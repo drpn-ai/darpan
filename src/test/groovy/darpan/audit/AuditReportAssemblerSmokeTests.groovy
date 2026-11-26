@@ -190,7 +190,7 @@ class AuditReportAssemblerSmokeTests {
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived", status: "ran", reason: null], r4.subMap(["id", "text", "weight", "status", "reason"]))
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
-                       matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409], systems: [],
+                       matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409], systems: ["OMS", "NetSuite"],
                        window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
         assertEquals(counted(1, 0, 0), r4.counts)
         Map brief = (r4.findings as List)[0]
@@ -448,7 +448,7 @@ class AuditReportAssemblerSmokeTests {
 
     /** DAR-BE-371. A check names the systems it compares from its automation's sources, on a morning it did not run too. */
     @Test
-    void aCheckNamesItsSystemsWhetherOrNotItRan() {
+    void aCheckNamesItsSystemsWhetherOrNotItRanFromItsWordsThenItsSources() {
         Timestamp now = ec.user.nowTimestamp
         withoutForeignKeys {
             insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "TREP_AUTO_INV", automationName: "invoices",
@@ -462,15 +462,22 @@ class AuditReportAssemblerSmokeTests {
             insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, automationId: "TREP_AUTO_INV"])
         }
         try {
-            Map r2 = report(GORJANA, "2026-10-09").categories.orders.statements.R2
+            Map doc = report(GORJANA, "2026-10-09")
+            Map r2 = doc.categories.orders.statements.R2
             assertEquals("notRun", r2.status)
             assertNull(r2.checks[0].compared, "no reads that morning")
-            assertEquals(["OMS", "NetSuite"], r2.checks[0].systems, "FILE_1 then FILE_2, one system once")
-            assertEquals([], report(GORJANA, "2026-10-09").categories.refundsAndCredits.statements.R4.checks[0].systems,
-                    "a check with no automation names none")
+            // DAR-BE-372: the check's own words name its systems first, over what its automation reads.
+            assertEquals(["NetSuite"], r2.checks[0].systems, "its label names NetSuite alone")
+            assertEquals(["OMS", "NetSuite"], doc.categories.refundsAndCredits.statements.R4.checks[0].systems)
+            // A label and statement that name no system: the automation's sources, FILE_1 then FILE_2, each system once.
+            withoutForeignKeys { insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, label: "Invoices with no Etail id"]) }
+            withoutForeignKeys { insert("darpan.audit.AuditStatement", [statementId: "TREP_R2", statementText: "Every invoice carries the Etail id."]) }
+            assertEquals(["OMS", "NetSuite"], report(GORJANA, "2026-10-09").categories.orders.statements.R2.checks[0].systems)
         } finally {
             withoutForeignKeys {
-                insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, automationId: null])
+                insert("darpan.audit.AuditStatement", [statementId: "TREP_R2", statementText: "Every invoice and credit memo carries the Shopify order id (the Etail id)."])
+                insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, automationId: null,
+                        label: "NetSuite invoices and memos with no Etail id"])
                 ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", "TREP_AUTO_INV")
                         .disableAuthz().deleteAll()
                 ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "TREP_AUTO_INV")
@@ -1158,7 +1165,8 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("2026-10-21", AuditReportAssembler.recordFacts([omsOrderDate: "2026-10-21T18:22:10Z"], "orderItem", la).orderDate)
         assertEquals("2026-10-20", AuditReportAssembler.recordFacts([createdAt: "2026-10-20T10:00:00-07:00"], "order", la).orderDate)
         assertEquals("2026-10-21", AuditReportAssembler.recordFacts([orderDate: "2026-10-21 18:22:10.0"], "order", la).orderDate)
-        assertEquals(null, AuditReportAssembler.recordFacts([orderDate: "10/21/2026", createdAt: "2026-10-20T10:00:00Z"], "salesOrderLine", la).orderDate)
+        // DAR-BE-372: NetSuite's M/d/yyyy is a day (it was read as none, so an R10 card said Day "—").
+        assertEquals("2026-10-21", AuditReportAssembler.recordFacts([orderDate: "10/21/2026", createdAt: "2026-10-20T10:00:00Z"], "salesOrderLine", la).orderDate)
 
         // DAR-UI-081 (Aditi: "show item as a subheading with SKU", "add customer name", "add location ID to the line box").
         Map unit = AuditReportAssembler.recordFacts([sku: "263-203-186-G", customerName: "Ada Lovelace", facilityId: "71", facilityName: "Portland"], "orderItem", la)

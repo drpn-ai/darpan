@@ -109,7 +109,11 @@ class AuditReportAssembler {
         links.each { if (checksById[it.checkId] && statementIds.contains(it.statementId)) checkIdsByStatement[it.statementId as String] << (it.checkId as String) }
         Set<String> configuredCheckIds = checkIdsByStatement.values().flatten().toSet() as Set<String>
         // DAR-BE-371. The systems each check compares, from its automation's sources, so a check not run today still names them.
-        Map<String, List<String>> systemsByCheck = checkSystems(ec, tenantId, configuredCheckIds.collect { checksById[it] } as List<Map>)
+        Map<String, String> statementTextById = statements.collectEntries { [(it.statementId as String): it.statementText as String] }
+        Map<String, String> statementTextByCheck = [:]
+        links.each { if (statementTextById[it.statementId as String]) statementTextByCheck.putIfAbsent(it.checkId as String, statementTextById[it.statementId as String]) }
+        Map<String, List<String>> systemsByCheck = checkSystems(ec, tenantId, configuredCheckIds.collect { checksById[it] } as List<Map>,
+                statementTextByCheck)
 
         // This morning's runs and their reads.
         Map<String, Map> runByCheck = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("period", period)
@@ -810,7 +814,7 @@ class AuditReportAssembler {
     /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax
      *  and not billed in NetSuite" from "Item M1167975/01 is completed ...". With a cause and no such words, the cause. */
     private static String oneLine(String order, Map line) {
-        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
+        String item = lineItemId(line)
         String headline = (line.headline ?: "") as String
         int at = item ? headline.indexOf(item) : -1
         if (at >= 0) return "line ${lineNumber(order, line)}${headline.substring(at + item.length())}".toString()
@@ -824,12 +828,28 @@ class AuditReportAssembler {
         return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
     }
 
-    /** "1" for item M1168785/01 of order M1168785 (a person reads "line 1", not "/01"); else the line's finding id. */
+    /**
+     * "1" for item M1168785/01 of order M1168785 (a person reads "line 1", not "/01"); the item id itself when it is not
+     * under the order's key (R10 keys an order by its NetSuite sales order). DAR-BE-372 rule 5: never the finding id; a
+     * line nothing names reads "?".
+     */
     private static String lineNumber(String order, Map line) {
-        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
-        if (!item?.startsWith(order) || item.length() <= order.length()) return line.id as String
+        String item = lineItemId(line)
+        if (!item) return "?"
+        if (!item.startsWith(order) || item.length() <= order.length()) return item
         String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
         return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
+    }
+
+    /**
+     * DAR-BE-372 rule 5. A line's HotWax item id: its HotWax item record's, else the one its own headline names ("Line
+     * M1230020/01 is open in NetSuite ..." on an R10 line that holds only a NetSuite record). Null when neither does.
+     */
+    static String lineItemId(Map line) {
+        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
+        if (item) return item
+        def named = ((line.headline ?: "") as String) =~ /^(?:Line|Item) (\S+)/
+        return named.find() ? named.group(1) : null
     }
 
     private static String lowerFirst(String text) {
@@ -1028,23 +1048,42 @@ class AuditReportAssembler {
 
     /** Records compared on each side of one run: the reads' counts summed per root system. */
     /**
-     * DAR-BE-371. Each check's compared systems as report keys (OMS, NetSuite, Shopify), FILE_1 then FILE_2, read from its
-     * automation's sources rather than a morning's reads, so they are there whether or not the check ran. One system
-     * once (a NetSuite-to-NetSuite check names NetSuite alone); a check with no automation names none.
+     * DAR-BE-371/372. The systems each check speaks about, as report keys (OMS, NetSuite, Shopify), whether or not it ran:
+     * the ones its own label names, in its words' order ("Orders cancelled in Shopify and not cancelled in HotWax"), else
+     * the ones its statement names, else its automation's sources (FILE_1 then FILE_2). Words before sources because a
+     * one-sided check reads one system and judges another (R13 reads Shopify and asks HotWax). Each system once.
      */
-    static Map<String, List<String>> checkSystems(def ec, String tenantId, List<Map> checks) {
-        List<String> automationIds = checks.collect { it?.automationId as String }.findAll { it }.unique()
-        if (!automationIds) return [:]
+    static Map<String, List<String>> checkSystems(def ec, String tenantId, List<Map> checks, Map<String, String> statementTextByCheck = [:]) {
+        Map<String, List<String>> out = [:]
+        List<Map> unnamed = []
+        checks.findAll { it }.each { Map check ->
+            List<String> named = systemsNamed(check.label as String) ?: systemsNamed(statementTextByCheck[check.checkId as String])
+            if (named) out[check.checkId as String] = named
+            else unnamed << check
+        }
+        List<String> automationIds = unnamed.collect { it.automationId as String }.findAll { it }.unique()
+        if (!automationIds) return out
         Map<String, List<Map>> byAutomation = tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
                 .condition("automationId", "in", automationIds).orderBy(["automationId", "fileSide"]).list()*.getMap()
                 .groupBy { it.automationId as String }
-        return checks.findAll { it?.automationId }.collectEntries { Map check ->
-            List<String> systems = (byAutomation[check.automationId as String] ?: []).collect { Map source ->
+        unnamed.findAll { it.automationId }.each { Map check ->
+            out[check.checkId as String] = (byAutomation[check.automationId as String] ?: []).collect { Map source ->
                 String enumId = source.systemEnumId as String
                 enumId ? systemKey(AuditAutomationSupport.rootSystem(enumId)) : null
             }.findAll { it }.unique()
-            [(check.checkId as String): systems]
         }
+        return out
+    }
+
+    /** The words a person uses for each system, to the report key. */
+    private static final Map<String, String> SYSTEM_WORDS = [hotwax: "OMS", oms: "OMS", netsuite: "NetSuite", shopify: "Shopify"].asImmutable()
+
+    /** DAR-BE-372. The systems a sentence names, in the order it names them, each once; empty when it names none. */
+    static List<String> systemsNamed(String text) {
+        if (!text) return []
+        List<String> found = []
+        (text =~ /(?i)\b(hotwax|oms|netsuite|shopify)\b/).each { List m -> found << SYSTEM_WORDS[(m[1] as String).toLowerCase()] }
+        return found.unique()
     }
 
     private static Map compared(List<Map> reads) {
@@ -1316,6 +1355,20 @@ class AuditReportAssembler {
      * another (R8 "Exchange held by open return") names the return holding it (heldBy) and its exchange order, with
      * whether that order reached NetSuite. Codes read as words (ORDER_COMPLETED -> Completed); data keeps them.
      */
+    /**
+     * DAR-BE-372 rule 2. Every read field that looks like a status, an amount or a date, by what the finding card makes of
+     * it. recordFacts reads the fed ones; `notOnCard` ones are known and left off on purpose. FindingCardRulesTests fails on
+     * a field in a sample read that is in neither, so a new read field is placed before a card can drop it.
+     */
+    static final Map<String, List<String>> CARD_FIELDS = [
+            status      : ["displayFulfillmentStatus", "statusId", "lineState", "displayFinancialStatus"],
+            hotwaxStatus: ["omsItemStatusId", "omsOrderStatusId"],   // an item's own, else its order's (orderStatus)
+            amount      : ["grandTotal", "totalPrice", "orderGrandTotal", "returnTotal", "lineAmount", "returnCredit"],
+            day         : ["omsOrderDate", "orderDate", "createdAt", "tranDate", "returnDate", "entryDate", "closedAt"],
+            notOnCard   : ["status", "cancelledAt", "processedAt", "updatedAt", "currentTotalPriceSet", "currentTotalTaxSet",
+                           "subtotalPriceSet", "totalPriceSet", "totalRefunded", "openReturnOnOrderStatus"],
+    ].asImmutable()
+
     static Map recordFacts(Map data, String recordType, ZoneId zone = ZoneId.of("UTC")) {
         if (!data) return [:]
         Closure<String> text = { String field -> data.get(field) instanceof Map || data.get(field) instanceof List ? null : (data.get(field)?.toString()?.trim() ?: null) }
@@ -1333,6 +1386,9 @@ class AuditReportAssembler {
                 paymentStatus: paymentStatus(data, text, deposits),
                 orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : recordType == "order" ? text("name") : null),
                 orderStatus: statusWords(text("omsOrderStatusId")),
+                // DAR-BE-372 rule 2. HotWax's own word for this record, carried on another system's row (an R10 NetSuite
+                // line's omsItemStatusId), so the HotWax cell says it although no HotWax record was kept.
+                hotwaxStatus: statusWords(text("omsItemStatusId")),
                 customer   : text("customerName") ?: personName(data.get("billToCustomer")),
                 sku        : text("sku"),
                 location   : text("facilityId") ?: text("lineLocation"),
@@ -1342,7 +1398,8 @@ class AuditReportAssembler {
                 salesChannel: text("salesChannel") ?: channelWords(text("sourceName") ?: text("salesChannelEnumId")),
                 shipMethod : text("shipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
                 fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
-                orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null), zone),
+                orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null) ?:
+                        text("tranDate"), zone),
                 returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate") ?: text("closedAt"), zone) : null,
                 heldBy     : heldBy ? [id: heldBy, status: statusWords(text("openReturnOnOrderStatus"))] : null,
                 exchange   : exchange ? [id: exchange, netsuiteId: text("exchangeOrderNetsuiteId")] : null,
@@ -1351,6 +1408,8 @@ class AuditReportAssembler {
                 // Aditi: "order and return totals are missing": an order's own total, else the one its item or return carries.
                 orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
                 returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
+                // DAR-BE-372 rule 2. A line's own amount (NetSuite lineAmount), for a finding about one line.
+                lineTotal  : amount(text("lineAmount")),
                 deposits   : deposits ?: null,
                 lines      : orderLines(data)] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
     }
@@ -1393,7 +1452,7 @@ class AuditReportAssembler {
 
     /**
      * DAR-UI-080. A record's date as the tenant's calendar day (2026-10-21): epoch millis (an OMS return's returnDate), an
-     * ISO instant (GraphQL orderDate, Shopify createdAt), or a date already written as one. Anything else is no date.
+     * ISO instant (GraphQL orderDate, Shopify createdAt), a date already written as one, or NetSuite's M/d/yyyy (DAR-BE-372). Anything else is no date.
      */
     static String dayOf(String text, ZoneId zone) {
         if (!text) return null
@@ -1401,6 +1460,9 @@ class AuditReportAssembler {
             if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate().toString()
             if (text ==~ /\d{4}-\d{2}-\d{2}T.+/) return OffsetDateTime.parse(text).atZoneSameInstant(zone).toLocalDate().toString()
             if (text ==~ /\d{4}-\d{2}-\d{2}.*/) return text.substring(0, 10)
+            // DAR-BE-372. NetSuite's tranDate as its SuiteQL gives it: 11/7/2026 (M/d/yyyy).
+            def us = text =~ /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+            if (us.find()) return LocalDate.of(us.group(3) as int, us.group(1) as int, us.group(2) as int).toString()
         } catch (DateTimeException ignored) { }
         return null
     }

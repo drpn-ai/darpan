@@ -29,15 +29,16 @@ class AuditRecheckSupport {
     static final int MAX_KEYS = 1000
 
     /**
-     * sides: [[source, result]] for FILE_1 and FILE_2. readByKey(source, keys) runs the side's extractor by key. onStart is
-     * called once, before anything is read, when there are older findings to re-check (the run's RECHECK step opens there).
+     * sides: [[source, result, readRecent]] for FILE_1 and FILE_2 (readRecent, DAR-BE-320: see readsRecent). readByKey(source,
+     * keys) runs the side's extractor by key. onStart is called once, before anything is read, when there are older findings
+     * to re-check (the run's RECHECK step opens there).
      * Answers what it read ([keys: side -> count, records: side -> count, failure]), or null when there was nothing to re-check.
      */
     static Map appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey,
                                   Closure onStart = null, Closure readChanged = null) {
         if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return null
         List<Map> live = sides.findAll { it.source != null }
-        if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.sourceReadsRecentOnly(ec, it.source) }) return null
+        if (!live || live.any { !it.result?.fileLocation } || !live.any { readsRecent(ec, it) }) return null
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
         List<String> ordered = oldestFirstKeys(openFindings(ec, tenantId, checks*.checkId, window.auditPeriod as String))
         Set<String> open = ordered as Set<String>
@@ -52,7 +53,7 @@ class AuditRecheckSupport {
                 String fileSide = normalize(readField(side.source, "fileSide"))
                 [side: side, fileSide: fileSide, keyField: firstKeyField(ec, scopeId, fileSide),
                  file: RunVerificationSupport.resolveLocationFile(ec, side.result.fileLocation as String),
-                 recentOnly: AuditRecentReadSupport.sourceReadsRecentOnly(ec, side.source)]
+                 recentOnly: readsRecent(ec, side)]
             }
         } catch (Exception e) {
             String reason = "Older findings were not re-checked: ${e.message}".toString()
@@ -80,6 +81,14 @@ class AuditRecheckSupport {
         else logger.info("Audit re-check (${window.auditPeriod}): ${open.size()} open finding key(s), ${changedKeys.size()} changed " +
                 "record key(s); read again by key ${outcome.keys}, records added ${outcome.records}, in ${outcome.millis} ms")
         return outcome
+    }
+
+    /**
+     * DAR-BE-320. Whether a side was read from the recent start: an OMS source (AuditRecentReadSupport.readsRecentOnly), or
+     * one the run read so because its changed read answered (readRecent, AuditRecentReadSupport.readByChangeFirst).
+     */
+    static boolean readsRecent(def ec, Map side) {
+        return side?.readRecent == true || AuditRecentReadSupport.sourceReadsRecentOnly(ec, side?.source)
     }
 
     /**

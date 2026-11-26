@@ -394,6 +394,11 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.AuditSourceRead"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-BE-320 — a read audit checks of one morning share. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_SHARED_READ"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.audit.AuditSharedRead"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- DAR-BE-102 — scheduled digests, filtered from the day the entity was added. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_DIGEST"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"

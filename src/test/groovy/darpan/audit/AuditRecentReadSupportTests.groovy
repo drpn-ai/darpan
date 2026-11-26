@@ -9,6 +9,7 @@ import java.time.ZoneId
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -84,5 +85,61 @@ class AuditRecentReadSupportTests {
         assertTrue(AuditRecentReadSupport.readsRecentOnly("OMS_GQL", [windowed: true]))
         assertTrue(AuditRecentReadSupport.readsRecentOnly("OMS_GQL", null), "no connector row: today's rule")
         assertFalse(AuditRecentReadSupport.readsRecentOnly("NETSUITE_SUITEQL", [windowed: true]))
+    }
+
+    /**
+     * DAR-BE-320 (Aditi 2026-11-26: "no runs pull month to date on a daily run"). gorjana's one-sided NetSuite checks read
+     * ~165k November lines every morning. A one-sided check's source reads from the recent start when its extractor can say
+     * what changed in the window since then; a pair keeps today's reads, and HotWax OMS keeps its own rule.
+     */
+    @Test
+    void aOneSidedNetsuiteCheckIsACandidateToReadByChangeAndPairsAreNot() {
+        Map netsuite = [systemEnumId: "NETSUITE_SUITEQL", windowed: true]
+        assertTrue(AuditRecentReadSupport.readsByChange(true, "NETSUITE_SUITEQL", netsuite, true, "orderLineId"))
+        assertFalse(AuditRecentReadSupport.readsByChange(false, "NETSUITE_SUITEQL", netsuite, true, "orderLineId"),
+                "a pair (Shopify and NetSuite, or OMS and NetSuite) keeps today's reads")
+        assertFalse(AuditRecentReadSupport.readsByChange(true, "SHOPIFY_ORDERS", [windowed: true], false, "orderId"),
+                "an extractor that cannot say what changed keeps the whole window")
+        assertFalse(AuditRecentReadSupport.readsByChange(true, "NETSUITE_SUITEQL", netsuite, true, null),
+                "no plain key: its open findings could not be read again by key")
+        assertFalse(AuditRecentReadSupport.readsByChange(true, "NETSUITE_SUITEQL", [windowed: false], true, "id"),
+                "a connector that reads its whole population whatever the window")
+        assertFalse(AuditRecentReadSupport.readsByChange(true, "OMS_GQL", [windowed: true], true, "omsOrderId"),
+                "HotWax OMS already reads recent (readsRecentOnly): unchanged")
+        assertTrue(AuditRecentReadSupport.readsRecentOnly("OMS_GQL", [windowed: true]), "OMS unchanged")
+        assertFalse(AuditRecentReadSupport.readsRecentOnly("NETSUITE_SUITEQL", [windowed: true]),
+                "NetSuite is not recent-only: an OMS pair still reads it from otherSideStart, a Shopify pair for the whole window")
+    }
+
+    /**
+     * DAR-BE-320. The read by change is the side's read (the new days are in it): answered, it is used as is; refused (a
+     * query that reads other transactions, or HotWax statuses with no omsChangedStatusIds) or unanswerable, the side reads
+     * the whole window; any other failure is the read failing, never a quiet fallback to a read of the whole month.
+     */
+    @Test
+    void theReadByChangeIsTheSidesReadAndOnlyARefusalReadsTheWholeWindow() {
+        Map<String, Object> window = [childWindowStartDate: at("2026-11-01"), childWindowEndDate: at("2026-11-26"),
+                                      auditRecentReadStartDate: at("2026-11-24")]
+        int asked = 0
+        Map read = AuditRecentReadSupport.readByChangeFirst(window, true, { -> asked++; [fileLocation: "/tmp/ns-changed.json", recordCount: 3] })
+        assertEquals("/tmp/ns-changed.json", read.changed.fileLocation)
+        assertEquals(at("2026-11-01"), window.childWindowStartDate, "the run's window is left as it was")
+
+        Map refused = AuditRecentReadSupport.readByChangeFirst(window, true, { ->
+            throw new IllegalStateException("Not read by what changed: NetSuite query NS_R11 asks HotWax for each record's " +
+                    "status, which changes there while no NetSuite stamp moves; set omsChangedStatusIds")
+        })
+        assertNull(refused.changed, "a query it cannot read by change keeps the whole window")
+        assertTrue((refused.reason as String).contains("omsChangedStatusIds"), refused.reason as String)
+        assertNull(AuditRecentReadSupport.readByChangeFirst(window, true, { -> null }).changed)
+
+        IllegalStateException failed = assertThrows(IllegalStateException) {
+            AuditRecentReadSupport.readByChangeFirst(window, true, { -> throw new IllegalStateException("HotWax changed orders read failed: 503") })
+        }
+        assertTrue(failed.message.contains("503"), "a failed read fails the side; it does not read the whole month instead")
+
+        assertNull(AuditRecentReadSupport.readByChangeFirst(window, false, { -> asked++; [fileLocation: "x"] }).changed)
+        assertNull(AuditRecentReadSupport.readByChangeFirst(window + [auditRecentReadStartDate: null], true, { -> asked++; [fileLocation: "x"] }).changed)
+        assertEquals(1, asked, "nothing is read for a source that is no candidate, or on a full read")
     }
 }

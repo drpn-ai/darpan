@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -199,5 +200,35 @@ class AuditRecheckSupportTests {
         assertEquals(null, changed.failure)
         AuditRecheckSupport.appendChangedFiles(plan, [:])
         assertEquals(["M9"], records(oms)*.omsOrderId)
+    }
+
+    /**
+     * DAR-BE-320. A one-sided NetSuite check read from the recent start (Nov 24 on): a line ordered Nov 3 that changed since
+     * comes back in the changed read and joins the extract, and an open finding on a Nov 5 line that did not change is read
+     * again by key. Every one is in the extract the check evaluates, so its key is examined and the finding can close or stay.
+     */
+    @Test
+    void aNetsuiteSideReadByChangeHoldsWhatChangedAndEveryOpenFinding() {
+        File ns = extract("ns.json", [[orderLineId: "L25", tranDate: "2026-11-25", lineState: "OPEN"]])
+        Map side = [source: [systemEnumId: "NETSUITE_SUITEQL", fileSide: "FILE_1"], result: [recordCount: 1, fileLocation: ns.absolutePath],
+                    readRecent: true]
+        assertTrue(AuditRecheckSupport.readsRecent(null, side), "read by change: re-checked as a recent read")
+        assertFalse(AuditRecheckSupport.readsRecent(null, side + [readRecent: false]), "read for the whole window: nothing to re-check")
+        assertTrue(AuditRecheckSupport.readsRecent(null, [source: [systemEnumId: "OMS_GQL"]]), "HotWax OMS: unchanged")
+
+        List<Map> plan = [[side: side, fileSide: "FILE_1", keyField: "orderLineId", file: ns, recentOnly: AuditRecheckSupport.readsRecent(null, side)]]
+        File changedFile = extract("ns-changed.json", [[orderLineId: "L03", tranDate: "2026-11-03", lineState: "CLOSED"],
+                                                       [orderLineId: "L25", tranDate: "2026-11-25", lineState: "OPEN"]])
+        Map changed = AuditRecheckSupport.readChangedFiles(plan) { Map s -> changedFile }
+        assertEquals(["L03"], changed.keys, "the recent read already holds L25")
+        Map asked = [:]
+        Map outcome = AuditRecheckSupport.readAndAppend(plan, ["L05"] + (List<String>) changed.keys) { Map s, List<String> keys ->
+            asked.FILE_1 = keys
+            extract("ns-key.json", [[orderLineId: "L05", tranDate: "2026-11-05", lineState: "OPEN"]])
+        }
+        assertEquals([FILE_1: ["L05"]], asked, "only the open finding is read by key: the changed read holds L03")
+        AuditRecheckSupport.appendChangedFiles(plan, (Map<String, Integer>) outcome.records)
+        assertEquals(["L25", "L05", "L03"], records(ns)*.orderLineId, "every open finding and every changed line is evaluated")
+        assertEquals(3, side.result.recordCount)
     }
 }

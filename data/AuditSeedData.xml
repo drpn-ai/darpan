@@ -44,6 +44,11 @@
     <moqui.basic.Enumeration enumId="AUDCS_NOT_RUN" enumTypeId="AuditCheckStatus" enumCode="notRun"
             description="Not run" sequenceNum="3"/>
 
+    <!-- DAR-BE-320: a read audit checks of one morning share -->
+    <moqui.basic.EnumerationType enumTypeId="AuditSharedRead" description="Audit shared read status"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_READING" enumTypeId="AuditSharedRead" enumCode="reading" description="Being read"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_DONE" enumTypeId="AuditSharedRead" enumCode="done" description="Read"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_FAILED" enumTypeId="AuditSharedRead" enumCode="failed" description="Failed"/>
     <moqui.basic.EnumerationType enumTypeId="AuditSourceRead" description="Audit source read status"/>
     <moqui.basic.Enumeration enumId="AUDSR_COMPLETE" enumTypeId="AuditSourceRead" enumCode="complete"
             description="Complete" sequenceNum="1"/>

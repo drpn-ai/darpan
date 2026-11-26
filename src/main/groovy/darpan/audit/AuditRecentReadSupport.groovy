@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter
 /**
  * DAR-BE-116 / DAR-BE-122. An audit reads rate-limited HotWax OMS from its checks' last complete read (incrementalStart);
  * the other system of an OMS-paired check reads EDGE_SLACK_DAYS earlier and is judged from EDGE_SLACK_DAYS later.
+ * DAR-BE-320: a one-sided check reads another system so too when its extractor can say what changed (readsByChange).
  */
 class AuditRecentReadSupport {
 
@@ -53,6 +54,51 @@ class AuditRecentReadSupport {
     static boolean readsRecentOnly(String systemEnumId, Map connector) {
         if (connector?.windowed == false) return false
         return AuditAutomationSupport.rootSystem(systemEnumId) == "OMS"
+    }
+
+    /**
+     * DAR-BE-320 (Aditi 2026-11-26: "no runs pull month to date on a daily run"). Whether a source that readsRecentOnly does
+     * not cover may still be read from the recent start: only in a one-sided (EVALUATE) check, on a windowed connector, whose
+     * extractor can read the window's records that changed since an instant (declares changedSince, as DAR-BE-356 asks of
+     * HotWax) and whose compare key is a plain record field (keyField: the re-check reads open findings by it). Whether its
+     * query can be read so is the extractor's own answer, asked first (readByChangeFirst). A pair keeps today's reads: an
+     * OMS pair's other side reads from otherSideStart and is judged from judgedFrom; a pair of two other systems (Shopify and
+     * NetSuite) keeps the whole window on both sides, as twins dated either side of a recent edge would read as missing.
+     */
+    static boolean readsByChange(boolean oneSided, String systemEnumId, Map connector, boolean declaresChangedSince, String keyField) {
+        if (!oneSided || !declaresChangedSince || !keyField || connector?.windowed == false) return false
+        return !readsRecentOnly(systemEnumId, connector)
+    }
+
+    /** DAR-BE-320. How an extractor's refusal to read a query by change begins (netsuite-darpan NsSuiteQlOrderSupport). */
+    static final String CHANGED_READ_REFUSED = "Not read by what changed"
+
+    /**
+     * DAR-BE-320. For a source that readsByChange (candidate), its read by change IS its read: readChanged() answers the
+     * window's records that could have moved since the recent start (the new days among them), whole orders, with what the
+     * extractor folds in (NetSuite: lines in a live state, orders HotWax changed). Answered: [changed: that result]. When the
+     * extractor refuses the query (a message starting CHANGED_READ_REFUSED) or cannot say (null), [changed: null, reason]:
+     * the side reads its whole window as before. Any other failure is the side's read failing, thrown as such: reading the
+     * whole window after a failed read would ask the same failing systems for far more.
+     */
+    static Map readByChangeFirst(Map<String, Object> window, boolean candidate, Closure readChanged) {
+        if (!candidate || window?.auditRecentReadStartDate == null) return [changed: null]
+        try {
+            Map changed = (Map) readChanged.call()
+            if (!changed?.fileLocation) return [changed: null, reason: "its extractor cannot say what changed"]
+            return [changed: changed]
+        } catch (Exception e) {
+            if (!refused(e)) throw e
+            return [changed: null, reason: e.message]
+        }
+    }
+
+    /** DAR-BE-320. Whether a failed read by change was the extractor refusing the query, not a read that failed. */
+    static boolean refused(Throwable e) {
+        for (Throwable t = e; t != null; t = t.cause) {
+            if (t.message?.contains(CHANGED_READ_REFUSED)) return true
+        }
+        return false
     }
 
     /** readsRecentOnly for a run or automation source, through its endpoint's connector row. */

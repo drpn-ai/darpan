@@ -2,7 +2,10 @@ package darpan.audit
 
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
+import org.moqui.entity.EntityCondition
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -50,6 +53,8 @@ class AuditMorningsSmokeTests {
                 "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/DarpanSystemSourceSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml",
+                // DAR-BE-320: the NetSuite endpoint's own fields (its Keep line), as prod has them, for a source naming its query
+                "component://netsuite-darpan/data/NetSuiteConnectorSeedData.xml",
                 "component://darpan/data/ConclusionCatalogSeedData.xml",
                 "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/test/AuditMorningsFixtureData.xml")
@@ -73,7 +78,9 @@ class AuditMorningsSmokeTests {
         upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATION, fileSide: "FILE_1"], [
                 automationId: AUTOMATION, fileSide: "FILE_1", companyUserGroupId: TENANT,
                 sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
-                fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
+                fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now,
+                // the query the source reads, as a saved automation names it: DAR-BE-320 asks its extract what it declares
+                safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"NS_INVOICE_ETAIL"}}'])
         def check = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", CHECK).disableAuthz().useCache(false).one()
         check.set("automationId", AUTOMATION)
         check.update()
@@ -87,7 +94,9 @@ class AuditMorningsSmokeTests {
 
     @Test
     void anInvoiceIsFoundOneMorningAndFixedTheNext() {
-        morning("2026-10-14", "component://darpan/data/test/mornings-invoices-morning-1.json")
+        morning("2026-10-14", fixture("component://darpan/data/test/mornings-invoices-morning-1.json"))
+        assertEquals([[kind: "window", from: at("2026-10-01"), changedSince: null, keys: null]], stubReads,
+                "the first morning reads the month to date")
 
         Map<String, Map> first = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, first.keySet(), "the two invoices with no Etail id")
@@ -105,7 +114,14 @@ class AuditMorningsSmokeTests {
         assertEquals(["AUDCS_RAN", "2026-10"], [run1.statusEnumId, run1.period])
         assertEquals([["NETSUITE", "AUDSR_COMPLETE", 3L]], reads(run1.checkRunId), "one system read, all three invoices")
 
-        morning("2026-10-15", "component://darpan/data/test/mornings-invoices-morning-2.json")
+        List<Map> second2 = fixture("component://darpan/data/test/mornings-invoices-morning-2.json")
+        // DAR-BE-320 (design approved 2026-11-26): the morning reads what could have moved in the month since the 14th, the
+        // day the first morning's read ran through, and nothing else: INV9000002's Etail id was entered (it is dated the 13th)
+        // and INV9000004 is new. INV9000003, open and untouched, is not in that read, so it is read again by key.
+        morning("2026-10-15", [], second2.findAll { it.tranId in ["INV9000002", "INV9000004"] }, second2)
+        assertEquals([[kind: "changed", from: at("2026-10-01"), changedSince: at("2026-10-14"), keys: null],
+                      [kind: "byKey", from: at("2026-10-01"), changedSince: null, keys: ["INV9000003"]]], stubReads,
+                "one read of what changed, over the month; then the open finding it lacks, by key; never the month to date")
 
         Map<String, Map> second = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, second.keySet(), "a fixed finding stays on the ledger")
@@ -123,8 +139,130 @@ class AuditMorningsSmokeTests {
         List<Map> findings = (List<Map>) r2.findings
         Map open = findings.find { it.records?.NetSuite?.invoice?.getAt(0)?.id == "INV9000003" }
         assertEquals("open", open?.state, "the report reads the ledger: ${findings*.headline}")
-        assertEquals([[id: "INV9000003", internalId: "81000003", status: "Invoice : Open"]], open.records.NetSuite.invoice)
+        // its day too, since the source names its query and so reads through the NetSuite connector, as in prod (DAR-BE-320)
+        assertEquals([[id: "INV9000003", internalId: "81000003", status: "Invoice : Open", orderDate: "2026-10-14"]], open.records.NetSuite.invoice)
         assertNull(findings.find { it.records?.NetSuite?.invoice?.getAt(0)?.id == "INV9000004" }, "an invoice with its Etail id is no finding")
+
+        // DAR-BE-320, 16 Oct: what moved since the 15th. INV9000001 (dated the 13th) lost its Etail id, INV9000005 is new.
+        // INV9000003 (open) did not move: read again by key. INV9000004 (no finding) did not move: never read, no event.
+        Map inv1 = second2.find { it.tranId == "INV9000001" }, inv3 = second2.find { it.tranId == "INV9000003" }
+        Map inv4 = second2.find { it.tranId == "INV9000004" }
+        Map inv5 = inv4 + [tranId: "INV9000005", internalId: "81000005", etailOrderId: "7187000000005", orderId: "M2000005"]
+        Map inv6 = inv4 + [tranId: "INV9000006", internalId: "81000006", etailOrderId: "7187000000006", orderId: "M2000006",
+                           tranDate: "2026-10-16"]
+        Map inv1Blank = inv1 + [etailOrderId: " "]
+        morning("2026-10-16", [], [inv1Blank, inv5], [inv1Blank, inv3, inv4])
+        assertEquals([[kind: "changed", from: at("2026-10-01"), changedSince: at("2026-10-15"), keys: null],
+                      [kind: "byKey", from: at("2026-10-01"), changedSince: null, keys: ["INV9000003"]]], stubReads,
+                "the re-check reads by key within the month, as a full read would, and not what the changed read holds")
+        Map<String, Map> third = findingsByRecord()
+        assertNull(third.INV9000004, "never read, never a finding")
+        assertEquals(["AUDFS_OPEN", Date.valueOf("2026-10-16")], [third.INV9000001?.stateEnumId, third.INV9000001?.firstFoundDate],
+                "an invoice dated before the read that changed since is judged, and found")
+        assertEquals("AUDFS_OPEN", third.INV9000003.stateEnumId)
+        assertEquals("AUDFE_STILL_OPEN", events(third.INV9000003.findingId as String).last(), "read again by key: examined, still reported")
+
+        // 17 Oct: read from the 16th, and nothing changed. Both open findings are read again by key, oldest first:
+        // INV9000003 now carries its Etail id and closes, INV9000001 is still open.
+        morning("2026-10-17", [], [inv6], [inv1Blank, inv3 + [etailOrderId: "7187000000003"]])
+        assertEquals([[kind: "changed", from: at("2026-10-01"), changedSince: at("2026-10-16"), keys: null],
+                      [kind: "byKey", from: at("2026-10-01"), changedSince: null, keys: ["INV9000003", "INV9000001"]]], stubReads)
+        Map<String, Map> fourth = findingsByRecord()
+        assertEquals("AUDFS_FIXED", fourth.INV9000003.stateEnumId, "read again by key, so examined: it closes")
+        assertEquals("AUDFS_OPEN", fourth.INV9000001.stateEnumId)
+        assertEquals("AUDFE_STILL_OPEN", events(fourth.INV9000001.findingId as String).last(), "examined and still reported")
+        Map run4 = checkRun("2026-10-17")
+        assertEquals("AUDCS_RAN", run4.statusEnumId, "the re-check finished: the check ran, so it can close findings")
+        assertEquals([["NETSUITE", "AUDSR_COMPLETE", 3L]], reads(run4.checkRunId as String), "one read, two read again by key")
+    }
+
+    /**
+     * DAR-BE-320 (read economy; gorjana R10, R11 and R12 read one NetSuite query): checks of one morning that read the same
+     * source over the same window from the same start share one read. The first check reads it; the second copies its file
+     * and judges it with its own rules, and each re-reads only its own open findings by key. A first morning (no complete
+     * read yet) is not shared: each check reads its whole window.
+     */
+    @Test
+    void twoChecksOfOneMorningReadingTheSameSourceShareOneRead() {
+        List<String> autos = ["MORNINGS_AUTO_SHARE_1", "MORNINGS_AUTO_SHARE_2"]
+        List<String> checks = ["MORNINGS_CHK_SHARE_1", "MORNINGS_CHK_SHARE_2"]
+        Map automation = find("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATION]).getMap()
+        Map source = find("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATION, fileSide: "FILE_1"]).getMap()
+        Map check = find("darpan.audit.AuditCheck", [checkId: CHECK]).getMap()
+        Map link = find("darpan.audit.AuditStatementCheck", [statementId: "MORNINGS_R2", checkId: CHECK]).getMap()
+        [autos, checks].transpose().eachWithIndex { List pair, int i ->
+            String a = pair[0], c = pair[1]
+            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: a], automation + [automationId: a])
+            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: a, fileSide: "FILE_1"], source + [automationId: a])
+            upsert("darpan.audit.AuditCheck", [checkId: c], check + [checkId: c, checkCode: "shared-read-${i + 1}".toString(), automationId: a])
+            upsert("darpan.audit.AuditStatementCheck", [statementId: "MORNINGS_R2", checkId: c], link + [checkId: c])
+        }
+        List<Map> rows = fixture("component://darpan/data/test/mornings-invoices-morning-1.json")
+        mornings("2026-09-14", autos, rows, rows, rows)
+        assertEquals(["window", "window"], stubReads*.kind, "a first morning reads each check's whole window, unshared")
+
+        List<Map> rows2 = fixture("component://darpan/data/test/mornings-invoices-morning-2.json")
+        Timestamp before = new Timestamp(System.currentTimeMillis())
+        mornings("2026-09-15", autos, [], rows2.findAll { it.tranId in ["INV9000002", "INV9000004"] }, rows2)
+        assertEquals([[kind: "changed", from: at("2026-09-01"), changedSince: at("2026-09-14"), keys: null],
+                      [kind: "byKey", from: at("2026-09-01"), changedSince: null, keys: ["INV9000003"]],
+                      [kind: "byKey", from: at("2026-09-01"), changedSince: null, keys: ["INV9000003"]]], stubReads,
+                "one read of what changed for both checks; each re-reads its own open finding")
+        List shared = ec.entity.find("darpan.audit.AuditSharedRead").condition("companyUserGroupId", TENANT)
+                .condition("statusEnumId", AuditSharedReadSupport.DONE).condition("completedDate", EntityCondition.GREATER_THAN_EQUAL_TO, before)
+                .disableAuthz().useCache(false).list()
+        assertEquals(1, shared.size(), "one shared read for the morning")
+        assertEquals(find("darpan.reconciliation.ReconciliationAutomationExecution", [automationId: autos[0]]) == null ? null :
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationId", autos[0])
+                        .orderBy("-createdDate").disableAuthz().useCache(false).list()[0].automationExecutionId,
+                shared[0].readerExecutionId, "read by the first check of the morning")
+        checks.each { String c ->
+            Map<String, Map> f = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", c).disableAuthz().useCache(false)
+                    .list().collectEntries { [(it.recordKey): it.getMap()] }
+            assertEquals(["AUDFS_FIXED", "AUDFS_OPEN"], [f.INV9000002?.stateEnumId, f.INV9000003?.stateEnumId],
+                    "${c}: judged from the shared read (INV9000002 fixed) and its own re-check (INV9000003 still open)")
+        }
+    }
+
+    /**
+     * DAR-BE-320 (review): a shared read is never stuck behind a reader that is gone. A row left READING by a run that no
+     * longer runs is taken over at once, not waited out; a reader that was taken over cannot overwrite its successor's row;
+     * a read that fails marks its row failed, so its waiters do not wait for it.
+     */
+    @Test
+    void aSharedReadIsNeverStuckBehindAReaderThatIsGone() {
+        String key = AuditSharedReadSupport.key(["MORNINGS", "dead-reader-test", System.nanoTime()])
+        ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.makeValue("darpan.audit.AuditSharedRead").setAll([sharedReadKey: key, companyUserGroupId: TENANT,
+                    statusEnumId: AuditSharedReadSupport.READING, readerExecutionId: "NO_SUCH_EXECUTION",
+                    startedDate: new Timestamp(System.currentTimeMillis())]).create()
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        File out = File.createTempFile("shared-dead-", ".json")
+        out.deleteOnExit()
+        out.text = JsonOutput.toJson([records: [[tranId: "INV1"]]])
+        long started = System.currentTimeMillis()
+        Map read = AuditSharedReadSupport.readOnce(ec, TENANT, key, "EXEC_NEW", { -> [fileLocation: out.absolutePath, recordCount: 1] },
+                { String name -> new File(out.parentFile, "copy-" + name).absolutePath })
+        assertFalse(read.shared as boolean, "the dead reader's row was taken over and read, not copied")
+        assertTrue(System.currentTimeMillis() - started < AuditSharedReadSupport.pollMillis, "taken over at once, not waited out")
+        Map row = find("darpan.audit.AuditSharedRead", [sharedReadKey: key]).getMap()
+        assertEquals([AuditSharedReadSupport.DONE, "EXEC_NEW"], [row.statusEnumId, row.readerExecutionId])
+
+        AuditSharedReadSupport.finish(ec, TENANT, key, "NO_SUCH_EXECUTION", [statusEnumId: AuditSharedReadSupport.FAILED, errorMessage: "late"])
+        assertEquals(AuditSharedReadSupport.DONE, find("darpan.audit.AuditSharedRead", [sharedReadKey: key]).statusEnumId,
+                "a reader that was taken over never overwrites the row")
+
+        String failingKey = AuditSharedReadSupport.key(["MORNINGS", "failing-reader-test", System.nanoTime()])
+        assertThrows(IllegalStateException) {
+            AuditSharedReadSupport.readOnce(ec, TENANT, failingKey, "EXEC_FAIL", { -> throw new IllegalStateException("NetSuite 503") },
+                    { String name -> name })
+        }
+        Map failed = find("darpan.audit.AuditSharedRead", [sharedReadKey: failingKey]).getMap()
+        assertEquals([AuditSharedReadSupport.FAILED, "NetSuite 503"], [failed.statusEnumId, failed.errorMessage],
+                "never left READING for its waiters")
     }
 
     @Test
@@ -314,23 +452,53 @@ class AuditMorningsSmokeTests {
                 found.collect { [it.statementId, it.recordKey, it.headline] }, "the cancelled one with no RMA and the uncancelled RMA are not findings")
     }
 
-    /** One scheduled morning at 06:00 in Los Angeles; the NetSuite read returns that morning's fixture. */
-    private void morning(String day, String fixture) {
+    /** DAR-BE-320: the reads the NetSuite stub answered on the last morning, in order. */
+    private List<Map> stubReads = []
+
+    /**
+     * One scheduled morning at 06:00 in Los Angeles. The NetSuite read answers `main` for the morning's own read, `changed`
+     * for what changed in the window since the recent start (DAR-BE-320), and the records of `pool` by key, each from a
+     * fresh file, since a re-check appends to the file it is given.
+     */
+    private void morning(String day, List<Map> main, List<Map> changed = main, List<Map> pool = main) {
+        mornings(day, [AUTOMATION], main, changed, pool)
+    }
+
+    /** The morning of each automation in turn, every one answered by the same NetSuite stub (DAR-BE-320: shared reads). */
+    private void mornings(String day, List<String> automationIds, List<Map> main, List<Map> changed = main, List<Map> pool = main) {
+        stubReads = []
         AutomationExecutionSupport.resetExecutionHooks()
         AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
-                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+                Map<String, Object> window, Map<String, Object> params ->
             assertEquals("FILE_1", source.get("fileSide"), "a single-sided check never reads a second side")
-            return [dataAvailable: true, fileLocation: fixture, fileName: "netsuite-invoices.json", fileTypeEnumId: "DftJson",
-                    recordCount: fixture.endsWith("1.json") ? 3 : 4]
+            List keys = params?.lookupKeys as List
+            String kind = params?.changedSince != null ? "changed" : keys ? "byKey" : "window"
+            stubReads << [kind: kind, from: window.childWindowStartDate, changedSince: params?.changedSince, keys: keys]
+            List<Map> rows = kind == "changed" ? changed : kind == "byKey" ? pool.findAll { keys.contains(it.tranId) } : main
+            File f = File.createTempFile("mornings-${kind}-", ".json")
+            f.deleteOnExit()
+            f.text = JsonOutput.toJson([records: rows])
+            return [dataAvailable: !rows.isEmpty(), fileLocation: f.absolutePath, fileName: f.name, fileTypeEnumId: "DftJson",
+                    recordCount: rows.size()]
         }
         Timestamp fire = Timestamp.from(LocalDateTime.parse("${day}T06:00:00").atZone(LA).toInstant())
-        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION, scheduledFireTime: fire,
-                sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
-        assertFalse(ec.message.hasError(), ec.message.errorsString)
-        assertEquals(1, result.executedCount, "${day}: ${result}")
-        def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                .condition("automationId", AUTOMATION).orderBy("-createdDate").disableAuthz().useCache(false).list()[0]
-        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId, "${day}: ${execution.errorMessage}")
+        automationIds.each { String automationId ->
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: automationId, scheduledFireTime: fire,
+                    sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
+            assertFalse(ec.message.hasError(), ec.message.errorsString)
+            assertEquals(1, result.executedCount, "${day} ${automationId}: ${result}")
+            def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                    .condition("automationId", automationId).orderBy("-createdDate").disableAuthz().useCache(false).list()[0]
+            assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId, "${day} ${automationId}: ${execution.errorMessage}")
+        }
+    }
+
+    private List<Map> fixture(String location) {
+        return (List<Map>) ((Map) new JsonSlurper().parseText(ec.resource.getLocationReference(location).getText())).records
+    }
+
+    private static Timestamp at(String day) {
+        return Timestamp.from(java.time.LocalDate.parse(day).atStartOfDay(LA).toInstant())
     }
 
     private Map<String, Map> findingsByRecord() {

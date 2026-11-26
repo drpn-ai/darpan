@@ -657,6 +657,42 @@ class AutomationExecutionSupport {
                     if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
                             (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
                 }
+                // DAR-BE-119: the audit's re-checks read within the check's whole window (DAR-BE-156: neither the recent start nor
+                // the other side's), which is what a full read would hold, restricted to the keys or to what changed.
+                Map<String, Object> recheckWindow = new LinkedHashMap<String, Object>(window) +
+                        [auditRecentReadStartDate: null, auditOtherSideStartDate: null] as Map<String, Object>
+                // DAR-BE-356: the window's records that changed since the recent read started (an order placed Nov 3 and
+                // completed Nov 8 is outside every orderDate read after Nov 5), from an extractor that can say so; null otherwise.
+                Closure<Map> readChangedSince = { def source ->
+                    String changedService = normalize(extractTarget(ec, source, windowParams)?.serviceName)
+                    if (!declaresParameter(ec, changedService, "changedSince")) return null
+                    Map<String, Object> byChange = new LinkedHashMap<String, Object>(windowParams) + [changedSince: window.auditRecentReadStartDate,
+                            sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
+                                    DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-changed")]
+                    return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byChange), source)
+                }
+                // DAR-BE-320: a one-sided check whose source OMS rule does not cover (NetSuite) reads by what changed: the
+                // window's records that could have moved since the recent start, the new days among them, is its read; a query
+                // its extractor refuses keeps the whole window. Pairs keep their reads (AuditRecentReadSupport.readsByChange).
+                // Never on a retry from the last extract: a replayed file is not a read of what changed (DAR-BE-356).
+                boolean side1ByChange = recentRead != null && evaluateMode && audit != null && !replayFrom &&
+                        sourceReadsByChange(ec, automation, file1Source, windowParams)
+                Map byChangeFirst = [changed: null]
+                // DAR-BE-320 (read economy): checks of one morning that read the same source over the same window from the
+                // same start share one read (gorjana R10, R11 and R12 read one NetSuite query): the first reads, the rest copy.
+                Closure<Map> readChangedShared = { def source ->
+                    String sideOut = DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
+                            DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-shared")
+                    String sharedKey = darpan.audit.AuditSharedReadSupport.key([readField(automation, "companyUserGroupId"),
+                            extractTarget(ec, source, windowParams)?.serviceName] +
+                            SHARED_READ_SOURCE_FIELDS.collect { String name -> declaredField(source, name) } +
+                            [window.childWindowStartDate, window.childWindowEndDate, window.auditRecentReadStartDate])
+                    Map shared = darpan.audit.AuditSharedReadSupport.readOnce(ec, normalize(readField(automation, "companyUserGroupId")),
+                            sharedKey, normalize(windowParams?.automationExecutionId), { -> readChangedSince(source) },
+                            { String name -> DataManagerSupport.childLocation(sideOut, name) },
+                            { -> RunObservability.checkpointCancel(ec, mintedRunResultId); heartbeatAutomationRun(ec, automation, execution, mintedRunResultId) })
+                    return shared.shared ? normalizeSourceResult(shared.result, source) : (Map) shared.result
+                }
                 // DAR-BE-192: a side read by the other side's keys waits for them. Side 1 can be that side (it holds the
                 // expected value of a money check), and then side 2 is read first.
                 boolean side1ByKeys = !evaluateMode && file2Source != null && readsByOtherSideKeys(file1Source)
@@ -678,7 +714,11 @@ class AutomationExecutionSupport {
                                 extract.call(ec, automation, file2Source, window, windowParams), file2Source)
                         parallelSide2 = null
                     }
-                    file1Result = normalizeSourceResult(side1ByKeys ?
+                    if (side1ByChange) {
+                        byChangeFirst = darpan.audit.AuditRecentReadSupport.readByChangeFirst(window, true, { -> readChangedShared(file1Source) })
+                        if (byChangeFirst.changed == null) logger.info("${FILE_SIDE_1} reads the whole window, not by what changed: ${byChangeFirst.reason}")
+                    }
+                    file1Result = byChangeFirst.changed != null ? (Map<String, Object>) byChangeFirst.changed : normalizeSourceResult(side1ByKeys ?
                             readByOtherSideKeys(ec, automation, file2Result, FILE_SIDE_2, file1Source, window, windowParams, extract) :
                             extract.call(ec, automation, file1Source, window, windowParams), file1Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
@@ -712,25 +752,17 @@ class AutomationExecutionSupport {
                     stampExtract(ec, execution, "file2", file2Result)
                 }
                 // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key and appended, so they
-                // close or are concluded again from today's facts. DAR-BE-156: within the check's whole window (neither the
-                // recent start nor the other side's), which is what a full read would hold, restricted to the keys.
-                Map<String, Object> recheckWindow = new LinkedHashMap<String, Object>(window) +
-                        [auditRecentReadStartDate: null, auditOtherSideStartDate: null] as Map<String, Object>
+                // close or are concluded again from today's facts, within recheckWindow.
                 Map recheck = AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
-                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]], { def source, List<String> keys ->
+                        [[source: file1Source, result: file1Result, readRecent: byChangeFirst.changed != null],
+                         [source: file2Source, result: file2Result]], { def source, List<String> keys ->
                     Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys, lookupWithinWindow: true,
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
                     return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byKey), source)
                 }, { -> openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_RECHECK) }, { def source ->
-                    // DAR-BE-356: the window's orders that changed since the recent read started (an order placed Nov 3 and
-                    // completed Nov 8 is outside every orderDate read after Nov 5), from an extractor that can say so.
-                    String changedService = normalize(extractTarget(ec, source, windowParams)?.serviceName)
-                    if (!declaresParameter(ec, changedService, "changedSince")) return null
-                    Map<String, Object> byChange = new LinkedHashMap<String, Object>(windowParams) + [changedSince: window.auditRecentReadStartDate,
-                            sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
-                                    DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-changed")]
-                    return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byChange), source)
+                    // DAR-BE-320: a side read by change holds what changed already; nothing more to ask of it
+                    source.is(file1Source) && byChangeFirst.changed != null ? null : readChangedSince(source)
                 })
                 if (openStep != null) {
                     // DAR-BE-156: the run page's own row for the re-check. A failed re-check fails its step, not the run: the
@@ -2728,6 +2760,42 @@ class AutomationExecutionSupport {
                 normalize(result.get("fileLocation") ?: result.get("dataManagerPath"))
         File landed = landedAt ? DataManagerSupport.resolveDirectoryFile(ec, landedAt, false) : null
         return sideKeepOf(ec, automation, source, (Map) target.connector, (String) target.serviceName, options, keepInSpark, landed)
+    }
+
+    /**
+     * DAR-BE-320. AuditRecentReadSupport.readsByChange for the one side of an audit's one-sided check: its endpoint's connector
+     * row, whether the extract it dispatches to declares changedSince, and its first compare key as a record field (what the
+     * re-check reads open findings by). A key that cannot be resolved is no candidate: the side reads the whole window.
+     */
+    static boolean sourceReadsByChange(def ec, def automation, def source, Map params) {
+        String systemEnumId = normalize(readField(source, "systemEnumId"))
+        try {
+            boolean declares = declaresParameter(ec, normalize(extractTarget(ec, source, params)?.serviceName), "changedSince")
+            if (!declares) return false
+            Map connector = systemEnumId ? SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId) : null
+            String keyField = AuditRecheckSupport.firstKeyField(ec, normalize(readField(automation, "compareScopeId")),
+                    normalize(readField(source, "fileSide")))
+            return darpan.audit.AuditRecentReadSupport.readsByChange(true, systemEnumId, connector, declares, keyField)
+        } catch (Exception e) {
+            logger.warn("${readField(source, 'fileSide')} (${systemEnumId}) reads the whole window: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * DAR-BE-320. A source's fields that steer what its extract reads (an automation source names its query in
+     * safeMetadataJson, a run's compare source in sourceConfigId): two checks share a read only when all of them agree.
+     */
+    static final List<String> SHARED_READ_SOURCE_FIELDS = ["systemEnumId", "sourceConfigId", "safeMetadataJson",
+            "extractParametersJson", "systemMessageRemoteId", "nsRestletConfigId", "databaseSourceQueryId",
+            "apiRequestTemplateJson", "extractStatusIds"].asImmutable()
+
+    /** A field of a source row or map, null when its entity does not declare it (EntityValue.get throws then). */
+    static Object declaredField(def source, String name) {
+        if (source == null) return null
+        // an EntityValue is a Map too: ask it first
+        if (source instanceof org.moqui.entity.EntityValue) return ((org.moqui.entity.EntityValue) source).isField(name) ? source.get(name) : null
+        return readField(source, name)
     }
 
     /** Whether serviceName's definition declares the in-parameter (ServiceDefinition.inParameterNameList). */

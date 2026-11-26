@@ -600,6 +600,26 @@
         </index>
     </entity>
 
+    <entity entity-name="AuditSharedRead" package="darpan.audit" use="transactional">
+        <description>DAR-BE-320. One read several audit checks of a morning share (gorjana R10, R11 and R12 read one NetSuite
+            query): the first check to need it reads, single flight under this row, and the others copy its file. Keyed
+            by everything the read depends on, so a different query, window or start never shares it.</description>
+        <field name="sharedReadKey" type="id-long" is-pk="true">
+            <description>SHA-256 of tenant, system, connection, extract service, window and changed-since start.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="statusEnumId" type="id" not-null="true">
+            <description>AUDSHR_READING, AUDSHR_DONE or AUDSHR_FAILED.</description>
+        </field>
+        <field name="readerExecutionId" type="id"><description>The automation execution that reads it.</description></field>
+        <field name="fileLocation" type="text-medium"><description>The read's file (the reader's own run folder).</description></field>
+        <field name="resultJson" type="text-very-long"><description>The read's result, as the extract answered it.</description></field>
+        <field name="errorMessage" type="text-medium"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="expiresDate" type="date-time"><description>Not shared after this: two hours after the read, so a later re-run reads afresh.</description></field>
+    </entity>
+
     <entity entity-name="AuditSourceRead" package="darpan.audit" use="transactional">
         <description>One extract a check run made from one system, and how it ended.</description>
         <field name="checkRunId" type="id" is-pk="true"/>

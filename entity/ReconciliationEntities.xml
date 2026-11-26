@@ -1199,6 +1199,17 @@
                 NetSuite has no fulfillment from), NO_FULFILLMENT (NetSuite shipped nothing yet) or NOT_IN_OMS, with nsFulfillmentCount, omsShipGroupCount and
                 omsShipGroupDetail. Needs omsStatusKeyField; not with omsStatusLineKeyField.</description>
         </field>
+        <field name="omsChangedStatusIds" type="text-medium">
+            <description>DAR-BE-320. Comma list of HotWax item statuses (ITEM_CANCELLED) that bring an order back into an
+                audit's daily read by change: an order HotWax wrote one of them for since the read's start is read again,
+                whatever NetSuite's stamps say. Needs omsStatusLineKeyField. Empty: a query asking HotWax for statuses is
+                read for its whole window every morning.</description>
+        </field>
+        <field name="liveLineStates" type="text-short">
+            <description>DAR-BE-320. SALES_LINES only. Comma list of NetSuite line states (OPEN, SHIPPED, CLOSED, BILLED): an
+                order with a keyed line in one of them is read by an audit's daily read by change every morning, whatever
+                its dates, because its HotWax side can move with no change signal (a line moved to another facility).</description>
+        </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other
                 side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax

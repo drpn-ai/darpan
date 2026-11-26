@@ -102,7 +102,9 @@ class DisableAuthzRatchetTest {
     // IdIndexDatasetHook and IdIndexer restoring authz in finally around the indexing write (2). The nightly
     // maintain_IdIndex_nightly job, cross-tenant by design with no user: IdIndexMaintain's source and cursor reads (2) and the
     // sweep's select and delete of rows past darpan.idindex.months (2). KEPT BARE.
-    static final int BASELINE = 33
+    // 34 since DAR-BE-320: AuditSharedReadSupport.inNewTransaction, the shared morning read's own bookkeeping row written by
+    // a scheduled run with no user; its reads go through TenantScopedFinder with the row's tenant checked. Restored in finally.
+    static final int BASELINE = 34
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>
@@ -206,7 +208,9 @@ class DisableAuthzRatchetTest {
             // the lookup's config gate); a scheduled extract may run with no signed-in user to authorize it.
             // 6 since DAR-BE-245 (baselined by DAR-BE-263): the same lookup again, asking where ship groups ship from for
             // orders with 2+ completed groups; the same tenant pin (the query row's companyUserGroupId).
-            "netsuite-darpan Groovy .disableAuthz("               : 6,
+            // 7 since DAR-BE-320: an audit's read by change asks read#HotWaxOmsChangedOrderIds for the orders HotWax changed
+            // since its start; the same tenant pin (the query row's companyUserGroupId) as the two lookups above.
+            "netsuite-darpan Groovy .disableAuthz("               : 7,
             "netsuite-darpan service+screen XML .disableAuthz("   : 0,
             "netsuite-darpan service+screen XML disable-authz=\"true\"": 0,
             "database-darpan Groovy .disableAuthz("               : 10,

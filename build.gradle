@@ -470,9 +470,11 @@ tasks.register('mysqlTest', Test) {
     useJUnitPlatform { includeTags 'mysql' }
     include '**/LoginDeadlockRegressionTests.class'
     include '**/XaDeadlockPoolRegressionTests.class'
+    include '**/AcknowledgementNoteMigrationMysqlTests.class'
     filter {
         includeTestsMatching '*LoginDeadlockRegressionTests'
         includeTestsMatching '*XaDeadlockPoolRegressionTests'
+        includeTestsMatching '*AcknowledgementNoteMigrationMysqlTests'
         failOnNoMatchingTests = true
     }
     // Cap at 1, matching `test` above; this task is the only guard for MySQL-only defects (InnoDB

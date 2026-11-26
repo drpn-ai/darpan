@@ -1,21 +1,21 @@
 package darpan.facade.common
 
 /**
- * DAR-CLI-003 — what a CLI session may call. A CLI session is a request signed in with a login key issued through
- * the CLI sign-in (CliAuthSupport.isCliSession). Aditi's scope: run execution and data getters, plus tenant scripts,
- * and (DAR-CLI-007) a run's conclusion tree and syncing an automation with its run; nothing that saves, changes or
- * deletes anything else. RpcMethodFence.enforce holds a CLI session to this list on
- * the server, so the key used directly (curl) gets no more than the CLI does.
+ * DAR-CLI-003 / DAR-CLI-008 — what a CLI session may call. A CLI session is a request signed in with a login key issued
+ * through the CLI sign-in (CliAuthSupport.isCliSession). RpcMethodFence.enforce holds a CLI session to this list on the
+ * server, so the key used directly (curl) gets no more than the CLI does.
  *
- * <p>ALLOWED: every facade get#/list#/search# that writes nothing and returns no credential, the run starters,
- * preview#NsSuiteQlSourceQuery and test#SourceConnection, every Scripts page service (deployments too, send-now
- * included: Aditi 2026-11-04), and the CLI's own logout (its start/poll sign-in runs anonymously). EXCLUDED: everything else in
- * docs/api-contract/methods.txt, with a note on each getter left out. CliMethodAllowlistTests fails when a published
- * method is in neither list, so a new service is placed here in the change that adds it.
+ * <p>ALLOWED (DAR-CLI-008, Aditi 2026-11-25: "everything"): every tenant-app method the user's role allows — reads, run
+ * starters, tenant scripts and every tenant-app edit. The fence is not the role check: each service checks the caller's
+ * tenant role itself, so a CLI key gets exactly what the same person gets in the app.
  *
- * <p>A getter returning any credential value or login identity (password, token, key, webhook URL, username,
- * OAuth client id or cert id, raw headers) stays EXCLUDED even though it writes nothing. Spec: wrapper
- * docs/superpowers/specs/2026-11-03-tenant-agent-cli-mcp-design.md 6.4.
+ * <p>EXCLUDED: connection credentials (their saves, deletes, sharing, and any getter returning a password, token, key,
+ * webhook URL, username, OAuth client id or cert id, or raw headers) — managed in the app, since a secret given to a
+ * user's AI goes into its provider's transcript; sign-in, identity and CLI access; browser installs; every admin.* method
+ * (the admin app and darpan-admin); and the embedded agent (a CLI session already is an agent).
+ * CliMethodAllowlistTests fails when a published method is in neither list, so a new service is placed here in the
+ * change that adds it. Specs: wrapper docs/superpowers/specs/2026-11-03-tenant-agent-cli-mcp-design.md 6.4 and
+ * 2026-11-25-dar-cli-008-cli-user-friendly-design.md section 4.
  */
 class CliMethodAllowlist {
 
@@ -142,6 +142,89 @@ class CliMethodAllowlist {
             "facade.TenantScriptFacadeServices.run#TenantQuerySchedule",
             "facade.TenantScriptFacadeServices.save#TenantQuery",
             "facade.TenantScriptFacadeServices.save#TenantQuerySchedule",
+            // DAR-CLI-008 (Aditi 2026-11-25: "everything"): app parity. Every tenant-app edit the user's role allows; each
+            // service checks the caller's role itself (XML or the Groovy it calls), and view-open ones (pins, own subscriptions,
+            // acknowledge/feedback) are view-open in the app too. Credentials, sign-in, installs, admin.* and the embedded agent stay EXCLUDED.
+            "facade.AgentChangeFacadeServices.apply#AuditChange",
+            "facade.AgentChangeFacadeServices.list#BrainChangeTickets",
+            "facade.AgentChangeFacadeServices.plan#AuditChange",
+            "facade.AgentChangeFacadeServices.reject#AuditChange",
+            "facade.AgentChangeFacadeServices.revert#AuditChange",
+            "facade.AuditFacadeServices.acknowledge#AuditFinding",
+            "facade.AuditFacadeServices.add#AuditStatement",
+            "facade.AuditFacadeServices.create#Audit",
+            "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
+            "facade.AuditFacadeServices.get#AuditRecheckProgress",
+            "facade.AuditFacadeServices.save#AuditCheck",
+            "facade.AuditFacadeServices.save#AuditSettings",
+            "facade.AuditFacadeServices.send#AuditFindingFeedback",
+            "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
+            "facade.AuditFacadeServices.verify#AuditFindings",
+            "facade.AuthFacadeServices.save#UserSettings",
+            "facade.JsonSchemaFacadeServices.delete#JsonSchema",
+            "facade.JsonSchemaFacadeServices.flatten#JsonSchema",
+            "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText",
+            "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromText",
+            "facade.JsonSchemaFacadeServices.save#JsonSchemaText",
+            "facade.JsonSchemaFacadeServices.save#RefinedSchema",
+            "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema",
+            "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery",
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriod",
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime",
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriod",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriodSync",
+            "facade.ReconciliationFacadeServices.archive#Automation",
+            "facade.ReconciliationFacadeServices.archive#SavedRun",
+            "facade.ReconciliationFacadeServices.create#CsvRun",
+            "facade.ReconciliationFacadeServices.create#Mapping",
+            "facade.ReconciliationFacadeServices.create#RuleSetRun",
+            "facade.ReconciliationFacadeServices.delete#Automation",
+            "facade.ReconciliationFacadeServices.delete#GeneratedOutput",
+            "facade.ReconciliationFacadeServices.delete#LifecycleFinding",
+            "facade.ReconciliationFacadeServices.delete#LifecycleRule",
+            "facade.ReconciliationFacadeServices.delete#LifecycleStageException",
+            "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion",
+            "facade.ReconciliationFacadeServices.delete#SavedRun",
+            "facade.ReconciliationFacadeServices.disable#SavedRun",
+            "facade.ReconciliationFacadeServices.enable#SavedRun",
+            "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns",
+            "facade.ReconciliationFacadeServices.pause#Automation",
+            "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys",
+            "facade.ReconciliationFacadeServices.reprocess#AutomationExecution",
+            "facade.ReconciliationFacadeServices.restore#Automation",
+            "facade.ReconciliationFacadeServices.restore#SavedRun",
+            "facade.ReconciliationFacadeServices.resume#Automation",
+            "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+            "facade.ReconciliationFacadeServices.save#Automation",
+            "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings",
+            "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns",
+            "facade.ReconciliationFacadeServices.save#Lifecycle",
+            "facade.ReconciliationFacadeServices.save#LifecycleConclusions",
+            "facade.ReconciliationFacadeServices.save#LifecycleDetails",
+            "facade.ReconciliationFacadeServices.save#LifecycleFinding",
+            "facade.ReconciliationFacadeServices.save#LifecycleRule",
+            "facade.ReconciliationFacadeServices.save#LifecycleStageException",
+            "facade.ReconciliationFacadeServices.save#LifecycleStages",
+            "facade.ReconciliationFacadeServices.save#Mapping",
+            "facade.ReconciliationFacadeServices.save#Reconciliation",
+            "facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+            "facade.ReconciliationFacadeServices.save#RuleSetRun",
+            "facade.ReconciliationFacadeServices.save#SavedRunName",
+            "facade.ReconciliationFacadeServices.subscribe#RunNotification",
+            "facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
+            "facade.SettingsFacadeServices.save#TenantSettings",
+            "facade.SettingsFacadeServices.save#UserNotificationDefault",
+            "facade.SettingsFacadeServices.send#ChatSpaceTest",
+            "facade.SettingsFacadeServices.set#NotificationRoute",
+            "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess",
+            "facade.SyncPulseFacadeServices.delete#SyncPair",
+            "facade.SyncPulseFacadeServices.save#SyncPair",
+            "facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
+            "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
+            "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
+            "facade.TenantScriptFacadeServices.save#TenantQueryPins",
     ] as LinkedHashSet<String>).asImmutable()
 
     static final Set<String> EXCLUDED = ([
@@ -187,14 +270,6 @@ class CliMethodAllowlist {
             "facade.CliAccessFacadeServices.get#MyCliAccess",
             "facade.CliAccessFacadeServices.request#CliAccess",
 
-            // DAR-BE-159: the embedded agent's change pipeline. A person plans, applies, rejects or reverts an agent proposal in the
-            // app (Rule of Two); none is a CLI action. list#BrainChangeTickets writes nothing but is left out until the agent panel
-            // (Plan 2) settles what a tenant sees of its tickets; Aditi may move it to ALLOWED.
-            "facade.AgentChangeFacadeServices.apply#AuditChange",
-            "facade.AgentChangeFacadeServices.list#BrainChangeTickets",
-            "facade.AgentChangeFacadeServices.plan#AuditChange",
-            "facade.AgentChangeFacadeServices.reject#AuditChange",
-            "facade.AgentChangeFacadeServices.revert#AuditChange",
             // DAR-BE-159/223 (darpan-agent): the embedded agent is a web panel; a CLI session already is an agent and never
             // runs a turn of this one or reads its panel.
             "facade.AgentTurnFacadeServices.get#AgentConversation",
@@ -289,21 +364,6 @@ class CliMethodAllowlist {
             "admin.UserAdminServices.reset#TwoFactor", // DAR-BE-264
             "admin.UserAdminServices.update#UserAccount",
 
-            // DAR-BE-361: acknowledge / change / reopen a report row write acknowledgement rows; the app only.
-            "facade.AuditFacadeServices.acknowledge#AuditFinding",
-            "facade.AuditFacadeServices.add#AuditStatement",
-            "facade.AuditFacadeServices.create#Audit",
-            "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
-            "facade.AuditFacadeServices.save#AuditCheck",
-            "facade.AuditFacadeServices.save#AuditSettings",
-            // DAR-BE-361: feedback saves a note, posts to Darpan's chat space and emails the sender; the app only.
-            "facade.AuditFacadeServices.send#AuditFindingFeedback",
-            "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
-            // DAR-BE-369: "Re-check all" reads every system for a whole statement or audit at once; the app's button only, until
-            // a CLI command is wanted (one finding's re-check, verify#AuditFinding, stays allowed).
-            "facade.AuditFacadeServices.get#AuditRecheckProgress",
-            "facade.AuditFacadeServices.verify#AuditFindings",
-
             "facade.AuthFacadeServices.change#ExpiredPassword",
             "facade.AuthFacadeServices.change#OwnPassword",
             "facade.AuthFacadeServices.complete#PasswordReset",
@@ -314,7 +374,6 @@ class CliMethodAllowlist {
             "facade.AuthFacadeServices.request#PasswordReset",
             "facade.AuthFacadeServices.save#ActiveTenant",
             "facade.AuthFacadeServices.save#RecoveryEmail",
-            "facade.AuthFacadeServices.save#UserSettings",
             "facade.AuthFacadeServices.verify#OwnPassword",
             "facade.AuthFacadeServices.verify#PasswordResetCode",
             // DAR-BE-264: two-factor sign-in, setup and recovery codes: credentials, never on the CLI list (get#TwoFactorStatus too).
@@ -345,72 +404,16 @@ class CliMethodAllowlist {
             "facade.CliAuthFacadeServices.list#CliSessions", // browser-only: listing and revoking CLI sessions is the app's
             "facade.CliAuthFacadeServices.revoke#CliSession",
 
+            // DAR-CLI-008: sharing widens another tenant's access to a config's credentials; credentials are managed in the app.
             "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess",
             "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess",
 
+            // DAR-CLI-008 (Aditi 2026-11-25): connection credentials — save, delete and the getters that return them — are
+            // managed in the app: a secret given to a user's AI goes into its provider's transcript.
             "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig",
             "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig",
 
-            "facade.JsonSchemaFacadeServices.delete#JsonSchema",
-            "facade.JsonSchemaFacadeServices.flatten#JsonSchema",
-            "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText",
-            "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromText",
-            "facade.JsonSchemaFacadeServices.save#JsonSchemaText",
-            "facade.JsonSchemaFacadeServices.save#RefinedSchema",
-            "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema",
-
-            "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery",
-
-            // DAR-BE-328: peak-period and sync-pulse writes; saving or deleting them is the app's, as with save#Automation.
-            "facade.PeakPeriodFacadeServices.delete#PeakPeriod",
-            "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime",
-            "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync",
-            "facade.PeakPeriodFacadeServices.save#PeakPeriod",
-            "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime",
-            "facade.PeakPeriodFacadeServices.save#PeakPeriodSync",
-            "facade.SyncPulseFacadeServices.delete#SyncPair",
-            "facade.SyncPulseFacadeServices.save#SyncPair",
-
-            "facade.ReconciliationFacadeServices.archive#Automation",
-            "facade.ReconciliationFacadeServices.archive#SavedRun",
-            "facade.ReconciliationFacadeServices.create#CsvRun",
-            "facade.ReconciliationFacadeServices.create#Mapping",
-            "facade.ReconciliationFacadeServices.create#RuleSetRun",
-            "facade.ReconciliationFacadeServices.delete#Automation",
-            "facade.ReconciliationFacadeServices.delete#GeneratedOutput",
-            "facade.ReconciliationFacadeServices.delete#LifecycleFinding",
-            "facade.ReconciliationFacadeServices.delete#LifecycleRule",
-            "facade.ReconciliationFacadeServices.delete#LifecycleStageException",
-            "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion",
-            "facade.ReconciliationFacadeServices.delete#SavedRun",
-            "facade.ReconciliationFacadeServices.disable#SavedRun",
-            "facade.ReconciliationFacadeServices.enable#SavedRun",
-            "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns",
             "facade.ReconciliationFacadeServices.list#AutomationSourceOptions", // sftpServers carry each SFTP login username
-            "facade.ReconciliationFacadeServices.pause#Automation",
-            "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys",
-            "facade.ReconciliationFacadeServices.reprocess#AutomationExecution",
-            "facade.ReconciliationFacadeServices.restore#Automation",
-            "facade.ReconciliationFacadeServices.restore#SavedRun",
-            "facade.ReconciliationFacadeServices.resume#Automation",
-            "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
-            "facade.ReconciliationFacadeServices.save#Automation",
-            "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings",
-            "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns",
-            "facade.ReconciliationFacadeServices.save#Lifecycle",
-            "facade.ReconciliationFacadeServices.save#LifecycleConclusions",
-            "facade.ReconciliationFacadeServices.save#LifecycleDetails",
-            "facade.ReconciliationFacadeServices.save#LifecycleFinding",
-            "facade.ReconciliationFacadeServices.save#LifecycleRule",
-            "facade.ReconciliationFacadeServices.save#LifecycleStageException",
-            "facade.ReconciliationFacadeServices.save#LifecycleStages",
-            "facade.ReconciliationFacadeServices.save#Mapping",
-            "facade.ReconciliationFacadeServices.save#Reconciliation",
-            "facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
-            "facade.ReconciliationFacadeServices.save#RuleSetRun",
-            "facade.ReconciliationFacadeServices.save#SavedRunName",
-            "facade.ReconciliationFacadeServices.subscribe#RunNotification",
-            "facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
 
             "facade.SettingsFacadeServices.delete#NsAuthConfig",
             "facade.SettingsFacadeServices.delete#TenantChatSpace",
@@ -423,11 +426,6 @@ class CliMethodAllowlist {
             "facade.SettingsFacadeServices.save#NsRestletConfig",
             "facade.SettingsFacadeServices.save#SftpServer",
             "facade.SettingsFacadeServices.save#TenantChatSpace",
-            "facade.SettingsFacadeServices.save#TenantSettings",
-            "facade.SettingsFacadeServices.save#UserNotificationDefault",
-            // DAR-UI-123: moves where a source posts; posts a test message into a tenant's chat.
-            "facade.SettingsFacadeServices.send#ChatSpaceTest",
-            "facade.SettingsFacadeServices.set#NotificationRoute",
 
             // DAR-BE-275: starts an install that stores a new connection; a browser flow, not a CLI one.
             "facade.ShopifyFacadeServices.begin#ShopifyInstall",
@@ -438,14 +436,6 @@ class CliMethodAllowlist {
             "facade.SlackFacadeServices.disconnect#SlackWorkspace",
             "facade.SlackFacadeServices.save#SlackBotToken",
 
-            "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess",
-
             "facade.TenantConfigFacadeServices.get#TenantConfigVersion", // its pack carries connection usernames, clientIds and certIds
-            "facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
-            "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
-            "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
-
-            // DAR-UI-138: the Queries page's pins, a browser preference like the dashboard pins; the CLI has no use for it.
-            "facade.TenantScriptFacadeServices.save#TenantQueryPins",
     ] as LinkedHashSet<String>).asImmutable()
 }

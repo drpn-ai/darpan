@@ -56,20 +56,40 @@ class CliMethodAllowlistTests {
             // these anonymously, so the fence never needs them)
             "facade.CliAuthFacadeServices.start#CliLogin",
             "facade.CliAuthFacadeServices.poll#CliLogin",
+            // DAR-CLI-008 (Aditi 2026-11-25): connection credentials are managed in the app — their getters return
+            // usernames/ids/webhook URLs, and sharing widens another tenant's access to them
+            "facade.SettingsFacadeServices.list#NsAuthConfigs",
+            "facade.SettingsFacadeServices.list#NsRestletConfigs",
+            "facade.SettingsFacadeServices.list#SftpServers",
+            "facade.SettingsFacadeServices.list#TenantChatSpaces",
+            "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess",
+            "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess",
+            "facade.ReconciliationFacadeServices.list#AutomationSourceOptions",
+            "facade.TenantConfigFacadeServices.get#TenantConfigVersion",
+            "facade.ShopifyFacadeServices.begin#ShopifyInstall",
+            // the embedded agent: a CLI session already is an agent
+            "facade.AgentTurnFacadeServices.send#AgentTurn",
+            "facade.AgentTurnFacadeServices.send#AgentQueryTurn",
+            "facade.AgentReadFacadeServices.get#AgentAuditScope",
+            // authoring data-defined reads is a super admin's (DAR-BE-235)
+            "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",
+            "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition",
     ].asImmutable()
 
-    /** Verbs an allowed method may have: reads and run starters. */
-    private static final Set<String> READ_OR_RUN_VERBS = ["get", "list", "search", "preview", "test",
-                                                          "run", "retry", "cancel"] as Set
-    private static final String TENANT_SCRIPT_SERVICES = "facade.TenantScriptFacadeServices."
+    /** Read verbs: the only AuthFacadeServices methods a CLI session may call besides save#UserSettings. */
+    private static final Set<String> READ_VERBS = ["get", "list", "search", "preview", "test"] as Set
+    private static final String OWN_SETTINGS = "facade.AuthFacadeServices.save#UserSettings"
     private static final String CLI_LOGOUT = "facade.CliAuthFacadeServices.logout#CliSession"
-    /** DAR-CLI-004: the audit page's Re-check starts a one-record run of a check, like retry#AuditCheck; named here so
-     *  the verify verb stays off the list (verify#OwnPassword and verify#PasswordResetCode must never pass). */
-    private static final String AUDIT_RECHECK = "facade.AuditFacadeServices.verify#AuditFinding"
-    /** DAR-CLI-007 (Aditi 2026-11-21): the only config edits a CLI session may make, named so no other save slips in. */
-    private static final Set<String> CONFIG_EDITS = ["facade.RunConclusionFacadeServices.save#RunConclusions",
-                                                     "facade.RunConclusionFacadeServices.create#RunConclusionCode",
-                                                     "facade.ReconciliationFacadeServices.sync#Automation"] as Set
+    /** DAR-CLI-008 (Aditi 2026-11-25: "everything"): tenant-app edits a CLI session reaches; the service checks the role. */
+    private static final List<String> TENANT_APP_EDITS = [
+            "facade.ReconciliationFacadeServices.save#Automation",
+            "facade.AuditFacadeServices.save#AuditSettings",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriod",
+            "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
+            "facade.AgentChangeFacadeServices.apply#AuditChange",
+            "facade.AuthFacadeServices.save#UserSettings",
+            "facade.AuditFacadeServices.verify#AuditFindings",
+    ].asImmutable()
 
     private static List<String> contractMethods() {
         Path methodsFile = ReconciliationSmokeTestSupport.resolveBackendRoot()
@@ -113,12 +133,24 @@ class CliMethodAllowlistTests {
     }
 
     @Test
-    void noSaveDeleteCreateOrUpdateOutsideTenantScriptsAndCliLogoutIsAllowed() {
-        List<String> writers = CliMethodAllowlist.ALLOWED.findAll { String method ->
-            if (method == CLI_LOGOUT || method == AUDIT_RECHECK || CONFIG_EDITS.contains(method) || method.startsWith(TENANT_SCRIPT_SERVICES)) return false
-            return !READ_OR_RUN_VERBS.contains(verbOf(method))
+    void signInAndIdentityStayInTheBrowser() {
+        List<String> leaks = CliMethodAllowlist.ALLOWED.findAll { String method ->
+            String service = method.substring(0, method.lastIndexOf('.'))
+            switch (service) {
+                case "facade.AuthFacadeServices": return method != OWN_SETTINGS && !READ_VERBS.contains(verbOf(method))
+                case "facade.CliAuthFacadeServices": return method != CLI_LOGOUT
+                case "facade.CliAccessFacadeServices": return true
+                case "facade.AgentTurnFacadeServices": return true
+                default: return false
+            }
         }.sort()
-        assertTrue(writers.isEmpty(), "a CLI session may only read, start runs, use tenant scripts and make the CONFIG_EDITS: ${writers}")
+        assertTrue(leaks.isEmpty(), "sign-in, identity, CLI access and the embedded agent stay in the browser: ${leaks}")
+    }
+
+    @Test
+    void tenantAppEditsAreAllowed() {
+        List<String> missing = TENANT_APP_EDITS.findAll { !CliMethodAllowlist.ALLOWED.contains(it) }
+        assertTrue(missing.isEmpty(), "DAR-CLI-008: a CLI session makes the edits the user's role allows in the app: ${missing}")
     }
 
     @Test

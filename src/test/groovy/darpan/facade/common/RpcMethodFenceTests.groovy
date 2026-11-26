@@ -141,6 +141,9 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.cliRejection("/rpc/json/", ["facade.TenantScriptFacadeServices.save#TenantQuery"]))
         // Aditi 2026-11-04: any script deployment (now a query schedule, DAR-BE-334) can be done via the CLI, send-now included
         assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantQuerySchedule"]))
+        // DAR-CLI-008: tenant-app edits the user's role allows
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.ReconciliationFacadeServices.save#Automation"]))
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantConfigFacadeServices.restore#TenantConfigVersion"]))
     }
 
     @Test
@@ -149,7 +152,7 @@ class RpcMethodFenceTests {
                 RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVE_ACTIVE_TENANT, SAVED_RUNS]))
         assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["admin.TenantAdminServices.get#TenantList"]))
         assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["gql.QueryServices.get#Sdl"]))
-        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantConfigFacadeServices.restore#TenantConfigVersion"]))
+        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.SettingsFacadeServices.save#NsAuthConfig"]))
         // through enforce, where the batch comes from the parsed body as the dispatcher reads it
         ExecutionContext cli = stubEc(true, "/rpc/json", [_requestBodyJsonList: [[method: SESSION_INFO], [method: SAVE_ACTIVE_TENANT]]])
         ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) { RpcMethodFence.enforce(cli) }

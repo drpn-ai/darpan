@@ -1,0 +1,54 @@
+# Upgrade Data Review For Darpan 3.5.1
+
+## Scope
+
+- Backend compare range: `v3.5.0..HEAD`
+- Data directory reviewed: `data`
+- Generic source data files are the source of truth for release upgrade data.
+- This report lists candidate seed/config records that were added or modified in generic source data files between the compared refs.
+- Do not author records directly in `upgrade-data.xml`; add or update the appropriate `runtime/component/darpan/data/*.xml` file and regenerate.
+
+## Candidate records
+
+### Modified in `data/AppContentSeedData.xml`
+
+- Record: `darpan.content.AppContentEntry|anchorTestId=|contentKind=MASCOT_GLOSSARY|contentKey=syncPairUpstream|routeName=`
+- Element: `darpan.content.AppContentEntry`
+
+```xml
+<darpan.content.AppContentEntry contentKind="MASCOT_GLOSSARY" contentKey="syncPairUpstream" source="SEED" seedMark="1a16ffaf3499f68a" defaultTitle="Upstream side" defaultBody="the system orders reach first, which the pulse reads for orders still missing on the other side. It must be HotWax or Shopify orders." matchLabels="" matchRegex="" routeName="" conditionKind="" anchorTestId="" defaultSequence="" whereShown="answered only where a page marks it with v-explain"/>
+```
+
+### Modified in `data/AppContentSeedData.xml`
+
+- Record: `darpan.content.AppContentEntry|anchorTestId=|contentKind=MASCOT_GLOSSARY|contentKey=syncPulse|routeName=`
+- Element: `darpan.content.AppContentEntry`
+
+```xml
+<darpan.content.AppContentEntry contentKind="MASCOT_GLOSSARY" contentKey="syncPulse" source="SEED" seedMark="1a16ffaf3499f68a" defaultTitle="Sync pulse" defaultBody="watches orders that reached one system but not the next one yet, and tells you which ones waited longer than the allowance. Open a pair to see today." matchLabels="sync pulse" matchRegex="" routeName="" conditionKind="" anchorTestId="" defaultSequence="" whereShown="answers labels: sync pulse"/>
+```
+
+### Modified in `data/SourceSystemConnectorSeedData.xml`
+
+- Record: `darpan.reconciliation.SourceSystemConnector|systemEnumId=OMS_GQL|remoteId=HOTWAX_ORDERS_API`
+- Element: `darpan.reconciliation.SourceSystemConnector`
+
+```xml
+<darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_GQL" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_GQL" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders" sendUrlTemplate="{baseUrl}/rest/s1/graphql" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders" systemAliases="OMS_GQL,HOTWAX_GQL,DAR_SYS_OMS_GQL" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId,currencyUomId,billToCustomer,shipGroups" filterParameterName="sourceFilters" pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId" pulseCreatedField="orderDate" pulseNameField="orderName" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ORDER_CREATED":"Created","ORDER_APPROVED":"Approved","ORDER_COMPLETED":"Completed","ORDER_CANCELLED":"Cancelled"},"facts":["orderName","orderId","externalId","grandTotal"]}' enabled="Y"/>
+```
+
+### Modified in `data/SourceSystemConnectorSeedData.xml`
+
+- Record: `darpan.reconciliation.SourceSystemConnector|systemEnumId=SHOPIFY|remoteId=SHOPIFY_REMOTE`
+- Element: `darpan.reconciliation.SourceSystemConnector`
+
+```xml
+<darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Orders" sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql" systemAliases="SHOPIFY,DAR_SYS_SHOPIFY" preserveWindowInstants="Y" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds" exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState" exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep" healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection" filterParameterName="sourceFilters" evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}' extractOptionsJson='[{"name":"withLineItems","label":"Order lines","type":"boolean"}]' pulseCreatedField="createdAt" pulseNameField="name" enabled="Y"/>
+```
+
+## Recommended operator review
+
+- Confirm every candidate record truly needs to be loaded for the target environment.
+- Keep final upgrade records reflected in the appropriate generic source data file, such as a type, security, mapping, job, or system-message seed file.
+- Prefer keeping changes in the existing domain seed file unless the release needs a distinct generic setup bundle.
+- State the final operator action in `release-notes.md` and `release-checklist.md`.

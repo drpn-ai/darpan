@@ -496,13 +496,25 @@ class SyncPulseSupport {
         }
     }
 
+    /** SyncPulseSample.message is text-medium: VARCHAR(255). */
+    static final int MESSAGE_MAX = 255
+
+    /**
+     * DAR-BE-382. A sample's message cut to fit its column, "..." marking the cut. Prod 2026-11-26: a Spark error past 255
+     * characters rolled back the FAILED sample itself (the old cut was at 4,000).
+     */
+    static String sampleMessage(String message) {
+        if (message == null || message.length() <= MESSAGE_MAX) return message
+        return message.take(MESSAGE_MAX - 3) + "..."
+    }
+
     /** A SKIPPED sample (admission refused) and the pair's stamp; never throws. */
     static Map recordSkipped(def ec, Map pair, Instant now, Integer allowance, String message) {
         try {
             int openCount = openOrders(ec, pair).size()
             Map sample = null
             ec.transaction.runUseOrBegin(60, "Sync pulse ${pair.syncPairId} could not record a skipped sample".toString()) {
-                sample = writeSample(ec, pair, now, [statusEnumId: SKIPPED, allowanceMinutes: allowance, pastAllowanceCount: openCount, message: message])
+                sample = writeSample(ec, pair, now, [statusEnumId: SKIPPED, allowanceMinutes: allowance, pastAllowanceCount: openCount, message: sampleMessage(message)])
                 stampPair(ec, pair, now, SKIPPED)
             }
             Map out = [status: SKIPPED, sample: sample, newlyPast: [], closed: [], waitingCount: null, oldest: null,
@@ -594,8 +606,7 @@ class SyncPulseSupport {
 
     private static Map failed(def ec, Map pair, Instant now, Integer allowance, List<Map> open, Collection errors) {
         List<String> reasons = (errors ?: []).collect { normalize(it) }.findAll { it } as List<String>
-        String message = reasons ? reasons.join("; ") : "The pulse could not read."
-        if (message.length() > 4000) message = message.take(3997) + "..."
+        String message = sampleMessage(reasons ? reasons.join("; ") : "The pulse could not read.")
         int openCount = open?.size() ?: 0
         Map sample = null
         ec.transaction.runUseOrBegin(60, "Sync pulse ${pair.syncPairId} could not record its failure".toString()) {

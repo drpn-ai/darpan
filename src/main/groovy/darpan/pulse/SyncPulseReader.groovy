@@ -106,8 +106,12 @@ class SyncPulseReader {
         return run(ec, pair, automation, "target", [present: [] as Set<String>, unasked: unasked]) { Map sides, String location ->
             Timestamp now = (ec.user?.nowTimestamp as Timestamp) ?: new Timestamp(System.currentTimeMillis())
             Map window = [childWindowStartDate: Timestamp.from(now.toInstant().minus(TARGET_WINDOW)), childWindowEndDate: now]
+            // DAR-BE-382: each batch writes in a folder of its own. Batches share one file name, and Spark (Keep) reading a
+            // reused path through its cached listing of the previous batch's deleted file failed with FILE_NOT_EXIST.
+            int batchIndex = 0
             Map found = presentByBatches(keys, sides.targetKey as String) { List<String> batch ->
-                extract(ec, automation, sides.target, window, location, batch, sides.targetKey as String, true)
+                String batchLocation = DataManagerSupport.childLocation(location, "batch-${batchIndex++}".toString())
+                extract(ec, automation, sides.target, window, batchLocation, batch, sides.targetKey as String, true)
             }
             return [ok: true, present: found.present, unasked: found.unasked, errors: [], warnings: found.warnings]
         }

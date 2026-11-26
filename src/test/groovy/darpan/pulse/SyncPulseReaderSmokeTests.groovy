@@ -184,6 +184,9 @@ class SyncPulseReaderSmokeTests {
         assertEquals(3, calls.size(), "2,500 keys -> three reads by key")
         assertEquals([NS] * 3, calls*.service)
         assertEquals([1000, 1000, 500], calls.collect { ((List) it.params.lookupKeys).size() })
+        // DAR-BE-382: prod 2026-11-26, Spark read a batch's file through the previous batch's cached listing of the same
+        // path (FILE_NOT_EXIST): every batch writes in a folder of its own
+        assertEquals(3, calls.collect { it.params.outputLocation }.unique().size(), "each batch has its own folder: ${calls*.params*.outputLocation}")
         calls.each { Map c ->
             assertEquals("otherRefNum", c.params.lookupKeyField, "read by the check's own FILE_2 key field")
             assertNull(c.params.lookupWithinWindow, "a pulse asks by key alone")

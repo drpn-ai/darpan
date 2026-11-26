@@ -654,6 +654,22 @@ class SyncPulseEngineSmokeTests {
         assertEquals(1, latestSample().pastAllowanceCount as Integer)
     }
 
+    /**
+     * DAR-BE-382. Prod 2026-11-26: a Spark error longer than the sample's message column (VARCHAR 255) rolled back the FAILED
+     * sample itself ("Data too long for column 'MESSAGE'"). The reason is cut to fit, and the failure is recorded.
+     */
+    @Test
+    void aVeryLongFailureReasonStillRecordsTheFailedSample() {
+        upstreamFailure = [ok: false, records: [], errors: ["[FAILED_READ_FILE.FILE_NOT_EXIST] " + ("x" * 2000)]]
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        Map s = latestSample()
+        assertEquals("SPS_FAILED", s.statusEnumId)
+        assertTrue((s.message as String).length() <= 255, "fits the column: ${(s.message as String).length()}")
+        assertTrue((s.message as String).startsWith("[FAILED_READ_FILE.FILE_NOT_EXIST] x"))
+        assertTrue((s.message as String).endsWith("..."))
+        assertEquals(["SPS_FAILED", Timestamp.from(T0)], [pairMap(SP).lastPulseStatusEnumId, pairMap(SP).lastPulseStamp])
+    }
+
     @Test
     void inactiveOrDeletedAutomationSkippedSilently() {
         pair("SPE_OFF", AUTO_OFF, 60, 60)

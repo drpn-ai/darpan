@@ -39,7 +39,9 @@ class IdIndexer {
         // DAR-BE-383: a temp file of the index's own, never "<read>.records.jsonl" beside the read. That name is the run's own
         // lines file (JsonRecordLines.SUFFIX), which this background index used to overwrite and then delete while the run's
         // Spark read (Keep) was reading it: FILE_NOT_EXIST on prod runs and sync pulses from 3.5.0. The caller deletes it.
-        File out = File.createTempFile("idindex-", ".jsonl")
+        // Owner-only (NIO creates 0600 on POSIX): it holds a tenant's record ids. No deleteOnExit: on a long-lived server its
+        // JVM-wide path set would grow with every indexed extract; both callers delete in their finally, a failed write here.
+        File out = java.nio.file.Files.createTempFile("idindex-", ".jsonl").toFile()
         boolean written = false
         DatasetRefreshSupport.RecordFileIterator records = null
         try {

@@ -110,6 +110,10 @@ class IdIndexerSparkTests {
         assertEquals('{"id":"KEEP"}\n', runsLines.text, "the run's lines file is untouched")
         assertEquals(before, runsLines.lastModified())
         assertEquals(["1"], IdIndexer.extract(spark, own, SHOPIFY, FIELDS).toList()*.key)
+        if (java.nio.file.FileSystems.default.supportedFileAttributeViews().contains("posix")) {
+            assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(
+                    java.nio.file.Files.getPosixFilePermissions(own.toPath())), "the index's copy of a tenant's ids is owner-only")
+        }
         own.delete()
         assertTrue(runsLines.isFile(), "deleting the index's file leaves the run's")
     }

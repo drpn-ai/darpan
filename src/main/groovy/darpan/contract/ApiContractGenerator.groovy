@@ -54,7 +54,7 @@ class ApiContractGenerator {
     //            replaced by the TenantQuery / TenantQuerySchedule methods on moqui-jexl (DAR-BE-334); also
     //            save#Automation no longer takes sources[].excludeFilters (DAR-BE-318) and add#TenantMember's
     //            welcomeQueued became welcomeSent / welcomeWithPassword.
-    static final int CONTRACT_VERSION = 5
+    static final int CONTRACT_VERSION = 6
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],

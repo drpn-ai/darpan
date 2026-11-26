@@ -108,6 +108,8 @@ class AuditReportAssembler {
         Map<String, List<String>> checkIdsByStatement = [:].withDefault { [] }
         links.each { if (checksById[it.checkId] && statementIds.contains(it.statementId)) checkIdsByStatement[it.statementId as String] << (it.checkId as String) }
         Set<String> configuredCheckIds = checkIdsByStatement.values().flatten().toSet() as Set<String>
+        // DAR-BE-371. The systems each check compares, from its automation's sources, so a check not run today still names them.
+        Map<String, List<String>> systemsByCheck = checkSystems(ec, tenantId, configuredCheckIds.collect { checksById[it] } as List<Map>)
 
         // This morning's runs and their reads.
         Map<String, Map> runByCheck = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("period", period)
@@ -165,6 +167,7 @@ class AuditReportAssembler {
                  reason   : status == RAN ? null : checkReason[checkId],
                  matchedBy: check.matchedBy ?: null,
                  compared : status == NOT_RUN || run == null ? null : compared(readsByRun[run.checkRunId as String]),
+                 systems  : systemsByCheck[checkId] ?: [],
                  // DAR-UI-063. The days this morning's run read: the period to date, or the days a person played.
                  window   : run == null ? null : [from: isoDate(run.windowFromDate as Date), thru: isoDate(run.windowThruDate as Date)]]
             }
@@ -1024,6 +1027,26 @@ class AuditReportAssembler {
     }
 
     /** Records compared on each side of one run: the reads' counts summed per root system. */
+    /**
+     * DAR-BE-371. Each check's compared systems as report keys (OMS, NetSuite, Shopify), FILE_1 then FILE_2, read from its
+     * automation's sources rather than a morning's reads, so they are there whether or not the check ran. One system
+     * once (a NetSuite-to-NetSuite check names NetSuite alone); a check with no automation names none.
+     */
+    static Map<String, List<String>> checkSystems(def ec, String tenantId, List<Map> checks) {
+        List<String> automationIds = checks.collect { it?.automationId as String }.findAll { it }.unique()
+        if (!automationIds) return [:]
+        Map<String, List<Map>> byAutomation = tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
+                .condition("automationId", "in", automationIds).orderBy(["automationId", "fileSide"]).list()*.getMap()
+                .groupBy { it.automationId as String }
+        return checks.findAll { it?.automationId }.collectEntries { Map check ->
+            List<String> systems = (byAutomation[check.automationId as String] ?: []).collect { Map source ->
+                String enumId = source.systemEnumId as String
+                enumId ? systemKey(AuditAutomationSupport.rootSystem(enumId)) : null
+            }.findAll { it }.unique()
+            [(check.checkId as String): systems]
+        }
+    }
+
     private static Map compared(List<Map> reads) {
         Map<String, Object> out = new LinkedHashMap<>()
         reads.groupBy { systemKey(it.systemEnumId as String) }.each { String key, List<Map> rs ->

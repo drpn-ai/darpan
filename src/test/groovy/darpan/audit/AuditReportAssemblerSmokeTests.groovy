@@ -190,7 +190,7 @@ class AuditReportAssemblerSmokeTests {
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived", status: "ran", reason: null], r4.subMap(["id", "text", "weight", "status", "reason"]))
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
-                       matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409],
+                       matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409], systems: [],
                        window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
         assertEquals(counted(1, 0, 0), r4.counts)
         Map brief = (r4.findings as List)[0]
@@ -443,6 +443,39 @@ class AuditReportAssemblerSmokeTests {
             assertEquals("Raise CM-88213 to the refund.", finding(GORJANA, m258615).finding.fix.action)
         } finally {
             withoutForeignKeys { insert("darpan.audit.AuditCheck", [checkId: RET, companyUserGroupId: GORJANA, savedRunId: null]) }
+        }
+    }
+
+    /** DAR-BE-371. A check names the systems it compares from its automation's sources, on a morning it did not run too. */
+    @Test
+    void aCheckNamesItsSystemsWhetherOrNotItRan() {
+        Timestamp now = ec.user.nowTimestamp
+        withoutForeignKeys {
+            insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "TREP_AUTO_INV", automationName: "invoices",
+                    companyUserGroupId: GORJANA, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "TREP_RS", isActive: "Y",
+                    createdDate: now, lastUpdatedDate: now])
+            [FILE_1: "OMS_GQL", FILE_2: "NETSUITE_SUITEQL", FILE_3: "NETSUITE"].each { String side, String system ->
+                insert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: "TREP_AUTO_INV", fileSide: side,
+                        companyUserGroupId: GORJANA, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: system, createdDate: now,
+                        lastUpdatedDate: now])
+            }
+            insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, automationId: "TREP_AUTO_INV"])
+        }
+        try {
+            Map r2 = report(GORJANA, "2026-10-09").categories.orders.statements.R2
+            assertEquals("notRun", r2.status)
+            assertNull(r2.checks[0].compared, "no reads that morning")
+            assertEquals(["OMS", "NetSuite"], r2.checks[0].systems, "FILE_1 then FILE_2, one system once")
+            assertEquals([], report(GORJANA, "2026-10-09").categories.refundsAndCredits.statements.R4.checks[0].systems,
+                    "a check with no automation names none")
+        } finally {
+            withoutForeignKeys {
+                insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, automationId: null])
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", "TREP_AUTO_INV")
+                        .disableAuthz().deleteAll()
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "TREP_AUTO_INV")
+                        .disableAuthz().deleteAll()
+            }
         }
     }
 

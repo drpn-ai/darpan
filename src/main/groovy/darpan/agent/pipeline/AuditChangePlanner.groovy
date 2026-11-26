@@ -56,6 +56,7 @@ class AuditChangePlanner {
      * so provenance runs unchanged; a value neither vouches for is returned as unconfirmedIds and must be named back at apply.
      */
     static Map createForPerson(def ec, String kind, Map target, Map after, String reasonText, String personWords, String findingId, Object evidence) {
+        if (refusedInAgentLoop(ec)) return null
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String words = personWords?.trim()
         if (!words) { ec.message.addError("Say what the person said: their own words are what a proposal's values are checked against."); return null }
@@ -65,10 +66,30 @@ class AuditChangePlanner {
             context = openContextForFinding(ec, tenantId, findingId)
             if (!context) { ec.message.addError("Finding ${findingId} was not found.".toString()); return null }
         }
-        String evidenceJson = JsonOutput.toJson([origin: "PERSON", personWords: words, findingId: findingId, evidence: evidence])
-        Map out = createCore(ec, tenantId, null, ec.user.userId as String, kind, target, after, reasonText, evidenceJson, [words], context)
-        if (out != null) out.unconfirmedIds = out.blockedIds ?: []
+        Map evidenceMap = [origin: "PERSON", personWords: words, findingId: findingId, evidence: evidence]
+        // Aditi 2026-11-26: the person's words vouch for nothing (the same AI writes the values and the words); they are kept
+        // as the record of why. Only the named finding and the config vouch, so every new value is shown and named back.
+        Map out = createCore(ec, tenantId, null, ec.user.userId as String, kind, target, after, reasonText, JsonOutput.toJson(evidenceMap), [], context)
+        if (out == null) return null
+        List<String> unconfirmed = ((out.blockedIds ?: []) as List).collect { it as String }
+        out.unconfirmedIds = unconfirmed
+        // blockedIds is cut to its column ("+N more"); the whole list is what the person must see and name back.
+        if (unconfirmed) {
+            def row = proposalFor(ec, out.proposalId as String)
+            evidenceMap.unconfirmedIds = unconfirmed
+            row.set("evidenceJson", JsonOutput.toJson(evidenceMap))
+            row.update()
+        }
         return out
+    }
+
+    /** A person-origin row's whole unconfirmed list (kept in its evidence); otherwise the stored blocked list. */
+    static List<String> unconfirmedOf(def row) {
+        if (row.conversationId == null && row.evidenceJson) {
+            Object listed = parse(row.evidenceJson).unconfirmedIds
+            if (listed instanceof List) return ((List) listed).collect { it as String }
+        }
+        return row.blockedIds ? ((List) new JsonSlurper().parseText(row.blockedIds as String)).collect { it as String } : []
     }
 
     private static Map createCore(def ec, String tenantId, String conversationId, String proposedFor, String kind, Map target, Map after,
@@ -206,7 +227,7 @@ class AuditChangePlanner {
         if (row.status != "PLANNED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only a planned proposal can be applied.".toString()); return null }
         boolean confirmed = false
         if (row.provenanceStatus == "BLOCKED") {
-            List<String> blocked = row.blockedIds ? ((List) new JsonSlurper().parseText(row.blockedIds as String)).collect { it as String } : []
+            List<String> blocked = unconfirmedOf(row)
             // DAR-CLI-008: a person-origin proposal (no conversation) applies once the person names back exactly the values
             // provenance could not trace; an agent's proposal is still confirmed only in its conversation.
             if (row.conversationId == null) {
@@ -368,11 +389,11 @@ class AuditChangePlanner {
     /** A proposal as the person reviews it: what changes (before/after), its effect on the last run (backtest), the values
      *  still to confirm and the planHash an apply must name. withState false leaves out before/after (lists). */
     static Map view(def row, boolean withState = true) {
-        Object blocked = row.blockedIds ? new JsonSlurper().parseText(row.blockedIds as String) : []
         boolean person = row.conversationId == null
+        List<String> blocked = row.provenanceStatus == "BLOCKED" ? unconfirmedOf(row) : []
         Map out = [proposalId: row.proposalId, kind: row.kind, status: row.status, statusMessage: row.statusMessage,
                    origin: person ? "PERSON" : "AGENT", provenanceStatus: row.provenanceStatus,
-                   unconfirmedIds: row.provenanceStatus == "BLOCKED" && blocked instanceof List ? blocked : [],
+                   unconfirmedIds: blocked,
                    target: parse(row.targetJson), reasonText: row.reasonText, planHash: row.planHash,
                    backtest: row.backtestJson ? parse(row.backtestJson) : null, appliedVersionId: row.appliedVersionId,
                    revertOfProposalId: row.revertOfProposalId, updated: row.lastUpdatedStamp?.toString()]

@@ -328,17 +328,56 @@ class AuditChangeApplySmokeTests {
     // ------------------------------------------------------------------ DAR-CLI-008: person-origin proposals (the CLI)
 
     @Test
-    void "a person's proposal traces its values to the person's own words"() {
+    void "a person's words do not vouch for a value: the person sees and names back every new value"() {
+        // Aditi 2026-11-26: the same AI writes the values and the words, so the words are kept as the record of why but
+        // vouch for nothing; only the named finding and the config do.
         Map p = personPropose(["M5550001"], "M5550001 is a test order; leave it out of R1")
-        assertEquals("PASS", p.provenanceStatus)
+        assertEquals("BLOCKED", p.provenanceStatus)
+        assertEquals(["M5550001"], p.unconfirmedIds)
         assertEquals("PLANNED", p.status, p.statusMessage as String)
-        assertEquals([], p.unconfirmedIds)
         assertNotNull(p.backtest)
         def row = proposal(p.proposalId)
         assertNull(row.conversationId, "no agent conversation: the person proposed it")
         assertEquals(USER, row.proposedForUserId)
         assertTrue((row.evidenceJson as String).contains('"origin":"PERSON"'), row.evidenceJson as String)
         assertTrue((row.evidenceJson as String).contains("M5550001 is a test order"), "the person's words are kept with the proposal")
+    }
+
+    @Test
+    void "a value already in the run's config needs no confirmation"() {
+        Map p = personPropose(["HOTWAX"], "leave HotWax memos out")
+        assertEquals("PASS", p.provenanceStatus, "HOTWAX is already a filter value on this run")
+        assertEquals([], p.unconfirmedIds)
+    }
+
+    @Test
+    void "a long unconfirmed list is kept whole: naming back the cut list is refused, the whole list applies"() {
+        List<String> values = (1..150).collect { "M9${String.format('%06d', it)}".toString() }
+        Map p = personPropose(values, "these are all test orders")
+        assertEquals(values, p.unconfirmedIds)
+        def row = proposal(p.proposalId)
+        List cut = new groovy.json.JsonSlurper().parseText(row.blockedIds as String) as List
+        assertTrue(cut.last().toString().startsWith("+"), "the column holds a cut list: ${cut.last()}")
+        String hash = row.planHash as String
+        Map refused = personApply(p.proposalId as String, hash, cut.collect { it as String })
+        assertTrue(refused.hadError as boolean, "the cut list is not the list")
+        Map shown = call("get#AuditChangeProposal", [proposalId: p.proposalId])
+        assertEquals(values, (shown.proposal as Map).unconfirmedIds, "change show lists every value")
+        Map ok = personApply(p.proposalId as String, hash, values)
+        assertFalse(ok.hadError as boolean, ok.errorText as String)
+        assertEquals("APPLIED", ok.status)
+    }
+
+    @Test
+    void "a person-origin proposal cannot be made from inside the agent loop"() {
+        Map p = AgentCallMarker.run {
+            AuditChangePlanner.createForPerson(ec, "EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"],
+                    [fieldExpression: NEW_FIELD, filterValues: ["M5550001"]], "test", "words", null, [:])
+        }
+        assertNull(p)
+        assertTrue(ec.message.errorsString.contains("AGENT_CANNOT_APPROVE") || ec.message.hasError())
+        ec.message.clearAll()
+        assertEquals(0L, proposalCount())
     }
 
     @Test
@@ -407,17 +446,17 @@ class AuditChangeApplySmokeTests {
         Map p = call("propose#AuditChange", personParams(["M5550001", "M5550005"], "M5550001 is a test order"))
         assertFalse(p.hadError as boolean, p.errorText as String)
         assertEquals("PLANNED", p.status)
-        assertEquals(["M5550005"], p.unconfirmedIds)
+        assertEquals(["M5550001", "M5550005"], p.unconfirmedIds)
         Map got = call("get#AuditChangeProposal", [proposalId: p.proposalId])
         Map view = got.proposal as Map
         assertEquals("PERSON", view.origin)
-        assertEquals(["M5550005"], view.unconfirmedIds)
+        assertEquals(["M5550001", "M5550005"], view.unconfirmedIds)
         assertEquals(64, (view.planHash as String).length())
         assertNotNull(view.backtest)
         assertEquals([savedRunId: runId, fileSide: "FILE_1"], view.target)
         assertEquals(["M5550001", "M5550005"], (view.after as Map).filterValues)
         assertNotNull(view.before, "the before state the person compares against")
-        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: view.planHash, confirmedIds: ["M5550005"]])
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: view.planHash, confirmedIds: ["M5550005", "M5550001"]])
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals("APPLIED", out.status)
         assertEquals("CONFIRMED", (call("get#AuditChangeProposal", [proposalId: p.proposalId]).proposal as Map).provenanceStatus)
@@ -433,6 +472,10 @@ class AuditChangeApplySmokeTests {
         List<Map> open = call("list#AuditChangeProposals", [status: "OPEN"]).proposals as List<Map>
         assertEquals([agent.proposalId, person.proposalId] as Set, open*.proposalId as Set)
         assertTrue((call("list#AuditChangeProposals", [status: "APPLIED"]).proposals as List).isEmpty())
+        assertEquals([person.proposalId], (call("list#AuditChangeProposals", [origin: "person"]).proposals as List<Map>)*.proposalId, "origin in any case")
+        Map badOrigin = call("list#AuditChangeProposals", [origin: "HUMAN"])
+        assertTrue(badOrigin.hadError as boolean, "an unknown origin is refused, not read as everything")
+        assertTrue(call("list#AuditChangeProposals", [status: "DONE"]).hadError as boolean, "an unknown status is refused")
     }
 
     @Test

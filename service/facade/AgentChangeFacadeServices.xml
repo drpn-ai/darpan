@@ -102,13 +102,18 @@
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><set field="proposals" from="[]"/><return/></if>
-            <set field="statuses" from="status == 'OPEN' ? darpan.agent.pipeline.AuditChangePlanner.OPEN : (status ? [status] : null)"/>
+            <set field="statusValue" from="status?.trim()?.toUpperCase()"/>
+            <set field="originValue" from="origin?.trim()?.toUpperCase()"/>
+            <if condition="statusValue &amp;&amp; !(statusValue in ['OPEN', 'DRAFT', 'PLANNED', 'APPLIED', 'REJECTED', 'REVERTED', 'STALE', 'INVALID'])">
+                <return error="true" message="Status ${status} is not one of OPEN, DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE or INVALID."/></if>
+            <if condition="originValue &amp;&amp; !(originValue in ['PERSON', 'AGENT'])"><return error="true" message="Origin ${origin} is PERSON or AGENT."/></if>
+            <set field="statuses" from="statusValue == 'OPEN' ? darpan.agent.pipeline.AuditChangePlanner.OPEN : (statusValue ? [statusValue] : null)"/>
             <entity-find entity-name="darpan.agent.AuditChangeProposal" list="rows" limit="100">
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
                 <econdition field-name="status" operator="in" from="statuses" ignore="statuses == null"/>
-                <econdition field-name="conversationId" operator="is-null" ignore="origin != 'PERSON'"/>
-                <econdition field-name="conversationId" operator="is-not-null" ignore="origin != 'AGENT'"/>
-                <order-by field-name="-proposalId"/>
+                <econdition field-name="conversationId" operator="is-null" ignore="originValue != 'PERSON'"/>
+                <econdition field-name="conversationId" operator="is-not-null" ignore="originValue != 'AGENT'"/>
+                <order-by field-name="-lastUpdatedStamp"/>
             </entity-find>
             <set field="proposals" from="rows.collect { darpan.agent.pipeline.AuditChangePlanner.view(it, false) }"/>
         </actions>

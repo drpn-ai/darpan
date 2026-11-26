@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 3.5.3.
+Generated from backend compare range: v3.5.2..HEAD
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/AuditSeedData.xml -->
+    <moqui.basic.EnumerationType enumTypeId="AuditSharedRead" description="Audit shared read status"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_DONE" enumTypeId="AuditSharedRead" enumCode="done" description="Read"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_FAILED" enumTypeId="AuditSharedRead" enumCode="failed" description="Failed"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_READING" enumTypeId="AuditSharedRead" enumCode="reading" description="Being read"/>
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_SHARED_READ" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.audit.AuditSharedRead" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+</entity-facade-xml>

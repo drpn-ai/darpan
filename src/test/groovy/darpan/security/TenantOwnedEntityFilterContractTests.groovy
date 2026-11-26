@@ -112,9 +112,7 @@ class TenantOwnedEntityFilterContractTests {
     // 3.4.0 shipped all 32 (DAR-BE-318 plan 2: 15 rules.* + 5 darpan.judge.*; plan 3a: 2 darpan.dataset.*;
     // DAR-BE-328 plans 1 and 3: 7 darpan.peak.* / darpan.pulse.*; DAR-BE-334: 3 jexl.script.*)
     // DAR-BE-320: the shared morning read (AuditSharedRead), filtered from the day the entity was added
-    static final Map<String, String> PENDING_NEXT_PACK = [
-            "DARPAN_SCOPE_AUD_SHARED_READ": "darpan.audit.AuditSharedRead",
-    ].asImmutable()
+    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

@@ -318,6 +318,45 @@ class SourceEndpointAccessSupportTests {
     }
 
     @Test
+    void storeServiceRefusesAViewOnlyMemberOfTheOwningTenant() {
+        // DAR-CLI-008: the owner gate let any member of the owning tenant switch a connection's endpoints, view-only
+        // ones included (store had no role check). A CLI key now reaches this service, so it must hold the role itself.
+        ec.entity.makeValue("moqui.security.UserGroup")
+                .setAll([userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, description: "View only",
+                         groupTypeEnumId: TenantAccessSupport.DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID]).createOrUpdate()
+        List<Map<String, Object>> before = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID)
+        setKrewePermissions([TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID])
+        Map<String, Object> result
+        try {
+            ec.message.clearErrors()
+            result = ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
+                    .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                                 configId            : CONFIG_ID,
+                                 enabledSystemEnumIds: ["OMS_GQL"]])
+                    .disableAuthz().call() as Map<String, Object>
+        } finally {
+            ec.message.clearErrors()
+            setKrewePermissions([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID])
+        }
+        assertFalse((result.ok as boolean), "a view-only member must not change a connection's endpoints")
+        assertEquals(["Your active tenant only has view access for connections."], result.errors)
+        assertEquals(before, SourceEndpointAccessSupport.listEndpointsForConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID), "a refused write leaves every row as it was")
+    }
+
+    /** The KREWE owner's permission groups on KREWE, exactly these. */
+    private void setKrewePermissions(List<String> permissionGroupIds) {
+        ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", KREWE)
+                .condition("userId", ec.user.userId).disableAuthz().deleteAll()
+        permissionGroupIds.each { String groupId ->
+            ec.entity.makeValue(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
+                    .setAll([tenantUserGroupId: KREWE, userId: ec.user.userId, permissionUserGroupId: groupId,
+                             fromDate: FOREIGN_TENANT_FROM_DATE]).create()
+        }
+    }
+
+    @Test
     void deletingAConfigRemovesItsAccessRows() {
         // Task 13: SourceConfigEndpointAccess.configId is polymorphic, so nothing cascades on
         // delete. companyUserGroupId is KREWE (not the file's TENANT constant) because the real

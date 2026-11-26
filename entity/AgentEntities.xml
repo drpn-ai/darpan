@@ -141,7 +141,7 @@
         <field name="evidenceJson" type="text-very-long"/>
         <field name="backtestJson" type="text-very-long"/>
         <field name="reasonText" type="text-intermediate"/>
-        <field name="provenanceStatus" type="text-short"><description>PASS or BLOCKED.</description></field>
+        <field name="provenanceStatus" type="text-short"><description>PASS or BLOCKED; CONFIRMED once a person-origin (DAR-CLI-008) proposal is applied with its unconfirmed values named back.</description></field>
         <field name="blockedIds" type="text-intermediate"/>
         <field name="planHash" type="text-medium"><description>Hex SHA-256 (64 characters) of the planned change and the config it was planned against.</description></field>
         <field name="status" type="text-short"><description>DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE or INVALID.</description></field>

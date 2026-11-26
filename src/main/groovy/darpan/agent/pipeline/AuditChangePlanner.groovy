@@ -46,6 +46,33 @@ class AuditChangePlanner {
         def conversation = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId",
                 conversationId, tenantId, WHY)
         if (conversation == null) { ec.message.addError("Conversation ${conversationId} was not found.".toString()); return null }
+        return createCore(ec, tenantId, conversationId, conversation.userId as String, kind, target, after, reasonText,
+                evidence == null ? null : JsonOutput.toJson(evidence), humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation))
+    }
+
+    /**
+     * DAR-CLI-008: a proposal a person makes through their own AI and the CLI, with no agent conversation. The person's own
+     * words (as they said them) and the finding they name stand in for the conversation's USER messages and opened finding,
+     * so provenance runs unchanged; a value neither vouches for is returned as unconfirmedIds and must be named back at apply.
+     */
+    static Map createForPerson(def ec, String kind, Map target, Map after, String reasonText, String personWords, String findingId, Object evidence) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        String words = personWords?.trim()
+        if (!words) { ec.message.addError("Say what the person said: their own words are what a proposal's values are checked against."); return null }
+        if (words.length() > INTERMEDIATE) { ec.message.addError("The person's words are longer than ${INTERMEDIATE} characters; quote the part that matters.".toString()); return null }
+        Map context = [:]
+        if (findingId) {
+            context = openContextForFinding(ec, tenantId, findingId)
+            if (!context) { ec.message.addError("Finding ${findingId} was not found.".toString()); return null }
+        }
+        String evidenceJson = JsonOutput.toJson([origin: "PERSON", personWords: words, findingId: findingId, evidence: evidence])
+        Map out = createCore(ec, tenantId, null, ec.user.userId as String, kind, target, after, reasonText, evidenceJson, [words], context)
+        if (out != null) out.unconfirmedIds = out.blockedIds ?: []
+        return out
+    }
+
+    private static Map createCore(def ec, String tenantId, String conversationId, String proposedFor, String kind, Map target, Map after,
+                                  String reasonText, String evidenceJson, List<String> humanTexts, Map openContext) {
         try {
             AgentProvenance.validateShape(kind, after)
             AuditChangeLevers.validateTarget(kind, target)
@@ -59,8 +86,7 @@ class AuditChangePlanner {
         def row = ec.entity.makeValue(ENTITY)
         row.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
                     conversationId: conversationId, kind: kind, targetJson: targetJson, afterJson: JsonOutput.toJson(after),
-                    evidenceJson: evidence == null ? null : JsonOutput.toJson(evidence), reasonText: reasonText, status: "DRAFT",
-                    proposedForUserId: conversation.userId])
+                    evidenceJson: evidenceJson, reasonText: reasonText, status: "DRAFT", proposedForUserId: proposedFor])
         row.create()
 
         Map current = AuditChangeLevers.current(ec, kind, target)
@@ -77,8 +103,7 @@ class AuditChangePlanner {
                 noPrimaryId = true
             }
         }
-        Map provenance = AgentProvenance.check(kind, after, humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation),
-                AuditChangeLevers.configValues(kind, current))
+        Map provenance = AgentProvenance.check(kind, after, humanTexts, openContext, AuditChangeLevers.configValues(kind, current))
         row.setAll([provenanceStatus: provenance.status, blockedIds: fittedList((List<String>) provenance.blockedIds)])
         // R27: only an editor's session runs the validating save. Since DAR-BE-292 only editors reach the agent
         // (send#AgentTurn refuses everyone else), so the DRAFT branch below is a guard for an in-JVM caller, not a path.
@@ -173,15 +198,29 @@ class AuditChangePlanner {
     // ---------------------------------------------------------------- apply
 
     /** A person applies a planned, provenance-PASS proposal whose plan still matches the config. Null (with an error) when refused. */
-    static Map apply(def ec, String proposalId, String expectedHash) {
+    static Map apply(def ec, String proposalId, String expectedHash, List<String> confirmedIds = null) {
         if (refusedInAgentLoop(ec)) return null
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot apply a change.")) return null
         def row = proposalFor(ec, proposalId)
         if (row == null) return null
         if (row.status != "PLANNED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only a planned proposal can be applied.".toString()); return null }
-        if (row.provenanceStatus != "PASS") {
-            Object blocked = row.blockedIds ? new JsonSlurper().parseText(row.blockedIds as String) : []
-            ec.message.addError("Proposal ${proposalId} is BLOCKED: ${blocked} did not come from you, the finding or the config. Confirm them in the conversation first.".toString())
+        boolean confirmed = false
+        if (row.provenanceStatus == "BLOCKED") {
+            List<String> blocked = row.blockedIds ? ((List) new JsonSlurper().parseText(row.blockedIds as String)).collect { it as String } : []
+            // DAR-CLI-008: a person-origin proposal (no conversation) applies once the person names back exactly the values
+            // provenance could not trace; an agent's proposal is still confirmed only in its conversation.
+            if (row.conversationId == null) {
+                if (confirmedIds == null || (confirmedIds.collect { it as String } as Set) != (blocked as Set)) {
+                    ec.message.addError("Proposal ${proposalId} has values that did not come from the person, the finding or the config: ${blocked}. Show them to the person, then name them with confirmedIds.".toString())
+                    return null
+                }
+                confirmed = true
+            } else {
+                ec.message.addError("Proposal ${proposalId} is BLOCKED: ${blocked} did not come from you, the finding or the config. Confirm them in the conversation first.".toString())
+                return null
+            }
+        } else if (row.provenanceStatus != "PASS" && row.provenanceStatus != "CONFIRMED") {
+            ec.message.addError("Proposal ${proposalId} has no provenance result; plan it again.".toString())
             return null
         }
         String kind = row.kind as String
@@ -219,6 +258,7 @@ class AuditChangePlanner {
         if (after == null || ec.message.hasError()) return null
         row.setAll([status: "APPLIED", statusMessage: null, approvedByUserId: approver, approvedDate: ec.user.nowTimestamp,
                     beforeVersionId: before.version?.id, appliedVersionId: after.version?.id])
+        if (confirmed) row.set("provenanceStatus", "CONFIRMED")
         row.update()
         if (row.revertOfProposalId) {
             def original = TenantScopedFinder.findOneOwnedByTenant(ec, ENTITY, "proposalId", row.revertOfProposalId, tenantId, WHY)
@@ -352,7 +392,11 @@ class AuditChangePlanner {
     /** The opened finding's structured fields only, never its records or record data. */
     static Map openContext(def ec, String tenantId, def conversation) {
         String findingId = conversation?.findingId as String
-        if (!findingId) return [:]
+        return findingId ? openContextForFinding(ec, tenantId, findingId) : [:]
+    }
+
+    /** One finding's structured fields only, never its records or record data. Empty when it is not the tenant's. */
+    static Map openContextForFinding(def ec, String tenantId, String findingId) {
         def f = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)
         if (f == null) return [:]
         def statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", f.statementId, tenantId, WHY)

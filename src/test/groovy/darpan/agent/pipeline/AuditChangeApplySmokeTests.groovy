@@ -325,6 +325,74 @@ class AuditChangeApplySmokeTests {
         assertEquals(0L, versionCount())
     }
 
+    // ------------------------------------------------------------------ DAR-CLI-008: person-origin proposals (the CLI)
+
+    @Test
+    void "a person's proposal traces its values to the person's own words"() {
+        Map p = personPropose(["M5550001"], "M5550001 is a test order; leave it out of R1")
+        assertEquals("PASS", p.provenanceStatus)
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals([], p.unconfirmedIds)
+        assertNotNull(p.backtest)
+        def row = proposal(p.proposalId)
+        assertNull(row.conversationId, "no agent conversation: the person proposed it")
+        assertEquals(USER, row.proposedForUserId)
+        assertTrue((row.evidenceJson as String).contains('"origin":"PERSON"'), row.evidenceJson as String)
+        assertTrue((row.evidenceJson as String).contains("M5550001 is a test order"), "the person's words are kept with the proposal")
+    }
+
+    @Test
+    void "a value the person never said is listed as unconfirmed"() {
+        Map p = personPropose(["M5550002"], "these are test orders, leave them out")
+        assertEquals("BLOCKED", p.provenanceStatus)
+        assertEquals(["M5550002"], p.unconfirmedIds)
+        assertEquals("PLANNED", p.status, "it is still planned, so the person can see it")
+    }
+
+    @Test
+    void "apply needs exactly the unconfirmed values named back"() {
+        List<Map> before = filterRows()
+        Map p = personPropose(["M5550002", "M5550003"], "these are test orders, leave them out")
+        String hash = proposal(p.proposalId).planHash as String
+        [null, ["M5550002"], ["M5550002", "M5550003", "M5550004"]].each { List<String> named ->
+            Map r = personApply(p.proposalId as String, hash, named)
+            assertTrue(r.hadError as boolean, "refused with ${named}")
+            assertTrue((r.errorText as String).contains("confirmedIds"), r.errorText as String)
+            assertEquals("PLANNED", proposal(p.proposalId).status)
+        }
+        assertEquals(before, filterRows())
+        assertEquals(0L, versionCount())
+        Map ok = personApply(p.proposalId as String, hash, ["M5550003", "M5550002"])
+        assertFalse(ok.hadError as boolean, ok.errorText as String)
+        assertEquals("APPLIED", ok.status)
+        assertEquals("CONFIRMED", proposal(p.proposalId).provenanceStatus)
+        assertEquals(2L, versionCount(), "applied like any proposal: a version before and after")
+    }
+
+    @Test
+    void "an agent's blocked proposal cannot be confirmed from outside its conversation"() {
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M7777777"]])
+        assertEquals("BLOCKED", p.provenanceStatus)
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        Map r = personApply(p.proposalId as String, plan.planHash as String, ["M7777777"])
+        assertTrue(r.hadError as boolean)
+        assertTrue((r.errorText as String).contains("Confirm them in the conversation first"), r.errorText as String)
+        assertEquals(0L, versionCount())
+    }
+
+    @Test
+    void "the finding the person names vouches for its own key"() {
+        asSystem {
+            upsert("darpan.audit.AuditFinding", [findingId: "F-TAC-PERSON", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
+                    checkId: "TAC_CHK", recordKey: "M5550009", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo M5550009 is open",
+                    firstFoundDate: java.sql.Date.valueOf("2026-10-08"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")])
+        }
+        Map p = AuditChangePlanner.createForPerson(ec, "EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"],
+                [fieldExpression: NEW_FIELD, filterValues: ["M5550009"]], "test", "leave this one out", "F-TAC-PERSON", [:])
+        ec.message.clearAll()
+        assertEquals("PASS", p.provenanceStatus)
+    }
+
     @Test
     void "exclusion apply refuses automation drift"() {
         asSystem {
@@ -1069,6 +1137,21 @@ class AuditChangeApplySmokeTests {
     private Map propose(String kind, Map target, Map after) {
         return call("create#AuditChangeProposal", [conversationId: CONV, kind: kind, target: target, after: after,
                 reasonText: "test", evidence: [findings: []]])
+    }
+
+    private Map personPropose(List<String> values, String words) {
+        Map p = AuditChangePlanner.createForPerson(ec, "EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"],
+                [fieldExpression: NEW_FIELD, filterValues: values], "test", words, null, [findings: []])
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        ec.message.clearAll()
+        return p
+    }
+
+    private Map personApply(String proposalId, String hash, List<String> confirmedIds) {
+        Map out = AuditChangePlanner.apply(ec, proposalId, hash, confirmedIds) ?: [:]
+        Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]
+        ec.message.clearAll()
+        return result
     }
 
     private Map call(String verbNoun, Map params = [:]) {

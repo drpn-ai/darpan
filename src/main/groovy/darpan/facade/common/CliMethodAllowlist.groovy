@@ -231,6 +231,14 @@ class CliMethodAllowlist {
             "facade.AgentChangeFacadeServices.list#AuditChangeProposals",
             "facade.AgentChangeFacadeServices.propose#AuditChange",
             "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
+            // DAR-CLI-008 part 3: the follow-the-order lookup (read-only fresh queries on the tenant's own connections) and the
+            // tenant's own lookup reads and links (editor or admin; a template must be read-only).
+            "facade.LookupFacadeServices.delete#TenantLookupLink",
+            "facade.LookupFacadeServices.delete#TenantLookupRead",
+            "facade.LookupFacadeServices.get#LookupCatalog",
+            "facade.LookupFacadeServices.lookup#Order",
+            "facade.LookupFacadeServices.save#TenantLookupLink",
+            "facade.LookupFacadeServices.save#TenantLookupRead",
     ] as LinkedHashSet<String>).asImmutable()
 
     static final Set<String> EXCLUDED = ([

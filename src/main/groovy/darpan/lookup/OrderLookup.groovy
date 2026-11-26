@@ -1,5 +1,10 @@
 package darpan.lookup
 
+import darpan.agent.AgentQuerySupport
+import darpan.config.DarpanSettings
+import darpan.facade.common.SharedConfigAccessSupport
+import darpan.facade.common.TenantAccessSupport
+
 import java.util.regex.Pattern
 
 /**
@@ -13,6 +18,19 @@ import java.util.regex.Pattern
 class OrderLookup {
 
     static final String DEFAULT_SHAPE = "[A-Za-z0-9#_\\-.]{1,64}"
+    static final int DEFAULT_MAX_READS = 30
+    static final int DEFAULT_TIMEOUT_SECONDS = 60
+
+    /** Each system: its connection config type and fresh-query service (in its own repo; absent = not installed). */
+    static final Map<String, Map<String, String>> SYSTEMS = [
+            NETSUITE: [configType: SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, service: "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery", idParam: "nsAuthConfigId"],
+            OMS     : [configType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, service: "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery", idParam: "omsRestSourceConfigId"],
+            SHOPIFY : [configType: SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, service: "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery", idParam: "shopifyAuthConfigId"],
+    ].asImmutable()
+
+    /** Test seam: (service name, parameters) -> the service's out map, in place of calling it. */
+    static Closure liveQueryHook = null
+    static void resetForTests() { liveQueryHook = null }
 
     /**
      * deps: reads (List<Map>), links (List<Map>), connections (Closure<List<Map>> by systemCode, each [id, label]),
@@ -55,6 +73,9 @@ class OrderLookup {
                 ((List<Map>) (answer.records ?: [])).each { Map record ->
                     records << [system: r.systemCode, connectionId: c.id, connectionLabel: c.label, recordKind: r.recordKind,
                                 readId: r.readId, foundBy: task.foundBy, record: project(record, fieldsOf(r), all)]
+                    // The record's own ids (its key field and every field a link reads) match findings too, followed or not.
+                    if (r.keyField) idsSeen.addAll(valuesAt(record, r.keyField as String))
+                    (linksFrom.get(r.readId as String) ?: []).each { Map l -> idsSeen.addAll(valuesAt(record, l.fromField as String)) }
                     (linksFrom.get(r.readId as String) ?: []).each { Map l ->
                         Map to = readById.get(l.toReadId as String)
                         if (to == null) return
@@ -69,6 +90,104 @@ class OrderLookup {
         }
         List<Map> findings = idsSeen ? (List<Map>) (((Closure) deps.findings)?.call(idsSeen) ?: []) : []
         return [value: given, records: records, findings: findings, skipped: skipped, readsUsed: readsUsed, capped: capped]
+    }
+
+    // ---------------------------------------------------------------- live
+
+    /** The lookup for the active tenant, wired to its catalog, connections, fresh-query services and open findings. */
+    static Map runLive(def ec, String value, boolean all) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!tenantId) { ec.message.addError("No active tenant."); return null }
+        if (!value?.trim()) { ec.message.addError("Give the id to look up."); return null }
+        int maxReads = setting("darpan.lookup.maxReads", DEFAULT_MAX_READS)
+        int timeoutSeconds = setting("darpan.lookup.timeoutSeconds", DEFAULT_TIMEOUT_SECONDS)
+        long start = System.currentTimeMillis()
+        Map deps = [reads      : LookupCatalog.reads(ec, tenantId), links: LookupCatalog.links(ec, tenantId),
+                    connections: { String system -> connectionsOf(ec, system) },
+                    query      : { Map read, Map connection, String v -> liveQuery(ec, read, connection, v) },
+                    findings   : { Collection<String> ids -> openFindings(ec, tenantId, ids) },
+                    maxReads   : maxReads, deadlineMillis: start + timeoutSeconds * 1000L, now: { System.currentTimeMillis() }]
+        return run(deps, value, all)
+    }
+
+    private static int setting(String key, int fallback) {
+        try { return DarpanSettings.intValue(key) } catch (Exception ignored) { return fallback }
+    }
+
+    /** The tenant's active connections of one system, [id, label]. */
+    static List<Map> connectionsOf(def ec, String system) {
+        Map<String, String> sys = SYSTEMS.get(system)
+        if (sys == null) return []
+        Map<String, String> type = SharedConfigAccessSupport.configType(sys.configType)
+        if (type == null) return []
+        return SharedConfigAccessSupport.listAccessibleConfigRows(ec, sys.configType)
+                .findAll { row -> "N" != row.get("isActive")?.toString()?.toUpperCase() }
+                .collect { row -> [id: row.get(type.pkField) as String, label: (row.get("description") ?: row.get(type.pkField)) as String] }
+    }
+
+    /** One read on one connection through the system's read-only fresh-query service: [records] or [error]. */
+    static Map liveQuery(def ec, Map read, Map connection, String value) {
+        Map<String, String> sys = SYSTEMS.get(read.systemCode as String)
+        if (sys == null) return [error: "unknown system ${read.systemCode}".toString()]
+        String passed = read.valueFormat ? String.format(read.valueFormat as String, value) : value
+        Map params = [(sys.idParam): connection.id]
+        if (read.systemCode == "NETSUITE") {
+            try { params.sql = renderSuiteQl(read.queryTemplate as String, passed, read.valueShape as String) }
+            catch (IllegalArgumentException e) { return [error: e.message] }
+            params.limit = 50
+        } else {
+            params.document = read.queryTemplate
+            params.variables = [value: passed]
+        }
+        Map out
+        if (liveQueryHook != null) {
+            out = (Map) liveQueryHook.call(sys.service, params)
+        } else {
+            if (!ec.service.isServiceDefined(sys.service)) return [error: "not installed"]
+            out = (Map) ec.service.sync().name(sys.service).parameters(params).call() ?: [:]
+        }
+        List errors = ((List) (out.errors ?: [])) + (ec.message.hasError() ? ec.message.errors : [])
+        ec.message.clearErrors()   // one read's refusal must not stop the next (Moqui runs no service while errors stand)
+        if (out.ok == false || errors) {
+            String why = out.code ? "${out.code}${errors ? ': ' + errors[0] : ''}" : (errors ? errors[0].toString() : "the read failed")
+            return [error: why.toString()]
+        }
+        List<Map> records = read.systemCode == "NETSUITE" ? (List<Map>) (out.rows ?: []) : recordsAt(out.data, read.recordsAt as String)
+        return [records: records]
+    }
+
+    /** The maps at a GraphQL path such as orders.edges[*].node ([*] walks a list). */
+    static List<Map> recordsAt(Object data, String path) {
+        List<Object> current = [data]
+        for (String token : (path ?: "").tokenize(".")) {
+            boolean each = token.endsWith("[*]")
+            String key = each ? token.substring(0, token.length() - 3) : token
+            List<Object> next = []
+            current.each { Object n ->
+                Object v = n instanceof Map ? ((Map) n).get(key) : null
+                if (v == null) return
+                if (each && v instanceof Collection) next.addAll((Collection) v) else next << v
+            }
+            current = next
+        }
+        return current.collectMany { it instanceof Collection ? (Collection) it : [it] }.findAll { it instanceof Map } as List<Map>
+    }
+
+    /** The tenant's open findings whose record key is any id seen, at most 50. */
+    static List<Map> openFindings(def ec, String tenantId, Collection<String> ids) {
+        if (!ids) return []
+        return ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
+                .condition("recordKey", "in", new ArrayList<String>(ids)).condition("stateEnumId", "AUDFS_OPEN")
+                .orderBy("-lastSeenDate").limit(50).useCache(false).list()
+                .collect { [findingId: it.findingId, recordKey: it.recordKey, headline: it.headline, period: it.period] }
+    }
+
+    /** A tenant template must be read-only for its system: null when it is, else why not. */
+    static String templateRefusal(String systemCode, String template) {
+        if (!template?.trim()) return "The read needs a query template."
+        if (systemCode == "NETSUITE") return AgentQuerySupport.checkSuiteQl(template.replace("{value}", "'1'"))
+        if (systemCode in ["OMS", "SHOPIFY"]) return AgentQuerySupport.checkGraphqlQuery(template)
+        return "Unknown system ${systemCode}; NETSUITE, OMS or SHOPIFY.".toString()
     }
 
     /** SuiteQL with {value} replaced by the value, quoted, once it fits the read's shape. Throws IllegalArgumentException. */

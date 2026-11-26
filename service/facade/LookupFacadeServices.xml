@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- DAR-CLI-008 part 3: the follow-the-order lookup and the tenant's own lookup reads and links. -->
+
+    <service verb="lookup" noun="Order" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Finds an order id (a Shopify id or name, a HotWax order or external id, a NetSuite number or id, or any id a
+            tenant read takes) in every connected system and follows the order through Shopify, HotWax and NetSuite, with its
+            open findings. Every read is a read-only fresh query on the tenant's own connection. Order facts by default;
+            customer name, email, phone and address only with all.</description>
+        <in-parameters>
+            <parameter name="value" required="true"><description>The id as the person gave it.</description></parameter>
+            <parameter name="all" type="Boolean" default-value="false"><description>Every field each read selects, customer details included.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="lookup" type="Map"><description>{value, records: [{system, connectionId, connectionLabel, recordKind, readId, foundBy, record}], findings, skipped, readsUsed, capped}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="lookup" from="darpan.lookup.OrderLookup.runLive(ec, value, all as boolean)"/>
+            <if condition="lookup == null"><return error="true"/></if>
+        </actions>
+    </service>
+
+    <service verb="get" noun="LookupCatalog" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The reads (without their templates) and links the active tenant's lookups use, its own rows merged in.</description>
+        <out-parameters>
+            <parameter name="reads" type="List"/>
+            <parameter name="links" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="reads" from="darpan.lookup.LookupCatalog.reads(ec, tenantId).collect { it.findAll { k, v -> k != 'queryTemplate' } }"/>
+            <set field="links" from="darpan.lookup.LookupCatalog.links(ec, tenantId)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantLookupRead" allow-remote="true" authenticate="true">
+        <description>Adds a tenant read, or overrides a product read with the same readId (blank fields keep the product's).
+            A template must be read-only for its system (SuiteQL SELECT with {value}; a GraphQL query taking $value).</description>
+        <in-parameters>
+            <parameter name="readId" required="true"/>
+            <parameter name="systemCode"/>
+            <parameter name="recordKind"/>
+            <parameter name="keyField"/>
+            <parameter name="queryTemplate" allow-html="any"/>
+            <parameter name="valueShape"/>
+            <parameter name="valueFormat"/>
+            <parameter name="recordsAt"/>
+            <parameter name="fieldsDefault"/>
+            <parameter name="isFind"/>
+            <parameter name="isActive"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for lookups.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="queryTemplate">
+                <set field="systemForCheck" from="systemCode ?: darpan.lookup.LookupCatalog.reads(ec, tenantId).find { it.readId == readId }?.systemCode"/>
+                <set field="refusal" from="darpan.lookup.OrderLookup.templateRefusal(systemForCheck as String, queryTemplate)"/>
+                <if condition="refusal"><return error="true" message="${refusal}"/></if>
+            </if>
+            <service-call name="store#darpan.lookup.TenantLookupRead" disable-authz="true"
+                    in-map="[companyUserGroupId: tenantId, readId: readId, systemCode: systemCode, recordKind: recordKind, keyField: keyField,
+                             queryTemplate: queryTemplate, valueShape: valueShape, valueFormat: valueFormat, recordsAt: recordsAt,
+                             fieldsDefault: fieldsDefault, isFind: isFind, isActive: isActive, sequenceNum: sequenceNum,
+                             description: description, lastChangedByUserId: ec.user.userId]"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="TenantLookupRead" allow-remote="true" authenticate="true">
+        <description>Removes the tenant's own read or its override (the product read, if any, applies again).</description>
+        <in-parameters><parameter name="readId" required="true"/></in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for lookups.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-delete-by-condition entity-name="darpan.lookup.TenantLookupRead">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="readId"/>
+            </entity-delete-by-condition>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantLookupLink" allow-remote="true" authenticate="true">
+        <description>Adds a tenant link (a join key), or overrides a product link with the same linkId.</description>
+        <in-parameters>
+            <parameter name="linkId" required="true"/>
+            <parameter name="fromReadId"/>
+            <parameter name="fromField"/>
+            <parameter name="toReadId"/>
+            <parameter name="isActive"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for lookups.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <service-call name="store#darpan.lookup.TenantLookupLink" disable-authz="true"
+                    in-map="[companyUserGroupId: tenantId, linkId: linkId, fromReadId: fromReadId, fromField: fromField, toReadId: toReadId,
+                             isActive: isActive, description: description, lastChangedByUserId: ec.user.userId]"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="TenantLookupLink" allow-remote="true" authenticate="true">
+        <description>Removes the tenant's own link or its override.</description>
+        <in-parameters><parameter name="linkId" required="true"/></in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for lookups.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-delete-by-condition entity-name="darpan.lookup.TenantLookupLink">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="linkId"/>
+            </entity-delete-by-condition>
+        </actions>
+    </service>
+</services>

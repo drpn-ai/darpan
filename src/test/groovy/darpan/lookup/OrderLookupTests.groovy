@@ -73,6 +73,15 @@ class OrderLookupTests {
     }
 
     @Test
+    void "findings match ids a record carries in its linked fields, even when no read follows them"() {
+        List<Map> reads = [read("OMS_ONLY", "OMS", "ORDER", [isFind: "Y", keyField: "externalId"])]
+        List<Map> links = [link("LX", "OMS_ONLY", "orderId", "NOT_INSTALLED_READ")]
+        Map d = deps(["OMS_ONLY|OMS1|5550001": [[orderId: "OMS100", externalId: "5550001"]]], [reads: reads, links: links])
+        Map out = OrderLookup.run(d, "5550001", false)
+        assertEquals([[findingId: "F-1", recordKey: "OMS100"]], out.findings)
+    }
+
+    @Test
     void "every store of a system is searched and each record names its store"() {
         Map d = deps(["SHOP_BY_ID|S1|5550001": [[id: "5550001"]], "SHOP_BY_ID|S2|5550001": [[id: "5550001", name: "#EU1"]]],
                 [connections: { String s -> s == "SHOPIFY" ? [[id: "S1", label: "US store"], [id: "S2", label: "EU store"]] : [] }])

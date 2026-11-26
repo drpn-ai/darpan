@@ -190,6 +190,12 @@ facade.JsonSchemaFacadeServices.list#JsonSchemas
 facade.JsonSchemaFacadeServices.save#JsonSchemaText
 facade.JsonSchemaFacadeServices.save#RefinedSchema
 facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
+facade.LookupFacadeServices.delete#TenantLookupLink
+facade.LookupFacadeServices.delete#TenantLookupRead
+facade.LookupFacadeServices.get#LookupCatalog
+facade.LookupFacadeServices.lookup#Order
+facade.LookupFacadeServices.save#TenantLookupLink
+facade.LookupFacadeServices.save#TenantLookupRead
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions
 facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions

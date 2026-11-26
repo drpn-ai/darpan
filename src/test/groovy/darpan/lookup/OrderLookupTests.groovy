@@ -212,6 +212,28 @@ class OrderLookupTests {
     }
 
     @Test
+    void "a read whose shape fails once is not tried again in the same lookup, and no shape runs past the deadline"() {
+        int[] tries = [0]
+        List<Map> reads = READS.collect { it.readId == "OMS_ITEMS" ? it + [valueShape: "(.*O){12}"] : it }
+        // count shape attempts on the evil read through the seam
+        Map d = deps(CHAIN, [reads: reads, shapeCheck: { Map r, String v -> if (r.readId == "OMS_ITEMS") { tries[0]++; throw new IllegalArgumentException("took too long") }; OrderLookup.shapeFits(r, v) }])
+        Map out = OrderLookup.run(d, "5550001", false)
+        assertEquals(1, tries[0], "marked broken after its first failure")
+        assertEquals(1, (out.skipped as List<Map>).count { it.readId == "OMS_ITEMS" })
+        long[] clock = [5000L]
+        int[] checks = [0]
+        Map late = deps(CHAIN, [deadlineMillis: 1000L, now: { clock[0] }, shapeCheck: { Map r, String v -> checks[0]++; OrderLookup.shapeFits(r, v) }])
+        OrderLookup.run(late, "5550001", false)
+        assertEquals(0, checks[0], "past the deadline no shape is run")
+    }
+
+    @Test
+    void "a nested-quantifier shape is refused when it is saved"() {
+        ["(a+)+", "(.*a){12}", "(a|a?)+", "([0-9]*)*", "(x+y?)*z"].each { assertNotNull(OrderLookup.shapeRefusal(it), it) }
+        ["[0-9]{6,20}", "#[A-Za-z0-9_\\-]{1,40}", "SO[0-9]{3,12}", "[A-Za-z]{0,4}[0-9]{1,12}", "(SO|IF)[0-9]{5}"].each { assertNull(OrderLookup.shapeRefusal(it), it) }
+    }
+
+    @Test
     void "SuiteQL gets the value only after its shape check, quoted"() {
         assertEquals("SELECT id FROM transaction WHERE tranid = '#GOR123'",
                 OrderLookup.renderSuiteQl("SELECT id FROM transaction WHERE tranid = {value}", "#GOR123", null))

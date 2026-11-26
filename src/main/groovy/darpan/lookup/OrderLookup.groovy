@@ -56,9 +56,14 @@ class OrderLookup {
         List<Map> records = [], skipped = []
         Set<String> skippedOnce = new HashSet<>()
         Closure skipOnce = { Map r, String reason -> if (skippedOnce.add("${r.readId}|${reason}".toString())) skipped << [readId: r.readId, connectionId: null, reason: reason] }
-        // A broken row (a bad shape regex) is skipped, never failing the lookup.
+        // A broken row (a bad or too-slow shape regex) is skipped for the rest of the lookup, never failing it; no shape
+        // check starts once the lookup's time is up.
+        Closure shapeCheck = (Closure) (deps.shapeCheck ?: { Map r, String v -> shapeFits(r, v) })
+        Set<String> brokenReads = new HashSet<>()
         Closure<Boolean> fits = { Map r, String v ->
-            try { return shapeFits(r, v) } catch (IllegalArgumentException e) { skipOnce(r, "broken read: ${e.message}".toString()); return false }
+            if (brokenReads.contains(r.readId as String) || now.call() >= deadline) return false
+            try { return shapeCheck.call(r, v) as boolean }
+            catch (IllegalArgumentException e) { brokenReads.add(r.readId as String); skipOnce(r, "broken read: ${e.message}".toString()); return false }
         }
 
         List<Map> queue = []
@@ -224,6 +229,33 @@ class OrderLookup {
                 .collect { [findingId: it.findingId, recordKey: it.recordKey, headline: it.headline, period: it.period] }
     }
 
+    /** A tenant value shape must be a short, valid pattern without a quantified group that itself repeats (the shapes that
+     *  backtrack without end, such as (a+)+ or (.*a){12}): null when it is fine, else why not. */
+    static String shapeRefusal(String shape) {
+        if (!shape) return null
+        if (shape.length() > 200) return "The value shape is longer than 200 characters."
+        try { Pattern.compile(shape) } catch (java.util.regex.PatternSyntaxException e) { return "The value shape is not a valid pattern." }
+        List<Boolean> groupHasQuantifier = []
+        boolean inClass = false
+        for (int i = 0; i < shape.length(); i++) {
+            char ch = shape.charAt(i)
+            if (ch == '\\' as char) { i++; continue }
+            if (inClass) { if (ch == ']' as char) inClass = false; continue }
+            if (ch == '[' as char) { inClass = true; continue }
+            if (ch == '(' as char) { groupHasQuantifier << false; continue }
+            boolean quantifier = ch in ['*' as char, '+' as char, '?' as char, '{' as char]
+            if (ch == ')' as char) {
+                boolean inner = groupHasQuantifier ? groupHasQuantifier.remove(groupHasQuantifier.size() - 1) : false
+                char next = i + 1 < shape.length() ? shape.charAt(i + 1) : (char) 0
+                if (inner && next in ['*' as char, '+' as char, '?' as char, '{' as char]) return "The value shape repeats a group that repeats; write it without nesting, e.g. [0-9]{6,20}."
+                if (inner && groupHasQuantifier) groupHasQuantifier[-1] = true
+                continue
+            }
+            if (quantifier && groupHasQuantifier) groupHasQuantifier[-1] = true
+        }
+        return null
+    }
+
     /** A tenant read row, merged over the product row with the same id, must be usable: null when it is, else why not. */
     static String tenantReadRefusal(def ec, String tenantId, Map p) {
         Map product = (Map) LookupCatalog.reads(ec, null).find { it.readId == p.readId } ?: [:]
@@ -233,10 +265,8 @@ class OrderLookup {
         for (String f : ["systemCode", "recordKind", "keyField", "queryTemplate"]) if (!merged.get(f)) return "A read needs ${f}.".toString()
         if (!(merged.systemCode in SYSTEMS.keySet())) return "Unknown system ${merged.systemCode}; NETSUITE, OMS or SHOPIFY.".toString()
         if (merged.systemCode != "NETSUITE" && !merged.recordsAt) return "A GraphQL read needs recordsAt, e.g. orders.edges[*].node."
-        if (merged.valueShape) {
-            if ((merged.valueShape as String).length() > 200) return "The value shape is longer than 200 characters."
-            try { Pattern.compile(merged.valueShape as String) } catch (java.util.regex.PatternSyntaxException e) { return "The value shape is not a valid pattern.".toString() }
-        }
+        String shapeWhy = shapeRefusal(merged.valueShape as String)
+        if (shapeWhy) return shapeWhy
         return templateRefusal(merged.systemCode as String, merged.queryTemplate as String) ?: formatRefusal(merged.valueFormat as String)
     }
 

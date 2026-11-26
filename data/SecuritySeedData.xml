@@ -477,6 +477,15 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.auth.CliAccessRequest"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-CLI-008 part 3 — a tenant's own lookup reads and links. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_LOOKUP_READ"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.lookup.TenantLookupRead"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_LOOKUP_LINK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.lookup.TenantLookupLink"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.agent.AuditChangeProposal"

@@ -111,7 +111,11 @@ class TenantOwnedEntityFilterContractTests {
     // DAR-BE-318 plan 2: every moqui-rules row and judge config row belongs to one tenant (15 rules.* + 5 darpan.judge.*)
     // 3.4.0 shipped all 32 (DAR-BE-318 plan 2: 15 rules.* + 5 darpan.judge.*; plan 3a: 2 darpan.dataset.*;
     // DAR-BE-328 plans 1 and 3: 7 darpan.peak.* / darpan.pulse.*; DAR-BE-334: 3 jexl.script.*)
-    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
+    static final Map<String, String> PENDING_NEXT_PACK = [
+            // DAR-CLI-008 part 3: the lookup's tenant reads and links; the next release's upgrade pack carries them.
+            "DARPAN_SCOPE_TENANT_LOOKUP_READ": "darpan.lookup.TenantLookupRead",
+            "DARPAN_SCOPE_TENANT_LOOKUP_LINK": "darpan.lookup.TenantLookupLink",
+    ].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

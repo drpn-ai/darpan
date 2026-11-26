@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-CLI-008 part 3: the follow-the-order lookup's reads and links, as data. Product rows ship in each system repo's
+         seed data; a tenant adds, overrides (same id) or hides (isActive N) them in the Tenant* entities, editable in production
+         without a deploy. Every read runs through the system's read-only fresh-query service (run#*AgentQuery). -->
+    <entity entity-name="LookupRead" package="darpan.lookup" use="configuration" cache="never">
+        <description>One read of one record kind in one system by one key: a SuiteQL or GraphQL template.</description>
+        <field name="readId" type="id" is-pk="true"/>
+        <field name="systemCode" type="text-short" not-null="true"><description>NETSUITE, OMS or SHOPIFY.</description></field>
+        <field name="recordKind" type="text-short" not-null="true"><description>ORDER, ORDER_ITEM, PAYMENT, SHIPMENT, FULFILLMENT, INVOICE, RETURN, RETURN_AUTHORIZATION or CREDIT_MEMO.</description></field>
+        <field name="keyField" type="text-short" not-null="true"><description>What the value is matched against, as the system names it.</description></field>
+        <field name="queryTemplate" type="text-very-long" not-null="true"><description>SuiteQL with {value} (quoted, shape-checked), or a GraphQL document taking $value.</description></field>
+        <field name="valueShape" type="text-medium"><description>A regex the whole value must match; blank = [A-Za-z0-9#_\-.]{1,64}.</description></field>
+        <field name="valueFormat" type="text-medium"><description>How the value is passed, e.g. gid://shopify/Order/%s; blank = as given.</description></field>
+        <field name="recordsAt" type="text-medium"><description>GraphQL: where the records sit in data, e.g. orders.edges[*].node; blank for SuiteQL rows.</description></field>
+        <field name="fieldsDefault" type="text-long"><description>Comma-separated fields returned by default (no customer name, email, phone or address); every field with all.</description></field>
+        <field name="isFind" type="text-indicator"><description>Y: tried for a raw value the person gives.</description></field>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="description" type="text-medium"/>
+    </entity>
+    <entity entity-name="TenantLookupRead" package="darpan.lookup" use="configuration" cache="never">
+        <description>A tenant's own read, or its override of a product read with the same readId (isActive N hides it).</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="readId" type="id" is-pk="true"/>
+        <field name="systemCode" type="text-short"/>
+        <field name="recordKind" type="text-short"/>
+        <field name="keyField" type="text-short"/>
+        <field name="queryTemplate" type="text-very-long"/>
+        <field name="valueShape" type="text-medium"/>
+        <field name="valueFormat" type="text-medium"/>
+        <field name="recordsAt" type="text-medium"/>
+        <field name="fieldsDefault" type="text-long"/>
+        <field name="isFind" type="text-indicator"/>
+        <field name="isActive" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="description" type="text-medium"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <relationship type="one" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
+    </entity>
+    <entity entity-name="LookupLink" package="darpan.lookup" use="configuration" cache="never">
+        <description>A found record's field value feeds another read: how one system's record leads to the next.</description>
+        <field name="linkId" type="id" is-pk="true"/>
+        <field name="fromReadId" type="id" not-null="true"/>
+        <field name="fromField" type="text-medium" not-null="true"><description>A field of the found record; a dotted path for nested values.</description></field>
+        <field name="toReadId" type="id" not-null="true"/>
+        <field name="description" type="text-medium"/>
+    </entity>
+    <entity entity-name="TenantLookupLink" package="darpan.lookup" use="configuration" cache="never">
+        <description>A tenant's join key, or its override of a product link with the same linkId (isActive N hides it).</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="linkId" type="id" is-pk="true"/>
+        <field name="fromReadId" type="id"/>
+        <field name="fromField" type="text-medium"/>
+        <field name="toReadId" type="id"/>
+        <field name="isActive" type="text-indicator"/>
+        <field name="description" type="text-medium"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <relationship type="one" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
+    </entity>
+</entities>

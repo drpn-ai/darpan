@@ -29,18 +29,14 @@ class AcknowledgementNoteMigration {
     /**
      * Makes one column nullable: [changed, statement, message]. Reads the column through JDBC metadata; a nullable column,
      * or a dry run, writes nothing. The statement is the database's own: MySQL/MariaDB MODIFY with the column's own type,
-     * H2 ALTER COLUMN ... SET NULL, PostgreSQL DROP NOT NULL. Any other database is refused in words.
+     * H2 ALTER COLUMN ... SET NULL, PostgreSQL DROP NOT NULL (statementFor). Any other database is refused in words.
      */
     static Map allowNull(Connection conn, String table, String column, boolean dryRun) {
         DatabaseMetaData md = conn.metaData
         Map col = columnInfo(md, table, column)
         if (col == null) return [changed: false, message: "Column ${table}.${column} was not found.".toString(), error: true]
         if (col.nullable) return [changed: false, message: "${table}.${column} already allows no value; nothing to do.".toString()]
-        String product = (md.databaseProductName ?: "").toLowerCase()
-        String sql = product.contains("mysql") || product.contains("mariadb") ?
-                "ALTER TABLE ${table} MODIFY ${column} ${col.typeName} NULL" :
-                product.contains("h2") ? "ALTER TABLE ${table} ALTER COLUMN ${column} SET NULL" :
-                product.contains("postgres") ? "ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL" : null
+        String sql = statementFor(md.databaseProductName as String, table, column, col.typeName as String, col.size as Integer)
         if (sql == null) {
             return [changed: false, error: true, message: "${md.databaseProductName} is not a database this migration knows; make ${table}.${column} nullable by hand.".toString()]
         }
@@ -50,12 +46,30 @@ class AcknowledgementNoteMigration {
         return [changed: true, statement: sql, message: "Ran: ${sql}".toString()]
     }
 
-    /** {nullable, typeName} of one column, matched as stored, upper or lower case (MySQL keeps the case it was made in). */
+    /**
+     * The statement that makes the column nullable on this database, or null for one this migration does not know. MySQL's
+     * MODIFY restates the whole type, so a sized type keeps its size: prod 3.4.16's dry run read the column as VARCHAR
+     * and "MODIFY NOTE VARCHAR NULL" is invalid; it is VARCHAR(n).
+     */
+    static String statementFor(String product, String table, String column, String typeName, Integer size) {
+        String db = (product ?: "").toLowerCase()
+        if (db.contains("mysql") || db.contains("mariadb")) {
+            String type = typeName?.toUpperCase()
+            boolean sized = type in ["VARCHAR", "CHAR", "VARBINARY", "BINARY"] && size
+            return "ALTER TABLE ${table} MODIFY ${column} ${type}${sized ? "(${size})" : ""} NULL".toString()
+        }
+        if (db.contains("h2")) return "ALTER TABLE ${table} ALTER COLUMN ${column} SET NULL".toString()
+        if (db.contains("postgres")) return "ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL".toString()
+        return null
+    }
+
+    /** {nullable, typeName, size} of one column, matched as stored, upper or lower case (MySQL keeps the case it was made in). */
     private static Map columnInfo(DatabaseMetaData md, String table, String column) {
         for (List<String> names in [[table, column], [table.toUpperCase(), column.toUpperCase()], [table.toLowerCase(), column.toLowerCase()]]) {
             ResultSet rs = md.getColumns(null, null, names[0], names[1])
             try {
-                if (rs.next()) return [nullable: rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable, typeName: rs.getString("TYPE_NAME")]
+                if (rs.next()) return [nullable: rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable, typeName: rs.getString("TYPE_NAME"),
+                                       size: rs.getInt("COLUMN_SIZE")]
             } finally { rs.close() }
         }
         return null

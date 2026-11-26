@@ -40,6 +40,17 @@ class AcknowledgementNoteMigrationTests {
         }
     }
 
+    /** Prod 3.4.16's dry run read MySQL's column as VARCHAR and wrote "MODIFY NOTE VARCHAR NULL", which MySQL refuses. */
+    @Test
+    void mySqlRestatesTheColumnsWholeType() {
+        assertEquals("ALTER TABLE AUDIT_FINDING_ACKNOWLEDGEMENT MODIFY NOTE VARCHAR(4095) NULL",
+                AcknowledgementNoteMigration.statementFor("MySQL", "AUDIT_FINDING_ACKNOWLEDGEMENT", "NOTE", "VARCHAR", 4095))
+        assertEquals("ALTER TABLE T MODIFY NOTE LONGTEXT NULL", AcknowledgementNoteMigration.statementFor("MySQL", "T", "NOTE", "LONGTEXT", 2147483647))
+        assertEquals("ALTER TABLE T MODIFY NOTE VARCHAR(255) NULL", AcknowledgementNoteMigration.statementFor("MariaDB", "T", "NOTE", "varchar", 255))
+        assertEquals("ALTER TABLE T ALTER COLUMN NOTE DROP NOT NULL", AcknowledgementNoteMigration.statementFor("PostgreSQL", "T", "NOTE", "text", 0))
+        assertEquals(null, AcknowledgementNoteMigration.statementFor("Oracle", "T", "NOTE", "CLOB", 0))
+    }
+
     private static boolean insertsNull(Connection conn) {
         try {
             conn.createStatement().execute("INSERT INTO AUDIT_FINDING_ACKNOWLEDGEMENT VALUES ('F-null', NULL)")

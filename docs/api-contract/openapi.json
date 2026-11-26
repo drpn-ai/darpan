@@ -11868,7 +11868,7 @@
                 "required": [
                     "proposalId"
                 ],
-                "description": "DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it: before and after,\n            the backtest against the last run, unconfirmed values, and the planHash apply#AuditChange needs."
+                "description": "DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it (editors and admins,\n            who are the only roles that reach proposals in the app): before and after,\n            the backtest against the last run, unconfirmed values, and the planHash apply#AuditChange needs."
             },
             "GetAuditChangeProposalResult": {
                 "type": "object",
@@ -11950,7 +11950,7 @@
                         "description": "PERSON (made through the CLI) or AGENT (the in-app agent)."
                     }
                 },
-                "description": "DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after."
+                "description": "DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after.\n            Editors and admins only, as in the app."
             },
             "ListAuditChangeProposalsResult": {
                 "type": "object",

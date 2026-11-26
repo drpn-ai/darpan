@@ -77,11 +77,13 @@
     </service>
 
     <service verb="get" noun="AuditChangeProposal" allow-remote="true" authenticate="true" authz-action="view">
-        <description>DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it: before and after,
+        <description>DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it (editors and admins,
+            who are the only roles that reach proposals in the app): before and after,
             the backtest against the last run, unconfirmed values, and the planHash apply#AuditChange needs.</description>
         <in-parameters><parameter name="proposalId" required="true"/></in-parameters>
         <out-parameters><parameter name="proposal" type="Map"/></out-parameters>
         <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Audit change proposals are for editors and admins, as in the app.')"><return error="true"/></if>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <entity-find entity-name="darpan.agent.AuditChangeProposal" list="rows" limit="1">
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
@@ -93,13 +95,15 @@
     </service>
 
     <service verb="list" noun="AuditChangeProposals" allow-remote="true" authenticate="true" authz-action="view">
-        <description>DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after.</description>
+        <description>DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after.
+            Editors and admins only, as in the app.</description>
         <in-parameters>
             <parameter name="status"><description>A status (DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE, INVALID), or OPEN for DRAFT, PLANNED, STALE and INVALID.</description></parameter>
             <parameter name="origin"><description>PERSON (made through the CLI) or AGENT (the in-app agent).</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="proposals" type="List"/></out-parameters>
         <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Audit change proposals are for editors and admins, as in the app.')"><return error="true"/></if>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><set field="proposals" from="[]"/><return/></if>
             <set field="statusValue" from="status?.trim()?.toUpperCase()"/>

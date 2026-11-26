@@ -479,6 +479,19 @@ class AuditChangeApplySmokeTests {
     }
 
     @Test
+    void "a view-only member cannot list or read proposals, as in the app where only editors reach them"() {
+        Map p = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
+        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        Map got = call("get#AuditChangeProposal", [proposalId: p.proposalId])
+        assertTrue(got.hadError as boolean)
+        assertNull(got.proposal)
+        assertTrue((got.errorText as String).contains("editor"), got.errorText as String)
+        Map listed = call("list#AuditChangeProposals", [:])
+        assertTrue(listed.hadError as boolean)
+        assertNull(listed.proposals)
+    }
+
+    @Test
     void "another tenant cannot read a proposal"() {
         Map p = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
         actAs(OTHER)

@@ -259,6 +259,19 @@ then
     insertLogical( new Ask( "omsOrderByShopifyId", $s ) );
 end
 
+// DAR-BE-373: an R7 order carries no items (its read is the order header), so it asks for them first; an R1 line carries
+// its own item. Only for an order NetSuite does not have, dropped when the order's best cause already ranks 66 or more.
+rule "Ask HotWax for the items of an R7 order that never reached NetSuite"
+    @reads("Finding, OrderNotInNetsuite, Item, Answered") @asks("orderItems") @mayEnable("CONC_RETIRED_SKU,CONC_PRODUCT_NOT_IN_NETSUITE")
+when
+    Finding( kind == "order", $o : order, order != null )
+    OrderNotInNetsuite( order == $o )
+    not Item( order == $o )
+    not Answered( question == "orderItems", subject == $o )
+then
+    insertLogical( new Ask( "orderItems", $o ) );
+end
+
 // DAR-BE-186: only for the items of an order NetSuite does not have; one read per 100 products, dropped when the order's
 // best cause already outranks what the answer could unlock.
 rule "Ask whether an item's product is known to NetSuite, when its order never reached NetSuite"
@@ -817,11 +830,13 @@ then
 end
 
 // DAR-BE-192: R7 (gorjana "Every order HotWax approves reaches NetSuite within a day"): an approved order takes its cause.
-rule "R7 · the order's cause, when HotWax approved it and NetSuite has no sales order"
+// DAR-BE-373 (Aditi 2026-11-26: R7 is the one presence check for orders): a completed one too, a store sale above all, as
+// Malbon's and RAILS's order checks already treat them. A cancelled order takes none: the tree's "Cancelled in HotWax" holds.
+rule "R7 · the order's cause, when HotWax approved or completed it and NetSuite has no sales order"
     @reads("Finding, Order, OrderNotInNetsuite, BestCause") @states("R7")
 when
     $f : Finding( kind == "order", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
-    Order( this == $o, statusId == "ORDER_APPROVED" )
+    Order( this == $o, statusId in ( "ORDER_APPROVED", "ORDER_COMPLETED" ) )
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then

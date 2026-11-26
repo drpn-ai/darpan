@@ -36,6 +36,11 @@ class BrainFactAdapter {
      * lookup of this name: a Shopify-paired scope has no HotWax source to default to). Carries its payments too.
      */
     static final String OMS_ORDER_BY_SHOPIFY_ID = "omsOrderByShopifyId"
+    /**
+     * DAR-BE-373: an R7 order's items (productId, sku), asked of HotWax by order id when NetSuite does not have the order,
+     * so R7 reaches the product causes R1 reaches from its lines. A read that kept orderItems answers it from the record.
+     */
+    static final String ORDER_ITEMS = "orderItems"
 
     /**
      * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
@@ -93,28 +98,12 @@ class BrainFactAdapter {
                     normalize(record.orderName) ?: normalize(record.omsOrderName))
             setAge(f.order, record.omsOrderDate, readAtMillis)
             f.netsuiteHasOrderLine = ((Map) (sides.FILE_2 ?: [:])).firstFieldPresence != "ABSENT"
-            String productId = normalize(record.productId)
-            if (f.order != null && productId) {
-                Product product = (Product) orders.get("product|" + productId)
-                if (product == null) {
-                    product = new Product(productId: productId, sku: normalize(record.sku))
-                    orders.put("product|" + productId, product)
-                    facts.add(product)
-                    addProductAnswer(facts, product, productAnswers)
-                } else if (product.sku == null) {
-                    product.sku = normalize(record.sku)
-                }
-                String itemKey = "item|${f.order.orderId}|${productId}".toString()
-                if (!orders.containsKey(itemKey)) {
-                    Item item = new Item(f.order, product)
-                    orders.put(itemKey, item)
-                    facts.add(item)
-                }
-            }
+            addItem(facts, orders, f.order, normalize(record.productId), normalize(record.sku), productAnswers)
         } else if (kind == Finding.ORDER) {
             // DAR-BE-192: an R7 order: HotWax approved it and NetSuite has no sales order for it (MISSING_FROM_FILE_2).
             f.order = orderFor(normalize(record.orderId), record.grandTotal, null, normalize(record.orderName), normalize(record.statusId))
             setAge(f.order, record.orderDate, readAtMillis)
+            addOrderItems(facts, orders, f.order, moreAnswers?.get(ORDER_ITEMS), productAnswers)
         } else if (kind == Finding.SHOPIFY_ORDER) {
             // DAR-BE-204: a Shopify order NetSuite has no sales order for. Its HotWax order (and that order's payments) comes
             // from the omsOrderByShopifyId answer; until then the finding has only its Shopify side.
@@ -221,6 +210,46 @@ class BrainFactAdapter {
         if (v instanceof Number) return java.time.Instant.ofEpochMilli(((Number) v).longValue()).toString().substring(0, 10)
         String t = normalize(v)
         return t && t ==~ /\d{4}-\d{2}-\d{2}.*/ ? t.substring(0, 10) : (t ==~ /\d{10,}/ ? day(t as long) : null)
+    }
+
+    /**
+     * DAR-BE-186: one Product per product id and one Item per order and product in the world, so a second line or finding
+     * reuses them; a product first seen without its SKU takes it from a later one.
+     */
+    private static void addItem(List<Object> facts, Map<String, Object> world, Order order, String productId, String sku,
+                                Map<String, Map> productAnswers) {
+        if (order == null || !productId) return
+        Product product = (Product) world.get("product|" + productId)
+        if (product == null) {
+            product = new Product(productId: productId, sku: sku)
+            world.put("product|" + productId, product)
+            facts.add(product)
+            addProductAnswer(facts, product, productAnswers)
+        } else if (product.sku == null) {
+            product.sku = sku
+        }
+        String itemKey = "item|${order.orderId}|${productId}".toString()
+        if (!world.containsKey(itemKey)) {
+            Item item = new Item(order, product)
+            world.put(itemKey, item)
+            facts.add(item)
+        }
+    }
+
+    /**
+     * DAR-BE-373: an answered R7 order carries its items (none: asked, HotWax answered no order or no item), each an Item of
+     * its product, once per order in the world.
+     */
+    private static void addOrderItems(List<Object> facts, Map<String, Object> world, Order order, Map<String, Map> answers,
+                                      Map<String, Map> productAnswers) {
+        if (order == null || answers == null || !answers.containsKey(order.orderId)) return
+        if (world.put("orderItems|" + order.orderId, Boolean.TRUE) != null) return
+        facts.add(new Answered(ORDER_ITEMS, order))
+        Object items = answers.get(order.orderId)?.get(ORDER_ITEMS)
+        if (!(items instanceof List)) return
+        ((List) items).each { Object i ->
+            if (i instanceof Map) addItem(facts, world, order, normalize(((Map) i).productId), normalize(((Map) i).sku), productAnswers)
+        }
     }
 
     /** DAR-BE-186: an answered product carries its NETSUITE_PRODUCT_ID, or none (asked, nothing found or no id). */

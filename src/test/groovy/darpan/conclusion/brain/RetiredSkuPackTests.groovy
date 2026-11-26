@@ -130,4 +130,95 @@ class RetiredSkuPackTests {
     void theR1ExtractKeepsTheItemsProductAndSku() {
         assertTrue(BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1").containsAll(["productId", "sku"]))
     }
+
+    // ---- DAR-BE-373 (Aditi 2026-11-26): R7 is the one presence check for orders, so it must reach the product causes R1
+    // reached from its lines. The same order as an R7 finding: its read is the order header, with no items.
+
+    private static Map r7(String orderId) {
+        return [key: orderId, bucket: "MISSING_FROM_FILE_2", sides: [
+                FILE_1: [presence: "KEPT", record: [orderId: orderId, orderName: "#GOR197325417", grandTotal: 697.06,
+                                                   statusId: "ORDER_COMPLETED"]],
+                FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]
+    }
+
+    private static Map items(String orderId, List<Map> lines) { [(orderId): [orderId: orderId, orderItems: lines]] }
+
+    private static Map fireR7(Map finding, Map payments, Map products, Map orderItems) {
+        return BrainEngine.forPacks(["oms-netsuite"]).fire(BrainFactAdapter.facts("order", finding, payments, [:], products,
+                orderItems == null ? null : [orderItems: orderItems]) as List<Object>)
+    }
+
+    private static List<String> asked(Map fired) { ((List<Ask>) fired.asks).collect { it.question }.unique().sort() }
+
+    @Test
+    void anR7OrderNotInNetsuiteAsksForItsItemsFirst() {
+        Map fired = fireR7(r7("M1090448"), [:], [:], null)
+        Ask ask = ((List<Ask>) fired.asks).find { it.question == "orderItems" }
+        assertEquals("M1090448", ((Order) ask.subject).orderId)
+        assertFalse(asked(fired).contains("productNetsuiteId"), "no item yet, so no product to ask about")
+    }
+
+    @Test
+    void itsItemsAskForTheirProductsAndNotForTheItemsAgain() {
+        Map fired = fireR7(r7("M1090448"), [:], [:], items("M1090448", [[productId: "10273", sku: "238-007-G-OLD"]]))
+        assertTrue(asked(fired).contains("productNetsuiteId"))
+        assertFalse(asked(fired).contains("orderItems"))
+        assertEquals("10273", ((Product) ((List<Ask>) fired.asks).find { it.question == "productNetsuiteId" }.subject).productId)
+    }
+
+    @Test
+    void anR7OrderWithARetiredSkuConcludesSoldOnARetiredSku() {
+        Map fired = fireR7(r7("M1090448"), [M1090448: paidInFull(697.06)], ["10273": product("10273", "238-007-G-OLD", null)],
+                items("M1090448", [[productId: "10273", sku: "238-007-G-OLD"], [productId: "10278", sku: "238-007-G"]]))
+        assertEquals(["CONC_RETIRED_SKU"], codes(fired), "one finding per order, with its retired SKU's cause")
+    }
+
+    @Test
+    void anR7OrderWhoseProductHasNoNetsuiteIdIsProductNotInNetsuite() {
+        assertEquals(["CONC_PRODUCT_NOT_IN_NETSUITE"], codes(fireR7(r7("M1"), [M1: paidInFull(10)],
+                ["12360": product("12360", "HG-NECK", null)], items("M1", [[productId: "12360", sku: "HG-NECK"]]))))
+    }
+
+    @Test
+    void anOrderHotwaxAnsweredWithNoItemsAsksNothingMoreAndConcludesNoProductCause() {
+        Map fired = fireR7(r7("M1"), [M1: paidInFull(10)], [:], [M1: null])
+        assertEquals([], asked(fired).findAll { it in ["orderItems", "productNetsuiteId"] })
+        assertFalse(codes(fired).any { it in ["CONC_RETIRED_SKU", "CONC_PRODUCT_NOT_IN_NETSUITE"] })
+    }
+
+    @Test
+    void anR1LineNeverAsksForItsOrdersItems() {
+        assertFalse(asked(fire([r1("M1090448", "10273", "238-007-G-OLD")], [:], [:])).contains("orderItems"))
+    }
+
+    @Test
+    void controlAnR7OrderNetsuiteHasAsksNothing() {
+        Map inNetsuite = r7("M2")
+        inNetsuite.bucket = "MATCHED"
+        assertEquals([], asked(fireR7(inNetsuite, [:], [:], null)))
+    }
+
+    @Test
+    void theItemsQuestionUnlocksUpToRank66() {
+        assertEquals(66, BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])).orderItems)
+    }
+
+    @Test
+    void theItemsLookupReadsHotwaxOrdersByIdAndSurvivesTheParameterFilter() {
+        Map lookup = BrainQuestions.defaultLookup("orderItems", "gorjana_oms")
+        assertEquals("OMS_GQL", lookup.systemEnumId)
+        assertEquals("orderId", lookup.keyField)
+        assertEquals("gorjana_oms", lookup.sourceConfigId)
+        // Only keepRecordFields reaches an extract (DAR-BE-174); asking for orderItems there is what attaches the items.
+        assertEquals([keepRecordFields: ["orderId", "orderItems"]],
+                darpan.reconciliation.conclusion.ConclusionLookupSupport.safeParameters(lookup))
+    }
+
+    @Test
+    void aReadThatKeptOrderItemsAnswersFromTheRecord() {
+        Map finding = r7("M1")
+        finding.sides.FILE_1.record.orderItems = [[productId: "12360", sku: "HG-NECK"]]
+        Map answers = BrainConclude.answersInRecords("order", [finding], BrainQuestionCatalog.ENTRIES)
+        assertEquals([orderItems: [[productId: "12360", sku: "HG-NECK"]]], answers.orderItems.M1)
+    }
 }

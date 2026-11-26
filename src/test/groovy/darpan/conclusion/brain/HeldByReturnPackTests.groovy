@@ -167,9 +167,16 @@ class HeldByReturnPackTests {
         assertEquals([], codes(fire("order", [r7("M1167220", "WTY-#GOR196553714-1", 275)], [M1167220: credit(275)],
                 more([M1167220: ret("M244082", "RETURN_COMPLETED", "AFTSHP_OL_WTY")], [M244082: [tranId: "RMA338431", status: "Pending Receipt"]],
                         [M244082: [tranId: "CM7676067", amount: 275]]))))
-        // An R7 order HotWax has moved on from (completed) is R1's, not R7's.
-        assertEquals([], codes(fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297, "ORDER_COMPLETED")], [M1201553: credit(297)],
+        // DAR-BE-373: an R7 order HotWax cancelled takes no cause of the brain's; the tree's "Cancelled in HotWax" holds.
+        assertEquals([], codes(fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297, "ORDER_CANCELLED")], [M1201553: credit(297)],
                 more([M1201553: ret("M258769", "RETURN_REQUESTED")]))))
+    }
+
+    /** DAR-BE-373 (Aditi 2026-11-26: R7 is the one presence check for orders): a completed order is R7's now, not R1's. */
+    @Test
+    void aCompletedR7OrderTakesItsCause() {
+        assertEquals(["RET_OPEN"], codes(fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297, "ORDER_COMPLETED")],
+                [M1201553: credit(297)], more([M1201553: ret("M258769", "RETURN_REQUESTED")]))))
     }
 
     /** The questions are asked in rounds: the replacement's return first, then NetSuite for that return; then it concludes. */
@@ -187,7 +194,9 @@ class HeldByReturnPackTests {
                         default: return [:]
                     }
                 }])
-        assertEquals(["orderPayments:M1167220", "replacementReturn:M1167220", "returnMemo:M244082", "returnRma:M244082"], calls.sort())
+        // DAR-BE-373: an R7 order also asks for its items (none here), for the product causes.
+        assertEquals(["orderItems:M1167220", "orderPayments:M1167220", "replacementReturn:M1167220", "returnMemo:M244082",
+                      "returnRma:M244082"], calls.sort())
         assertTrue(calls.indexOf("replacementReturn:M1167220") >= 0)
         assertEquals("RMA_NO_MEMO", ((Map) ((Map) out.byKey).get("M1167220")).code)
         assertEquals([], out.warnings)

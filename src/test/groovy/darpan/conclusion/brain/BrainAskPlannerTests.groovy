@@ -31,8 +31,9 @@ class BrainAskPlannerTests {
         // DAR-BE-151: and, for an exchange, its original's NetSuite order "waits on its original order" (58), which the
         // return has to name first, so the return is worth asking up to 58 too.
         // DAR-BE-204: a Shopify order's HotWax order can unlock up to "payment failed, never paid" (95): always worth asking.
+        // DAR-BE-373: an R7 order's items unlock what its products can: up to "Sold on a retired SKU" (66).
         assertEquals(RANKS + [productNetsuiteId: 66, replacementReturn: 58, returnRma: 55, returnMemo: 55, originalInNetsuite: 58,
-                              omsOrderByShopifyId: 95],
+                              omsOrderByShopifyId: 95, orderItems: 66],
                 BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])))
     }
 

@@ -3,6 +3,7 @@ package darpan.conclusion.brain
 import groovy.transform.Immutable
 
 import static darpan.conclusion.brain.BrainFactAdapter.OMS_ORDER_BY_SHOPIFY_ID
+import static darpan.conclusion.brain.BrainFactAdapter.ORDER_ITEMS
 import static darpan.conclusion.brain.BrainFactAdapter.ORDER_PAYMENTS
 import static darpan.conclusion.brain.BrainFactAdapter.ORIGINAL_IN_NETSUITE
 import static darpan.conclusion.brain.BrainFactAdapter.PRODUCT_NETSUITE_ID
@@ -56,6 +57,14 @@ class BrainQuestionCatalog {
                     defaultLookup: { String config ->
                         [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: config,
                          keyField: "orderId", parameters: [keepRecordFields: ["orderId", "grandTotal", "paymentPreferences"]]]
+                    }),
+            new Entry(name: ORDER_ITEMS, subject: "Order", batchSize: BATCH, freshness: FRESH_RUN, depth: 1,
+                    answeredBy: ORDER_ITEMS,
+                    // DAR-BE-373: an R7 order's items (orderItems: productId, sku) by OMS order id; asking for the field is what
+                    // makes the orders read attach them (DAR-BE-368), so no extract option is needed.
+                    defaultLookup: { String config ->
+                        [name: ORDER_ITEMS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: config,
+                         keyField: "orderId", parameters: [keepRecordFields: ["orderId", ORDER_ITEMS]]]
                     }),
             // DAR-BE-226: whether a product is in NetSuite rarely changes within a day; stable.
             new Entry(name: PRODUCT_NETSUITE_ID, subject: "Product", batchSize: BATCH, freshness: FRESH_STABLE, depth: 2,

@@ -41,6 +41,79 @@
         </actions>
     </service>
 
+    <service verb="propose" noun="AuditChange" allow-remote="true" authenticate="true">
+        <description>DAR-CLI-008: a person proposes a change to the audit brain through their own AI and the CLI (no agent
+            conversation). The person's own words and the finding they name vouch for the proposal's values; values neither
+            vouches for come back as unconfirmedIds, and apply#AuditChange needs them named back as confirmedIds. Planned and
+            backtested like an agent's proposal. Refused without write access on the active tenant.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS, ADD_STATEMENT, ADD_CHECK, STATEMENT_EDIT or REASON_PRIORITY.</description></parameter>
+            <parameter name="target" type="Map" required="true"/>
+            <parameter name="after" type="Map" required="true"/>
+            <parameter name="personWords" required="true"><description>What the person said, verbatim; at most 1023 characters.</description></parameter>
+            <parameter name="reasonText"/>
+            <parameter name="findingId"><description>The finding the person is explaining; its key and codes vouch too.</description></parameter>
+            <parameter name="evidence" type="Object"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="proposalId"/>
+            <parameter name="status"/>
+            <parameter name="statusMessage"/>
+            <parameter name="provenanceStatus"/>
+            <parameter name="unconfirmedIds" type="List"/>
+            <parameter name="backtest" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your role can\'t change this audit; an editor can.')"><return error="true"/></if>
+            <set field="created" from="darpan.agent.pipeline.AuditChangePlanner.createForPerson(ec, kind, target, after, reasonText, personWords, findingId, evidence)"/>
+            <if condition="created == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="proposalId" from="created.proposalId"/>
+            <set field="status" from="created.status"/>
+            <set field="statusMessage" from="created.statusMessage"/>
+            <set field="provenanceStatus" from="created.provenanceStatus"/>
+            <set field="unconfirmedIds" from="created.unconfirmedIds"/>
+            <set field="backtest" from="created.backtest"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AuditChangeProposal" allow-remote="true" authenticate="true" authz-action="view">
+        <description>DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it: before and after,
+            the backtest against the last run, unconfirmed values, and the planHash apply#AuditChange needs.</description>
+        <in-parameters><parameter name="proposalId" required="true"/></in-parameters>
+        <out-parameters><parameter name="proposal" type="Map"/></out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-find entity-name="darpan.agent.AuditChangeProposal" list="rows" limit="1">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="proposalId"/>
+            </entity-find>
+            <if condition="!tenantId || !rows"><return error="true" message="Proposal ${proposalId} was not found."/></if>
+            <set field="proposal" from="darpan.agent.pipeline.AuditChangePlanner.view(rows[0])"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="AuditChangeProposals" allow-remote="true" authenticate="true" authz-action="view">
+        <description>DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after.</description>
+        <in-parameters>
+            <parameter name="status"><description>A status (DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE, INVALID), or OPEN for DRAFT, PLANNED, STALE and INVALID.</description></parameter>
+            <parameter name="origin"><description>PERSON (made through the CLI) or AGENT (the in-app agent).</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="proposals" type="List"/></out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><set field="proposals" from="[]"/><return/></if>
+            <set field="statuses" from="status == 'OPEN' ? darpan.agent.pipeline.AuditChangePlanner.OPEN : (status ? [status] : null)"/>
+            <entity-find entity-name="darpan.agent.AuditChangeProposal" list="rows" limit="100">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="status" operator="in" from="statuses" ignore="statuses == null"/>
+                <econdition field-name="conversationId" operator="is-null" ignore="origin != 'PERSON'"/>
+                <econdition field-name="conversationId" operator="is-not-null" ignore="origin != 'AGENT'"/>
+                <order-by field-name="-proposalId"/>
+            </entity-find>
+            <set field="proposals" from="rows.collect { darpan.agent.pipeline.AuditChangePlanner.view(it, false) }"/>
+        </actions>
+    </service>
+
     <service verb="plan" noun="AuditChange" allow-remote="true" authenticate="true">
         <description>Plans an open proposal again against the current config: the change is checked by its real save, which
             is rolled back, and planHash covers the change and the config it was planned against. Ends PLANNED, or INVALID
@@ -73,6 +146,8 @@
         <in-parameters>
             <parameter name="proposalId" required="true"/>
             <parameter name="planHash" required="true"/>
+            <parameter name="confirmedIds" type="List"><description>DAR-CLI-008: for a person-origin proposal, exactly its
+                unconfirmed values, named back once the person has seen them.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="appliedVersionId"/>
@@ -80,7 +155,7 @@
             <parameter name="statusMessage"/>
         </out-parameters>
         <actions>
-            <set field="applied" from="darpan.agent.pipeline.AuditChangePlanner.apply(ec, proposalId, planHash)"/>
+            <set field="applied" from="darpan.agent.pipeline.AuditChangePlanner.apply(ec, proposalId, planHash, confirmedIds as List)"/>
             <if condition="applied == null || ec.message.hasError()"><return error="true"/></if>
             <set field="appliedVersionId" from="applied.appliedVersionId"/>
             <set field="status" from="applied.status"/>

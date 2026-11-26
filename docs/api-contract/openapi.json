@@ -312,10 +312,19 @@
                                         "$ref": "#/components/schemas/ApplyAuditChangeRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAuditChangeProposalRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListAuditChangeProposalsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListBrainChangeTicketsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/PlanAuditChangeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ProposeAuditChangeRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/RejectAuditChangeRequest"
@@ -325,6 +334,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/ListAgentQueryLogsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/FindAuditFindingLookalikesRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAgentAuditScopeRequest"
@@ -1107,11 +1119,15 @@
                                         "admin.UserAdminServices.reset#TwoFactor": "#/components/schemas/ResetTwoFactorRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
                                         "facade.AgentChangeFacadeServices.apply#AuditChange": "#/components/schemas/ApplyAuditChangeRequest",
+                                        "facade.AgentChangeFacadeServices.get#AuditChangeProposal": "#/components/schemas/GetAuditChangeProposalRequest",
+                                        "facade.AgentChangeFacadeServices.list#AuditChangeProposals": "#/components/schemas/ListAuditChangeProposalsRequest",
                                         "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "#/components/schemas/ListBrainChangeTicketsRequest",
                                         "facade.AgentChangeFacadeServices.plan#AuditChange": "#/components/schemas/PlanAuditChangeRequest",
+                                        "facade.AgentChangeFacadeServices.propose#AuditChange": "#/components/schemas/ProposeAuditChangeRequest",
                                         "facade.AgentChangeFacadeServices.reject#AuditChange": "#/components/schemas/RejectAuditChangeRequest",
                                         "facade.AgentChangeFacadeServices.revert#AuditChange": "#/components/schemas/RevertAuditChangeRequest",
                                         "facade.AgentFacadeServices.list#AgentQueryLogs": "#/components/schemas/ListAgentQueryLogsRequest",
+                                        "facade.AgentReadFacadeServices.find#AuditFindingLookalikes": "#/components/schemas/FindAuditFindingLookalikesRequest",
                                         "facade.AgentReadFacadeServices.get#AgentAuditScope": "#/components/schemas/GetAgentAuditScopeRequest",
                                         "facade.AgentTurnFacadeServices.get#AgentConversation": "#/components/schemas/GetAgentConversationRequest",
                                         "facade.AgentTurnFacadeServices.get#AgentStatus": "#/components/schemas/GetAgentStatusRequest",
@@ -1644,10 +1660,19 @@
                                             "$ref": "#/components/schemas/ApplyAuditChangeResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetAuditChangeProposalResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListAuditChangeProposalsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListBrainChangeTicketsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/PlanAuditChangeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ProposeAuditChangeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RejectAuditChangeResponse"
@@ -1657,6 +1682,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAgentQueryLogsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/FindAuditFindingLookalikesResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAgentAuditScopeResponse"
@@ -11699,6 +11727,13 @@
                     },
                     "planHash": {
                         "type": "string"
+                    },
+                    "confirmedIds": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "DAR-CLI-008: for a person-origin proposal, exactly its\n                unconfirmed values, named back once the person has seen them."
                     }
                 },
                 "required": [
@@ -11774,6 +11809,171 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ApplyAuditChangeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditChangeProposalParams": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "proposalId"
+                ],
+                "description": "DAR-CLI-008: one of the active tenant's audit change proposals as a person reviews it: before and after,\n            the backtest against the last run, unconfirmed values, and the planHash apply#AuditChange needs."
+            },
+            "GetAuditChangeProposalResult": {
+                "type": "object",
+                "properties": {
+                    "proposal": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAuditChangeProposalRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.get#AuditChangeProposal",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.get#AuditChangeProposal",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.get#AuditChangeProposal"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditChangeProposalParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditChangeProposalResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.get#AuditChangeProposal. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditChangeProposalResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListAuditChangeProposalsParams": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "A status (DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE, INVALID), or OPEN for DRAFT, PLANNED, STALE and INVALID."
+                    },
+                    "origin": {
+                        "type": "string",
+                        "description": "PERSON (made through the CLI) or AGENT (the in-app agent)."
+                    }
+                },
+                "description": "DAR-CLI-008: the active tenant's audit change proposals, newest first, at most 100, without before/after."
+            },
+            "ListAuditChangeProposalsResult": {
+                "type": "object",
+                "properties": {
+                    "proposals": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListAuditChangeProposalsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.list#AuditChangeProposals",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.list#AuditChangeProposals",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.list#AuditChangeProposals"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListAuditChangeProposalsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListAuditChangeProposalsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.list#AuditChangeProposals. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListAuditChangeProposalsResult"
                     }
                 },
                 "required": [
@@ -11950,6 +12150,129 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/PlanAuditChangeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ProposeAuditChangeParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS, ADD_STATEMENT, ADD_CHECK, STATEMENT_EDIT or REASON_PRIORITY."
+                    },
+                    "target": {
+                        "type": "object"
+                    },
+                    "after": {
+                        "type": "object"
+                    },
+                    "personWords": {
+                        "type": "string",
+                        "description": "What the person said, verbatim; at most 1023 characters."
+                    },
+                    "reasonText": {
+                        "type": "string"
+                    },
+                    "findingId": {
+                        "type": "string",
+                        "description": "The finding the person is explaining; its key and codes vouch too."
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "description": "Moqui type Object"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "target",
+                    "after",
+                    "personWords"
+                ],
+                "description": "DAR-CLI-008: a person proposes a change to the audit brain through their own AI and the CLI (no agent\n            conversation). The person's own words and the finding they name vouch for the proposal's values; values neither\n            vouches for come back as unconfirmedIds, and apply#AuditChange needs them named back as confirmedIds. Planned and\n            backtested like an agent's proposal. Refused without write access on the active tenant."
+            },
+            "ProposeAuditChangeResult": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "statusMessage": {
+                        "type": "string"
+                    },
+                    "provenanceStatus": {
+                        "type": "string"
+                    },
+                    "unconfirmedIds": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "backtest": {
+                        "type": "object"
+                    }
+                }
+            },
+            "ProposeAuditChangeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.propose#AuditChange",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.propose#AuditChange",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.propose#AuditChange"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ProposeAuditChangeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ProposeAuditChangeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.propose#AuditChange. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ProposeAuditChangeResult"
                     }
                 },
                 "required": [
@@ -12281,6 +12604,107 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ListAgentQueryLogsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "FindAuditFindingLookalikesParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "At most this many of each list (10 max)."
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "Findings of the same check as one finding: sameCause (same conclusion, any state) and controls (a different\n            conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}, plus counts of\n            every other finding of the check by conclusion code (none when blank) and by state. Conditions equal on every row are\n            left out of conditionValues."
+            },
+            "FindAuditFindingLookalikesResult": {
+                "type": "object",
+                "properties": {
+                    "byCause": {
+                        "type": "object",
+                        "description": "Count of the check's other findings by conclusion code."
+                    },
+                    "byState": {
+                        "type": "object",
+                        "description": "Count of the check's other findings by state."
+                    },
+                    "sameCause": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "controls": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "FindAuditFindingLookalikesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
+                "x-darpan-method": "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentReadFacadeServices.find#AuditFindingLookalikes"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/FindAuditFindingLookalikesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "FindAuditFindingLookalikesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentReadFacadeServices.find#AuditFindingLookalikes. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/FindAuditFindingLookalikesResult"
                     }
                 },
                 "required": [
@@ -42528,11 +42952,15 @@
         "admin.UserAdminServices.reset#TwoFactor": "ResetTwoFactor",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AgentChangeFacadeServices.apply#AuditChange": "ApplyAuditChange",
+        "facade.AgentChangeFacadeServices.get#AuditChangeProposal": "GetAuditChangeProposal",
+        "facade.AgentChangeFacadeServices.list#AuditChangeProposals": "ListAuditChangeProposals",
         "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "ListBrainChangeTickets",
         "facade.AgentChangeFacadeServices.plan#AuditChange": "PlanAuditChange",
+        "facade.AgentChangeFacadeServices.propose#AuditChange": "ProposeAuditChange",
         "facade.AgentChangeFacadeServices.reject#AuditChange": "RejectAuditChange",
         "facade.AgentChangeFacadeServices.revert#AuditChange": "RevertAuditChange",
         "facade.AgentFacadeServices.list#AgentQueryLogs": "ListAgentQueryLogs",
+        "facade.AgentReadFacadeServices.find#AuditFindingLookalikes": "FindAuditFindingLookalikes",
         "facade.AgentReadFacadeServices.get#AgentAuditScope": "GetAgentAuditScope",
         "facade.AgentTurnFacadeServices.get#AgentConversation": "GetAgentConversation",
         "facade.AgentTurnFacadeServices.get#AgentStatus": "GetAgentStatus",

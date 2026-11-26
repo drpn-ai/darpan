@@ -94,11 +94,15 @@ admin.UserAdminServices.reset#Password
 admin.UserAdminServices.reset#TwoFactor
 admin.UserAdminServices.update#UserAccount
 facade.AgentChangeFacadeServices.apply#AuditChange
+facade.AgentChangeFacadeServices.get#AuditChangeProposal
+facade.AgentChangeFacadeServices.list#AuditChangeProposals
 facade.AgentChangeFacadeServices.list#BrainChangeTickets
 facade.AgentChangeFacadeServices.plan#AuditChange
+facade.AgentChangeFacadeServices.propose#AuditChange
 facade.AgentChangeFacadeServices.reject#AuditChange
 facade.AgentChangeFacadeServices.revert#AuditChange
 facade.AgentFacadeServices.list#AgentQueryLogs
+facade.AgentReadFacadeServices.find#AuditFindingLookalikes
 facade.AgentReadFacadeServices.get#AgentAuditScope
 facade.AgentTurnFacadeServices.get#AgentConversation
 facade.AgentTurnFacadeServices.get#AgentStatus

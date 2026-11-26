@@ -225,6 +225,12 @@ class CliMethodAllowlist {
             "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
             "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
             "facade.TenantScriptFacadeServices.save#TenantQueryPins",
+            // DAR-CLI-008 part 2: a person explains a finding or marks a cause expected through their own AI: proposes a change
+            // (editor or admin; refused otherwise), reads it, reads a finding's look-alikes. Apply/revert were opened in part 1.
+            "facade.AgentChangeFacadeServices.get#AuditChangeProposal",
+            "facade.AgentChangeFacadeServices.list#AuditChangeProposals",
+            "facade.AgentChangeFacadeServices.propose#AuditChange",
+            "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
     ] as LinkedHashSet<String>).asImmutable()
 
     static final Set<String> EXCLUDED = ([

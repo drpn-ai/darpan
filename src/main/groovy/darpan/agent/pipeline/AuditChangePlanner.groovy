@@ -363,6 +363,28 @@ class AuditChangePlanner {
         }
     }
 
+    // ---------------------------------------------------------------- view (DAR-CLI-008)
+
+    /** A proposal as the person reviews it: what changes (before/after), its effect on the last run (backtest), the values
+     *  still to confirm and the planHash an apply must name. withState false leaves out before/after (lists). */
+    static Map view(def row, boolean withState = true) {
+        Object blocked = row.blockedIds ? new JsonSlurper().parseText(row.blockedIds as String) : []
+        boolean person = row.conversationId == null
+        Map out = [proposalId: row.proposalId, kind: row.kind, status: row.status, statusMessage: row.statusMessage,
+                   origin: person ? "PERSON" : "AGENT", provenanceStatus: row.provenanceStatus,
+                   unconfirmedIds: row.provenanceStatus == "BLOCKED" && blocked instanceof List ? blocked : [],
+                   target: parse(row.targetJson), reasonText: row.reasonText, planHash: row.planHash,
+                   backtest: row.backtestJson ? parse(row.backtestJson) : null, appliedVersionId: row.appliedVersionId,
+                   revertOfProposalId: row.revertOfProposalId, updated: row.lastUpdatedStamp?.toString()]
+        if (withState) {
+            out.before = row.beforeJson ? parse(row.beforeJson) : null
+            out.after = parse(row.afterJson)
+            Map evidence = row.evidenceJson ? parse(row.evidenceJson) : [:]
+            if (person && evidence.personWords) out.personWords = evidence.personWords
+        }
+        return out.findAll { it.value != null }
+    }
+
     // ---------------------------------------------------------------- provenance inputs (R21)
 
     /** The human's own words: text of the conversation's USER messages; tool results inside them are never text. */

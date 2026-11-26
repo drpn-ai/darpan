@@ -394,6 +394,62 @@ class AuditChangeApplySmokeTests {
     }
 
     @Test
+    void "a view-only member cannot propose a change through the facade"() {
+        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        Map r = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
+        assertTrue(r.hadError as boolean)
+        assertTrue((r.errorText as String).contains("Your role can't change this audit; an editor can."), r.errorText as String)
+        assertEquals(0L, proposalCount(), "nothing is written")
+    }
+
+    @Test
+    void "propose, get and apply through the facade, the way the CLI does"() {
+        Map p = call("propose#AuditChange", personParams(["M5550001", "M5550005"], "M5550001 is a test order"))
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("PLANNED", p.status)
+        assertEquals(["M5550005"], p.unconfirmedIds)
+        Map got = call("get#AuditChangeProposal", [proposalId: p.proposalId])
+        Map view = got.proposal as Map
+        assertEquals("PERSON", view.origin)
+        assertEquals(["M5550005"], view.unconfirmedIds)
+        assertEquals(64, (view.planHash as String).length())
+        assertNotNull(view.backtest)
+        assertEquals([savedRunId: runId, fileSide: "FILE_1"], view.target)
+        assertEquals(["M5550001", "M5550005"], (view.after as Map).filterValues)
+        assertNotNull(view.before, "the before state the person compares against")
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: view.planHash, confirmedIds: ["M5550005"]])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+        assertEquals("CONFIRMED", (call("get#AuditChangeProposal", [proposalId: p.proposalId]).proposal as Map).provenanceStatus)
+    }
+
+    @Test
+    void "the proposal list filters by status and origin, newest first"() {
+        Map person = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
+        Map agent = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+        List<Map> persons = call("list#AuditChangeProposals", [origin: "PERSON"]).proposals as List<Map>
+        assertEquals([person.proposalId], persons*.proposalId)
+        assertNull(persons[0].after, "the list carries no before/after")
+        List<Map> open = call("list#AuditChangeProposals", [status: "OPEN"]).proposals as List<Map>
+        assertEquals([agent.proposalId, person.proposalId] as Set, open*.proposalId as Set)
+        assertTrue((call("list#AuditChangeProposals", [status: "APPLIED"]).proposals as List).isEmpty())
+    }
+
+    @Test
+    void "another tenant cannot read a proposal"() {
+        Map p = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
+        actAs(OTHER)
+        try {
+            Map got = call("get#AuditChangeProposal", [proposalId: p.proposalId])
+            assertTrue(got.hadError as boolean, "another tenant's proposal is not found")
+            assertNull(got.proposal)
+            assertTrue((call("list#AuditChangeProposals", [:]).proposals as List).isEmpty())
+        } finally {
+            actAs(MINE)
+        }
+    }
+
+    @Test
     void "exclusion apply refuses automation drift"() {
         asSystem {
             upsert(AUTO_FILTER, [automationId: AUTO, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
@@ -1137,6 +1193,11 @@ class AuditChangeApplySmokeTests {
     private Map propose(String kind, Map target, Map after) {
         return call("create#AuditChangeProposal", [conversationId: CONV, kind: kind, target: target, after: after,
                 reasonText: "test", evidence: [findings: []]])
+    }
+
+    private Map personParams(List<String> values, String words) {
+        return [kind: "EXCLUSION_FILTER", target: [savedRunId: runId, fileSide: "FILE_1"], after: [fieldExpression: NEW_FIELD, filterValues: values],
+                personWords: words, reasonText: "test"]
     }
 
     private Map personPropose(List<String> values, String words) {

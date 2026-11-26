@@ -90,6 +90,11 @@ class CliMethodAllowlistTests {
             "facade.AgentChangeFacadeServices.apply#AuditChange",
             "facade.AuthFacadeServices.save#UserSettings",
             "facade.AuditFacadeServices.verify#AuditFindings",
+            // DAR-CLI-008 part 2: the person's own AI proposes, reads and applies audit changes
+            "facade.AgentChangeFacadeServices.propose#AuditChange",
+            "facade.AgentChangeFacadeServices.get#AuditChangeProposal",
+            "facade.AgentChangeFacadeServices.list#AuditChangeProposals",
+            "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
     ].asImmutable()
 
     /** Final review Important 2: credentials by name, so a NEW credential service is caught, not only today's names. */

@@ -48,7 +48,7 @@
         </actions>
     </service>
 
-    <service verb="find" noun="AuditFindingLookalikes" authz-action="view" allow-remote="false" authenticate="true">
+    <service verb="find" noun="AuditFindingLookalikes" authz-action="view" allow-remote="true" authenticate="true">
         <description>Findings of the same check as one finding: sameCause (same conclusion, any state) and controls (a different
             conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}, plus counts of
             every other finding of the check by conclusion code (none when blank) and by state. Conditions equal on every row are

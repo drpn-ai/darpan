@@ -53,18 +53,33 @@ class OrderLookup {
         long deadline = (deps.deadlineMillis ?: Long.MAX_VALUE) as long
         Closure<Long> now = (Closure<Long>) (deps.now ?: { System.currentTimeMillis() })
 
-        List<Map> queue = []
-        reads.findAll { it.isFind == "Y" && shapeFits(it, given) }.each { queue << [read: it, value: given, foundBy: [value: given], connectionId: null] }
-
         List<Map> records = [], skipped = []
-        Set<String> done = new HashSet<>()
+        Set<String> skippedOnce = new HashSet<>()
+        Closure skipOnce = { Map r, String reason -> if (skippedOnce.add("${r.readId}|${reason}".toString())) skipped << [readId: r.readId, connectionId: null, reason: reason] }
+        // A broken row (a bad shape regex) is skipped, never failing the lookup.
+        Closure<Boolean> fits = { Map r, String v ->
+            try { return shapeFits(r, v) } catch (IllegalArgumentException e) { skipOnce(r, "broken read: ${e.message}".toString()); return false }
+        }
+
+        List<Map> queue = []
+        reads.findAll { it.isFind == "Y" && fits(it, given) }.each { queue << [read: it, value: given, foundBy: [value: given], connectionId: null] }
+
+        Set<String> done = new HashSet<>(), listed = new HashSet<>()
         Set<String> idsSeen = new LinkedHashSet<>()
         int readsUsed = 0
         boolean capped = false
         while (!queue.isEmpty()) {
             Map task = queue.remove(0)
             Map r = (Map) task.read
-            List<Map> conns = connectionCache.computeIfAbsent(r.systemCode as String) { String s -> (List<Map>) (connections.call(s) ?: []) }
+            List<Map> conns
+            try {
+                conns = connectionCache.containsKey(r.systemCode) ? connectionCache.get(r.systemCode) : (List<Map>) connections.call(r.systemCode as String)
+                connectionCache.put(r.systemCode as String, conns)
+            } catch (Exception e) {
+                skipOnce(r, "broken read: ${e.message ?: e.class.simpleName}".toString()); continue
+            }
+            if (conns == null) { skipOnce(r, "not installed"); continue }
+            if (conns.isEmpty()) { skipOnce(r, "no connection"); continue }
             if (task.connectionId != null) conns = conns.findAll { it.id == task.connectionId }
             for (Map c : conns) {
                 String key = "${r.readId}|${c.id}|${task.value}".toString()
@@ -73,11 +88,20 @@ class OrderLookup {
                 if (now.call() >= deadline) { capped = true; skipped << [readId: r.readId, connectionId: c.id, reason: "time limit"]; continue }
                 readsUsed++
                 idsSeen << (task.value as String)
-                Map answer = (Map) ((Closure) deps.query).call(r, c, task.value as String) ?: [:]
+                Map answer
+                try {
+                    answer = (Map) ((Closure) deps.query).call(r, c, task.value as String) ?: [:]
+                } catch (Exception e) {
+                    skipped << [readId: r.readId, connectionId: c.id, reason: "broken read: ${e.message ?: e.class.simpleName}".toString()]; continue
+                }
                 if (answer.error) { skipped << [readId: r.readId, connectionId: c.id, reason: answer.error.toString()]; continue }
                 ((List<Map>) (answer.records ?: [])).each { Map record ->
-                    records << [system: r.systemCode, connectionId: c.id, connectionLabel: c.label, recordKind: r.recordKind,
-                                readId: r.readId, foundBy: task.foundBy, record: project(record, fieldsOf(r), all)]
+                    Map shown = project(record, fieldsOf(r), all)
+                    // The same record reached by two paths (HotWax -> Shopify -> HotWax) is listed once; its links still run once each.
+                    if (listed.add("${r.systemCode}|${c.id}|${r.recordKind}|${groovy.json.JsonOutput.toJson(record)}".toString())) {
+                        records << [system: r.systemCode, connectionId: c.id, connectionLabel: c.label, recordKind: r.recordKind,
+                                    readId: r.readId, foundBy: task.foundBy, record: shown]
+                    }
                     // The record's own ids (its key field and every field a link reads) match findings too, followed or not.
                     if (r.keyField) idsSeen.addAll(valuesAt(record, r.keyField as String))
                     (linksFrom.get(r.readId as String) ?: []).each { Map l -> idsSeen.addAll(valuesAt(record, l.fromField as String)) }
@@ -85,7 +109,7 @@ class OrderLookup {
                         Map to = readById.get(l.toReadId as String)
                         if (to == null) return
                         valuesAt(record, l.fromField as String).each { String v ->
-                            if (!shapeFits(to, v)) return
+                            if (!fits(to, v)) return
                             queue << [read: to, value: v, foundBy: [value: v, linkId: l.linkId, fromReadId: r.readId],
                                       connectionId: to.systemCode == r.systemCode ? c.id : null]
                         }
@@ -104,6 +128,8 @@ class OrderLookup {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!tenantId) { ec.message.addError("No active tenant."); return null }
         if (!value?.trim()) { ec.message.addError("Give the id to look up."); return null }
+        // Every read is a fresh query on a connected system, which the systems allow user, editor and admin roles (run access).
+        if (!TenantAccessSupport.requireActiveTenantRunAccess(ec, "Looking up an order queries your connected systems, which needs a user, editor or admin role in this tenant.")) return null
         int maxReads = setting("darpan.lookup.maxReads", DEFAULT_MAX_READS)
         int timeoutSeconds = setting("darpan.lookup.timeoutSeconds", DEFAULT_TIMEOUT_SECONDS)
         long start = System.currentTimeMillis()
@@ -124,9 +150,11 @@ class OrderLookup {
         Map<String, String> sys = SYSTEMS.get(system)
         if (sys == null) return []
         Map<String, String> type = SharedConfigAccessSupport.configType(sys.configType)
-        if (type == null) return []
+        if (type == null || !ec.entity.isEntityDefined(type.entityName)) return null   // the system's repo is not installed
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        // Owned connections only: the fresh-query services refuse a connection shared from another tenant (R25).
         return SharedConfigAccessSupport.listAccessibleConfigRows(ec, sys.configType)
-                .findAll { row -> "N" != row.get("isActive")?.toString()?.toUpperCase() }
+                .findAll { row -> "N" != row.get("isActive")?.toString()?.toUpperCase() && row.get("companyUserGroupId") == tenantId }
                 .collect { row -> [id: row.get(type.pkField) as String, label: (row.get("description") ?: row.get(type.pkField)) as String] }
     }
 
@@ -138,12 +166,13 @@ class OrderLookup {
         try { passed = formatValue(read.valueFormat as String, value) } catch (IllegalArgumentException e) { return [error: e.message] }
         Map params = [(sys.idParam): connection.id]
         if (read.systemCode == "NETSUITE") {
-            try { params.sql = renderSuiteQl(read.queryTemplate as String, passed, read.valueShape as String) }
+            try { params.sql = renderSuiteQl(read.queryTemplate as String, passed, null) }   // the read's shape was checked on the value as given
             catch (IllegalArgumentException e) { return [error: e.message] }
             String refused = AgentQuerySupport.checkSuiteQl(params.sql as String)
             if (refused) return [error: refused]
             params.limit = 50
         } else {
+            if (!read.queryTemplate || !read.recordsAt) return [error: "broken read: a GraphQL read needs a template and recordsAt"]
             params.document = read.queryTemplate
             params.variables = [value: passed]
         }
@@ -184,10 +213,31 @@ class OrderLookup {
     /** The tenant's open findings whose record key is any id seen, at most 50. */
     static List<Map> openFindings(def ec, String tenantId, Collection<String> ids) {
         if (!ids) return []
+        // An order's findings are keyed by the order (M1210830) or by one of its lines (M1210830/02, SO7371002/01).
+        def ecf = ec.entity.conditionFactory
+        List<String> keys = new ArrayList<String>(ids).take(60)
+        List conds = [ecf.makeCondition("recordKey", org.moqui.entity.EntityCondition.IN, keys)] +
+                keys.collect { String k -> ecf.makeCondition("recordKey", org.moqui.entity.EntityCondition.LIKE, k.replace("%", "").replace("_", "\\_") + "/%") }
         return ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
-                .condition("recordKey", "in", new ArrayList<String>(ids)).condition("stateEnumId", "AUDFS_OPEN")
+                .condition(ecf.makeCondition(conds, org.moqui.entity.EntityCondition.OR)).condition("stateEnumId", "AUDFS_OPEN")
                 .orderBy("-lastSeenDate").limit(50).useCache(false).list()
                 .collect { [findingId: it.findingId, recordKey: it.recordKey, headline: it.headline, period: it.period] }
+    }
+
+    /** A tenant read row, merged over the product row with the same id, must be usable: null when it is, else why not. */
+    static String tenantReadRefusal(def ec, String tenantId, Map p) {
+        Map product = (Map) LookupCatalog.reads(ec, null).find { it.readId == p.readId } ?: [:]
+        Map merged = new LinkedHashMap(product)
+        p.each { k, v -> if (v != null && v.toString() != "") merged.put(k, v) }
+        if ("N" == merged.isActive) return null   // hiding a product read needs nothing else
+        for (String f : ["systemCode", "recordKind", "keyField", "queryTemplate"]) if (!merged.get(f)) return "A read needs ${f}.".toString()
+        if (!(merged.systemCode in SYSTEMS.keySet())) return "Unknown system ${merged.systemCode}; NETSUITE, OMS or SHOPIFY.".toString()
+        if (merged.systemCode != "NETSUITE" && !merged.recordsAt) return "A GraphQL read needs recordsAt, e.g. orders.edges[*].node."
+        if (merged.valueShape) {
+            if ((merged.valueShape as String).length() > 200) return "The value shape is longer than 200 characters."
+            try { Pattern.compile(merged.valueShape as String) } catch (java.util.regex.PatternSyntaxException e) { return "The value shape is not a valid pattern.".toString() }
+        }
+        return templateRefusal(merged.systemCode as String, merged.queryTemplate as String) ?: formatRefusal(merged.valueFormat as String)
     }
 
     /** A tenant template must be read-only for its system: null when it is, else why not. */
@@ -204,8 +254,9 @@ class OrderLookup {
 
     /** SuiteQL with {value} replaced by the value, quoted, once it fits the read's shape. Throws IllegalArgumentException. */
     static String renderSuiteQl(String template, String value, String shape) {
+        if (!template) throw new IllegalArgumentException("broken read: no query template")
         String v = value ?: ""
-        if (v.length() > MAX_VALUE_LENGTH || !SAFE_VALUE.matcher(v).matches() || !Pattern.compile(shape ?: DEFAULT_SHAPE).matcher(v).matches()) {
+        if (v.length() > MAX_VALUE_LENGTH || !SAFE_VALUE.matcher(v).matches() || (shape && !Pattern.compile(shape).matcher(v).matches())) {
             throw new IllegalArgumentException("'${v}' is not a value this read takes.".toString())
         }
         return template.replace("{value}", "'" + v + "'")
@@ -232,19 +283,40 @@ class OrderLookup {
     static Map project(Map record, List<String> fields, boolean all) {
         if (all || !fields) return record
         Map out = [:]
-        fields.each { String path ->
-            List<String> parts = path.tokenize(".")
-            Object v = record
-            for (String p : parts) { v = v instanceof Map ? ((Map) v).get(p) : null; if (v == null) break }
-            if (v == null) return
-            Map at = out
-            parts.eachWithIndex { String p, int i -> if (i == parts.size() - 1) at.put(p, v) else at = (Map) at.computeIfAbsent(p) { [:] } }
-        }
+        fields.each { String path -> mergeInto(out, pick(record, path.tokenize("."))) }
         return out
     }
 
+    /** The part of node at path, keeping its nesting; a list along the way keeps each element's part. Null when absent. */
+    private static Object pick(Object node, List<String> parts) {
+        if (parts.isEmpty()) return node
+        if (node instanceof List) {
+            List picked = ((List) node).collect { pick(it, parts) }.findAll { it != null }
+            return picked ? picked : null
+        }
+        if (!(node instanceof Map)) return null
+        Object below = pick(((Map) node).get(parts[0]), parts.subList(1, parts.size()))
+        return below == null ? null : [(parts[0]): below]
+    }
+
+    private static void mergeInto(Map into, Object part) {
+        if (!(part instanceof Map)) return
+        ((Map) part).each { k, v ->
+            Object have = into.get(k)
+            if (have instanceof Map && v instanceof Map) mergeInto((Map) have, v)
+            else if (have instanceof List && v instanceof List && have.size() == v.size()) {
+                ((List) have).eachWithIndex { Object h, int i -> if (h instanceof Map && v[i] instanceof Map) mergeInto((Map) h, v[i]) }
+            } else into.put(k, v)
+        }
+    }
+
+    /** The value fits the read's shape (at most 64 characters, checked before any tenant regex runs). Throws on a bad regex. */
     static boolean shapeFits(Map read, String value) {
-        return value && Pattern.compile((read.valueShape as String) ?: DEFAULT_SHAPE).matcher(value).matches()
+        if (!value || value.length() > MAX_VALUE_LENGTH) return false
+        Pattern p
+        try { p = Pattern.compile((read.valueShape as String) ?: DEFAULT_SHAPE) }
+        catch (java.util.regex.PatternSyntaxException e) { throw new IllegalArgumentException("bad valueShape ${read.valueShape}".toString()) }
+        return p.matcher(value).matches()
     }
 
     private static List<String> fieldsOf(Map read) {

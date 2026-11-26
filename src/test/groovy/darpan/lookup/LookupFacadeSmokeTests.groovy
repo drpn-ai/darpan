@@ -92,9 +92,12 @@ class LookupFacadeSmokeTests {
     }
 
     @Test
-    void "a view-only member can look up but cannot edit the tenant's reads"() {
+    void "a view-only member is told up front that a lookup queries connected systems, and cannot edit the tenant's reads"() {
         setPermissions([TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID])
-        assertFalse(call("lookup#Order", [value: "5550001"]).hadError as boolean)
+        Map look = call("lookup#Order", [value: "5550001"])
+        assertTrue(look.hadError as boolean, "the fresh-query services refuse a view member; say so once, not as 'not found'")
+        assertTrue((look.errorText as String).contains("user, editor or admin"), look.errorText as String)
+        assertEquals([], queried, "nothing was read")
         Map r = call("save#TenantLookupRead", [readId: "LKP_OMS_BY_EXT", keyField: "orderName"])
         assertTrue(r.hadError as boolean)
         assertTrue((r.errorText as String).contains("view access"), r.errorText as String)
@@ -132,6 +135,45 @@ class LookupFacadeSmokeTests {
         Map noValue = call("save#TenantLookupRead", [readId: "MY_N", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "x",
                 queryTemplate: "SELECT id FROM transaction WHERE x = '1'"])
         assertTrue(noValue.hadError as boolean, "a SuiteQL template must take {value}")
+    }
+
+    @Test
+    void "a line-level finding of the order is attached too"() {
+        asSystem {
+            ec.entity.makeValue("darpan.audit.AuditFinding").setAll([findingId: "F-LKP-2", companyUserGroupId: MINE, statementId: "LKP_R1", checkId: "LKP_CHK",
+                    recordKey: "OMS100/01", period: "2026-11", stateEnumId: "AUDFS_OPEN", headline: "Line OMS100/01 is open",
+                    firstFoundDate: java.sql.Date.valueOf("2026-11-20"), lastSeenDate: java.sql.Date.valueOf("2026-11-24")]).createOrUpdate()
+        }
+        Map out = call("lookup#Order", [value: "5550001"])
+        assertEquals(["F-LKP-1", "F-LKP-2"] as Set, ((out.lookup as Map).findings as List<Map>)*.findingId as Set)
+    }
+
+    @Test
+    void "a NetSuite read with a value format is shape-checked on the value as given and bound formatted"() {
+        asSystem {
+            ec.entity.makeValue("darpan.lookup.LookupRead").setAll([readId: "LKP_NS_BY_SHOPIFY", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "externalid",
+                    queryTemplate: "SELECT id, tranid FROM transaction WHERE externalid = {value}", valueShape: "[0-9]{6,20}", valueFormat: "SO_%s",
+                    isFind: "Y", sequenceNum: 2]).create()
+            ec.entity.makeValue("darpan.reconciliation.NsAuthConfig").setAll([nsAuthConfigId: "LKP_NS", companyUserGroupId: MINE, description: "KREWE NetSuite",
+                    isActive: "Y"]).createOrUpdate()
+        }
+        Map out = call("lookup#Order", [value: "5550001"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        List ns = queried.findAll { it[0] == "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery" }
+        assertEquals(1, ns.size(), "skipped: ${(out.lookup as Map).skipped}")
+        assertEquals("SELECT id, tranid FROM transaction WHERE externalid = 'SO_5550001'", (ns[0][1] as Map).sql)
+    }
+
+    @Test
+    void "a new tenant read must say its system, kind, key and template, and its shape must compile"() {
+        [[readId: "MY_X", queryTemplate: "SELECT id FROM transaction WHERE x = {value}"],
+         [readId: "MY_X", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "x"],
+         [readId: "MY_X", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "x", queryTemplate: "SELECT id FROM transaction WHERE x = {value}", valueShape: "[0-9"],
+         [readId: "MY_X", systemCode: "OMS", recordKind: "ORDER", keyField: "x", queryTemplate: 'query($value: String){ orders(query: $value){ edges { node { orderId } } } }']].each { Map p ->
+            assertTrue(this.call("save#TenantLookupRead", p).hadError as boolean, "refused: ${p}")
+        }
+        assertFalse(call("save#TenantLookupRead", [readId: "LKP_OMS_BY_EXT", keyField: "orderName"]).hadError as boolean,
+                "an override of a product read may change one field")
     }
 
     @Test

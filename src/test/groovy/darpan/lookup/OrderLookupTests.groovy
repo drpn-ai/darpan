@@ -164,6 +164,44 @@ class OrderLookupTests {
         assertNull(OrderLookup.formatRefusal("externalId:%s orderTypeId:SALES_ORDER"))
     }
 
+    // ---- final review fixes ----
+
+    @Test
+    void "a system with no connection is reported once per read, not silently left out"() {
+        Map d = deps(CHAIN, [connections: { String s -> s == "NETSUITE" ? [] : (s == "SHOPIFY" ? [[id: "S1", label: "US"]] : [[id: "OMS1", label: "o"]]) }])
+        Map out = OrderLookup.run(d, "5550001", false)
+        List<Map> none = (out.skipped as List<Map>).findAll { it.reason == "no connection" }
+        assertEquals(["NS_BY_EXT", "NS_BY_INTERNAL"] as Set, none*.readId as Set)
+        assertEquals(1, none.count { it.readId == "NS_BY_EXT" })
+    }
+
+    @Test
+    void "a broken read is skipped, never failing the lookup"() {
+        List<Map> reads = READS + [read("BAD_SHAPE", "OMS", "ORDER", [isFind: "Y", valueShape: "[0-9"])]
+        Map d = deps(CHAIN, [reads: reads, query: { Map r, Map c, String v -> if (r.readId == "OMS_ITEMS") throw new NullPointerException("no template"); [records: (CHAIN["${r.readId}|${c.id}|${v}".toString()] ?: [])] }])
+        Map out = OrderLookup.run(d, "5550001", false)
+        assertTrue((out.records as List<Map>).any { it.readId == "NS_BY_EXT" }, "the rest of the chain still answers")
+        assertTrue((out.skipped as List<Map>).any { it.readId == "BAD_SHAPE" && (it.reason as String).startsWith("broken read") })
+        assertTrue((out.skipped as List<Map>).any { it.readId == "OMS_ITEMS" && (it.reason as String).startsWith("broken read") })
+    }
+
+    @Test
+    void "the same record reached twice is listed once"() {
+        List<Map> links = LINKS + [link("L6", "SHOP_BY_ID", "id", "OMS_BY_EXT2")]
+        List<Map> reads = READS + [read("OMS_BY_EXT2", "OMS", "ORDER")]
+        Map answers = new LinkedHashMap(CHAIN)
+        answers.put("OMS_BY_EXT2|OMS1|5550001", CHAIN["OMS_BY_EXT|OMS1|5550001"])
+        Map out = OrderLookup.run(deps(answers, [reads: reads, links: links]), "5550001", false)
+        assertEquals(1, (out.records as List<Map>).count { it.system == "OMS" && it.recordKind == "ORDER" })
+    }
+
+    @Test
+    void "default fields walk lists and a long value never reaches a tenant shape"() {
+        assertEquals([lineItems: [nodes: [[sku: "A"], [sku: "B"]]]],
+                OrderLookup.project([lineItems: [nodes: [[sku: "A", name: "x"], [sku: "B", name: "y"]]], other: 1], ["lineItems.nodes.sku"], false))
+        assertFalse(OrderLookup.shapeFits([valueShape: "(a+)+b"], "a" * 65), "values past 64 characters are refused before the regex runs")
+    }
+
     @Test
     void "SuiteQL gets the value only after its shape check, quoted"() {
         assertEquals("SELECT id FROM transaction WHERE tranid = '#GOR123'",
@@ -172,5 +210,8 @@ class OrderLookupTests {
             assertThrows(IllegalArgumentException) { OrderLookup.renderSuiteQl("SELECT 1 FROM t WHERE x = {value}", bad, null) }
         }
         assertThrows(IllegalArgumentException) { OrderLookup.renderSuiteQl("SELECT 1 FROM t WHERE x = {value}", "ABC", "[0-9]+") }
+        assertEquals("SELECT id FROM t WHERE x = 'gid://shopify/Order/123'", OrderLookup.renderSuiteQl("SELECT id FROM t WHERE x = {value}", "gid://shopify/Order/123", null),
+                "a formatted value is held to the safe class only; the read's shape was checked on the value as given")
+        assertThrows(IllegalArgumentException) { OrderLookup.renderSuiteQl(null, "1", null) }
     }
 }

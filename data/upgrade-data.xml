@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.4.15.
-Generated from backend compare range: v3.4.14..HEAD
+Candidate release-scoped upgrade data for Darpan 3.4.16.
+Generated from backend compare range: v3.4.15..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- No added or modified candidate records were detected between the compared refs. -->
+    <!-- Added records from data/MigrationRegistrySeedData.xml -->
+    <darpan.migration.DarpanMigration migrationId="ACK_NOTE_NULLABLE" componentName="darpan" serviceName="audit.AuditLedgerServices.migrate#AcknowledgementNoteNullable" sequenceNum="170" supportsDryRun="Y" enabled="Y" description="Let an acknowledgement have no note (DAR-UI-152): AuditFindingAcknowledgement.note becomes nullable.                 Schema only, no row changes. Idempotent: a nullable column is left alone."/>
 </entity-facade-xml>

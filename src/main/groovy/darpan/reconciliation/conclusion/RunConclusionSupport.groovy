@@ -243,9 +243,15 @@ class RunConclusionSupport {
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
             Map f = finding(row)
             Map sides = (Map) f.sides
+            // DAR-BE-372 rule 2: what each lookup found for this row rides on it too, so a finding keeps the other system's
+            // record its rules read (R13's HotWax order) rather than only its id.
+            List<Map> lookedUp = []
             ((List<Map>) (args.lookups ?: [])).each { Map l ->
                 Map found = answers.get(l.name)
-                if (found && sides.get(l.subject) != null) sides.put(l.subject, ConclusionLookupSupport.attach((Map) sides.get(l.subject), l, found))
+                if (found && sides.get(l.subject) != null) {
+                    lookedUp.addAll(ConclusionLookupSupport.answersFor((Map) sides.get(l.subject), l, found))
+                    sides.put(l.subject, ConclusionLookupSupport.attach((Map) sides.get(l.subject), l, found))
+                }
             }
             Map conclusion = (Map) ((Map) (brain?.byKey ?: [:])).get(row.get("primaryId")?.toString()) ?:
                     (engine ? engine.conclude([f])[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides)))
@@ -279,7 +285,8 @@ class RunConclusionSupport {
                              question: conclusion.question,
                              path    : conclusion.path]
             if (byRun) concluded.unexplainedExpected = true
-            return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + [conclusion: concluded]
+            return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + (lookedUp ? [lookedUp: lookedUp] : [:]) +
+                    [conclusion: concluded]
         }, { Map summary ->
             Map shownSummary = new LinkedHashMap(summary)
             applyHidden(shownSummary, hiddenByBucket, "totalDifferences")

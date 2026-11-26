@@ -194,7 +194,7 @@ class RunConclusionSupportTests {
         List<List<String>> asked = []
         Map a = args(doc, rules)
         a.file1 = [extractFile: extract("oms-r.json", []), keyFields: ["returnId"], idNormalizer: null, evidence: HOTWAX_EVIDENCE]
-        a.lookups = [[name: "orderInNetsuite", subject: "FILE_1", idField: "orderNetsuiteId", keyField: "internalId"]]
+        a.lookups = [[name: "orderInNetsuite", subject: "FILE_1", idField: "orderNetsuiteId", keyField: "internalId", systemEnumId: "NETSUITE_SUITEQL"]]
         a.fetchLookup = { Map lookup, List<String> ids -> asked.add(ids); return ["81": [internalId: "81", backordered: "2"]] }
 
         Map result = RunConclusionSupport.concludeRun(a)
@@ -204,6 +204,11 @@ class RunConclusionSupportTests {
         assertEquals(["C_NO_ORDER", "C_BACKORDER", "C_NOT_IN_NS", "C_BACKORDER"], ["R1", "R2", "R3", "R4"].collect { byId[it].code })
         assertEquals("2", ((List<Map>) byId.R2.checks).find { it.label == "Units backordered" }.value)
         assertEquals(2, result.counts.C_BACKORDER)
+        // DAR-BE-372 rule 2: what the lookup found rides on the row, so the finding keeps the record its rules read.
+        Map rows = ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it] }
+        assertEquals([[name: "orderInNetsuite", systemEnumId: "NETSUITE_SUITEQL", record: [internalId: "81", backordered: "2"]]], rows.R2.lookedUp)
+        assertEquals(null, rows.R3.lookedUp, "82 was asked and not found")
+        assertEquals(null, rows.R1.lookedUp, "R1 names no NetSuite order")
     }
 
     /**

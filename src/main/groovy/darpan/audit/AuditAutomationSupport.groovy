@@ -624,7 +624,11 @@ class AuditAutomationSupport {
                     recordData  : whole ?: null]
         }
         Set<String> seen = own.collect { "${rootSystem(it.systemEnumId as String)}|${it.recordType}|${it.recordId}".toString() } as Set
-        return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
+        // DAR-BE-372 rule 2: a record a conclusion lookup read (R13's HotWax order) is kept whole, ahead of the bare id
+        // the row names for it, so the finding says that system's status.
+        List<Map> lookedUp = lookedUpRecords(row)
+        return own + lookedUp.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
+                related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
                 orderLineRecords(row, file1Source, file2Source, sideConfigIds)
     }
 
@@ -677,6 +681,24 @@ class AuditAutomationSupport {
             id ? [systemEnumId: spec.system, recordType: spec.recordType, recordId: id,
                   internalId: internalId == id ? null : internalId, recordStatus: null] : null
         }.findAll()
+    }
+
+    /**
+     * DAR-BE-372. The records the row's conclusion lookups found (RunConclusionSupport `lookedUp`), each as its system's
+     * record named the way RELATED_IDS names it, with everything the lookup kept as its data. One the spec cannot name
+     * is left out.
+     */
+    static List<Map> lookedUpRecords(Map row) {
+        return ((row?.lookedUp ?: []) as List).findAll { it instanceof Map && ((Map) it).record instanceof Map }.collect { Map l ->
+            String system = rootSystem(l.systemEnumId as String)
+            Map record = (Map) l.record
+            Map spec = RELATED_IDS.find { it.system == system && relatedValue(record, it.id as List<String>) }
+            String id = spec ? relatedValue(record, spec.id as List<String>) : null
+            if (!id) return null
+            String internalId = spec.internalId ? relatedValue(record, [spec.internalId as String]) : null
+            [systemEnumId: system, recordType: spec.recordType, recordId: id, internalId: internalId == id ? null : internalId,
+             recordStatus: null, recordData: record]
+        }.findAll() as List<Map>
     }
 
     /** The first of fields with a value; "NO_..."/"NONE" is none, and a return's externalId is its Shopify RETURN. */

@@ -129,6 +129,18 @@ class ConclusionLookupSupport {
         return copy
     }
 
+    /**
+     * DAR-BE-372. What a lookup found for a finding's subject side, one entry per record found: {name, systemEnumId,
+     * record}. A `many` lookup gives one entry per record of its list. None when it found nothing.
+     */
+    static List<Map> answersFor(Map sideState, Map lookup, Map<String, ?> found) {
+        return idsOf(sideState, lookup).collectMany { String id ->
+            Object answer = found.get(id)
+            List<Map> records = answer instanceof Map ? [(Map) answer] : answer instanceof List ? ((List) answer).findAll { it instanceof Map } as List<Map> : []
+            records.collect { Map record -> [name: lookup.name, systemEnumId: lookup.systemEnumId, record: record] }
+        } as List<Map>
+    }
+
     /** The ids a finding's subject side names for a lookup, from every record under its key. */
     static Set<String> idsOf(Map sideState, Map lookup) {
         List<Map> records = (sideState?.records instanceof List) ? (List<Map>) sideState.records :

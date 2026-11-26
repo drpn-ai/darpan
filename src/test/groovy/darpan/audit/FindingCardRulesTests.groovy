@@ -57,6 +57,24 @@ class FindingCardRulesTests {
         assertTrue(facts.orderTotal != null, "a 0.00 total is a total")
     }
 
+    /**
+     * Rules 2 and 7 on R13: the check reads Shopify and asks HotWax through its omsOrder lookup. The HotWax order the
+     * lookup found is kept whole on the finding, so its card says HotWax's status, not a false "Missing".
+     */
+    @Test
+    void aRecordALookupFoundIsKeptWholeOnTheFinding() {
+        Map hotwax = [orderId: "M1300001", externalId: "19002956775555", statusId: "ORDER_COMPLETED"]
+        Map row = [type: "FINDING", id: "19002956775555", data: SHOPIFY_ORDER,
+                   lookedUp: [[name: "omsOrder", systemEnumId: "OMS_GQL", record: hotwax]]]
+        List<Map> records = AuditAutomationSupport.recordsOf([file1RecordType: "order"], row, [systemEnumId: "SHOPIFY"], null)
+        Map kept = records.find { it.systemEnumId == "OMS" }
+        assertEquals(["order", "M1300001", hotwax], [kept?.recordType, kept?.recordId, kept?.recordData])
+        assertEquals(1, records.count { it.systemEnumId == "OMS" }, "kept once")
+        assertEquals("Completed", AuditReportAssembler.recordFacts(kept.recordData as Map, "order").status)
+        assertEquals([], AuditAutomationSupport.lookedUpRecords([lookedUp: [[systemEnumId: "OMS_GQL", record: [statusId: "X"]]]]),
+                "a record nothing names is left out")
+    }
+
     /** Rule 1: a check's systems are the ones its words name, in their order, each once; HotWax and OMS are one. */
     @Test
     void aChecksSystemsAreTheOnesItsWordsName() {

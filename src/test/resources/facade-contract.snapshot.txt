@@ -551,6 +551,8 @@ SERVICE run Audit
   allow-remote: true
   IN:
     audit : String [required]
+    checks : List
+    checks.check : String
     fromDate : String [required]
     fullRead : Boolean
     thruDate : String [required]

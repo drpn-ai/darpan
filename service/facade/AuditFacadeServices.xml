@@ -796,7 +796,7 @@
     </service>
 
     <service verb="run" noun="Audit" allow-remote="true" authenticate="true">
-        <description>Play: runs every check of the audit now over the days picked, first to last inclusive (the tenant's zone),
+        <description>Play: runs every check of the audit (or only the checks named) now over the days picked, first to last inclusive (the tenant's zone),
             recording findings as the morning run does. Submitted to the background, one automation per run; the audit page
             shows the results as each finishes. Days in the period just ended record under that period (DAR-BE-178).
             Refused up front for days in the future or in a period ended before that.</description>
@@ -807,6 +807,9 @@
             <parameter name="fullRead" type="Boolean" default="false"><description>DAR-BE-122. Read every system for the
                 whole of the days picked. Off: each check reads the days since its last complete read and re-checks its
                 older open findings by key.</description></parameter>
+            <parameter name="checks" type="List"><description>DAR-BE-373. Check codes to play; none plays every check. Only the
+                automations of these checks run (each records every check it feeds). A code the audit does not have refuses
+                the play.</description><parameter name="check"/></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -825,7 +828,7 @@
                 <script>
                     try {
                         runs = darpan.audit.AuditSettingsSupport.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),
-                                java.time.LocalDate.parse(thruDate.trim()), fullRead == true)
+                                java.time.LocalDate.parse(thruDate.trim()), fullRead == true, checks as List)
                     } catch (java.time.format.DateTimeParseException e) {
                         ec.message.addError("The days must be YYYY-MM-DD.")
                     }

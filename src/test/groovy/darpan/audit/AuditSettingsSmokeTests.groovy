@@ -798,6 +798,42 @@ class AuditSettingsSmokeTests {
         }
     }
 
+    // DAR-BE-373 part (c) (gorjana 2026-11-26: R7 alone had to read November once): a play of named checks runs only
+    // their automations, and a check the audit does not have refuses the play before anything is made or read.
+    @Test
+    @Order(75)
+    void aPlayOfNamedChecksRunsOnlyTheirAutomations() {
+        List<Runnable> started = Collections.synchronizedList([] as List<Runnable>)
+        RunAdmission admission = new RunAdmission(8, 8, 85, { -> null }, { Runnable r -> started << r } as Executor)
+        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
+            throw new IllegalStateException("probe: stop before reading")
+        })
+        try {
+            String today = java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).toString()
+            Map unknown = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: today,
+                                               checks: ["open-in-netsuite", "no-such-check"]])
+            assertTrue(unknown.hadError as boolean, "a check the audit does not have refuses the play")
+            assertTrue((unknown.errorText as String).contains("no check no-such-check"), unknown.errorText as String)
+            assertEquals(0, started.size(), "nothing runs for a refused play")
+
+            Map one = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: today, checks: ["open-in-netsuite"]])
+            assertFalse(one.hadError as boolean, one.errorText as String)
+            assertEquals(["TSET_RS1"], one.runs*.savedRunId, "only the named check's automation runs")
+            assertEquals(1, started.size())
+
+            // Two checks on one run: their automation runs once.
+            Map shared = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: today,
+                                              checks: ["paid-without-opp", "paid-without-opp-2"]])
+            assertFalse(shared.hadError as boolean, shared.errorText as String)
+            assertEquals(["TSET_RS2"], shared.runs*.savedRunId)
+            new ArrayList<Runnable>(started).each { runOnItsOwnThread(it) }
+        } finally {
+            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationExecutionSupport.resetExecutionHooks()
+        }
+    }
+
     private void check(String checkId, String code, String ruleSetId, String statementCode) {
         insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: MINE, checkCode: code, label: code,
                 savedRunId: ruleSetId])

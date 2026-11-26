@@ -367,17 +367,30 @@ class AuditSettingsSupport {
     }
 
     /**
-     * Play: every check of the audit over [from, thru], days inclusive in the tenant's zone. Refused before anything runs
-     * when the days cannot be recorded (in the future, backwards, or in a period that ended before the one just ended).
+     * Play: every check of the audit over [from, thru], days inclusive in the tenant's zone, or (DAR-BE-373) only the
+     * checks named by code: then only their automations run, so a one-off read of one check does not read every system
+     * again. An automation records every check it feeds. Refused before anything runs when the days cannot be recorded
+     * (in the future, backwards, or in a period that ended before the one just ended) or a named check is not the audit's.
      * Answers the automations submitted.
      */
-    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead) {
+    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead,
+                         List<String> checkCodes = null) {
         ZoneId zone = ZoneId.of(tenantZone(ec))
         try {
             AuditAutomationSupport.pickedWindows(ec, audit, zone, LocalDate.now(zone), from, thru)
         } catch (IllegalArgumentException | IllegalStateException e) {
             ec.message.addError(e.message)
             return []
+        }
+        Set<String> picked = (checkCodes ?: []).collect { normalize(it as String) }.findAll { it } as Set<String>
+        if (picked) {
+            Set<String> known = (checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
+                    *.checkCode.collect { it as String }) as Set<String>
+            List<String> unknown = picked.findAll { !known.contains(it) }.sort()
+            if (unknown) {
+                ec.message.addError("Audit ${audit.auditCode} has no check ${unknown.join(', ')}.".toString())
+                return []
+            }
         }
         // DAR-BE-172: the automations a first play makes commit in their OWN transaction before a run is handed to
         // RunAdmission, whose pool starts it on another thread at once. Made in the request's transaction, that thread
@@ -387,6 +400,7 @@ class AuditSettingsSupport {
                 "Could not make audit ${audit.auditCode}'s automations".toString()) { ->
             ensureAutomations(ec, tenantId, audit)
             List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
+            if (picked) checks = checks.findAll { picked.contains(it.checkCode as String) }
             return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>)
                     .collect { [automationId: it.automationId, savedRunId: it.savedRunId] }
         }

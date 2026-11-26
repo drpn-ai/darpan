@@ -28,7 +28,7 @@ class LookupFacadeSmokeTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "lookup-facade")
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml", "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
         asSystem {
             ec.entity.makeValue("darpan.audit.Audit").setAll([auditId: "LKP_MC", companyUserGroupId: MINE, auditCode: "month-close",
@@ -145,7 +145,20 @@ class LookupFacadeSmokeTests {
                     firstFoundDate: java.sql.Date.valueOf("2026-11-20"), lastSeenDate: java.sql.Date.valueOf("2026-11-24")]).createOrUpdate()
         }
         Map out = call("lookup#Order", [value: "5550001"])
-        assertEquals(["F-LKP-1", "F-LKP-2"] as Set, ((out.lookup as Map).findings as List<Map>)*.findingId as Set)
+        assertTrue((((out.lookup as Map).findings as List<Map>)*.findingId as Set).containsAll(["F-LKP-1", "F-LKP-2"]))
+    }
+
+    @Test
+    void "a finding keyed by another system's id is attached through the records it names"() {
+        asSystem {
+            ec.entity.makeValue("darpan.audit.AuditFinding").setAll([findingId: "F-LKP-3", companyUserGroupId: MINE, statementId: "LKP_R1", checkId: "LKP_CHK",
+                    recordKey: "18979108061315|50861592150147", period: "2026-11", stateEnumId: "AUDFS_OPEN", headline: "Item OMS100/01 is completed and not billed",
+                    firstFoundDate: java.sql.Date.valueOf("2026-11-03"), lastSeenDate: java.sql.Date.valueOf("2026-11-24")]).createOrUpdate()
+            ec.entity.makeValue("darpan.audit.AuditFindingRecord").setAll([findingId: "F-LKP-3", recordSeqId: "01", companyUserGroupId: MINE,
+                    systemEnumId: "OMS_GQL", recordType: "orderItem", recordId: "OMS100/01"]).createOrUpdate()
+        }
+        Map out = call("lookup#Order", [value: "5550001"])
+        assertTrue("F-LKP-3" in ((out.lookup as Map).findings as List<Map>)*.findingId, "${(out.lookup as Map).findings}")
     }
 
     @Test

@@ -215,16 +215,24 @@ class OrderLookup {
         return current.collectMany { it instanceof Collection ? (Collection) it : [it] }.findAll { it instanceof Map } as List<Map>
     }
 
-    /** The tenant's open findings whose record key is any id seen, at most 50. */
+    /** The tenant's open findings of any id seen, at most 50: by the finding's own key, or by a record it names (its id,
+     *  internal id, or a line of it: M1210830/02, SO7371002/01), since a check keys its findings by its own compare id. */
     static List<Map> openFindings(def ec, String tenantId, Collection<String> ids) {
         if (!ids) return []
-        // An order's findings are keyed by the order (M1210830) or by one of its lines (M1210830/02, SO7371002/01).
         def ecf = ec.entity.conditionFactory
         List<String> keys = new ArrayList<String>(ids).take(60)
-        List conds = [ecf.makeCondition("recordKey", org.moqui.entity.EntityCondition.IN, keys)] +
-                keys.collect { String k -> ecf.makeCondition("recordKey", org.moqui.entity.EntityCondition.LIKE, k.replace("%", "").replace("_", "\\_") + "/%") }
+        Closure<List> idOrLine = { String field -> [ecf.makeCondition(field, org.moqui.entity.EntityCondition.IN, keys)] +
+                keys.collect { String k -> ecf.makeCondition(field, org.moqui.entity.EntityCondition.LIKE, k.replace("%", "").replace("_", "\\_") + "/%") } }
+        Set<String> findingIds = new LinkedHashSet<>()
+        ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
+                .condition(ecf.makeCondition(idOrLine("recordKey"), org.moqui.entity.EntityCondition.OR)).condition("stateEnumId", "AUDFS_OPEN")
+                .selectField("findingId").limit(50).useCache(false).list().each { findingIds << (it.findingId as String) }
+        ec.entity.find("darpan.audit.AuditFindingRecord").condition("companyUserGroupId", tenantId)
+                .condition(ecf.makeCondition(idOrLine("recordId") + [ecf.makeCondition("internalId", org.moqui.entity.EntityCondition.IN, keys)], org.moqui.entity.EntityCondition.OR))
+                .selectField("findingId").limit(200).useCache(false).list().each { findingIds << (it.findingId as String) }
+        if (!findingIds) return []
         return ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
-                .condition(ecf.makeCondition(conds, org.moqui.entity.EntityCondition.OR)).condition("stateEnumId", "AUDFS_OPEN")
+                .condition("findingId", org.moqui.entity.EntityCondition.IN, new ArrayList<String>(findingIds)).condition("stateEnumId", "AUDFS_OPEN")
                 .orderBy("-lastSeenDate").limit(50).useCache(false).list()
                 .collect { [findingId: it.findingId, recordKey: it.recordKey, headline: it.headline, period: it.period] }
     }

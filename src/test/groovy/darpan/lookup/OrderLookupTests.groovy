@@ -147,6 +147,24 @@ class OrderLookupTests {
     }
 
     @Test
+    void "a permissive tenant shape cannot let a quote, space or SQL comment into SuiteQL"() {
+        ["M1' OR '1'='1", "1 OR 1=1", "1--", "1/*", "a;b"].each { String bad ->
+            assertThrows(IllegalArgumentException, { OrderLookup.renderSuiteQl("SELECT 1 FROM t WHERE x = {value}", bad, ".*") }, bad)
+        }
+    }
+
+    @Test
+    void "valueFormat is one literal %s, never a format pattern"() {
+        assertEquals("gid://shopify/Order/5550001", OrderLookup.formatValue("gid://shopify/Order/%s", "5550001"))
+        assertEquals("5550001", OrderLookup.formatValue(null, "5550001"))
+        ["%1000000000s", "%s%s", "%d", "50%", "no placeholder"].each { String bad ->
+            assertNotNull(OrderLookup.formatRefusal(bad), bad)
+            assertThrows(IllegalArgumentException, { OrderLookup.formatValue(bad, "1") }, bad)
+        }
+        assertNull(OrderLookup.formatRefusal("externalId:%s orderTypeId:SALES_ORDER"))
+    }
+
+    @Test
     void "SuiteQL gets the value only after its shape check, quoted"() {
         assertEquals("SELECT id FROM transaction WHERE tranid = '#GOR123'",
                 OrderLookup.renderSuiteQl("SELECT id FROM transaction WHERE tranid = {value}", "#GOR123", null))

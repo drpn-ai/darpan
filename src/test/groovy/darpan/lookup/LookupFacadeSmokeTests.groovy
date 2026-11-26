@@ -122,6 +122,19 @@ class LookupFacadeSmokeTests {
     }
 
     @Test
+    void "a tenant read with a format pattern, an unsafe shape or an oversized template is refused"() {
+        Map fmt = call("save#TenantLookupRead", [readId: "MY_F", systemCode: "SHOPIFY", recordKind: "ORDER", keyField: "id",
+                queryTemplate: 'query($value: ID!){ order(id: $value){ id } }', valueFormat: "%1000000000s"])
+        assertTrue(fmt.hadError as boolean)
+        Map big = call("save#TenantLookupRead", [readId: "MY_B", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "x",
+                queryTemplate: "SELECT id FROM transaction WHERE x = {value} " + ("AND 1=1 " * 3000)])
+        assertTrue(big.hadError as boolean)
+        Map noValue = call("save#TenantLookupRead", [readId: "MY_N", systemCode: "NETSUITE", recordKind: "ORDER", keyField: "x",
+                queryTemplate: "SELECT id FROM transaction WHERE x = '1'"])
+        assertTrue(noValue.hadError as boolean, "a SuiteQL template must take {value}")
+    }
+
+    @Test
     void "the catalog lists reads without their templates, and links"() {
         Map cat = call("get#LookupCatalog", [:])
         Map read = (cat.reads as List<Map>)[0]

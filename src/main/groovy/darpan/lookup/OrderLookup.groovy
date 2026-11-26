@@ -18,6 +18,11 @@ import java.util.regex.Pattern
 class OrderLookup {
 
     static final String DEFAULT_SHAPE = "[A-Za-z0-9#_\\-.]{1,64}"
+    /** Every value bound into SuiteQL must also fit this, whatever a tenant read's own shape allows: no quote, space,
+     *  semicolon, comment marker or other SQL metacharacter can reach the query. */
+    static final Pattern SAFE_VALUE = Pattern.compile("[A-Za-z0-9#_.:@/]+(?:-[A-Za-z0-9#_.:@/]+)*")
+    static final int MAX_VALUE_LENGTH = 64
+    static final int MAX_TEMPLATE_LENGTH = 8000
     static final int DEFAULT_MAX_READS = 30
     static final int DEFAULT_TIMEOUT_SECONDS = 60
 
@@ -129,11 +134,14 @@ class OrderLookup {
     static Map liveQuery(def ec, Map read, Map connection, String value) {
         Map<String, String> sys = SYSTEMS.get(read.systemCode as String)
         if (sys == null) return [error: "unknown system ${read.systemCode}".toString()]
-        String passed = read.valueFormat ? String.format(read.valueFormat as String, value) : value
+        String passed
+        try { passed = formatValue(read.valueFormat as String, value) } catch (IllegalArgumentException e) { return [error: e.message] }
         Map params = [(sys.idParam): connection.id]
         if (read.systemCode == "NETSUITE") {
             try { params.sql = renderSuiteQl(read.queryTemplate as String, passed, read.valueShape as String) }
             catch (IllegalArgumentException e) { return [error: e.message] }
+            String refused = AgentQuerySupport.checkSuiteQl(params.sql as String)
+            if (refused) return [error: refused]
             params.limit = 50
         } else {
             params.document = read.queryTemplate
@@ -185,7 +193,11 @@ class OrderLookup {
     /** A tenant template must be read-only for its system: null when it is, else why not. */
     static String templateRefusal(String systemCode, String template) {
         if (!template?.trim()) return "The read needs a query template."
-        if (systemCode == "NETSUITE") return AgentQuerySupport.checkSuiteQl(template.replace("{value}", "'1'"))
+        if (template.length() > MAX_TEMPLATE_LENGTH) return "The query template is longer than ${MAX_TEMPLATE_LENGTH} characters.".toString()
+        if (systemCode == "NETSUITE") {
+            if (!template.contains("{value}")) return "A SuiteQL template takes the value as {value}."
+            return AgentQuerySupport.checkSuiteQl(template.replace("{value}", "'1'"))
+        }
         if (systemCode in ["OMS", "SHOPIFY"]) return AgentQuerySupport.checkGraphqlQuery(template)
         return "Unknown system ${systemCode}; NETSUITE, OMS or SHOPIFY.".toString()
     }
@@ -193,8 +205,27 @@ class OrderLookup {
     /** SuiteQL with {value} replaced by the value, quoted, once it fits the read's shape. Throws IllegalArgumentException. */
     static String renderSuiteQl(String template, String value, String shape) {
         String v = value ?: ""
-        if (!Pattern.compile(shape ?: DEFAULT_SHAPE).matcher(v).matches()) throw new IllegalArgumentException("'${v}' is not a value this read takes.".toString())
-        return template.replace("{value}", "'" + v.replace("'", "''") + "'")
+        if (v.length() > MAX_VALUE_LENGTH || !SAFE_VALUE.matcher(v).matches() || !Pattern.compile(shape ?: DEFAULT_SHAPE).matcher(v).matches()) {
+            throw new IllegalArgumentException("'${v}' is not a value this read takes.".toString())
+        }
+        return template.replace("{value}", "'" + v + "'")
+    }
+
+    /** valueFormat with its one literal %s replaced by the value (never a java.util.Formatter pattern). */
+    static String formatValue(String format, String value) {
+        if (!format) return value
+        String why = formatRefusal(format)
+        if (why) throw new IllegalArgumentException(why)
+        return format.replace("%s", value)
+    }
+
+    /** Null when the format is plain text with exactly one %s and no other %, else why not. */
+    static String formatRefusal(String format) {
+        if (!format) return null
+        if (format.length() > 200) return "The value format is longer than 200 characters."
+        int at = format.indexOf("%s")
+        if (at < 0 || format.indexOf("%s", at + 2) >= 0 || format.replace("%s", "").contains("%")) return "The value format takes the value as one %s and no other %."
+        return null
     }
 
     /** The record with only the read's default fields (dotted paths keep their nesting), or whole with all. */

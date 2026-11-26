@@ -60,6 +60,8 @@
                 <set field="refusal" from="darpan.lookup.OrderLookup.templateRefusal(systemForCheck as String, queryTemplate)"/>
                 <if condition="refusal"><return error="true" message="${refusal}"/></if>
             </if>
+            <set field="formatRefusal" from="darpan.lookup.OrderLookup.formatRefusal(valueFormat)"/>
+            <if condition="formatRefusal"><return error="true" message="${formatRefusal}"/></if>
             <service-call name="store#darpan.lookup.TenantLookupRead" disable-authz="true"
                     in-map="[companyUserGroupId: tenantId, readId: readId, systemCode: systemCode, recordKind: recordKind, keyField: keyField,
                              queryTemplate: queryTemplate, valueShape: valueShape, valueFormat: valueFormat, recordsAt: recordsAt,

@@ -15,14 +15,24 @@ class AcknowledgementNoteMigration {
     static final String ENTITY = "darpan.audit.AuditFindingAcknowledgement"
     static final String FIELD = "note"
 
-    /** The registered migration: AuditFindingAcknowledgement.note allows no value. */
+    /**
+     * The registered migration: AuditFindingAcknowledgement.note allows no value. The caller's transaction is suspended
+     * around the DDL: run#Migration runs inside one, and MySQL refuses DDL on a connection enlisted in an active XA
+     * transaction (prod 3.5.1: "XAER_RMFAIL: The command cannot be executed when global transaction is in the ACTIVE
+     * state"); a DDL statement commits on its own anyway, so it never belonged to the caller's transaction.
+     */
     static Map run(def ec, boolean dryRun) {
         def ed = ec.entity.getEntityDefinition(ENTITY)
-        Connection conn = ec.entity.getConnection(ec.entity.getEntityGroupName(ENTITY))
+        boolean suspended = ec.transaction.isTransactionInPlace() ? ec.transaction.suspend() : false
         try {
-            return allowNull(conn, ed.getFullTableName() as String, ed.getColumnName(FIELD) as String, dryRun)
+            Connection conn = ec.entity.getConnection(ec.entity.getEntityGroupName(ENTITY))
+            try {
+                return allowNull(conn, ed.getFullTableName() as String, ed.getColumnName(FIELD) as String, dryRun)
+            } finally {
+                conn.close()
+            }
         } finally {
-            conn.close()
+            if (suspended) ec.transaction.resume()
         }
     }
 

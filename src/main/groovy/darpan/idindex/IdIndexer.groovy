@@ -30,17 +30,25 @@ class IdIndexer {
     static final String ENTITY = "darpan.idindex.RecordIdIndex"
 
     /**
-     * A dataset read's file (records under one JSON document's "records", or a bare array) as one record per line, written
-     * beside it as .records.jsonl so Spark reads it line by line; a file already ending .jsonl is returned as it is.
+     * A dataset read's file (records under one JSON document's "records", or a bare array) as one record per line, in a temp
+     * file of the index's own (the caller deletes it) so Spark reads it line by line; a file already ending .jsonl is returned
+     * as it is.
      */
     static File toJsonLines(File readFile) {
         if (readFile.name.endsWith(".jsonl")) return readFile
-        File out = new File(readFile.parentFile, readFile.name + ".records.jsonl")
-        DatasetRefreshSupport.RecordFileIterator records = new DatasetRefreshSupport.RecordFileIterator(readFile)
+        // DAR-BE-383: a temp file of the index's own, never "<read>.records.jsonl" beside the read. That name is the run's own
+        // lines file (JsonRecordLines.SUFFIX), which this background index used to overwrite and then delete while the run's
+        // Spark read (Keep) was reading it: FILE_NOT_EXIST on prod runs and sync pulses from 3.5.0. The caller deletes it.
+        File out = File.createTempFile("idindex-", ".jsonl")
+        boolean written = false
+        DatasetRefreshSupport.RecordFileIterator records = null
         try {
+            records = new DatasetRefreshSupport.RecordFileIterator(readFile)
             out.withWriter("UTF-8") { Writer w -> while (records.hasNext()) { w.write(JsonOutput.toJson(records.next())); w.write("\n") } }
+            written = true
         } finally {
-            records.close()
+            records?.close()
+            if (!written) out.delete()
         }
         return out
     }

@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.*
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class IdIndexerSparkTests {
 
+    /** The run's own lines-file suffix (JsonRecordLines.SUFFIX), named here so the test reads as the prod path. */
+    private static class JsonRecordLinesSuffix { static final String SUFFIX = darpan.reconciliation.core.JsonRecordLines.SUFFIX }
+
     private SparkSession spark
     @TempDir
     File dir
@@ -85,6 +88,30 @@ class IdIndexerSparkTests {
         assertEquals(["1", "2"], IdIndexer.extract(spark, docLines, SHOPIFY, FIELDS).toList()*.key.sort())
         assertEquals(["3"], IdIndexer.extract(spark, IdIndexer.toJsonLines(arr), SHOPIFY, FIELDS).toList()*.key)
         assertNotEquals(doc, docLines, "the read's own file is left as it was")
+    }
+
+    /**
+     * DAR-BE-383. Prod 2026-11-26: the ID index's background read of a run's extract wrote and then deleted
+     * "<extract>.records.jsonl" beside it, the very file JsonRecordLines writes for that run's own Spark read (Keep), so the
+     * run (and every sync pulse) failed with FILE_NOT_EXIST. The indexer's lines file is its own, never beside the extract,
+     * and the run's file is left exactly as it was.
+     */
+    @Test
+    void "the index never writes or deletes the run's own lines file beside the extract"() {
+        File extract = new File(dir, "netsuite-orders-null-null.json")
+        extract.text = '{"metadata":{},"records":[{"id":"1","name":"#A"}]}'
+        File runsLines = new File(dir, "netsuite-orders-null-null.json" + JsonRecordLinesSuffix.SUFFIX)
+        runsLines.text = '{"id":"KEEP"}\n'
+        long before = runsLines.lastModified()
+
+        File own = IdIndexer.toJsonLines(extract)
+        assertNotEquals(runsLines.canonicalPath, own.canonicalPath, "the index writes a file of its own")
+        assertNotEquals(extract.parentFile.canonicalPath, own.parentFile.canonicalPath, "not beside the extract")
+        assertEquals('{"id":"KEEP"}\n', runsLines.text, "the run's lines file is untouched")
+        assertEquals(before, runsLines.lastModified())
+        assertEquals(["1"], IdIndexer.extract(spark, own, SHOPIFY, FIELDS).toList()*.key)
+        own.delete()
+        assertTrue(runsLines.isFile(), "deleting the index's file leaves the run's")
     }
 
     private File lines(String... json) {

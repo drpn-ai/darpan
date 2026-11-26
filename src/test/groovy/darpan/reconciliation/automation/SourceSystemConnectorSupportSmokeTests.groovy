@@ -62,6 +62,20 @@ class SourceSystemConnectorSupportSmokeTests {
         assertFalse((boolean) c.preserveWindowInstants)
     }
 
+    /**
+     * DAR-BE-377: the pulse fields resolve through toConnectorMap (its explicit field list), not only sit in the seed:
+     * HotWax orders and Shopify orders can be a pulse's upstream side, an endpoint without the fields cannot.
+     */
+    @Test
+    void pulseFieldsResolveForTheEndpointsAPulseCanReadUpstream() {
+        assertEquals([createdField: "orderDate", nameField: "orderName"], darpan.pulse.SyncPulseSupport.pulseFieldsOf(ec, "OMS_GQL"))
+        assertEquals([createdField: "createdAt", nameField: "name"], darpan.pulse.SyncPulseSupport.pulseFieldsOf(ec, "SHOPIFY"))
+        assertEquals("createdAt", SourceSystemConnectorSupport.resolveBySystemEnumId(ec, "SHOPIFY").pulseCreatedField)
+        ["OMS_RETURNS_GQL", "OMS_PRODUCTS_GQL", "NETSUITE", null, ""].each {
+            assertFalse(darpan.pulse.SyncPulseSupport.canPulse(ec, it as String), "${it} must not be a pulse upstream")
+        }
+    }
+
     @Test
     void noHotWaxRestConnectorResolves() {
         // DAR-BE-052: HotWax is read over GraphQL only; the REST rows are gone from the seed.

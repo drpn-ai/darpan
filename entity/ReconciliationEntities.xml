@@ -1454,6 +1454,15 @@
                 Spark before the tenant's source filters; an entry is skipped when the side sets one of its appliesUnless
                 options to that value. They never appear among a side's configured exclusions. Blank: none.</description>
         </field>
+        <field name="pulseCreatedField" type="text-short">
+            <description>DAR-BE-377. The record field holding when a record was created (orderDate for HotWax orders, createdAt
+                for Shopify orders). A sync pulse reads this endpoint as a check's upstream side only when it is set, and dates
+                each upstream record by it. Blank: the endpoint cannot be a pulse's upstream side.</description>
+        </field>
+        <field name="pulseNameField" type="text-short">
+            <description>DAR-BE-377. The record field a sync pulse shows as a waiting record's name (orderName for HotWax orders,
+                name for Shopify orders). Blank: the record's key.</description>
+        </field>
         <field name="datasetReadParametersJson" type="text-medium">
             <description>DAR-BE-318. Extract parameters every dataset read of this endpoint sends, as a JSON object (a run never
                 sends them), e.g. a longer side-file list for a 60-day read. Blank: none.</description>

@@ -30,7 +30,7 @@ class SyncPulseReaderTests {
                 [orderId: "O1b", orderName: "#GOR1", orderDate: "2026-11-21T11:00:00Z"],
         ])
 
-        Map read = SyncPulseReader.upstreamRecords(file, "orderName")
+        Map read = SyncPulseReader.upstreamRecords(file, "orderName", "orderDate", "orderName")
 
         assertEquals([
                 [key: "#GOR1", orderName: "#GOR1", createdAt: Instant.parse("2026-11-21T10:15:00Z"), otherKey: "#GOR1"],
@@ -45,9 +45,33 @@ class SyncPulseReaderTests {
     @Test
     void recordsKeyedByAnotherFieldCarryThatField() {
         File file = json("up.json", [[orderId: "O1", orderName: "#GOR1", externalId: "5550001", orderDate: "2026-11-21T10:15:00Z"]])
-        Map read = SyncPulseReader.upstreamRecords(file, "externalId")
+        Map read = SyncPulseReader.upstreamRecords(file, "externalId", "orderDate", "orderName")
         assertEquals([[key: "5550001", orderName: "#GOR1", createdAt: Instant.parse("2026-11-21T10:15:00Z"), otherKey: "5550001"]], read.records)
-        assertEquals([], SyncPulseReader.upstreamRecords(null, "externalId").records, "no file, no records")
+        assertEquals([], SyncPulseReader.upstreamRecords(null, "externalId", "orderDate", "orderName").records, "no file, no records")
+    }
+
+    /**
+     * DAR-BE-377: a Shopify order (as extract#ShopifyOrders writes it: id = legacy id, name, createdAt ISO text) is dated and
+     * named by the Shopify connector's fields. Read with HotWax's field names it would carry no date at all and every order
+     * would be skipped: the bug a hard-coded orderDate would hide as an empty, healthy-looking pulse.
+     */
+    @Test
+    void shopifyOrdersAreDatedAndNamedByTheirConnectorsFields() {
+        File file = json("shopify.json", [
+                [id: "6123456789012", legacyResourceId: "6123456789012", name: "#GOR196940093", createdAt: "2026-11-27T08:01:02Z"],
+                [id: "6123456789013", name: "#GOR196940094", createdAt: "not a date"],
+        ])
+        Map read = SyncPulseReader.upstreamRecords(file, "id", "createdAt", "name")
+        assertEquals([[key: "6123456789012", orderName: "#GOR196940093", createdAt: Instant.parse("2026-11-27T08:01:02Z"),
+                       otherKey: "6123456789012"]], read.records)
+        assertEquals(["1 upstream record(s) skipped: no createdAt that reads as a date and time."], read.warnings)
+
+        Map asHotwax = SyncPulseReader.upstreamRecords(file, "id", "orderDate", "orderName")
+        assertEquals([], asHotwax.records, "HotWax's field names find no date on a Shopify order")
+        assertEquals(["2 upstream record(s) skipped: no orderDate that reads as a date and time."], asHotwax.warnings)
+
+        Map unnamed = SyncPulseReader.upstreamRecords(file, "id", "createdAt", null)
+        assertEquals(null, unnamed.records[0].orderName, "no name field: the pulse shows the key")
     }
 
     @Test
@@ -129,10 +153,10 @@ class SyncPulseReaderTests {
     @Test
     void upstreamRecordsSkipWhatKeepSetAside() {
         File file = json("up.json", UPSTREAM)
-        Map before = SyncPulseReader.upstreamRecords(file, "orderName")
+        Map before = SyncPulseReader.upstreamRecords(file, "orderName", "orderDate", "orderName")
         keep(file, [1L, 3L])
 
-        Map read = SyncPulseReader.upstreamRecords(file, "orderName")
+        Map read = SyncPulseReader.upstreamRecords(file, "orderName", "orderDate", "orderName")
 
         assertEquals([
                 [key: "#GOR1", orderName: "#GOR1", createdAt: Instant.parse("2026-11-21T10:15:00Z"), otherKey: "#GOR1"],
@@ -146,10 +170,10 @@ class SyncPulseReaderTests {
     @Test
     void withNoKeepSummaryTheUpstreamReadIsTodays() {
         File file = json("up.json", UPSTREAM)
-        Map today = SyncPulseReader.upstreamRecords(file, "orderName")
+        Map today = SyncPulseReader.upstreamRecords(file, "orderName", "orderDate", "orderName")
         KeepArtifacts.writeRows(file, [[1L, "A:1"]].iterator())
 
-        assertEquals(today, SyncPulseReader.upstreamRecords(file, "orderName"), "the summary decides, not a rows file")
+        assertEquals(today, SyncPulseReader.upstreamRecords(file, "orderName", "orderDate", "orderName"), "the summary decides, not a rows file")
         assertEquals(["1 upstream record(s) skipped: no orderDate that reads as a date and time."], today.warnings)
     }
 

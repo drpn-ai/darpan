@@ -47,16 +47,19 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
+        // DAR-BE-377: the connector rows say which endpoints a pulse can read upstream
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         seedTenant(A, "Krewe")
         seedTenant(B, "Gorjana")
         automation("AUTO_A", A)
         automation("AUTO_B", B)
         automation("AUTO_A_SHOP", A)
-        // Unscheduled, so it is not a peak target or a held run: it only carries the pair whose upstream is not HotWax.
+        // Unscheduled, so it is not a peak target or a held run: it only carries the pair whose upstream a pulse cannot read
+        // (NetSuite: its connector names no pulseCreatedField, DAR-BE-377).
         ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: "AUTO_A_SHOP", scheduleExpr: null]).update()
         pair(PAIR_A, "AUTO_A", A, "OMS_GQL", "NETSUITE")
         pair(PAIR_B, "AUTO_B", B, "OMS_GQL", "NETSUITE")
-        pair(PAIR_C, "AUTO_A_SHOP", A, "SHOPIFY", "OMS_GQL")
+        pair(PAIR_C, "AUTO_A_SHOP", A, "NETSUITE", "OMS_GQL")
         // PAIR_A's check keys both sides by one plain field; PAIR_D's check has no key at all, so it cannot pulse.
         ec.entity.makeValue("darpan.rule.RuleSet").setAll([ruleSetId: "RS_A", ruleSetName: "Check A", companyUserGroupId: A,
                 explosionPath: "records", primaryKeyPath: "orderId"]).createOrUpdate()
@@ -194,11 +197,11 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, pulseEveryMinutes: 120]).ok as boolean)
         assertNull(syncRow(period, PAIR_A).allowanceMinutes)
         assertEquals(120, syncRow(period, PAIR_A).pulseEveryMinutes as int)
-        Map nonHotwax = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C, pulseEveryMinutes: 60])
-        assertFalse(nonHotwax.ok as boolean)
-        assertEquals(["A pulse needs HotWax as the upstream side."], nonHotwax.errors)
+        Map unreadable = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C, pulseEveryMinutes: 60])
+        assertFalse(unreadable.ok as boolean)
+        assertEquals(["A pulse needs HotWax or Shopify orders as the upstream side."], unreadable.errors)
         assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C, allowanceMinutes: 30, pulseEveryMinutes: 0]).ok as boolean,
-                "an off pulse and an allowance are fine on a non-HotWax upstream")
+                "an off pulse and an allowance are fine on any upstream")
         assertTrue(call("delete#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C]).ok as boolean)
         Map bad = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 5])
         assertFalse(bad.ok as boolean)

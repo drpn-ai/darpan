@@ -232,7 +232,10 @@ class SourceSystemConnectorSupport {
                 excludedRecordsSidecar     : readString(record, "excludedRecordsSidecar")?.toUpperCase(),
                 servingProjectionServiceName: readString(record, "servingProjectionServiceName"),
                 datasetReadParametersJson  : readString(record, "datasetReadParametersJson"),
-                enabled                    : isEnabled(record),
+                // DAR-BE-377: set = a sync pulse can read this endpoint as a check's upstream side
+                pulseCreatedField          : readString(record, "pulseCreatedField"),
+                pulseNameField             : readString(record, "pulseNameField"),
+                enabled                   : isEnabled(record),
         ] as Map<String, Object>
     }
 }

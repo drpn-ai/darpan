@@ -52,9 +52,6 @@ class SyncPulseReader {
     private static final Logger logger = LoggerFactory.getLogger(SyncPulseReader)
 
     static final String PULSE_FOLDER = "sync-pulse"
-    /** The record field a pulse dates an upstream record by. */
-    static final String CREATED_FIELD = "orderDate"
-    static final String NAME_FIELD = "orderName"
     /** The keys a NetSuite read by key accepts (NsSuiteQlOrderSupport.lookupKeyList; they reach SuiteQL by interpolation). */
     static final String KEY_PATTERN = /[A-Za-z0-9#_.\-]{1,64}/
     /** Bookkeeping only: a read by key sends no lookupWithinWindow, so the target ignores this window. */
@@ -76,6 +73,9 @@ class SyncPulseReader {
     /**
      * The upstream side of the pair's check for [from, thru) on its window field, with the side's filters.
      *
+     * <p>DAR-BE-377: each record is dated and named by the fields the upstream endpoint's connector names
+     * (SyncPulseSupport.pulseFieldsOf: orderDate / orderName for HotWax orders, createdAt / name for Shopify orders).</p>
+     *
      * @return [ok, records: [[key, orderName, createdAt (Instant), otherKey]], errors, warnings]; key is the upstream
      *         side's join key value, otherKey the value the target side is read by (the same value: the check joins on it)
      */
@@ -83,9 +83,11 @@ class SyncPulseReader {
         return run(ec, pair, automation, "upstream", [records: []]) { Map sides, String location ->
             if (from == null || thru == null || !from.isBefore(thru)) throw new IllegalArgumentException("A pulse reads a window that ends after it starts.")
             if (AutomationExecutionSupport.isStateWindowMode(automation)) throw new IllegalStateException("A pulse reads a window; this check reads by status.")
+            Map fields = SyncPulseSupport.pulseFieldsOf(ec, normalize(readField(sides.upstream, "systemEnumId")))
+            if (fields == null) throw new IllegalStateException(SyncPulseFacadeSupport.E_UPSTREAM)
             Map window = [childWindowStartDate: Timestamp.from(from), childWindowEndDate: Timestamp.from(thru)]
             File file = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String, false).file
-            Map read = upstreamRecords(file, sides.upstreamKey as String)
+            Map read = upstreamRecords(file, sides.upstreamKey as String, fields.createdField as String, fields.nameField as String)
             return [ok: true, records: read.records, errors: [], warnings: read.warnings]
         }
     }
@@ -114,24 +116,25 @@ class SyncPulseReader {
     // ------------------------------------------------------------------------------------------------- pure parts
 
     /**
-     * The records of an upstream extract file: key from keyField, createdAt from orderDate, each key once (the first). A
-     * record with no key, or no orderDate that reads as an instant, is skipped, each kind with one warning. No file: none.
+     * The records of an upstream extract file: key from keyField, createdAt from createdField, orderName from nameField
+     * (none when blank), each key once (the first). A record with no key, or no createdField value that reads as an
+     * instant, is skipped, each kind with one warning. No file: none.
      */
-    static Map upstreamRecords(File file, String keyField) {
+    static Map upstreamRecords(File file, String keyField, String createdField, String nameField) {
         List<Map> records = []
         Set<String> seen = new HashSet<String>()
         int noKey = 0, noDate = 0
         if (file != null && file.exists()) forEachPresentRecord(file) { Map r ->
             String key = normalize(r.get(keyField))
             if (!key) { noKey++; return }
-            Instant createdAt = createdAt(r.get(CREATED_FIELD))
+            Instant createdAt = createdAt(r.get(createdField))
             if (createdAt == null) { noDate++; return }
             if (!seen.add(key)) return
-            records << [key: key, orderName: normalize(r.get(NAME_FIELD)), createdAt: createdAt, otherKey: key]
+            records << [key: key, orderName: nameField ? normalize(r.get(nameField)) : null, createdAt: createdAt, otherKey: key]
         }
         List<String> warnings = []
         if (noKey) warnings << "${noKey} upstream record(s) skipped: no ${keyField}.".toString()
-        if (noDate) warnings << "${noDate} upstream record(s) skipped: no ${CREATED_FIELD} that reads as a date and time.".toString()
+        if (noDate) warnings << "${noDate} upstream record(s) skipped: no ${createdField} that reads as a date and time.".toString()
         return [records: records, warnings: warnings]
     }
 

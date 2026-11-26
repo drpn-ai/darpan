@@ -12,7 +12,7 @@
             RunAdmission (label "pulse &lt;syncPairId&gt;"), where it runs on its own thread with its own execution context.
             A pulse refused a slot writes a SKIPPED sample and is not queued; one that RunAdmission queues after all (another start
             took the slot between the check and the submit) writes nothing now and samples at the moment it starts; a pulse of the same pair still in flight, and a
-            pair whose check is missing, archived, inactive or not HotWax upstream, are skipped silently. Never fails: one bad
+            pair whose check is missing, archived, inactive or whose upstream endpoint a pulse cannot read (no pulseCreatedField), are skipped silently. Never fails: one bad
             pair never stops the others. Returns at once; each pulse reports itself on its own SyncPulseSample.</description>
         <in-parameters>
             <parameter name="nowTimestamp" type="Timestamp"><description>The scan instant; blank is now.</description></parameter>

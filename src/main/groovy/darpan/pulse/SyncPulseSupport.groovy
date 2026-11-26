@@ -8,6 +8,7 @@ import darpan.peak.PeakPeriodSupport
 import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.entity.EntityCondition
@@ -54,7 +55,6 @@ class SyncPulseSupport {
     static final String OK = "SPS_OK"
     static final String FAILED = "SPS_FAILED"
     static final String SKIPPED = "SPS_SKIPPED"
-    static final String HOTWAX_ORDERS = "OMS_GQL"
     static final String LABEL_PREFIX = "pulse "
     /** The job ticks every 5 minutes with some jitter: a pulse is due this much early rather than a whole tick late. */
     static final Duration DUE_SLACK = Duration.ofMinutes(2)
@@ -428,7 +428,7 @@ class SyncPulseSupport {
 
     /**
      * One pulse of a pair at now: reads, classifies, opens and closes SyncPulseOrder rows, writes the sample and stamps the
-     * pair. A pair whose check is missing, archived, inactive or not HotWax upstream is skipped silently (skipped: true,
+     * pair. A pair whose check is missing, archived, inactive or whose upstream endpoint a pulse cannot read (canPulse) is skipped silently (skipped: true,
      * nothing written). Never throws: anything unexpected writes a FAILED sample and changes no order.
      *
      * @return [status, sample, newlyPast: List of order maps, closed: List of order maps, waitingCount,
@@ -622,8 +622,8 @@ class SyncPulseSupport {
     // ------------------------------------------------------------------------------------------- reads
 
     /**
-     * The pair's check, when it may pulse: present in the pair's tenant, active, not archived, and HotWax orders
-     * (OMS_GQL) on the pair's upstream side. Else null.
+     * The pair's check, when it may pulse: present in the pair's tenant, active, not archived, and an endpoint a pulse can
+     * read upstream (canPulse) on the pair's upstream side. Else null.
      */
     static Map pulseableAutomation(def ec, Map pair) {
         String tenantId = normalize(pair?.get("companyUserGroupId"))
@@ -638,9 +638,23 @@ class SyncPulseSupport {
         def source = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.reconciliation.ReconciliationAutomationSource", WHY)
                 .condition("automationId", automationId).condition("fileSide", upstreamSide)
                 .condition("companyUserGroupId", tenantId).useCache(false).list().find()
-        if (normalize(source?.get("systemEnumId")) != HOTWAX_ORDERS) return null
+        if (!canPulse(ec, normalize(source?.get("systemEnumId")))) return null
         return new LinkedHashMap(automation.getMap())
     }
+
+    /**
+     * DAR-BE-377. The fields a pulse reads an upstream record of systemEnumId by, from its connector row: [createdField (when
+     * the record was created), nameField (what to show, or null for the key)]; null when the connector sets no
+     * pulseCreatedField, so a pulse cannot read that endpoint upstream. Which systems qualify is data, never a name in code.
+     */
+    static Map pulseFieldsOf(def ec, String systemEnumId) {
+        Map connector = systemEnumId ? SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId) : null
+        String created = normalize(connector?.get("pulseCreatedField"))
+        return created ? [createdField: created, nameField: normalize(connector.get("pulseNameField"))] : null
+    }
+
+    /** DAR-BE-377. A pulse can read systemEnumId as a check's upstream side (pulseFieldsOf is set). */
+    static boolean canPulse(def ec, String systemEnumId) { return pulseFieldsOf(ec, systemEnumId) != null }
 
     /** The tenant's local date at now and its peak periods from that date. */
     private static Map tenantDay(def ec, String tenantId, Instant now) {

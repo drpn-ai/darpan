@@ -12,8 +12,8 @@ class SyncPulseFacadeSupportTests {
     private static final Map DAILY = [relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
     private static final Map OK_INPUT = [upstreamSide: "FILE_1", allowanceMinutes: 120, pulseEveryMinutes: 60]
 
-    private static List<String> check(Map input = OK_INPUT, Map automation = DAILY, String system = "OMS_GQL", boolean dup = false, boolean chat = true) {
-        return SyncPulseFacadeSupport.validate(input, automation, system, dup, chat)
+    private static List<String> check(Map input = OK_INPUT, Map automation = DAILY, boolean canPulse = true, boolean dup = false, boolean chat = true) {
+        return SyncPulseFacadeSupport.validate(input, automation, canPulse, dup, chat)
     }
 
     @Test
@@ -39,7 +39,7 @@ class SyncPulseFacadeSupportTests {
     }
 
     @Test
-    void oneSyncPairPerRun() { assertEquals(["That run already has a sync pair."], check(OK_INPUT, DAILY, "OMS_GQL", true)) }
+    void oneSyncPairPerRun() { assertEquals(["That run already has a sync pair."], check(OK_INPUT, DAILY, true, true)) }
 
     @Test
     void allowanceIsFifteenMinutesToFortyEightHours() {
@@ -56,14 +56,14 @@ class SyncPulseFacadeSupportTests {
     }
 
     @Test
-    void aPulseNeedsHotWaxUpstreamButAnAllowanceDoesNot() {
-        assertEquals(["A pulse needs HotWax as the upstream side."], check(OK_INPUT, DAILY, "SHOPIFY"))
-        assertEquals([], check(OK_INPUT + [pulseEveryMinutes: null], DAILY, "SHOPIFY"))
+    void aPulseNeedsAnUpstreamItCanReadButAnAllowanceDoesNot() {
+        assertEquals(["A pulse needs HotWax or Shopify orders as the upstream side."], check(OK_INPUT, DAILY, false))
+        assertEquals([], check(OK_INPUT + [pulseEveryMinutes: null], DAILY, false))
     }
 
     @Test
     void aChatSpaceOfAnotherTenantIsRefused() {
-        assertEquals(["Choose a chat space of this tenant."], check(OK_INPUT, DAILY, "OMS_GQL", false, false))
+        assertEquals(["Choose a chat space of this tenant."], check(OK_INPUT, DAILY, true, false, false))
     }
 
     @Test
@@ -111,10 +111,10 @@ class SyncPulseFacadeSupportTests {
 
     @Test
     void theKeyRefusalOnlyAppliesWhenAPulseIsOn() {
-        List<String> on = SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, "OMS_GQL", false, true, SyncPulseFacadeSupport.E_KEY)
+        List<String> on = SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, true, false, true, SyncPulseFacadeSupport.E_KEY)
         assertEquals([SyncPulseFacadeSupport.E_KEY], on)
         // validate is only handed a block when a cadence is set; with a cadence of null the block is ignored too
-        assertEquals([], SyncPulseFacadeSupport.validate(OK_INPUT + [pulseEveryMinutes: null], DAILY, "OMS_GQL", false, true, SyncPulseFacadeSupport.E_KEY))
-        assertEquals([SyncPulseFacadeSupport.E_HOTWAX], SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, "SHOPIFY", false, true, SyncPulseFacadeSupport.E_KEY))
+        assertEquals([], SyncPulseFacadeSupport.validate(OK_INPUT + [pulseEveryMinutes: null], DAILY, true, false, true, SyncPulseFacadeSupport.E_KEY))
+        assertEquals([SyncPulseFacadeSupport.E_UPSTREAM], SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, false, false, true, SyncPulseFacadeSupport.E_KEY))
     }
 }

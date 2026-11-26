@@ -36,7 +36,8 @@ class SyncPulseFacadeCrossTenantSmokeTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "sync-pulse-facade-cross-tenant-smoke")
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SyncPulseSeedData.xml", "component://darpan/data/DarpanSystemSourceSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SyncPulseSeedData.xml", "component://darpan/data/DarpanSystemSourceSeedData.xml",
+                "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         seedTenant(A, "Krewe")
         seedTenant(B, "Gorjana")
@@ -136,8 +137,9 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         actAs(A)
         assertEquals(["Choose a daily check."], call("save#SyncPair", [automationId: "SPF_A_WEEKLY", upstreamSide: "FILE_1", allowanceMinutes: 60]).errors)
         assertEquals(["That run already has a sync pair."], call("save#SyncPair", [automationId: "SPF_A_DAILY", upstreamSide: "FILE_1", allowanceMinutes: 60]).errors)
-        assertEquals(["A pulse needs HotWax as the upstream side."],
-                call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_1", allowanceMinutes: 60, pulseEveryMinutes: 120]).errors)
+        // DAR-BE-377: NetSuite's connector names no pulseCreatedField, so its side cannot be a pulse's upstream
+        assertEquals(["A pulse needs HotWax or Shopify orders as the upstream side."],
+                call("save#SyncPair", [syncPairId: pairA, automationId: "SPF_A_DAILY", upstreamSide: "FILE_2", allowanceMinutes: 60, pulseEveryMinutes: 120]).errors)
         assertEquals(["Choose a chat space of this tenant."],
                 call("save#SyncPair", [syncPairId: pairA, automationId: "SPF_A_DAILY", upstreamSide: "FILE_1", allowanceMinutes: 60, chatSpaceId: "SPF_CHAT_B"]).errors)
         assertEquals([darpan.pulse.SyncPulseFacadeSupport.E_KEY],
@@ -145,8 +147,9 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         Map nokey = call("save#SyncPair", [automationId: "SPF_A_NOKEY", upstreamSide: "FILE_1", allowanceMinutes: 60])
         assertTrue(nokey.ok as boolean, "an allowance alone needs no key: ${nokey.errors}")
         assertTrue(call("delete#SyncPair", [syncPairId: nokey.syncPairId]).ok as boolean)
-        Map shop = call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_1", allowanceMinutes: 60])
-        assertTrue(shop.ok as boolean, "an allowance alone is fine with any upstream: ${shop.errors}")
+        Map shop = call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_1", allowanceMinutes: 60, pulseEveryMinutes: 120])
+        assertTrue(shop.ok as boolean, "DAR-BE-377: Shopify orders upstream can pulse: ${shop.errors}")
+        assertEquals(120, readPair((String) shop.syncPairId).pulseEveryMinutes as int)
         assertTrue(call("delete#SyncPair", [syncPairId: shop.syncPairId]).ok as boolean)
     }
 

@@ -303,11 +303,11 @@ class PeakPeriodFacadeSupport {
         return errors
     }
 
-    /** True when the pair's upstream side reads HotWax orders (OMS_GQL), the only system a pulse can sample. */
-    static boolean upstreamIsHotwax(def ec, String tenantId, Map pair) {
+    /** True when the pair's upstream side is an endpoint a pulse can read upstream (SyncPulseSupport.canPulse, DAR-BE-377). */
+    static boolean upstreamCanPulse(def ec, String tenantId, Map pair) {
         def source = rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
                 .condition("automationId", pair.get("automationId")).condition("fileSide", pair.get("upstreamSide")).list().find()
-        return normalize(source?.get("systemEnumId")) == darpan.pulse.SyncPulseSupport.HOTWAX_ORDERS
+        return darpan.pulse.SyncPulseSupport.canPulse(ec, normalize(source?.get("systemEnumId")))
     }
 
     /**

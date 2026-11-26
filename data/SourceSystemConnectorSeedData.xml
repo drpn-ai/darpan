@@ -29,6 +29,8 @@
             keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId,currencyUomId,billToCustomer,shipGroups"
             filterParameterName="sourceFilters"
             pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            pulseCreatedField="orderDate"
+            pulseNameField="orderName"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ORDER_CREATED":"Created","ORDER_APPROVED":"Approved","ORDER_COMPLETED":"Completed","ORDER_CANCELLED":"Cancelled"},"facts":["orderName","orderId","externalId","grandTotal"]}'
             enabled="Y"/>
@@ -78,6 +80,8 @@
             filterParameterName="sourceFilters"
             evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}'
             extractOptionsJson='[{"name":"withLineItems","label":"Order lines","type":"boolean"}]'
+            pulseCreatedField="createdAt"
+            pulseNameField="name"
             enabled="Y"/>
 
     <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its

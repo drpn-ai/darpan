@@ -292,8 +292,8 @@
                 <set field="validationErrors" from="darpan.peak.PeakPeriodFacadeSupport.validateSync(allowanceMinutes, pulseEveryMinutes)"/>
                 <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0 &amp;&amp; !darpan.peak.PeakPeriodFacadeSupport.upstreamIsHotwax(ec, tenantId, pairRow.getMap())">
-                <message error="true">A pulse needs HotWax as the upstream side.</message>
+            <if condition="!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0 &amp;&amp; !darpan.peak.PeakPeriodFacadeSupport.upstreamCanPulse(ec, tenantId, pairRow.getMap())">
+                <message error="true">${darpan.pulse.SyncPulseFacadeSupport.E_UPSTREAM}</message>
             </if>
             <set field="pulseBlock" from="(!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0) ? darpan.peak.PeakPeriodFacadeSupport.pulseBlockOf(ec, tenantId, pairRow.getMap()) : null"/>
             <if condition="pulseBlock">

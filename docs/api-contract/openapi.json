@@ -41655,7 +41655,7 @@
                         "type": "boolean"
                     }
                 },
-                "description": "Create or update one sync pair of the active tenant. A blank pulseEveryMinutes is pulse off and a blank chatSpaceId is no chat space (both stored null, never the old value); isActive and hourlySummary keep the stored value when omitted. One pair per automation; a pulse needs HotWax orders upstream."
+                "description": "Create or update one sync pair of the active tenant. A blank pulseEveryMinutes is pulse off and a blank chatSpaceId is no chat space (both stored null, never the old value); isActive and hourlySummary keep the stored value when omitted. One pair per automation; a pulse needs an upstream endpoint whose connector dates its records (pulseCreatedField: HotWax or Shopify orders)."
             },
             "SaveSyncPairResult": {
                 "type": "object",

@@ -30,7 +30,8 @@ class SyncPulseFacadeSupport {
 
     static final String E_DAILY = "Choose a daily check."
     static final String E_DUPLICATE = "That run already has a sync pair."
-    static final String E_HOTWAX = "A pulse needs HotWax as the upstream side."
+    /** DAR-BE-377: the endpoints whose connector sets pulseCreatedField (SyncPulseSupport.pulseFieldsOf). */
+    static final String E_UPSTREAM = "A pulse needs HotWax or Shopify orders as the upstream side."
     static final String E_ALLOWANCE = "Allowance must be 15 minutes to 48 hours."
     static final String E_CADENCE = "Pulse must be every 1, 2, 3, 4 or 6 hours, or off."
     static final String E_KEY = "A pulse needs a check that pairs orders by one plain key field on both sides."
@@ -49,12 +50,13 @@ class SyncPulseFacadeSupport {
      * Error sentences for a pair about to be saved; empty when valid.
      * @param p allowanceMinutes, pulseEveryMinutes, upstreamSide (the caller's input)
      * @param automation the tenant's active, unarchived automation named by the caller, or null when there is none
-     * @param upstreamSystemEnumId systemEnumId of the automation's source on the chosen side
+     * @param upstreamCanPulse the automation's source on the chosen side is an endpoint a pulse can read upstream
+     *        (SyncPulseSupport.canPulse)
      * @param duplicate another pair of the tenant already watches this automation
      * @param chatSpaceOk the chat space is blank or belongs to the tenant
      * @param pulseBlock why the check cannot be pulsed (pulseBlockFor), or null; refused only when a cadence is set
      */
-    static List<String> validate(Map p, Map automation, String upstreamSystemEnumId, boolean duplicate, boolean chatSpaceOk,
+    static List<String> validate(Map p, Map automation, boolean upstreamCanPulse, boolean duplicate, boolean chatSpaceOk,
                                  String pulseBlock = null) {
         List<String> errors = []
         String side = normalize(p?.get("upstreamSide"))
@@ -68,8 +70,8 @@ class SyncPulseFacadeSupport {
         Integer cadence = p?.get("pulseEveryMinutes") as Integer
         if (cadence != null && !CADENCES.contains(cadence)) {
             errors << E_CADENCE
-        } else if (cadence != null && automation != null && upstreamSystemEnumId != SyncPulseSupport.HOTWAX_ORDERS) {
-            errors << E_HOTWAX
+        } else if (cadence != null && automation != null && !upstreamCanPulse) {
+            errors << E_UPSTREAM
         } else if (cadence != null && automation != null && pulseBlock) {
             errors << pulseBlock
         }
@@ -107,7 +109,7 @@ class SyncPulseFacadeSupport {
             String scopeId = normalize(automation.get("compareScopeId"))
             block = pulseBlockFor(automation, RunConclusionStep.keySpecFor(ec, scopeId, "FILE_1"), RunConclusionStep.keySpecFor(ec, scopeId, "FILE_2"))
         }
-        return validate(p, automation, system, duplicate, chatOk, block)
+        return validate(p, automation, system != null && SyncPulseSupport.canPulse(ec, system), duplicate, chatOk, block)
     }
 
     // ------------------------------------------------------------------------------------------- reads

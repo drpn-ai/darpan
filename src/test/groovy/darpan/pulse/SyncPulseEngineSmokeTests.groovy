@@ -38,6 +38,8 @@ class SyncPulseEngineSmokeTests {
     private static final String AUTO_OFF = "PULSE_E_OFF"
     private static final String AUTO_ARCH = "PULSE_E_ARCH"
     private static final String AUTO_NS = "PULSE_E_NSUP"
+    /** DAR-BE-377: Shopify orders upstream, HotWax the target. */
+    private static final String AUTO_SH = "PULSE_E_SHOP"
     private static final String B = "PULSE_E_OTHER"
     private static final String AUTO_B = "PULSE_E_B"
     private static final String SP = "SPE_MAIN"
@@ -57,14 +59,15 @@ class SyncPulseEngineSmokeTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "sync-pulse-engine")
+        // DAR-BE-377: the connector rows say which endpoints a pulse can read upstream (pulseCreatedField)
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml",
-                "component://darpan/data/SyncPulseSeedData.xml")
+                "component://darpan/data/SyncPulseSeedData.xml", "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: B, description: "Other",
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
         StringBuilder xml = new StringBuilder('<entity-facade-xml type="seed">')
         [[AUTO, "Y", "N", "OMS_GQL"], [AUTO_OFF, "N", "N", "OMS_GQL"], [AUTO_ARCH, "Y", "Y", "OMS_GQL"],
-         [AUTO_NS, "Y", "N", "NETSUITE_SUITEQL"], [AUTO_B, "Y", "N", "OMS_GQL", B]].each { List a ->
+         [AUTO_NS, "Y", "N", "NETSUITE_SUITEQL"], [AUTO_B, "Y", "N", "OMS_GQL", B], [AUTO_SH, "Y", "N", "SHOPIFY"]].each { List a ->
             String tenant = a.size() > 4 ? a[4] : A
             String other = a[3] == "OMS_GQL" ? "NETSUITE_SUITEQL" : "OMS_GQL"
             xml << """<darpan.reconciliation.ReconciliationAutomation automationId="${a[0]}" automationName="${a[0]}" companyUserGroupId="${tenant}"
@@ -666,11 +669,28 @@ class SyncPulseEngineSmokeTests {
         Map out = runJob(T0)
 
         assertEquals([], out.errors)
-        assertEquals([SP], upstreamCalls*.syncPairId, "only the pair with a live HotWax-upstream check pulses")
+        assertEquals([SP], upstreamCalls*.syncPairId, "only the pair with a live check on an upstream a pulse can read pulses")
         assertEquals([SP], samples()*.syncPairId)
         ["SPE_OFF", "SPE_ARCH", "SPE_NS", "SPE_PAUSED", "SPE_NOPULSE", "SPE_FOREIGN"].each {
             assertNull(pairMap(it).lastPulseStamp, it)
         }
+    }
+
+    /** DAR-BE-377: a Shopify-upstream pair pulses like a HotWax one, and its late order becomes a finding. */
+    @Test
+    void shopifyUpstreamPairPulses() {
+        ec.entity.find("darpan.pulse.SyncPair").disableAuthz().deleteAll()
+        pair("SPE_SHOP", AUTO_SH, 60, 60)
+        upstream["6100000000001"] = T0.minus(Duration.ofMinutes(90))
+        upstream["6100000000002"] = T0.minus(Duration.ofMinutes(20))
+
+        Map out = runJob(T0)
+
+        assertEquals([], out.errors)
+        assertEquals(["SPE_SHOP"], upstreamCalls*.syncPairId, "the Shopify-upstream pair is pulsed, not skipped")
+        assertNotNull(pairMap("SPE_SHOP").lastPulseStamp)
+        assertEquals(["6100000000001"], openOrders()*.recordKey, "past the 60-minute allowance: a finding; 20 minutes: waiting")
+        assertEquals(1, latestSample().pastAllowanceCount as Integer)
     }
 
     @Test

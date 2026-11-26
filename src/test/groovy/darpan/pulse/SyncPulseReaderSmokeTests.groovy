@@ -87,12 +87,13 @@ class SyncPulseReaderSmokeTests {
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${AUTO}" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].productStoreId" operator="EXCLUDE_IN" filterValues="TEST_STORE" companyUserGroupId="${A}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${FILTERED}" extractServiceName="${GQL}"
-                dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters" enabled="Y"/>
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters" enabled="Y"
+                pulseCreatedField="orderDate" pulseNameField="orderName"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${LEDGER}" extractServiceName="${NS}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${ACME}" extractServiceName="${ACME_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]" pulseCreatedField="orderDate" pulseNameField="orderName"/>
             <darpan.rule.RuleSet ruleSetId="PULSE_KEEP_RS" ruleSetName="Pulse keep" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="PULSE_KEEP_SCOPE" ruleSetId="PULSE_KEEP_RS" objectType="ORDER" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" systemEnumId="${ACME}" fileTypeEnumId="DftJson"

@@ -2,6 +2,7 @@ package darpan.pulse
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.ops.ErrorChatSupport
 import darpan.peak.AllowanceSpec
 import darpan.peak.PeakPeriodLoader
 import darpan.peak.PeakPeriodSupport
@@ -784,7 +785,14 @@ class SyncPulseSupport {
         return "${label}: ${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${pastCount} past allowance".toString()
     }
 
-    static String failureText(String label) { return "${label}: the sync pulse could not read for 2 pulses.".toString() }
+    /**
+     * DAR-BE-382. The alerts-room notice for two pulses in a row that did not finish (FAILED or SKIPPED): the tenant, the
+     * pair, and the last pulse's own reason. It never goes to the pair's chat space, which is the client's room.
+     */
+    static String failureText(String tenantId, String label, String lastReason) {
+        return ("${tenantId}${DOT}${label}: 2 pulses in a row did not finish." +
+                (lastReason ? "\nLast: ${lastReason}" : "")).toString()
+    }
 
     /**
      * The post a finished pulse earns, or null. result is runPulse's map; priorPosted the pair's lastPostedPastCount (null =
@@ -800,7 +808,7 @@ class SyncPulseSupport {
         if (status == FAILED || status == SKIPPED) {
             List<String> r = recent ?: []
             boolean twoInARow = r.size() >= 2 && r[0] != OK && r[1] != OK && (r.size() == 2 || r[2] == OK)
-            return twoInARow ? [kind: "failure", text: failureText(label), lastPostedPastCount: priorPosted]
+            return twoInARow ? [kind: "failure", text: null, lastPostedPastCount: priorPosted]
                     : [kind: "none", text: null, lastPostedPastCount: priorPosted]
         }
         if (status != OK) return [kind: "none", text: null, lastPostedPastCount: priorPosted]
@@ -826,8 +834,10 @@ class SyncPulseSupport {
     }
 
     /**
-     * Posts what a finished pulse earned to the pair's chat space: a past/clear change, a summary at the first pulse of a
-     * tenant-local hour, or the failure notice. Nothing without a chatSpaceId; a failed post is logged and never fails the pulse.
+     * Posts what a finished pulse earned to the pair's chat space: a past/clear change or a summary at the first pulse of a
+     * tenant-local hour. DAR-BE-382: two pulses in a row that did not finish go to Darpan's alerts room instead
+     * (ErrorChatSupport.postAlertText), never the pair's chat space, with or without one. Nothing else without a
+     * chatSpaceId; a failed post is logged and never fails the pulse.
      */
     private static void postAfterPulse(def ec, Map pair, Instant now, Map result) {
         try {
@@ -835,7 +845,7 @@ class SyncPulseSupport {
             String tenantId = normalize(pair?.get("companyUserGroupId"))
             def row = tenantFind(ec, "darpan.pulse.SyncPair", [syncPairId: normalize(pair?.get("syncPairId"))], tenantId)
             String chatSpaceId = normalize(row?.get("chatSpaceId"))
-            if (!tenantId || !chatSpaceId) return
+            if (!tenantId || row == null) return
             List<Map> samples = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulseSample", WHY)
                     .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", tenantId)
                     .orderBy("-sampleStamp").limit(3).useCache(false).list() ?: []).collect { it.getMap() as Map }
@@ -853,6 +863,15 @@ class SyncPulseSupport {
             }
             Map decision = decidePost(names.label as String, result, row.get("lastPostedPastCount") as Integer,
                     samples.collect { normalize(it.get("statusEnumId")) }, normalize(row.get("hourlySummary")) == "Y", topOfHour)
+            if (decision.kind == "failure") {
+                String lastReason = normalize((result.get("sample") as Map)?.get("message"))
+                if (!ErrorChatSupport.postAlertText(ec, failureText(tenantId, names.label as String, lastReason))) {
+                    logger.warn("Sync pulse {} (tenant {}): 2 pulses in a row did not finish; no alerts room took the notice",
+                            pair.syncPairId, tenantId)
+                }
+                return
+            }
+            if (!chatSpaceId) return
             boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, decision.text as String)
             Integer wanted = decision.lastPostedPastCount as Integer
             // the episode opens with the 0 -> >0 post and ends with the >0 -> 0 post

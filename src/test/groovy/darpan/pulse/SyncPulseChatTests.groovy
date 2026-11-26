@@ -21,6 +21,9 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.concurrent.Executor
 
+import darpan.config.DarpanSettings
+import darpan.ops.ErrorChatSupport
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
@@ -51,6 +54,10 @@ class SyncPulseChatTests {
     private Set<String> arrived = [] as Set
     private Map upstreamFailure = null
     private List<Map> posts = Collections.synchronizedList([])
+    /** DAR-BE-382: what reached Darpan's alerts room (ErrorChatSupport.postHook). */
+    private List<Map> alerts = Collections.synchronizedList([])
+    private static final String ALERTS = "https://chat.googleapis.com/v1/spaces/DARPANALERTS/messages?key=k&token=t"
+    private String alertsRoom = ALERTS
     private boolean postsThrow = false
     private List<Thread> pulseThreads = Collections.synchronizedList([])
 
@@ -88,7 +95,11 @@ class SyncPulseChatTests {
         ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         SyncPulseSupport.forgetPresentMemoryForTests()
-        upstream.clear(); arrived.clear(); posts.clear(); pulseThreads.clear()
+        upstream.clear(); arrived.clear(); posts.clear(); alerts.clear(); pulseThreads.clear()
+        alertsRoom = ALERTS
+        DarpanSettings.rowLoader = { -> alertsRoom ? [(ErrorChatSupport.WEBHOOK_SETTING): [settingValue: alertsRoom]] : [:] }
+        DarpanSettings.expire()
+        ErrorChatSupport.postHook = { String url, Map payload -> alerts << [url: url, text: payload.text]; return [ok: true] }
         upstreamFailure = null
         postsThrow = false
         ec.message.clearAll()
@@ -112,6 +123,8 @@ class SyncPulseChatTests {
 
     @AfterEach
     void resetHooks() {
+        ErrorChatSupport.resetForTests()
+        DarpanSettings.resetForTests()
         TenantNotificationSupport.resetDeliveryHook()
         SyncPulseSupport.resetHooks()
         AutomationExecutionSupport.setRunAdmission(null)
@@ -231,24 +244,67 @@ class SyncPulseChatTests {
         assertEquals("${LABEL}: 1 waiting${DOT}oldest 1h 10m${DOT}0 past allowance".toString(), posts[1].text)
     }
 
+    /**
+     * DAR-BE-382. A pulse that did not run is Darpan's problem, not the client's: two in a row post to Darpan's alerts
+     * room (errors.chat.webhookUrl), never the pair's chat space, with the tenant and the last pulse's reason. GORJANA's
+     * client room got "could not read for 2 pulses" on 2026-11-26 for two pulses that were only skipped.
+     */
     @Test
-    void failurePostedOnSecondInARowThenOnceMore() {
+    void twoFailedPulsesAlertDarpanNeverTheClientRoom() {
         upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
         pulse(T0)
-        assertEquals([], posts, "one failed pulse is not news")
+        assertEquals([], alerts, "one failed pulse is not news")
         pulse(T0.plus(Duration.ofMinutes(5)))
-        assertEquals(["${LABEL}: the sync pulse could not read for 2 pulses.".toString()], posts*.text)
+        assertEquals([], posts, "nothing reaches the client's room")
+        assertEquals(["${A}${DOT}${LABEL}: 2 pulses in a row did not finish.\nLast: HotWax answered 503".toString()],
+                alerts*.text)
+        assertEquals([ALERTS], alerts*.url)
         pulse(T0.plus(Duration.ofMinutes(10)))
         pulse(T0.plus(Duration.ofMinutes(15)))
-        assertEquals(1, posts.size(), "not again until an OK pulse")
+        assertEquals(1, alerts.size(), "not again until an OK pulse")
 
         upstreamFailure = null
         pulse(T0.plus(Duration.ofMinutes(20)))
         upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
         pulse(T0.plus(Duration.ofMinutes(25)))
-        assertEquals(1, posts.size())
+        assertEquals(1, alerts.size())
         pulse(T0.plus(Duration.ofMinutes(30)))
-        assertEquals(2, posts.size(), "after an OK pulse, a new second failure posts again")
+        assertEquals(2, alerts.size(), "after an OK pulse, a new second failure alerts again")
+        assertEquals([], posts, "and the client's room still heard nothing")
+    }
+
+    /** DAR-BE-382. Two skipped pulses (no slot) say they were skipped, in the alerts room only; nothing to the client. */
+    @Test
+    void twoSkippedPulsesAlertDarpanAsSkipped() {
+        SyncPulseSupport.recordSkipped(ec, pairMap(SP), T0, 60, "This pulse was skipped: all 4 light run slots are in use")
+        SyncPulseSupport.recordSkipped(ec, pairMap(SP), T0.plus(Duration.ofMinutes(60)), 60,
+                "This pulse was skipped: all 4 light run slots are in use")
+        assertEquals([], posts)
+        assertEquals(["${A}${DOT}${LABEL}: 2 pulses in a row did not finish.\nLast: This pulse was skipped: all 4 light run slots are in use".toString()],
+                alerts*.text)
+    }
+
+    /** DAR-BE-382. A pair with no chat space still tells Darpan when its pulses stop. */
+    @Test
+    void aPairWithNoChatSpaceStillAlertsDarpan() {
+        pair(SP, 60, 60, null)
+        upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
+        pulse(T0)
+        pulse(T0.plus(Duration.ofMinutes(5)))
+        assertEquals([], posts)
+        assertEquals(1, alerts.size())
+    }
+
+    /** DAR-BE-382. No alerts room set: the notice is dropped (logged), and still never goes to the client's room. */
+    @Test
+    void noAlertsRoomStillNeverTheClientRoom() {
+        alertsRoom = null
+        DarpanSettings.expire()
+        upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
+        pulse(T0)
+        pulse(T0.plus(Duration.ofMinutes(5)))
+        assertEquals([], posts)
+        assertEquals([], alerts)
     }
 
     @Test

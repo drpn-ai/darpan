@@ -83,7 +83,8 @@ class AuditFindingsVerifySupport {
      * those checked since then, and of those how many are now closed. A finding whose read did not finish is not
      * checked, so a caller stops waiting after its own limit.
      */
-    static Map progress(def ec, String tenantId, Map audit, String statementCode, String period, Timestamp since) {
+    static Map progress(def ec, String tenantId, Map audit, String statementCode, String period, Object sinceGiven) {
+        Timestamp since = sinceStamp(sinceGiven)
         List<String> statementIds = statementIds(ec, tenantId, audit, statementCode)
         if (statementIds == null) return [error: "Statement ${statementCode} is not part of audit ${audit.auditCode}.".toString()]
         List<Map> checked = statementIds && since ? find(ec, tenantId, "darpan.audit.AuditFinding")
@@ -91,6 +92,23 @@ class AuditFindingsVerifySupport {
                 .condition("lastCheckedStamp", EntityCondition.GREATER_THAN_EQUAL_TO, since)
                 .selectField("findingId,stateEnumId").list()*.getMap() : []
         return [checked: checked.size(), closed: checked.count { it.stateEnumId == "AUDFS_FIXED" } as int]
+    }
+
+    /**
+     * DAR-BE-373. `since` as the page sends it back: verify#AuditFindings' checkedSince reaches JSON as epoch millis, and
+     * the page returns that number, which the service's Timestamp parameter does not convert (prod 3.4.10-3.4.12: "No
+     * signature of method ... progress ... Long"). A Timestamp, epoch millis (number or digits) or an ISO instant; else null.
+     */
+    static Timestamp sinceStamp(Object since) {
+        if (since instanceof Timestamp) return (Timestamp) since
+        if (since instanceof Date) return new Timestamp(((Date) since).time)
+        if (since instanceof Number) return new Timestamp(((Number) since).longValue())
+        String text = since?.toString()?.trim()
+        if (!text) return null
+        if (text ==~ /\d{10,}/) return new Timestamp(text as long)
+        try { return Timestamp.from(java.time.Instant.parse(text)) } catch (Exception ignored) { }
+        try { return Timestamp.valueOf(text) } catch (Exception ignored) { }
+        return null
     }
 
     /** The audit's statement ids: all of them for a blank code, the one with that code, or null when it has none. */

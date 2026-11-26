@@ -6,7 +6,7 @@ Each shipped item names the page changed in each surface, or none with a reason.
 
 | Item | Change | How-to | Reference | Troubleshooting | Setup / service details |
 | --- | --- | --- | --- | --- | --- |
-| DAR-UI-152 (migration fix) | The note migration's MySQL statement keeps the column's size | none: guides/audits.mdx already says the note is optional (3.4.16) | none: no field changed | none: the failure was caught in a dry run | none: no connection change |
+| DAR-UI-152 (migration fix) | The note migration's MySQL statement keeps the column's size | none: the audit guide already says the note is optional (changed in 3.4.16) | none: no field changed | none: the failure was caught in a dry run | none: no connection change |
 | DAR-BE-373 part (c) | `run#Audit` can play only the checks named | none: the play page has no per-check choice yet | none: no field changed | none: no new message | none: no connection change |
 
 ## GraphQL reference (developers.drpn.ai)

@@ -2,6 +2,7 @@
   "settings": [
     {"key": "darpan.reconciliation.automation.maxConcurrentExecutions", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs the instance executes at once; the rest wait.", "defaultValue": "8", "min": 1, "max": 32},
     {"key": "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs one tenant executes at once (never above the instance cap).", "defaultValue": "5", "min": 1, "max": 32},
+    {"key": "darpan.reconciliation.automation.maxConcurrentLightRuns", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most sync pulses running at once across the instance; they use their own slots, not the run caps.", "defaultValue": "4", "min": 1, "max": 16},
     {"key": "darpan.reconciliation.automation.holdAtHeapPercent", "type": "INT", "area": "Runs", "unit": "percent", "description": "Heap use at or above which new runs wait instead of starting.", "defaultValue": "85", "min": 50, "max": 100},
     {"key": "darpan.reconciliation.automation.maxWaitingPerTenant", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs one tenant may have waiting before new ones are refused.", "defaultValue": "50", "min": 1, "max": 500},
     {"key": "darpan.reconciliation.automation.maxRetryCount", "type": "INT", "area": "Runs", "unit": "count", "description": "Retries of a failed automation run when the automation sets none of its own.", "defaultValue": "3", "min": 0, "max": 10},

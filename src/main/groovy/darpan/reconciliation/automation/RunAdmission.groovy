@@ -32,6 +32,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * In memory, per JVM. The scan submits only what can start at once ({@link #canStartNow}) and leaves the rest due,
  * so a restart loses no scheduled window; what waits here was asked for by a person (play, retry, re-check).
+ *
+ * DAR-BE-379. A light run (a sync pulse: a few short reads, not an audit check) takes its own lane instead
+ * ({@link #submitLight}): at most {@code lightCap} of them at once across the instance (maxConcurrentLightRuns), outside
+ * {@code cap} and {@code perTenantCap}, so one tenant's audit filling its share cannot skip that tenant's pulses. A light
+ * run never waits: refused when the lane is full or memory holds new starts. It counts in {@link #busy} like any run.
  */
 class RunAdmission {
 
@@ -43,6 +48,7 @@ class RunAdmission {
     private static final String PER_TENANT_KEY = "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant"
     private static final String HOLD_HEAP_KEY = "darpan.reconciliation.automation.holdAtHeapPercent"
     private static final String MAX_WAITING_KEY = "darpan.reconciliation.automation.maxWaitingPerTenant"
+    private static final String LIGHT_CAP_KEY = "darpan.reconciliation.automation.maxConcurrentLightRuns"
 
     static RunAdmission SHARED = new RunAdmission(
             { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
@@ -69,10 +75,15 @@ class RunAdmission {
     /** DAR-BE-207: runs started and not yet released, by label, so an audit can tell a run it has not seen start yet. */
     private final Map<String, Integer> runningByLabel = [:]
     private int running = 0
+    /** DAR-BE-379: light runs started and not yet released; never counted in running or runningByTenant. */
+    private int lightRunning = 0
+    private final Closure<Integer> lightCapSupplier
     private String lastStarted = null
 
     RunAdmission(Closure<Integer> cap, Closure<Integer> perTenantCap, Closure<Integer> holdAtHeapPercent,
-                 Closure<Integer> heapPercent, Executor executor, Closure<Integer> maxWaitingPerTenant) {
+                 Closure<Integer> heapPercent, Executor executor, Closure<Integer> maxWaitingPerTenant,
+                 Closure<Integer> lightCap = { -> DarpanSettings.intValue(LIGHT_CAP_KEY) }) {
+        this.lightCapSupplier = lightCap
         this.capSupplier = cap
         this.perTenantCapSupplier = perTenantCap
         this.holdAtHeapPercentSupplier = holdAtHeapPercent
@@ -98,9 +109,10 @@ class RunAdmission {
         final int perTenantCap
         final int holdAtHeapPercent
         final int maxWaiting
-        Limits(int cap, int perTenantCap, int holdAtHeapPercent, int maxWaiting) {
+        final int lightCap
+        Limits(int cap, int perTenantCap, int holdAtHeapPercent, int maxWaiting, int lightCap) {
             this.cap = cap; this.perTenantCap = perTenantCap
-            this.holdAtHeapPercent = holdAtHeapPercent; this.maxWaiting = maxWaiting
+            this.holdAtHeapPercent = holdAtHeapPercent; this.maxWaiting = maxWaiting; this.lightCap = lightCap
         }
     }
 
@@ -111,7 +123,7 @@ class RunAdmission {
     private Limits limits() {
         int cap = Math.max(1, capSupplier.call())
         return new Limits(cap, Math.max(1, Math.min(perTenantCapSupplier.call(), cap)), holdAtHeapPercentSupplier.call(),
-                Math.max(1, maxWaitingPerTenantSupplier.call()))
+                Math.max(1, maxWaitingPerTenantSupplier.call()), Math.max(1, lightCapSupplier.call()))
     }
 
     /**
@@ -155,6 +167,48 @@ class RunAdmission {
         return running < l.cap && tenantLoad < l.perTenantCap && !held(l)
     }
 
+    /**
+     * DAR-BE-379. Starts a light run now on its own lane, or refuses it: answers submitted (never queued), and error when
+     * refused. The tenant's share and the instance cap do not apply; the lane's own cap and the memory hold do.
+     */
+    Map<String, Object> submitLight(String label, Runnable work) {
+        Limits l = limits()
+        synchronized (this) {
+            if (lightRunning >= l.lightCap) {
+                return [submitted: false, queued: false, error: "all ${l.lightCap} light run slots are in use".toString()]
+            }
+            if (held(l)) return [submitted: false, queued: false, error: "memory is holding new starts"]
+            lightRunning++
+            runningByLabel[label] = (runningByLabel[label] ?: 0) + 1
+            try {
+                executor.execute({ -> runLightThenRelease(label, work) } as Runnable)
+                return [submitted: true, queued: false]
+            } catch (Throwable refused) {
+                releaseLight(label)
+                String error = "Could not start ${label}: ${refused.message ?: refused.toString()}".toString()
+                logger.error(error)
+                return [submitted: false, queued: false, error: error]
+            }
+        }
+    }
+
+    private void runLightThenRelease(String label, Runnable work) {
+        try {
+            work.run()
+        } catch (Throwable t) {
+            logger.error("Light run {} ended with an error: {}", label, t.message ?: t.toString())
+        } finally {
+            synchronized (this) { releaseLight(label) }
+        }
+    }
+
+    private void releaseLight(String label) {  // caller holds the lock
+        lightRunning = Math.max(0, lightRunning - 1)
+        int labelLeft = (runningByLabel[label] ?: 1) - 1
+        if (labelLeft > 0) runningByLabel[label] = labelLeft
+        else runningByLabel.remove(label)
+    }
+
     /** Starts every waiting run there is room for, tenants in turn. Called on submit, on finish, and by each scan tick. */
     void drain() {
         Limits l = limits()
@@ -181,7 +235,8 @@ class RunAdmission {
             [(t): [running: runningByTenant[t] ?: 0, queued: waiting[t]?.size() ?: 0]]
         }
         return [running      : running, queued: waitingTotal(), cap: l.cap, perTenantCap: l.perTenantCap,
-                holdAtHeapPercent: l.holdAtHeapPercent, maxWaitingPerTenant: l.maxWaiting, heldForMemory: running > 0 && heapAtOrAbove(l), byTenant: byTenant]
+                holdAtHeapPercent: l.holdAtHeapPercent, maxWaitingPerTenant: l.maxWaiting, heldForMemory: running > 0 && heapAtOrAbove(l), byTenant: byTenant,
+                lightRunning : lightRunning, lightCap: l.lightCap]
     }
 
     /**
@@ -266,7 +321,7 @@ class RunAdmission {
         try {
             RunAdmission old = SHARED
             synchronized (old) {
-                if (old.running > 0 || old.waitingTotal() > 0) {
+                if (old.running > 0 || old.lightRunning > 0 || old.waitingTotal() > 0) {
                     logger.warn("RunAdmission.resetForTests: runs still active or waiting, SHARED left in place")
                     return
                 }

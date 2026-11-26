@@ -171,7 +171,9 @@ class AdminLiveOperationsSupport {
     /** DAR-BE-143: what waits for a slot on this instance, each tenant's share, and whether memory holds new starts. */
     private static Map<String, Object> admissionOf(Map snapshot) {
         return [queued: snapshot.queued, perTenantCap: snapshot.perTenantCap, heldForMemory: snapshot.heldForMemory,
-                holdAtHeapPercent: snapshot.holdAtHeapPercent, byTenant: snapshot.byTenant]
+                holdAtHeapPercent: snapshot.holdAtHeapPercent, byTenant: snapshot.byTenant,
+                // DAR-BE-379: sync pulses on their own lane, outside the caps above
+                lightRunning: snapshot.lightRunning, lightCap: snapshot.lightCap]
     }
 
     /**

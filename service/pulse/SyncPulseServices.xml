@@ -9,9 +9,9 @@
 
     <service verb="run" noun="DuePulses" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
         <description>Scans every tenant's active sync pairs and admits each due pulse through the automation scheduler's
-            RunAdmission (label "pulse &lt;syncPairId&gt;"), where it runs on its own thread with its own execution context.
-            A pulse refused a slot writes a SKIPPED sample and is not queued; one that RunAdmission queues after all (another start
-            took the slot between the check and the submit) writes nothing now and samples at the moment it starts; a pulse of the same pair still in flight, and a
+            RunAdmission as a light run (label "pulse &lt;syncPairId&gt;", its own lane outside the run caps, DAR-BE-379), where it
+            runs on its own thread with its own execution context. A pulse refused a light slot writes a SKIPPED sample and is
+            not queued; a pulse of the same pair still in flight, and a
             pair whose check is missing, archived, inactive or whose upstream endpoint a pulse cannot read (no pulseCreatedField), are skipped silently. Never fails: one bad
             pair never stops the others. Returns at once; each pulse reports itself on its own SyncPulseSample.</description>
         <in-parameters>
@@ -22,8 +22,7 @@
             <parameter name="pairCount" type="Integer"><description>Active sync pairs read.</description></parameter>
             <parameter name="dueCount" type="Integer"><description>Pulses that were due and admitted or skipped.</description></parameter>
             <parameter name="submittedCount" type="Integer"><description>Pulses started at once.</description></parameter>
-            <parameter name="queuedCount" type="Integer"><description>Pulses RunAdmission queued; each samples when it starts.</description></parameter>
-            <parameter name="skippedCount" type="Integer"><description>Due pulses refused a slot (SKIPPED samples).</description></parameter>
+            <parameter name="skippedCount" type="Integer"><description>Due pulses refused a light slot (SKIPPED samples).</description></parameter>
         </out-parameters>
         <actions>
             <set field="scan" from="darpan.pulse.SyncPulseSupport.runDuePulses(ec, nowTimestamp)"/>
@@ -31,7 +30,6 @@
             <set field="pairCount" from="scan.pairCount"/>
             <set field="dueCount" from="scan.dueCount"/>
             <set field="submittedCount" from="scan.submittedCount"/>
-            <set field="queuedCount" from="scan.queuedCount"/>
             <set field="skippedCount" from="scan.skippedCount"/>
         </actions>
     </service>

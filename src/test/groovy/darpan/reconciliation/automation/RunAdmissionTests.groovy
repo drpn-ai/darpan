@@ -287,4 +287,83 @@ class RunAdmissionTests {
         }
         assertEquals(2, executor.started.size(), "the blocked submit started once its read returned")
     }
+
+    // ---------------------------------------------------------------------------------------------- DAR-BE-379 light lane
+
+    private RunAdmission withLightCap(HandExecutor executor, int cap, int perTenant, int lightCap,
+                                      Closure<Integer> heap = { -> null }, int holdAt = 85) {
+        return new RunAdmission({ -> cap }, { -> perTenant }, { -> holdAt }, heap, executor, { -> 50 }, { -> lightCap })
+    }
+
+    /** Gorjana's month close held its whole share and the instance cap; its pulse must still start, taking no run slot. */
+    @Test
+    void aLightRunStartsWhenItsTenantAndTheInstanceAreFull() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = withLightCap(executor, 1, 1, 4)
+        admission.submit("A", "month close", work("audit"))
+        assertFalse(admission.canStartNow("A"), "precondition: tenant and instance full")
+
+        Map light = admission.submitLight("pulse P1", work("pulse"))
+        assertEquals([submitted: true, queued: false], light)
+        assertEquals(2, executor.started.size())
+        assertTrue(admission.busy("pulse P1"), "a light run in flight is busy, so the next tick does not start it twice")
+        Map snap = admission.snapshot()
+        assertEquals([1, 1, 4], [snap.running, snap.lightRunning, snap.lightCap])
+        assertEquals([running: 1, queued: 0], snap.byTenant.A, "the pulse is not counted in its tenant's share")
+
+        executor.finish(1)
+        assertEquals(["pulse"], log)
+        assertFalse(admission.busy("pulse P1"))
+        assertEquals([1, 0], [admission.snapshot().running, admission.snapshot().lightRunning])
+    }
+
+    @Test
+    void theLightLaneHasItsOwnCapAndNeverQueues() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = withLightCap(executor, 8, 5, 2)
+        assertTrue(admission.submitLight("pulse P1", work("p1")).submitted as boolean)
+        assertTrue(admission.submitLight("pulse P2", work("p2")).submitted as boolean)
+        Map third = admission.submitLight("pulse P3", work("p3"))
+        assertEquals(false, third.submitted)
+        assertEquals(false, third.queued)
+        assertEquals("all 2 light run slots are in use", third.error)
+        assertFalse(admission.busy("pulse P3"), "a refused light run leaves nothing behind")
+
+        executor.finish(0)
+        assertTrue(admission.submitLight("pulse P3", work("p3")).submitted as boolean, "a finished light run frees its slot")
+        assertTrue(admission.canStartNow("A"), "light runs never take a regular slot")
+    }
+
+    @Test
+    void theMemoryHoldRefusesALightRun() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = withLightCap(executor, 8, 5, 4, { -> 90 }, 85)
+        admission.submit("A", "a1", work("a1"))
+        Map light = admission.submitLight("pulse P1", work("p1"))
+        assertEquals(false, light.submitted)
+        assertEquals("memory is holding new starts", light.error)
+        assertEquals(0, admission.snapshot().lightRunning)
+    }
+
+    @Test
+    void aLightRunThePoolRefusesGivesItsSlotBack() {
+        HandExecutor executor = new HandExecutor(reject: true)
+        RunAdmission admission = withLightCap(executor, 8, 5, 1)
+        Map light = admission.submitLight("pulse P1", work("p1"))
+        assertEquals(false, light.submitted)
+        assertTrue((light.error as String).contains("pool closed"))
+        assertFalse(admission.busy("pulse P1"))
+        executor.reject = false
+        assertTrue(admission.submitLight("pulse P1", work("p1")).submitted as boolean, "the slot came back")
+    }
+
+    @Test
+    void aLightRunThatThrowsStillGivesItsSlotBack() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = withLightCap(executor, 8, 5, 1)
+        admission.submitLight("pulse P1", { -> throw new IllegalStateException("reader bug") } as Runnable)
+        executor.finish(0)
+        assertEquals(0, admission.snapshot().lightRunning)
+        assertFalse(admission.busy("pulse P1"))
+    }
 }

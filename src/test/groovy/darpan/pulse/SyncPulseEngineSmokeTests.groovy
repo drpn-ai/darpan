@@ -21,6 +21,7 @@ import java.time.ZoneOffset
 import java.util.concurrent.Executor
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -576,42 +577,39 @@ class SyncPulseEngineSmokeTests {
     }
 
     /**
-     * canStartNow said yes, but another start took the slot before the submit: RunAdmission queues the pulse. The scan writes
-     * nothing; the pulse samples when it starts, at that moment, not at the scan's now.
+     * DAR-BE-379. The tenant's whole share and the instance cap are held by another run (Gorjana's month close, 2026-11-26):
+     * the pulse still runs, on RunAdmission's light lane, at the scan's now, on its own thread, and takes no run slot.
      */
     @Test
-    void aQueuedPulseSamplesWhenItStartsNotAtTheScansNow() {
+    void aTenantAtItsShareStillPulses() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(10))
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1)
+        // the blocker's thread is not one runJob joins (it holds the slot until the test releases it); the pulse's is
+        java.util.concurrent.atomic.AtomicBoolean blocker = new java.util.concurrent.atomic.AtomicBoolean(true)
         RunAdmission full = new RunAdmission(1, 1, 101, { -> 0 }, { Runnable r ->
-            Thread t = new Thread(r, "pulse-test-" + pulseThreads.size()); pulseThreads << t; t.start()
-        } as Executor, 10) {
-            @Override boolean canStartNow(String tenantId) { return true }
+            Thread t = new Thread(r, "pulse-test-" + pulseThreads.size())
+            if (!blocker.getAndSet(false)) pulseThreads << t
+            t.start()
+        } as Executor, 10)
+        try {
+            full.submit(A, "month close check", { -> release.await(60, java.util.concurrent.TimeUnit.SECONDS) } as Runnable)
+            assertFalse(full.canStartNow(A), "test precondition: the tenant is at its share and the instance at its cap")
+            AutomationExecutionSupport.setRunAdmission(full)
+
+            Map out = runJob(T0)
+            assertEquals([], out.errors)
+            assertEquals(1, out.out.submittedCount as Integer)
+            assertEquals(0, out.out.skippedCount as Integer)
+            Map s = latestSample()
+            assertEquals("SPS_OK", s.statusEnumId, "a full tenant share does not skip the pulse")
+            assertEquals(Timestamp.from(T0), s.sampleStamp)
+            assertEquals(1, s.waitingCount as Integer)
+            assertTrue(upstreamCalls[0].thread != Thread.currentThread().name, "a pulse runs on its own thread")
+            assertEquals(1, full.snapshot().running as Integer, "the pulse took no run slot")
+            assertEquals(0, full.snapshot().lightRunning as Integer, "and gave its light slot back")
+        } finally {
+            release.countDown()
         }
-        full.submit("OTHER_TENANT", "blocker", { -> release.await(60, java.util.concurrent.TimeUnit.SECONDS) } as Runnable)
-        AutomationExecutionSupport.setRunAdmission(full)
-
-        Map out = runJob(T0, false)
-        assertEquals([], out.errors)
-        assertEquals(1, out.out.queuedCount as Integer)
-        assertEquals(0, out.out.submittedCount as Integer)
-        assertEquals([], samples(), "a queued pulse writes no sample at the scan")
-        assertNull(pairMap(SP).lastPulseStamp)
-        assertTrue(full.busy("pulse " + SP), "and the next tick sees it in flight")
-
-        long before = System.currentTimeMillis()
-        release.countDown()
-        long deadline = before + 60000
-        while (samples().isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50)
-        new ArrayList<Thread>(pulseThreads).each { it.join(60000) }
-
-        assertEquals(1, samples().size())
-        Map s = latestSample()
-        assertEquals("SPS_OK", s.statusEnumId)
-        long stamp = (s.sampleStamp as Timestamp).time
-        assertTrue(stamp >= before - 1000 && stamp <= System.currentTimeMillis() + 1000,
-                "sampled when it started (${s.sampleStamp}), not at the scan's ${T0}")
-        Instant started = (s.sampleStamp as Timestamp).toInstant()
-        assertEquals(started.minus(Duration.ofMinutes(60 + 127)), upstreamCalls.last().from, "its window ends when it starts")
     }
 
     /** A sample write that throws (no SPS_* enums, FK SPSAMPLE_STATUS) leaves the claim stamped: no re-read every tick. */
@@ -757,7 +755,7 @@ class SyncPulseEngineSmokeTests {
 
     /**
      * An admission whose pulses run on their own threads (joined by runJob), as RunAdmission's pool runs them; refusing
-     * says no slot is free, busy says the pair's pulse is already in flight.
+     * says no light slot is free, busy says the pair's pulse is already in flight.
      */
     private RunAdmission admission(boolean refusing, boolean busy = false) {
         Executor ownThread = { Runnable r ->
@@ -766,7 +764,9 @@ class SyncPulseEngineSmokeTests {
             t.start()
         } as Executor
         return new RunAdmission(8, 5, 101, { -> 0 }, ownThread, 10) {
-            @Override boolean canStartNow(String tenantId) { return !refusing && super.canStartNow(tenantId) }
+            @Override Map<String, Object> submitLight(String label, Runnable work) {
+                return refusing ? [submitted: false, queued: false, error: "all 4 light run slots are in use"] : super.submitLight(label, work)
+            }
             @Override synchronized boolean busy(String label) { return busy || super.busy(label) }
         }
     }

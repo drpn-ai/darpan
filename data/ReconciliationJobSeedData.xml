@@ -73,4 +73,10 @@
             serviceName="dataset.DatasetServices.scan#DueDatasets"
             defaultCronExpression="0 0/30 * * * ?"
             defaultPaused="Y" minIntervalMinutes="15"/>
+    <!-- DAR-BE-374: the ID index's nightly upkeep (catch-up over kept copies, then the sweep). Reads only Darpan's own data.
+         Seeded PAUSED. -->
+    <moqui.service.job.ServiceJob jobName="maintain_IdIndex_nightly" expireLockTime="360"
+            description="Index kept copies the ID index has not, then drop ids no read has seen for darpan.idindex.months."
+            serviceName="idindex.IdIndexServices.maintain#IdIndex"
+            defaultCronExpression="0 30 2 * * ?" defaultPaused="Y" minIntervalMinutes="60"/>
 </entity-facade-xml>

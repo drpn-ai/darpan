@@ -287,6 +287,9 @@ class RunExtractSupport {
             ec.message.addError("${label} API did not return an output file for the selected time period.")
             return [:]
         }
+        // DAR-BE-374: what this run read feeds the ID index, in the background
+        darpan.idindex.IdIndexRunHook.afterLiveRead(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                normalize(connector?.systemEnumId), configId, extractedLocation)
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
     }

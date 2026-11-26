@@ -573,6 +573,18 @@
                                         "$ref": "#/components/schemas/SaveHotWaxOmsRestSourceConfigRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteTenantIdIndexFieldRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetIdIndexStatusRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveTenantIdIndexFieldRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SearchRecordIdsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteJsonSchemaRequest"
                                     },
                                     {
@@ -600,22 +612,7 @@
                                         "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/DeleteTenantLookupLinkRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/DeleteTenantLookupReadRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/GetLookupCatalogRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/LookupOrderRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/SaveTenantLookupLinkRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/SaveTenantLookupReadRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetLifecycleOptionsRequest"
@@ -1224,6 +1221,10 @@
                                         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "#/components/schemas/ListHotWaxOmsRestSourceConfigsRequest",
                                         "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery": "#/components/schemas/RunOmsGraphqlAgentQueryRequest",
                                         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "#/components/schemas/SaveHotWaxOmsRestSourceConfigRequest",
+                                        "facade.IdIndexFacadeServices.delete#TenantIdIndexField": "#/components/schemas/DeleteTenantIdIndexFieldRequest",
+                                        "facade.IdIndexFacadeServices.get#IdIndexStatus": "#/components/schemas/GetIdIndexStatusRequest",
+                                        "facade.IdIndexFacadeServices.save#TenantIdIndexField": "#/components/schemas/SaveTenantIdIndexFieldRequest",
+                                        "facade.IdIndexFacadeServices.search#RecordIds": "#/components/schemas/SearchRecordIdsRequest",
                                         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "#/components/schemas/DeleteJsonSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "#/components/schemas/FlattenJsonSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.get#JsonSchema": "#/components/schemas/GetJsonSchemaRequest",
@@ -1233,12 +1234,7 @@
                                         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "#/components/schemas/SaveJsonSchemaTextRequest",
                                         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "#/components/schemas/SaveRefinedSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest",
-                                        "facade.LookupFacadeServices.delete#TenantLookupLink": "#/components/schemas/DeleteTenantLookupLinkRequest",
-                                        "facade.LookupFacadeServices.delete#TenantLookupRead": "#/components/schemas/DeleteTenantLookupReadRequest",
-                                        "facade.LookupFacadeServices.get#LookupCatalog": "#/components/schemas/GetLookupCatalogRequest",
                                         "facade.LookupFacadeServices.lookup#Order": "#/components/schemas/LookupOrderRequest",
-                                        "facade.LookupFacadeServices.save#TenantLookupLink": "#/components/schemas/SaveTenantLookupLinkRequest",
-                                        "facade.LookupFacadeServices.save#TenantLookupRead": "#/components/schemas/SaveTenantLookupReadRequest",
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "#/components/schemas/GetLifecycleOptionsRequest",
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "#/components/schemas/GetLifecycleRuleOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "#/components/schemas/GetNsSuiteQlQueryOptionsRequest",
@@ -1945,6 +1941,18 @@
                                             "$ref": "#/components/schemas/SaveHotWaxOmsRestSourceConfigResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeleteTenantIdIndexFieldResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetIdIndexStatusResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveTenantIdIndexFieldResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SearchRecordIdsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/DeleteJsonSchemaResponse"
                                         },
                                         {
@@ -1972,22 +1980,7 @@
                                             "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/DeleteTenantLookupLinkResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/DeleteTenantLookupReadResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/GetLookupCatalogResponse"
-                                        },
-                                        {
                                             "$ref": "#/components/schemas/LookupOrderResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SaveTenantLookupLinkResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SaveTenantLookupReadResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetLifecycleOptionsResponse"
@@ -22845,6 +22838,352 @@
                     "result"
                 ]
             },
+            "DeleteTenantIdIndexFieldParams": {
+                "type": "object",
+                "properties": {
+                    "systemEnumId": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "systemEnumId",
+                    "fieldId"
+                ],
+                "description": "Removes the tenant's own ID field or its override (the product field, if any, applies again). The system's\n            kept copies are indexed again by the nightly catch-up."
+            },
+            "DeleteTenantIdIndexFieldResult": {
+                "type": "object",
+                "properties": {
+                    
+                }
+            },
+            "DeleteTenantIdIndexFieldRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.IdIndexFacadeServices.delete#TenantIdIndexField",
+                "x-darpan-method": "facade.IdIndexFacadeServices.delete#TenantIdIndexField",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.IdIndexFacadeServices.delete#TenantIdIndexField"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteTenantIdIndexFieldParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteTenantIdIndexFieldResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.IdIndexFacadeServices.delete#TenantIdIndexField. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteTenantIdIndexFieldResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetIdIndexStatusParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "How current the active tenant's ID index is: one row per kept copy of a system it reads (indexed or behind,\n            last indexed, last failure), and the tenant's row count. Runs' own extracts are indexed as they finish."
+            },
+            "GetIdIndexStatusResult": {
+                "type": "object",
+                "properties": {
+                    "connections": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{datasetId, connectionId, systemEnumId, lastReadAt, lastIndexedAt, rowsLastPass, lastStatus, lastError, behind, stale}]"
+                    },
+                    "rowCount": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "GetIdIndexStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.IdIndexFacadeServices.get#IdIndexStatus",
+                "x-darpan-method": "facade.IdIndexFacadeServices.get#IdIndexStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.IdIndexFacadeServices.get#IdIndexStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetIdIndexStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetIdIndexStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.IdIndexFacadeServices.get#IdIndexStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetIdIndexStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveTenantIdIndexFieldParams": {
+                "type": "object",
+                "properties": {
+                    "systemEnumId": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    },
+                    "recordKind": {
+                        "type": "string"
+                    },
+                    "fieldPath": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "refRecordKind": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "systemEnumId",
+                    "fieldId"
+                ],
+                "description": "Adds a tenant ID field, or overrides a product field with the same fieldId (blank fields keep the product's).\n            The system must be one the index reads; a new field needs a path and a role. A path must be plain (name.name, lists as\n            name[*]); one that looks like a customer detail (email, phone, address, names ...) is refused: the index keeps identifiers only."
+            },
+            "SaveTenantIdIndexFieldResult": {
+                "type": "object",
+                "properties": {
+                    
+                }
+            },
+            "SaveTenantIdIndexFieldRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.IdIndexFacadeServices.save#TenantIdIndexField",
+                "x-darpan-method": "facade.IdIndexFacadeServices.save#TenantIdIndexField",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.IdIndexFacadeServices.save#TenantIdIndexField"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveTenantIdIndexFieldParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveTenantIdIndexFieldResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.IdIndexFacadeServices.save#TenantIdIndexField. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveTenantIdIndexFieldResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SearchRecordIdsParams": {
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "string",
+                        "description": "The id as the person gave it."
+                    }
+                },
+                "required": [
+                    "value"
+                ],
+                "description": "Finds an id (any spelling: #GOR123, gor123, a Shopify gid) in the active tenant's ID index with one read, then\n            follows the records it belongs to through the values they share (a HotWax order to its Shopify order, a NetSuite sales\n            order to its fulfillments) up to 4 hops and 200 records. Identifiers only: no customer details or order contents."
+            },
+            "SearchRecordIdsResult": {
+                "type": "object",
+                "properties": {
+                    "search": {
+                        "type": "object",
+                        "description": "{value, idNorm, records: [{systemCode, systemEnumId, connectionId, recordKind, recordKey, ids: [{fieldPath, idRaw, role}], foundBy, indexedAt}], capped, cappedReason}"
+                    }
+                }
+            },
+            "SearchRecordIdsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.IdIndexFacadeServices.search#RecordIds",
+                "x-darpan-method": "facade.IdIndexFacadeServices.search#RecordIds",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.IdIndexFacadeServices.search#RecordIds"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SearchRecordIdsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SearchRecordIdsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.IdIndexFacadeServices.search#RecordIds. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SearchRecordIdsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteJsonSchemaParams": {
                 "type": "object",
                 "properties": {
@@ -23972,269 +24311,25 @@
                     "result"
                 ]
             },
-            "DeleteTenantLookupLinkParams": {
-                "type": "object",
-                "properties": {
-                    "linkId": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "linkId"
-                ],
-                "description": "Removes the tenant's own link or its override."
-            },
-            "DeleteTenantLookupLinkResult": {
-                "type": "object",
-                "properties": {
-                    
-                }
-            },
-            "DeleteTenantLookupLinkRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.LookupFacadeServices.delete#TenantLookupLink",
-                "x-darpan-method": "facade.LookupFacadeServices.delete#TenantLookupLink",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.LookupFacadeServices.delete#TenantLookupLink"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/DeleteTenantLookupLinkParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "DeleteTenantLookupLinkResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.LookupFacadeServices.delete#TenantLookupLink. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/DeleteTenantLookupLinkResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "DeleteTenantLookupReadParams": {
-                "type": "object",
-                "properties": {
-                    "readId": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "readId"
-                ],
-                "description": "Removes the tenant's own read or its override (the product read, if any, applies again)."
-            },
-            "DeleteTenantLookupReadResult": {
-                "type": "object",
-                "properties": {
-                    
-                }
-            },
-            "DeleteTenantLookupReadRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.LookupFacadeServices.delete#TenantLookupRead",
-                "x-darpan-method": "facade.LookupFacadeServices.delete#TenantLookupRead",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.LookupFacadeServices.delete#TenantLookupRead"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/DeleteTenantLookupReadParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "DeleteTenantLookupReadResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.LookupFacadeServices.delete#TenantLookupRead. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/DeleteTenantLookupReadResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "GetLookupCatalogParams": {
-                "type": "object",
-                "properties": {
-                    
-                },
-                "description": "The reads (without their templates) and links the active tenant's lookups use, its own rows merged in."
-            },
-            "GetLookupCatalogResult": {
-                "type": "object",
-                "properties": {
-                    "reads": {
-                        "type": "array",
-                        "items": {
-                            
-                        }
-                    },
-                    "links": {
-                        "type": "array",
-                        "items": {
-                            
-                        }
-                    }
-                }
-            },
-            "GetLookupCatalogRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.LookupFacadeServices.get#LookupCatalog",
-                "x-darpan-method": "facade.LookupFacadeServices.get#LookupCatalog",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.LookupFacadeServices.get#LookupCatalog"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/GetLookupCatalogParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "GetLookupCatalogResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.LookupFacadeServices.get#LookupCatalog. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/GetLookupCatalogResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "LookupOrderParams": {
                 "type": "object",
                 "properties": {
                     "value": {
                         "type": "string",
                         "description": "The id as the person gave it."
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Every field each read selects, customer details included."
                     }
                 },
                 "required": [
                     "value"
                 ],
-                "description": "Finds an order id (a Shopify id or name, a HotWax order or external id, a NetSuite number or id, or any id a\n            tenant read takes) in every connected system and follows the order through Shopify, HotWax and NetSuite, with its\n            open findings. Every read is a read-only fresh query on the tenant's own connection. Order facts by default;\n            customer name, email, phone and address only with all."
+                "description": "Answers an id (a Shopify order id or name, a HotWax order or return id, a NetSuite number, any spelling) from\n            what Darpan already holds: the ID index's records that carry it, the records they connect to, and the tenant's open\n            findings on any of them. Calls no connected system; an id no Darpan read has seen yet comes back notSeen."
             },
             "LookupOrderResult": {
                 "type": "object",
                 "properties": {
                     "lookup": {
                         "type": "object",
-                        "description": "{value, records: [{system, connectionId, connectionLabel, recordKind, readId, foundBy, record}], findings, skipped, readsUsed, capped}"
+                        "description": "{value, records: [{systemCode, systemEnumId, connectionId, recordKind, recordKey, ids, foundBy, indexedAt}], findings, notSeen, capped, cappedReason}"
                     }
                 }
             },
@@ -24291,213 +24386,6 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/LookupOrderResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "SaveTenantLookupLinkParams": {
-                "type": "object",
-                "properties": {
-                    "linkId": {
-                        "type": "string"
-                    },
-                    "fromReadId": {
-                        "type": "string"
-                    },
-                    "fromField": {
-                        "type": "string"
-                    },
-                    "toReadId": {
-                        "type": "string"
-                    },
-                    "isActive": {
-                        "type": "string"
-                    },
-                    "description": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "linkId"
-                ],
-                "description": "Adds a tenant link (a join key), or overrides a product link with the same linkId."
-            },
-            "SaveTenantLookupLinkResult": {
-                "type": "object",
-                "properties": {
-                    
-                }
-            },
-            "SaveTenantLookupLinkRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.LookupFacadeServices.save#TenantLookupLink",
-                "x-darpan-method": "facade.LookupFacadeServices.save#TenantLookupLink",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.LookupFacadeServices.save#TenantLookupLink"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/SaveTenantLookupLinkParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "SaveTenantLookupLinkResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.LookupFacadeServices.save#TenantLookupLink. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/SaveTenantLookupLinkResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "SaveTenantLookupReadParams": {
-                "type": "object",
-                "properties": {
-                    "readId": {
-                        "type": "string"
-                    },
-                    "systemCode": {
-                        "type": "string"
-                    },
-                    "recordKind": {
-                        "type": "string"
-                    },
-                    "keyField": {
-                        "type": "string"
-                    },
-                    "queryTemplate": {
-                        "type": "string"
-                    },
-                    "valueShape": {
-                        "type": "string"
-                    },
-                    "valueFormat": {
-                        "type": "string"
-                    },
-                    "recordsAt": {
-                        "type": "string"
-                    },
-                    "fieldsDefault": {
-                        "type": "string"
-                    },
-                    "isFind": {
-                        "type": "string"
-                    },
-                    "isActive": {
-                        "type": "string"
-                    },
-                    "sequenceNum": {
-                        "type": "integer"
-                    },
-                    "description": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "readId"
-                ],
-                "description": "Adds a tenant read, or overrides a product read with the same readId (blank fields keep the product's).\n            A template must be read-only for its system (SuiteQL SELECT with {value}; a GraphQL query taking $value)."
-            },
-            "SaveTenantLookupReadResult": {
-                "type": "object",
-                "properties": {
-                    
-                }
-            },
-            "SaveTenantLookupReadRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.LookupFacadeServices.save#TenantLookupRead",
-                "x-darpan-method": "facade.LookupFacadeServices.save#TenantLookupRead",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.LookupFacadeServices.save#TenantLookupRead"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/SaveTenantLookupReadParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "SaveTenantLookupReadResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.LookupFacadeServices.save#TenantLookupRead. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/SaveTenantLookupReadResult"
                     }
                 },
                 "required": [
@@ -43621,6 +43509,10 @@
         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "ListHotWaxOmsRestSourceConfigs",
         "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery": "RunOmsGraphqlAgentQuery",
         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "SaveHotWaxOmsRestSourceConfig",
+        "facade.IdIndexFacadeServices.delete#TenantIdIndexField": "DeleteTenantIdIndexField",
+        "facade.IdIndexFacadeServices.get#IdIndexStatus": "GetIdIndexStatus",
+        "facade.IdIndexFacadeServices.save#TenantIdIndexField": "SaveTenantIdIndexField",
+        "facade.IdIndexFacadeServices.search#RecordIds": "SearchRecordIds",
         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "DeleteJsonSchema",
         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "FlattenJsonSchema",
         "facade.JsonSchemaFacadeServices.get#JsonSchema": "GetJsonSchema",
@@ -43630,12 +43522,7 @@
         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "SaveJsonSchemaText",
         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "SaveRefinedSchema",
         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "ValidateJsonTextAgainstSchema",
-        "facade.LookupFacadeServices.delete#TenantLookupLink": "DeleteTenantLookupLink",
-        "facade.LookupFacadeServices.delete#TenantLookupRead": "DeleteTenantLookupRead",
-        "facade.LookupFacadeServices.get#LookupCatalog": "GetLookupCatalog",
         "facade.LookupFacadeServices.lookup#Order": "LookupOrder",
-        "facade.LookupFacadeServices.save#TenantLookupLink": "SaveTenantLookupLink",
-        "facade.LookupFacadeServices.save#TenantLookupRead": "SaveTenantLookupRead",
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "GetLifecycleOptions",
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "GetLifecycleRuleOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "GetNsSuiteQlQueryOptions",

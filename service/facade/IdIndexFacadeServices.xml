@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- DAR-BE-374: the ID index — search it, see how far behind it is, and a tenant's own ID fields. -->
+
+    <service verb="search" noun="RecordIds" allow-remote="true" authenticate="true" authz-action="view">
+        <description>Finds an id (any spelling: #GOR123, gor123, a Shopify gid) in the active tenant's ID index with one read, then
+            follows the records it belongs to through the values they share (a HotWax order to its Shopify order, a NetSuite sales
+            order to its fulfillments) up to 4 hops and 200 records. Identifiers only: no customer details or order contents.</description>
+        <in-parameters><parameter name="value" required="true"><description>The id as the person gave it.</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="search" type="Map"><description>{value, idNorm, records: [{systemCode, systemEnumId, connectionId, recordKind, recordKey, ids: [{fieldPath, idRaw, role}], foundBy, indexedAt}], capped, cappedReason}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'"><return error="true" message="No active tenant"/></if>
+            <set field="search" from="darpan.idindex.IdIndexSearch.search(darpan.idindex.IdIndexSearch.liveDeps(ec, tenantId), value as String)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="IdIndexStatus" allow-remote="true" authenticate="true" authz-action="view">
+        <description>How current the active tenant's ID index is: one row per kept copy of a system it reads (indexed or behind,
+            last indexed, last failure), and the tenant's row count. Runs' own extracts are indexed as they finish.</description>
+        <out-parameters>
+            <parameter name="connections" type="List"><description>[{datasetId, connectionId, systemEnumId, lastReadAt, lastIndexedAt, rowsLastPass, lastStatus, lastError, behind, stale}]</description></parameter>
+            <parameter name="rowCount" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'"><return error="true" message="No active tenant"/></if>
+            <set field="systems" from="darpan.idindex.IdIndexCatalog.sources(ec)*.systemEnumId"/>
+            <set field="datasetList" from="[]"/>
+            <if condition="systems">
+                <entity-find entity-name="darpan.dataset.Dataset" list="datasetList">
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <econdition field-name="systemEnumId" operator="in" from="systems"/>
+                    <order-by field-name="systemEnumId"/><order-by field-name="sourceConfigId"/>
+                </entity-find>
+            </if>
+            <entity-find entity-name="darpan.idindex.RecordIdIndexCursor" list="cursorList">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <set field="connections" from="darpan.idindex.IdIndexSearch.statusRows(datasetList*.getMap(), cursorList*.getMap())"/>
+            <entity-find-count entity-name="darpan.idindex.RecordIdIndex" count-field="rowCount">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find-count>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantIdIndexField" allow-remote="true" authenticate="true">
+        <description>Adds a tenant ID field, or overrides a product field with the same fieldId (blank fields keep the product's).
+            The system must be one the index reads; a new field needs a path and a role. A path must be plain (name.name, lists as
+            name[*]); one that looks like a customer detail (email, phone, address, names ...) is refused: the index keeps identifiers only.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="fieldId" required="true"/>
+            <parameter name="recordKind"/>
+            <parameter name="fieldPath"/>
+            <parameter name="role"/>
+            <parameter name="refRecordKind"/>
+            <parameter name="isActive"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for the ID index.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="refusal" from="darpan.idindex.IdIndexCatalog.tenantFieldRefusal(ec, [systemEnumId: systemEnumId, fieldId: fieldId,
+                    fieldPath: fieldPath, role: role, isActive: isActive])"/>
+            <if condition="refusal"><return error="true" message="${refusal}"/></if>
+            <service-call name="store#darpan.idindex.TenantIdIndexField" disable-authz="true"
+                    in-map="[companyUserGroupId: tenantId, systemEnumId: systemEnumId, fieldId: fieldId, recordKind: recordKind,
+                             fieldPath: fieldPath, role: role, refRecordKind: refRecordKind, isActive: isActive,
+                             description: description, lastChangedByUserId: ec.user.userId]"/>
+            <script>darpan.idindex.IdIndexCatalog.markForReindex(ec, tenantId, systemEnumId)</script>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="TenantIdIndexField" allow-remote="true" authenticate="true">
+        <description>Removes the tenant's own ID field or its override (the product field, if any, applies again). The system's
+            kept copies are indexed again by the nightly catch-up.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="fieldId" required="true"/>
+        </in-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for the ID index.')"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-delete-by-condition entity-name="darpan.idindex.TenantIdIndexField">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="systemEnumId"/>
+                <econdition field-name="fieldId"/>
+            </entity-delete-by-condition>
+            <script>darpan.idindex.IdIndexCatalog.markForReindex(ec, tenantId, systemEnumId)</script>
+        </actions>
+    </service>
+</services>

@@ -2606,6 +2606,10 @@ class AutomationExecutionSupport {
             ec.message.clearErrors()
         }
         if (errors) throw new IllegalStateException(errors.join("; "))
+        // DAR-BE-374: what this run read feeds the ID index, in the background
+        darpan.idindex.IdIndexRunHook.afterLiveRead(ec, normalize(serviceParams.companyUserGroupId), normalize(connectorForService?.systemEnumId),
+                normalize(serviceParams[normalize(connectorForService?.configParameterName) ?: "sourceConfigId"]),
+                normalize(result.fileLocation ?: result.dataManagerPath))
         // DAR-BE-320 phase 1b: the window THIS side read (HotWax reads from its last covered day, the other side a
         // little earlier), recorded on the audit's source read.
         result = new LinkedHashMap<String, Object>(result)

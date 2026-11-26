@@ -97,8 +97,6 @@ class CliMethodAllowlistTests {
             "facade.AgentReadFacadeServices.find#AuditFindingLookalikes",
             // DAR-CLI-008 part 3: the order lookup and the tenant's lookup reads and links
             "facade.LookupFacadeServices.lookup#Order",
-            "facade.LookupFacadeServices.save#TenantLookupRead",
-            "facade.LookupFacadeServices.save#TenantLookupLink",
     ].asImmutable()
 
     /** Final review Important 2: credentials by name, so a NEW credential service is caught, not only today's names. */

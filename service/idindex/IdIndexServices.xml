@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- DAR-BE-374: the ID index's background work. It reads only what Darpan already holds: never Shopify, HotWax or NetSuite. -->
+
+    <service verb="index" noun="ExtractFile" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
+        <description>Indexes one run's live extract file for its tenant connection (handed over by both run paths, in the
+            background). A failure is logged; the run is never touched.</description>
+        <in-parameters>
+            <parameter name="tenantId" required="true"/>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="connectionId" required="true"/>
+            <parameter name="fileLocation" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="records" type="Integer"/><parameter name="rows" type="Integer"/></out-parameters>
+        <actions>
+            <script>
+                try {
+                    Map out = darpan.idindex.IdIndexRunHook.indexExtract(ec, tenantId, systemEnumId, connectionId, fileLocation)
+                    if (out.error) ec.logger.warn("ID index of ${systemEnumId} extract ${fileLocation}: ${out.error}")
+                    records = out.records; rows = out.rows
+                } catch (Throwable t) {
+                    ec.logger.warn("ID index of ${systemEnumId} extract ${fileLocation} failed", t)
+                }
+            </script>
+        </actions>
+    </service>
+
+    <service verb="maintain" noun="IdIndex" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
+        <description>The maintain_IdIndex_nightly job (seeded paused): indexes every kept copy whose current version the index has
+            not (first load, a failed pass, a changed tenant field), then drops rows no read has seen for darpan.idindex.months.</description>
+        <out-parameters>
+            <parameter name="indexed" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="deleted" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="caught" from="darpan.idindex.IdIndexMaintain.catchUp(ec)"/>
+            <set field="indexed" from="caught.indexed" type="Integer"/>
+            <set field="failed" from="caught.failed" type="Integer"/>
+            <set field="deleted" from="darpan.idindex.IdIndexMaintain.sweep(ec)" type="Integer"/>
+        </actions>
+    </service>
+</services>

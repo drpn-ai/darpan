@@ -242,6 +242,9 @@
                 <set field="warningText" value="Read ${readSeqId} found ${missCount} records the earlier reads missed"/></if>
             <set field="updates" from="[currentVersion:result.version, readThru:startedAt, lastReadAt:result.readAt,
                     recordCount:result.recordCount, lastMissCount:missCount, nextReadDate:result.nextReadDate, warningText:warningText]"/>
+            <!-- DAR-BE-374: the read's records feed the ID index now, while this refresh still holds the lock (so no next read
+                 prunes the file mid-index); a failure is recorded on the index cursor and never fails the read -->
+            <set field="indexOut" from="darpan.idindex.IdIndexDatasetHook.afterRead(ec, lockOut.dataset, readSeqId, result.readFile as String, result.version as String, readKindEnumId as String)"/>
             <!-- plan 3b-1: what a full read kept of each record (the copy's manifest holds the same); empty for whole records -->
             <if condition="readKindEnumId == 'DRK_FULL'"><set field="updates.keptFieldsJson" from="result.keptFieldsJson"/></if>
             <if condition="readKindEnumId == 'DRK_FULL'"><set field="updates.lastFullReadAt" from="result.readAt"/></if>

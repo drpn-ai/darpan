@@ -181,6 +181,10 @@ facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema
 facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs
 facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery
 facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig
+facade.IdIndexFacadeServices.delete#TenantIdIndexField
+facade.IdIndexFacadeServices.get#IdIndexStatus
+facade.IdIndexFacadeServices.save#TenantIdIndexField
+facade.IdIndexFacadeServices.search#RecordIds
 facade.JsonSchemaFacadeServices.delete#JsonSchema
 facade.JsonSchemaFacadeServices.flatten#JsonSchema
 facade.JsonSchemaFacadeServices.get#JsonSchema
@@ -190,12 +194,7 @@ facade.JsonSchemaFacadeServices.list#JsonSchemas
 facade.JsonSchemaFacadeServices.save#JsonSchemaText
 facade.JsonSchemaFacadeServices.save#RefinedSchema
 facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
-facade.LookupFacadeServices.delete#TenantLookupLink
-facade.LookupFacadeServices.delete#TenantLookupRead
-facade.LookupFacadeServices.get#LookupCatalog
 facade.LookupFacadeServices.lookup#Order
-facade.LookupFacadeServices.save#TenantLookupLink
-facade.LookupFacadeServices.save#TenantLookupRead
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions
 facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions

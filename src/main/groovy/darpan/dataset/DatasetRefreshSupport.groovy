@@ -379,7 +379,7 @@ class DatasetRefreshSupport {
                 records.close()
             }
             Map manifest = KeptCopyStore.manifest(datasetDir)
-            return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount,
+            return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount, readFile: file.absolutePath,
                     recordsRead : counts.recordsRead ?: 0, changedCount: counts.changedCount ?: 0,
                     addedCount  : counts.addedCount ?: 0, removedCount: counts.removedCount ?: 0,
                     missCount   : rolling ? null : (counts.missCount ?: 0)]

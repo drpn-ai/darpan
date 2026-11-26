@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-374: the ID index. Every ID-like field of every record a dataset reads goes into RecordIdIndex, so a search is
+         one keyed read. Which fields count is data: product rows ship in each system repo's seed data; a tenant adds,
+         overrides (same fieldId) or hides (isActive N) them in TenantIdIndexField, editable in production. The index holds
+         identifiers and where they point only: no customer details, amounts or order contents. -->
+    <entity entity-name="IdIndexSource" package="darpan.idindex" use="configuration" cache="never">
+        <description>One dataset endpoint the index reads, and the record kind its records are (fixed, or by a field's value).</description>
+        <field name="systemEnumId" type="id" is-pk="true"><description>The dataset's endpoint (OMS_GQL, SHOPIFY, NETSUITE_SUITEQL ...).</description></field>
+        <field name="systemCode" type="text-short" not-null="true"><description>OMS, SHOPIFY or NETSUITE.</description></field>
+        <field name="recordKind" type="text-short"><description>The kind every record is (ORDER, RETURN ...); blank when recordKindField decides.</description></field>
+        <field name="recordKindField" type="text-medium"><description>A field whose value names the kind (NetSuite type), mapped by recordKindMapJson.</description></field>
+        <field name="recordKindMapJson" type="text-long"><description>{"SalesOrd":"ORDER", ...}; an unmapped value skips the record.</description></field>
+        <field name="idField" type="text-medium" not-null="true"><description>The record's own key (the dataset's idField).</description></field>
+        <field name="kindHintEntity" type="text-medium"><description>Where a read's record kind is named when the records do not carry
+            it: an entity whose primary key is the read's connection (NetSuite: darpan.reconciliation.NsSuiteQlSourceQuery).</description></field>
+        <field name="kindHintField" type="text-medium"><description>That entity's field holding the value recordKindMapJson maps (recordType).</description></field>
+        <field name="isActive" type="text-indicator"/>
+        <field name="description" type="text-medium"/>
+    </entity>
+    <entity entity-name="IdIndexField" package="darpan.idindex" use="configuration" cache="never">
+        <description>One ID-like field of a source's records: the record's own identifier (OWN) or a pointer to another record (REF).</description>
+        <field name="systemEnumId" type="id" is-pk="true"/>
+        <field name="fieldId" type="id" is-pk="true"/>
+        <field name="recordKind" type="text-short"><description>Blank: every kind of the source.</description></field>
+        <field name="fieldPath" type="text-medium" not-null="true"><description>Dotted path; [*] for lists (lineItems[*].id).</description></field>
+        <field name="role" type="text-short" not-null="true"><description>OWN or REF.</description></field>
+        <field name="refRecordKind" type="text-short"><description>REF only: the kind it points at, when known.</description></field>
+        <field name="description" type="text-medium"/>
+    </entity>
+    <entity entity-name="TenantIdIndexField" package="darpan.idindex" use="configuration" cache="never">
+        <description>A tenant's own ID field, or its override of a product field with the same fieldId (isActive N hides it).</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="systemEnumId" type="id" is-pk="true"/>
+        <field name="fieldId" type="id" is-pk="true"/>
+        <field name="recordKind" type="text-short"/>
+        <field name="fieldPath" type="text-medium"/>
+        <field name="role" type="text-short"/>
+        <field name="refRecordKind" type="text-short"/>
+        <field name="isActive" type="text-indicator"/>
+        <field name="description" type="text-medium"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <relationship type="one" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
+    </entity>
+    <entity entity-name="RecordIdIndex" package="darpan.idindex" use="transactional" cache="never">
+        <description>One ID of one record in one system: the normalised value, and the record it belongs to. Added or touched by
+            every Darpan read that sees it, never deleted by a read (a run's extract may carry only some fields); the nightly sweep
+            drops rows not seen for darpan.idindex.months.</description>
+        <field name="rowKey" type="id" is-pk="true"><description>SHA-1 hex of tenant, connection, kind, record, field and value: one
+            row per id, whoever writes it.</description></field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="idNorm" type="text-medium" not-null="true"><description>IdNormalizer.normalize: trimmed, no leading #, Shopify gid reduced to its number, uppercase.</description></field>
+        <field name="idRaw" type="text-medium"/>
+        <field name="systemCode" type="text-short" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="connectionId" type="id" not-null="true"/>
+        <field name="recordKind" type="text-short" not-null="true"/>
+        <field name="recordKey" type="text-medium" not-null="true"><description>The record's own key in its system (normalised).</description></field>
+        <field name="fieldPath" type="text-medium" not-null="true"/>
+        <field name="role" type="text-short" not-null="true"/>
+        <field name="refRecordKind" type="text-short"/>
+        <field name="lastSeenAt" type="date-time" not-null="true"/>
+        <index name="RECID_SEARCH"><index-field name="companyUserGroupId"/><index-field name="idNorm"/></index>
+        <index name="RECID_RECORD"><index-field name="companyUserGroupId"/><index-field name="connectionId"/>
+            <index-field name="recordKind"/><index-field name="recordKey"/></index>
+        <index name="RECID_SEEN"><index-field name="lastSeenAt"/></index>
+    </entity>
+    <entity entity-name="RecordIdIndexCursor" package="darpan.idindex" use="transactional" cache="never">
+        <description>How far the index has read one dataset: the last read and the kept copy version indexed, the last error.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="datasetId" type="id" is-pk="true"/>
+        <field name="systemEnumId" type="id"/>
+        <field name="connectionId" type="id"/>
+        <field name="lastIndexedReadSeqId" type="id"/>
+        <field name="indexedVersion" type="text-short"><description>The kept copy version last indexed in full; behind the dataset's
+            currentVersion, the nightly catch-up indexes it again.</description></field>
+        <field name="lastIndexedAt" type="date-time"/>
+        <field name="rowsLastPass" type="number-integer"/>
+        <field name="lastStatus" type="text-short"><description>OK, FAILED or SKIPPED_BUSY.</description></field>
+        <field name="lastError" type="text-long"/>
+    </entity>
+</entities>

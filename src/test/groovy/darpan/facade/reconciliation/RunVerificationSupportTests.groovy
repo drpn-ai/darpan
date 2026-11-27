@@ -141,6 +141,66 @@ class RunVerificationSupportTests {
                 "an empty verification must not add an empty warnings array to the result document")
     }
 
+    // --- one side blocked ----------------------------------------------------------------------
+
+    /** A stand-in for ec.entity.find(...) over the connector registry; rows are plain Maps. */
+    private static Object fakeEc(List<Map> connectorRows) {
+        return [entity: [find: { String name -> fakeFinder(connectorRows) }]]
+    }
+
+    private static Object fakeFinder(List<Map> rows) {
+        return [condition: { String f, Object v -> fakeFinder(rows.findAll { it.get(f) == v }) },
+                useCache : { boolean b -> fakeFinder(rows) },
+                one      : { -> rows ? rows.first() : null },
+                list     : { -> rows }]
+    }
+
+    private static Map oneSideBlockedArgs(File diffFile) {
+        List<Map> connectors = [
+                [systemEnumId: "SYS_A", lookupServiceName: "facade.SampleFacadeServices.lookup#Orders", enabled: "Y"],
+                [systemEnumId: "SYS_B", lookupServiceName: "facade.SampleFacadeServices.lookup#Orders", enabled: "Y"]]
+        return [ec           : fakeEc(connectors),
+                serviceResult: [missingInFile1Count: 2L, missingInFile2Count: 3L, differenceCount: 5L],
+                diffFile     : diffFile,
+                file1Label   : "Side A", file2Label: "Side B",
+                // Side A resolves a config id; side B has none, so its lookup is blocked.
+                file1Source  : [systemEnumId: "SYS_A", sourceConfigId: "cfg-a"],
+                file2Source  : [systemEnumId: "SYS_B"],
+                dispatcher   : { String name, Map params -> [:] }] as Map
+    }
+
+    @Test
+    void aBlockedSideIsCarriedOnAPassThatStillAppliesToTheOtherSide() {
+        File diffFile = File.createTempFile("diff", ".json")
+        try {
+            Map prepared = RunVerificationSupport.prepareMissingDiffPass(oneSideBlockedArgs(diffFile))
+
+            assertTrue(prepared.applies == true, "the resolvable side must still be rechecked")
+            assertEquals(["Side A"], prepared.verifiedLabels)
+            assertEquals(1, ((List) prepared.blockedSides).size())
+            assertTrue(((List) prepared.blockedSides).first().toString().startsWith("Side B: "))
+        } finally {
+            diffFile.delete()
+        }
+    }
+
+    @Test
+    void runMissingDiffPassWarnsAboutTheSideItCouldNotRecheck() {
+        File diffFile = File.createTempFile("diff", ".json")
+        try {
+            Map args = oneSideBlockedArgs(diffFile)
+            Map serviceResult = (Map) args.serviceResult
+
+            assertTrue(RunVerificationSupport.runMissingDiffPass(args))
+
+            List warnings = (serviceResult.processingWarnings ?: []) as List
+            assertTrue(warnings.any { it.toString().contains("Side B") && it.toString().contains("not verified") },
+                    "the blocked side's reason must reach processingWarnings, got: ${warnings}")
+        } finally {
+            diffFile.delete()
+        }
+    }
+
     @Test
     void anOrderKeyedSideIsNeverSentToARefundOrReturnLookup() {
         // DAR-BE-320: RAILS R6/R7 (completedReturns) are keyed by orderId; the returns lookup answers

@@ -770,10 +770,10 @@ class SyncPulseSupport {
 
     private static String cadenceWords(Integer minutes) {
         if (minutes == null) return null
-        if (minutes <= 0) return "pulse off"
-        if (minutes == 60) return "pulse every hour"
-        if (minutes % 60 == 0) return "pulse every ${minutes.intdiv(60)} hours".toString()
-        return "pulse every ${minutes} min".toString()
+        if (minutes <= 0) return "Pulse off"
+        if (minutes == 60) return "Pulse every hour"
+        if (minutes % 60 == 0) return "Pulse every ${minutes.intdiv(60)} hours".toString()
+        return "Pulse every ${minutes} min".toString()
     }
 
     private static String oldestWords(Map oldest) {
@@ -973,30 +973,37 @@ class SyncPulseSupport {
         return find.condition("companyUserGroupId", tenantId).useCache(false).list().find()
     }
 
-    /** "NetSuite sync allowance 6h . pulse every hour . heavy runs wait 08:00-23:00"; empty when the period overrides nothing. */
-    static String overridesLine(Map period, List<Map> syncRows, Map<String, Map> namesByPair) {
-        List<String> parts = []
+    /**
+     * One line per setting the period changes, for the start post (DAR-BE-389): "NetSuite sync allowance 6h" when every pair
+     * shares one allowance and one target, else a line per pair name and allowance, a count when several pairs share both
+     * ("Shopify → HotWax orders allowance 2h (5 pairs)"); then "Pulse every hour" and "Heavy runs wait 08:00–23:00". Empty when
+     * the period changes nothing.
+     */
+    static List<String> overrideLines(Map period, List<Map> syncRows, Map<String, Map> namesByPair) {
+        List<String> lines = []
         List<Map> withAllowance = (syncRows ?: []).findAll { it.get("allowanceMinutes") != null }
+        Closure<Map> nameOf = { Map r -> namesByPair?.get(r.get("syncPairId")) ?: [:] }
         Set<Integer> allowances = withAllowance.collect { it.get("allowanceMinutes") as Integer } as LinkedHashSet
-        if (allowances.size() == 1) {
-            String target = namesByPair?.get(withAllowance[0].get("syncPairId"))?.get("target") ?: "Sync"
-            parts << "${target} sync allowance ${allowanceWords(allowances.first())}".toString()
-        } else if (allowances.size() > 1) {
-            withAllowance.each { Map r ->
-                String label = namesByPair?.get(r.get("syncPairId"))?.get("label") ?: r.get("syncPairId")
-                parts << "${label} allowance ${allowanceWords(r.get('allowanceMinutes') as Integer)}".toString()
-            }
+        Set<String> targets = withAllowance.collect { nameOf(it).get("target") ?: "Sync" } as LinkedHashSet
+        if (allowances.size() == 1 && targets.size() == 1) {
+            lines << "${targets.first()} sync allowance ${allowanceWords(allowances.first())}".toString()
+        } else {
+            withAllowance.groupBy { Map r -> [nameOf(r).get("label") ?: r.get("syncPairId"), r.get("allowanceMinutes") as Integer] }
+                    .each { List key, List<Map> same ->
+                        String count = same.size() > 1 ? " (${same.size()} pairs)" : ""
+                        lines << "${key[0]} allowance ${allowanceWords(key[1] as Integer)}${count}".toString()
+                    }
         }
         Set<Integer> cadences = (syncRows ?: []).findAll { it.get("pulseEveryMinutes") != null }
                 .collect { it.get("pulseEveryMinutes") as Integer } as LinkedHashSet
-        cadences.each { Integer c -> parts << cadenceWords(c) }
+        cadences.each { Integer c -> lines << cadenceWords(c) }
         String from = normalize(period.get("peakHoursStart")), thru = normalize(period.get("peakHoursEnd"))
-        if (from && thru) parts << "heavy runs wait ${from}${DASH}${thru}".toString()
-        return parts.join(DOT)
+        if (from && thru) lines << "Heavy runs wait ${from}${DASH}${thru}".toString()
+        return lines
     }
 
     /**
-     * Once per period per boundary: "<name> started. Until <MMM d>:" + its overrides, and "<name> ended. Normal settings are
+     * Once per period per boundary: "<name> started. Until <MMM d>:" ("Today only:" for a one-day period) + its overrides, and "<name> ended. Normal settings are
      * back.", to every distinct chat space of the tenant's active pairs. The period's startPostedStamp / endPostedStamp say it
      * was done; a tenant with no chat space posts and stamps nothing (a space added later still gets the start). An end is only
      * posted for a start that was.
@@ -1047,9 +1054,11 @@ class SyncPulseSupport {
                 .condition("peakPeriodId", periodId).condition("companyUserGroupId", tenantId).useCache(false).list() ?: [])
                 .collect { it.getMap() as Map }.findAll { names.containsKey(normalize(it.get("syncPairId"))) }
                 .sort { normalize(it.get("syncPairId")) }
-        String head = "${normalize(period.get('periodName'))} started. Until ${MONTH_DAY.format(thru)}:".toString()
-        String line = overridesLine(period, rows, names)
-        return line ? head + "\n" + line : head
+        LocalDate from = dateOf(period.get("fromDate"))
+        String until = thru == from ? "Today only" : "Until ${MONTH_DAY.format(thru)}".toString()
+        List<String> lines = overrideLines(period, rows, names)
+        String head = "${normalize(period.get('periodName'))} started. ${until}".toString()
+        return lines ? ([head + ":"] + lines).join("\n") : head + "."
     }
 
     private static LocalDate dateOf(Object value) {

@@ -346,7 +346,7 @@ class SyncPulseChatTests {
                 allowanceMinutes: 360, pulseEveryMinutes: 60]).create()
 
         scan(T0)
-        String start = "Black Friday started. Until Nov 23:\nNetSuite sync allowance 6h${DOT}pulse every hour${DOT}heavy runs wait 08:00–23:00".toString()
+        String start = "Black Friday started. Until Nov 23:\nNetSuite sync allowance 6h\nPulse every hour\nHeavy runs wait 08:00–23:00"
         assertEquals([[ref: URL1, text: start], [ref: URL2, text: start]] as Set, posts as Set)
         assertEquals(2, posts.size(), "one post per distinct space")
         assertNotNull(period("PC_BF").startPostedStamp)
@@ -363,6 +363,40 @@ class SyncPulseChatTests {
         assertNotNull(period("PC_BF").endPostedStamp)
         scan(after.plus(Duration.ofMinutes(5)))
         assertEquals(2, posts.size(), "the end is once too")
+    }
+
+    // DAR-BE-389 (Aditi 2026-11-27, RAILS "PEAK Nov 27 started. Until Nov 27:" then six pairs on one line): "dont like how
+    // this message looks". A one-day period says so; each setting is its own line.
+    @Test
+    void aOneDayPeriodSaysTodayOnly() {
+        pair(SP, 60, 60, SPACE, [lastPulseStamp: Timestamp.from(T0)])
+        LocalDate today = T0.atZone(ZoneOffset.UTC).toLocalDate()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_ONE", companyUserGroupId: A, periodName: "PEAK Nov 21",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today), isActive: "Y",
+                peakHoursStart: "00:00", peakHoursEnd: "01:30"]).create()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_BARE", companyUserGroupId: A, periodName: "Quiet",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today.plusDays(2)), isActive: "Y"]).create()
+        scan(T0)
+        assertEquals(["PEAK Nov 21 started. Today only:\nHeavy runs wait 00:00–01:30", "Quiet started. Until Nov 23."] as Set,
+                posts*.text as Set, "a period that changes nothing ends on a full stop, not a colon")
+    }
+
+    @Test
+    void pairsWithTheSameNameAndAllowanceAreSaidOnce() {
+        Map shop = [upstream: "Shopify", target: "HotWax", label: "Shopify → HotWax orders"]
+        Map ns = [upstream: "HotWax", target: "NetSuite", label: "HotWax → NetSuite orders"]
+        Map<String, Map> names = [S1: shop, S2: shop, S3: shop, S4: shop, S5: shop, N1: ns]
+        List<Map> rows = (1..5).collect { [syncPairId: "S${it}".toString(), allowanceMinutes: 120, pulseEveryMinutes: 60] } +
+                [[syncPairId: "N1", allowanceMinutes: 360, pulseEveryMinutes: 60]]
+        assertEquals(["Shopify → HotWax orders allowance 2h (5 pairs)", "HotWax → NetSuite orders allowance 6h", "Pulse every hour",
+                "Heavy runs wait 00:00–01:30"], SyncPulseSupport.overrideLines([peakHoursStart: "00:00", peakHoursEnd: "01:30"], rows, names))
+
+        Map ns2 = [upstream: "Shopify", target: "NetSuite", label: "Shopify → NetSuite orders"]
+        assertEquals(["Shopify → HotWax orders allowance 2h", "Shopify → NetSuite orders allowance 2h"],
+                SyncPulseSupport.overrideLines([:], [[syncPairId: "S1", allowanceMinutes: 120], [syncPairId: "M1", allowanceMinutes: 120]],
+                        [S1: shop, M1: ns2]), "one allowance over two targets names each pair, never the first target alone")
+        assertEquals(["HotWax sync allowance 2h"], SyncPulseSupport.overrideLines([:],
+                [[syncPairId: "S1", allowanceMinutes: 120], [syncPairId: "S2", allowanceMinutes: 120]], [S1: shop, S2: shop]))
     }
 
     @Test

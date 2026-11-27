@@ -660,7 +660,10 @@ class AuditSettingsSupport {
                 .condition("reconciliationRunResultId", previousRunResultId)
                 .condition("stageCode", EntityCondition.IN, sideOfStage.keySet() as List)
                 .condition("statusEnumId", RunObservability.STATUS_SUCCESS).orderBy("startedDate").list()
-                .collectEntries { [(it.stageCode as String): readCountOf(it.metricsJson as String)] }.findAll { it.value != null } : [:]
+                // DAR-BE-394: qualified, and no inline cast. Groovy 5.0.3 fails a bare static call from a closure with an
+                // inline-cast null ("argument type mismatch"); a read that never heartbeats keeps no metricsJson, which took
+                // down get#AuditProgress and, through idle(), send#AuditRunUpdate whenever such an automation was mid-run.
+                .collectEntries { [(it.stageCode as String): AuditSettingsSupport.readCountOf(it.metricsJson)] }.findAll { it.value != null } : [:]
         return rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
                 .condition("reconciliationRunResultId", runResultId).orderBy(["stageSequence", "startedDate"]).list().collect { step ->
             String stage = step.stageCode as String
@@ -678,9 +681,10 @@ class AuditSettingsSupport {
         }
     }
 
-    private static Long readCountOf(String metricsJson) {
-        if (!metricsJson?.contains("readCount")) return null
-        try { return (new groovy.json.JsonSlurper().parseText(metricsJson) as Map)?.readCount as Long }
+    private static Long readCountOf(Object metricsJson) {
+        String text = metricsJson?.toString()
+        if (!text?.contains("readCount")) return null
+        try { return (new groovy.json.JsonSlurper().parseText(text) as Map)?.readCount as Long }
         catch (Exception ignored) { return null }
     }
 

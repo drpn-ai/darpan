@@ -109,10 +109,10 @@ class AuditReadReport {
             if (r.statusEnumId == "AUDSR_FAILED") g.failed = (g.failed as int) + 1
             if (!(g.checks as List).contains(r.checkCode)) (g.checks as List) << r.checkCode
             if (r.windowFrom || r.windowThru) (g.windows as List) << [check: r.checkCode, from: r.windowFrom, thru: r.windowThru]
-            addCalls(g.calls as Map, r.calls as Map)
+            AuditReadReport.addCalls(g.calls, r.calls)
         }
         Map<String, Long> totalCalls = new LinkedHashMap<>()
-        groups.values().each { addCalls(totalCalls, it.calls as Map) }
+        groups.values().each { AuditReadReport.addCalls(totalCalls, it.calls) }
         Map totals = [reads      : play.size(), connections: groups.values().count { it.sourceConfigId } as int,
                       records    : groups.values().sum(0L) { it.records as long }, calls: totalCalls]
 
@@ -196,7 +196,7 @@ class AuditReadReport {
         List<Map> mine = reads.findAll { groupKey(it) == groupKey(g) }
         if (!mine) return null
         Map<String, Long> calls = new LinkedHashMap<>()
-        mine.each { addCalls(calls, it.calls as Map) }
+        mine.each { AuditReadReport.addCalls(calls, it.calls) }
         return [calls: calls]
     }
 
@@ -204,8 +204,14 @@ class AuditReadReport {
 
     private static boolean lookedUp(Map r) { return (((r.lookup as Map)?.lookedUp ?: 0) as long) > 0 }
 
-    private static void addCalls(Map<String, Long> into, Map calls) {
-        calls?.each { k, v -> if (v instanceof Number) into.put(k as String, ((into.get(k as String) ?: 0L) as long) + (v as long)) }
+    /**
+     * DAR-BE-394: called qualified and with no inline cast, from closures. Groovy 5.0.3 fails a bare static call from a
+     * closure when an inline-cast argument is null ("argument type mismatch"), and a read with no call tally has none.
+     */
+    private static void addCalls(Object target, Object tally) {
+        Map<String, Long> into = (Map<String, Long>) target
+        if (!(tally instanceof Map)) return
+        ((Map) tally).each { k, v -> if (v instanceof Number) into.put(k as String, ((into.get(k as String) ?: 0L) as long) + (v as long)) }
     }
 
     private static String stamp(Object value) { return value instanceof Timestamp ? ((Timestamp) value).toInstant().toString() : null }

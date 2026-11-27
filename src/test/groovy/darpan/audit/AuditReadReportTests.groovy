@@ -31,6 +31,17 @@ class AuditReadReportTests {
         assertEquals([reads: 2, connections: 2, calls: 20L, flags: 0], AuditReadReport.summary(report))
     }
 
+    // DAR-BE-394: a read that kept no call tally (calls null) beside one that did. Prod answered get#AuditReadReport with
+    // "argument type mismatch": Groovy 5.0.3 fails a bare static call from a closure when an inline-cast argument is null.
+    @Test
+    void aReadWithNoCallTallyAddsNothingAndBreaksNothing() {
+        List<Map> play = [read(), read(checkId: "C2", checkCode: "R6", endpointEnumId: "SHOPIFY_RETURN_REFS", calls: null)]
+        List<List<Map>> history = [[read(calls: null), read(checkId: "C2", checkCode: "R6", endpointEnumId: "SHOPIFY_RETURN_REFS")]]
+        Map report = AuditReadReport.build(play, history, LIMITS)
+        assertEquals([graphql: 10L, costPoints: 40L, bulkStarts: 1L], report.totals.calls)
+        assertEquals([reads: 2, connections: 2, calls: 10L, flags: 0], AuditReadReport.summary(report))
+    }
+
     @Test
     void theSameStoresOrdersReadByThreeChecksIsOneDuplicateNamingThemAll() {
         Map report = AuditReadReport.build([read(), read(checkId: "C3", checkCode: "R3"), read(checkId: "C5", checkCode: "R5")], [], LIMITS)

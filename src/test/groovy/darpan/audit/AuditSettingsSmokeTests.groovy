@@ -255,7 +255,9 @@ class AuditSettingsSmokeTests {
         long now = System.currentTimeMillis()
         insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "TSET_PROG_RR", companyUserGroupId: MINE,
                 savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_RUNNING", currentStage: "EXTRACT_FILE2", progressPercent: 40L,
-                startedDate: new java.sql.Timestamp(now - 3 * 60_000L), lastHeartbeatDate: new java.sql.Timestamp(now - 60_000L)])
+                startedDate: new java.sql.Timestamp(now - 3 * 60_000L), lastHeartbeatDate: new java.sql.Timestamp(now - 60_000L),
+                // DAR-BE-394: an automation's run always carries its window, as on prod.
+                windowStartDate: new java.sql.Timestamp(now - 86_400_000L), windowEndDate: new java.sql.Timestamp(now)])
         insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_X1", automationId: paid,
                 companyUserGroupId: MINE, statusEnumId: "AUT_STAT_RUNNING", reconciliationRunResultId: "TSET_PROG_RR",
                 startedDate: new java.sql.Timestamp(now - 3 * 60_000L), retryCount: 0L])
@@ -288,12 +290,13 @@ class AuditSettingsSmokeTests {
                 savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_SUCCESS", startedDate: new java.sql.Timestamp(now - 80 * 60_000L),
                 completedDate: new java.sql.Timestamp(now - 60 * 60_000L)])
         [[id: "TSET_PROG_P1", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE1", seq: 2L, kept: 50L, read: 50000L, tenant: MINE],
-         [id: "TSET_PROG_P2", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE2", seq: 3L, kept: 59L, read: 59000L, tenant: MINE],
+         // DAR-BE-394: a read that never heartbeats (Shopify bulk) keeps no metricsJson; prod failed here with "argument type mismatch".
+         [id: "TSET_PROG_P2", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE2", seq: 3L, kept: 59L, read: null, tenant: MINE],
          [id: "TSET_PROG_PX", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE1", seq: 2L, kept: 1L, read: 99999L, tenant: OTHER],
          [id: "TSET_PROG_M1", run: "TSET_PROG_MANUAL", stage: "EXTRACT_FILE1", seq: 2L, kept: 7L, read: 77777L, tenant: MINE]].each { Map s ->
             insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: s.run,
                     companyUserGroupId: s.tenant, stageCode: s.stage, stageSequence: s.seq, statusEnumId: "AUT_STAT_SUCCESS",
-                    recordCount: s.kept, metricsJson: groovy.json.JsonOutput.toJson([readCount: s.read])])
+                    recordCount: s.kept, metricsJson: s.read == null ? null : groovy.json.JsonOutput.toJson([readCount: s.read])])
         }
         PeakReadPolicy.resetForTests()
         PeakReadPolicy.limitsLoader = { def x, String t -> t == MINE ? new ReadLimits(50, true) : ReadLimits.NONE }
@@ -322,8 +325,8 @@ class AuditSettingsSmokeTests {
         assertEquals([["open-in-netsuite"], 2, null], [queued.checks, queued.attempt, queued.health], "a retry waits; no health yet")
         // DAR-BE-350: when each step last moved (server time), yesterday's raw count for the reads, the peak limits.
         assertNotNull(progress.asOf)
-        assertEquals([null, 50000L, 59000L], steps.collect { it.expectedRecords as Long },
-                "reads only, the page count of this automation's last success: not its kept count, a manual run's, or another tenant's")
+        assertEquals([null, 50000L, null], steps.collect { it.expectedRecords as Long },
+                "reads only, the page count of this automation's last success: not its kept count, a manual run's, another tenant's, or a read that kept none")
         assertEquals([null, now - 30_000L, null], steps.collect { (it.movedDate as Timestamp)?.time },
                 "moved = the last page heartbeat; a read that never heartbeats has none")
         assertEquals([hotwaxSharePct: 50, netsuiteSerial: true], running.limits)

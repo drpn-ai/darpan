@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 3.5.9.
+Generated from backend compare range: v3.5.8..HEAD
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/OpsSeedData.xml -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.ignored" defaultText="Left out ${count} log lines that match the ignore patterns (Errors settings)."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.ignored.more" defaultText="${count} more not shown."/>
+</entity-facade-xml>

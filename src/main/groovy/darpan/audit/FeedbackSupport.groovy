@@ -272,13 +272,16 @@ class FeedbackSupport {
         return TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", statementId, tenantId, WHY)?.getMap()
     }
 
-    /** The sender: id, label (full name, else username), first name (the label's first word) and email address. */
+    /**
+     * The sender: id, label (full name, else username), first name (the label's first word) and email address. A disabled
+     * account has no address here (DAR-BE-397): the answer is still saved, it is just never mailed to them.
+     */
     private static Map userInfo(def ec, String userId) {
         def account = userId ? TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount", "feedback on a finding: the sender")
                 .condition("userId", userId).useCache(false).one() : null
         String label = (account?.userFullName ?: account?.username ?: userId) as String
         return [id: userId, label: label, firstName: label?.trim()?.split(/\s+/)?.getAt(0) ?: "there",
-                email: (account?.emailAddress as String)?.trim() ?: null]
+                email: account?.disabled == "Y" ? null : ((account?.emailAddress as String)?.trim() ?: null)]
     }
 
     /**

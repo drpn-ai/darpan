@@ -216,6 +216,35 @@ class FeedbackSupportTests {
         assertEquals(["DARPAN_FEEDBACK_RECEIVED"], emails*.templateId)
     }
 
+    /** DAR-BE-397. A sender whose account is disabled is never mailed: the note is still saved and posted. */
+    @Test
+    void aDisabledSenderIsNotMailedButTheNoteIsSaved() {
+        String f = ids["M211/01"]
+        setDisabled("Y")
+        try {
+            Map out = call("send#AuditFindingFeedback", [findingId: f, note: "Sent just before my account was turned off"])
+            assertFalse(out.hadError as boolean, out.errorText as String)
+            assertEquals(1, rows(f).size(), "the note is kept")
+            assertEquals([], emails, "no thank-you to a disabled account")
+        } finally {
+            setDisabled("N")
+            // its own finding, and its note removed, so the other tests' counts never see it
+            boolean wasDisabled = ec.artifactExecution.disableAuthz()
+            try { ec.entity.find(ENTITY).condition("findingId", f).deleteAll() }
+            finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        }
+    }
+
+    private void setDisabled(String flag) {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.find("moqui.security.UserAccount").condition("userId", ec.user.userId).useCache(false).one()
+                    .set("disabled", flag).update()
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
     /** Review I2. A tree's own UNEXPLAINED conclusion is Unexplained too: no cause stored, one group with the no-cause notes. */
     @Test
     void unexplainedConclusionGroupsWithNoCause() {

@@ -306,7 +306,9 @@ class AuditRunUpdateSupport {
             if (destination == null) logger.warn("Audit run update {}: chat space {} cannot be used", digest.auditDigestId, chatSpaceId)
         }
         // Members always; a digest's addresses are added (group mailboxes, people with no Darpan account), never instead.
-        List<String> emails = (defaultRecipients(ec, tenantId) + extraEmails(digest)).unique().findAll { !mailed.contains(it) }
+        // DAR-BE-397: a digest's typed addresses may name a disabled account; members already exclude them
+        List<String> emails = AuditDigestSupport.withoutDisabled(ec, (defaultRecipients(ec, tenantId) + extraEmails(digest)).unique())
+                .findAll { !mailed.contains(it) }
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         boolean delivered = false
         if (destination != null) {

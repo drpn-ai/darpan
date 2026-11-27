@@ -207,7 +207,7 @@ class AuditDigestSupport {
             if (destination == null) logger.warn("Audit digest {}: chat space {} cannot be used (missing, another tenant's, inactive or without a webhook)",
                     digest.auditDigestId, chatSpaceId)
         }
-        List<String> emails = emailsOf(digest.emailAddresses)
+        List<String> emails = withoutDisabled(ec, emailsOf(digest.emailAddresses))
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         Map report = assemble(ec, tenantId, digest.auditId as String, today)
         if (report == null) return [sent: false, reason: "NO_REPORT"]
@@ -265,6 +265,25 @@ class AuditDigestSupport {
     /** The digest's addresses: comma- or semicolon-separated, each shaped like an address; anything else is dropped. */
     static List<String> emailsOf(Object raw) {
         return (raw?.toString() ?: "").split(/[,;]/)*.trim().findAll { it && it.length() <= 254 && EMAIL.matcher(it).matches() }.unique()
+    }
+
+    /**
+     * DAR-BE-397 (Aditi 2026-11-27: a disabled person must not be mailed). The addresses less any that belong to a disabled
+     * Darpan account, compared without case; addresses of people with no account stay. Never throws: on a failed read the
+     * list stands, so a lookup problem never stops an email the tenant is owed.
+     */
+    static List<String> withoutDisabled(def ec, List<String> emails) {
+        if (!emails) return emails ?: []
+        try {
+            Set<String> off = (TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                    "email recipients: an address of a disabled account is never mailed")
+                    .condition("disabled", "Y").useCache(false).list()*.emailAddress)
+                    .collect { (it as String)?.trim()?.toLowerCase() }.findAll { it } as Set
+            return off ? emails.findAll { !off.contains(it?.trim()?.toLowerCase()) } : emails
+        } catch (Throwable t) {
+            logger.warn("Disabled-account check on email recipients skipped: {}", t.message ?: t.toString())
+            return emails
+        }
     }
 
     /** The app's audit page for that morning; null when the app's address is not configured (the line drops). */

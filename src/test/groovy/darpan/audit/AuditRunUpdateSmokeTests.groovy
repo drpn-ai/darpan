@@ -392,6 +392,23 @@ class AuditRunUpdateSmokeTests {
         assertEquals(1L, ec.entity.find("darpan.audit.AuditDigest").count(), "no default digest made beside it")
     }
 
+    // DAR-BE-397 (Aditi 2026-11-27): a digest's typed address that belongs to a disabled account is never mailed; an
+    // address with no account stays, and case does not hide it.
+    @Test
+    void aDigestAddressOfADisabledAccountIsNeverMailed() {
+        assertEquals(["ops@gorjana.example", "stranger@elsewhere.example"],
+                AuditDigestSupport.withoutDisabled(ec, ["Off@Gorjana.example", "ops@gorjana.example", "stranger@elsewhere.example"]),
+                "off@ is TRU_OFF's (disabled); a person with no account stays")
+        assertEquals([], AuditDigestSupport.withoutDisabled(ec, []))
+        ec.entity.find("darpan.audit.AuditDigest").deleteAll()
+        insert("darpan.audit.AuditDigest", [auditDigestId: "TRU_RUN", companyUserGroupId: GORJANA, auditId: AUDIT, chatSpaceId: SPACE,
+                emailAddresses: "OFF@gorjana.example, ops@gorjana.example", kindEnumId: "AUDDK_RUN", sendTime: "00:00", isActive: "Y"])
+        assertEquals(true, send(AUTO)[0].sent)
+        assertEquals(1, mails.size())
+        assertFalse((mails[0].to as String).toLowerCase().contains("off@gorjana.example"), mails[0].to as String)
+        assertTrue((mails[0].to as String).contains("ops@gorjana.example"), mails[0].to as String)
+    }
+
     // DAR-BE-358: with Darpan's address set, the run also sends it one CSV of every Unexplained finding (R2's three; R8's
     // two have a cause), apart from the tenant's email; an audit whose update is off still sends it; never twice a run.
     @Test

@@ -35,6 +35,9 @@ class ErrorDigestAssembler {
         List<Map> ignored = split[true] ?: []
         List<Map> logErrors = buildLogErrors(split[false] ?: [])
         int ignoredCount = ignored.sum { (it.count ?: 0) as int } as Integer ?: 0
+        List<Map> ignoredByFingerprint = ignored.groupBy { it.fingerprint as String }
+                .collect { String fp, List<Map> rows -> [fingerprint: fp, count: rows.sum { (it.count ?: 0) as long } as long] }
+                .sort { -(it.count as long) }
 
         Set<String> subjects = new LinkedHashSet<String>()
         runErrors.each { subjects.add("${it.tenant}|${it.check ?: ('automation:' + it.automationId)}".toString()) }
@@ -44,7 +47,7 @@ class ErrorDigestAssembler {
         String subject = (subjects.isEmpty() && logCount == 0)
                 ? "[${instance}] Darpan errors ${day}: none"
                 : "[${instance}] Darpan errors ${day}: ${subjects.size()} checks, ${logCount} log errors"
-        return [subject: subject, runErrors: runErrors, watchdog: watchdog, logErrors: logErrors,
+        return [subject: subject, runErrors: runErrors, watchdog: watchdog, logErrors: logErrors, ignoredLogErrors: ignoredByFingerprint,
                 counts: [checks: subjects.size(), logErrors: logCount, ignoredLogErrors: ignoredCount]]
     }
 
@@ -59,13 +62,15 @@ class ErrorDigestAssembler {
     }
 
     /**
-     * DAR-BE-396: a line Darpan logs while refusing something on purpose (errors.email.ignorePatterns), found in
-     * "logger message" or in the fingerprint. The OVERFLOW row is never left out: what it hides is unknown.
+     * DAR-BE-396: a line Darpan logs while refusing something on purpose (errors.email.ignorePatterns). Tried against the
+     * fingerprint only (ErrorLogCapture.fingerprint: the logger, then the message with quoted values, ids and digits
+     * masked), never the raw sample: a message can echo words a caller chose, and those must not hide another error.
+     * The OVERFLOW row is never left out: what it hides is unknown.
      */
     private static boolean ignoredLine(Map row, List<Pattern> ignore) {
-        if (!ignore || row.fingerprint == ErrorLogCapture.OVERFLOW) return false
-        String text = "${row.loggerName ?: ''} ${row.sampleMessage ?: ''}\n${row.fingerprint ?: ''}".toString()
-        return ignore.any { it.matcher(text).find() }
+        String fingerprint = row.fingerprint as String
+        if (!ignore || !fingerprint || fingerprint == ErrorLogCapture.OVERFLOW) return false
+        return ignore.any { it.matcher(fingerprint).find() }
     }
 
     private static boolean isScheduled(Map ex) {

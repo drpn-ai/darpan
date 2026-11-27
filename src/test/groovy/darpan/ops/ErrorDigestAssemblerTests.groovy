@@ -52,37 +52,52 @@ class ErrorDigestAssemblerTests {
     }
 
     // DAR-BE-396: the 2026-11-27 email's 140 "[Login]" lines were the DAR-BE-264 fence turning scanners away on purpose.
+    private static Map logRow(String logger, String message, int n) {
+        return [fingerprint: ErrorLogCapture.fingerprint(logger, message), loggerName: logger, sampleMessage: message, count: n]
+    }
+
+    static final String FENCE = "^org\\.moqui\\.impl\\.actions\\.XmlAction Error running groovy script \\(org\\.moqui\\.impl\\.webapp\\.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content \\[(Login|SecondFactor|ChangePassword)\\] under screen \\[null\\]"
+    static final String SIGNED_OUT = "^org\\.moqui\\.impl\\.service\\.ServiceJsonRpcDispatcher Error calling service [\\w.#]+ from JSON-RPC request: org\\.moqui\\.context\\.AuthenticationRequiredException: User must be logged in to call service "
+
     @Test
     void logLinesMatchingAnIgnorePatternAreLeftOutAndCounted() {
-        String fence = "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null]"
         Map d = ErrorDigestAssembler.assemble(input(
-                ignorePatterns: ["ScreenResourceNotFoundException: Could not find subscreen or transition or file/content \\[(Login|SecondFactor|ChangePassword)\\]",
-                                 "^org\\.moqui\\.impl\\.webapp\\.ElasticRequestLogFilter "],
-                logRows: [[fingerprint: "org.moqui.impl.actions.XmlAction ~91b2e17b", loggerName: "org.moqui.impl.actions.XmlAction", sampleMessage: fence, count: 91],
-                          [fingerprint: "org.moqui.impl.webapp.ElasticRequestLogFilter In ElasticRequestLogFilter init", loggerName: "org.moqui.impl.webapp.ElasticRequestLogFilter",
-                           sampleMessage: "In ElasticRequestLogFilter init could not find ElasticClient", count: 9],
-                          [fingerprint: "org.moqui.impl.context.MessageFacadeImpl Sync pair * was not found.", loggerName: "org.moqui.impl.context.MessageFacadeImpl",
-                           sampleMessage: "Sync pair '100102' was not found.", count: 652],
+                ignorePatterns: [FENCE, "^org\\.moqui\\.impl\\.webapp\\.ElasticRequestLogFilter In ElasticRequestLogFilter init could not find ElasticClient with name logger or default, not starting\$"],
+                logRows: [logRow("org.moqui.impl.actions.XmlAction", "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null] while finding url for path [Login] under from screen [null]): \n1 : import static org.moq", 91),
+                          logRow("org.moqui.impl.webapp.ElasticRequestLogFilter", "In ElasticRequestLogFilter init could not find ElasticClient with name logger or default, not starting", 9),
+                          logRow("org.moqui.impl.context.MessageFacadeImpl", "Sync pair '100102' was not found.", 652),
                           [fingerprint: "OVERFLOW", count: 3]]))
         assertEquals(["org.moqui.impl.context.MessageFacadeImpl Sync pair * was not found.", "OVERFLOW"], d.logErrors*.fingerprint)
         assertEquals(655, d.counts.logErrors)
         assertEquals(100, d.counts.ignoredLogErrors)
+        assertEquals([91, 9], d.ignoredLogErrors.collect { it.count as int }, "each left-out fingerprint is named with its count, biggest first")
+        assertTrue((d.ignoredLogErrors[0].fingerprint as String).contains("[Login]"))
         assertEquals("[prod] Darpan errors 2026-11-25: 0 checks, 655 log errors", d.subject)
+    }
+
+    // Security review of 4a9fc9ae: a message can echo text a caller chose, so a pattern is tried against the fingerprint
+    // only (logger first, quoted values, digits and hex masked) and the shipped ones are anchored to their logger and shape.
+    @Test
+    void wordsEchoedInsideAnotherErrorNeverLeaveItOut() {
+        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: [FENCE, SIGNED_OUT],
+                logRows: [logRow("org.moqui.impl.context.MessageFacadeImpl", "Validation error (WrongType@[orders]) : argument sortKey with value User must be logged in to call service x is not a valid OrderSortKey", 4),
+                          logRow("darpan.reconciliation.Something", "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null]", 2),
+                          [fingerprint: "darpan.x Boom #", loggerName: "darpan.x", sampleMessage: "Error calling service a.b#C from JSON-RPC request: org.moqui.context.AuthenticationRequiredException: User must be logged in to call service ", count: 1]]))
+        assertEquals(7, d.counts.logErrors)
+        assertEquals(0, d.counts.ignoredLogErrors)
     }
 
     @Test
     void aBrokenIgnorePatternIsSkippedNotFatal() {
-        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["([unclosed", "Elastic"],
-                logRows: [[fingerprint: "f1", loggerName: "x", sampleMessage: "Elastic down", count: 2],
-                          [fingerprint: "f2", loggerName: "x", sampleMessage: "([unclosed", count: 5]]))
-        assertEquals(["f2"], d.logErrors*.fingerprint)
+        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["([unclosed", "^x Elastic"],
+                logRows: [logRow("x", "Elastic down", 2), logRow("x", "([unclosed", 5)]))
+        assertEquals(["x ([unclosed"], d.logErrors*.fingerprint)
         assertEquals(2, d.counts.ignoredLogErrors)
     }
 
     @Test
     void everyLineIgnoredSaysNone() {
-        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["Elastic"],
-                logRows: [[fingerprint: "f1", loggerName: "x", sampleMessage: "Elastic down", count: 2]]))
+        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["^x Elastic"], logRows: [logRow("x", "Elastic down", 2)]))
         assertEquals("[prod] Darpan errors 2026-11-25: none", d.subject)
         assertEquals(2, d.counts.ignoredLogErrors)
     }

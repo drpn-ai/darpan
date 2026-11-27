@@ -112,7 +112,7 @@ class ErrorDigestSupport {
             counts = digest.counts as Map
             subject = digest.subject
             Map body = [instance       : input.instance, since: since, now: now, generatedAt: new Timestamp(System.currentTimeMillis()),
-                        runErrors      : digest.runErrors, watchdog: digest.watchdog, logErrors: digest.logErrors, counts: counts,
+                        runErrors      : digest.runErrors, watchdog: digest.watchdog, logErrors: digest.logErrors, ignoredLogErrors: digest.ignoredLogErrors ?: [], counts: counts,
                         tenantNames    : input.tenantNames ?: [:], automationNames: input.automationNames ?: [:],
                         emptyStreakDays: emptyStreakDays]
             if (addresses) {

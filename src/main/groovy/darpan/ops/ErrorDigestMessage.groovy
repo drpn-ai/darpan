@@ -68,8 +68,8 @@ class ErrorDigestMessage {
                     "<pre style=\"${F}margin:6px 0 0;white-space:pre-wrap;font-size:11px;line-height:1.45;color:${MUTED};\">${esc(l.sampleStack as String)}</pre></details>"
             out << "</div>"
         }
-        String leftOut = ignoredLine(body, copy)
-        if (leftOut) out << p(leftOut, DIM)
+        List<String> leftOut = ignoredLines(body, copy)
+        if (leftOut) out << "<pre style=\"${F}margin:10px 0 14px;white-space:pre-wrap;word-break:break-all;font-size:12px;line-height:1.5;color:${DIM};\">${esc(leftOut.join('\n'))}</pre>"
 
         out << "<div class=\"dp-note\">${esc(footer(body, copy))}</div>" <<
                 "<div class=\"dp-sign\">— Darpan</div>" <<
@@ -119,8 +119,8 @@ class ErrorDigestMessage {
             }
             logs << lines.join("\n")
         }
-        String leftOut = ignoredLine(body, copy)
-        if (leftOut) logs << leftOut
+        List<String> leftOut = ignoredLines(body, copy)
+        if (leftOut) logs << leftOut.join("\n")
         parts << logs.join("\n\n")
 
         parts << footer(body, copy)
@@ -206,10 +206,21 @@ class ErrorDigestMessage {
         return l.tenantId ? "${line} ${tenantLabel(body, l.tenantId)}".toString() : line
     }
 
-    /** DAR-BE-396: how many lines errors.email.ignorePatterns left out; null when none, so a quiet list stays quiet. */
-    private static String ignoredLine(Map body, EmailCopyReader copy) {
+    static final int IGNORED_SHOWN = 10
+
+    /**
+     * DAR-BE-396: how many lines errors.email.ignorePatterns left out, then each left-out fingerprint with its count (the
+     * IGNORED_SHOWN biggest, then how many more), so a flood the list hides still shows. Empty when none: a quiet list
+     * stays quiet.
+     */
+    private static List<String> ignoredLines(Map body, EmailCopyReader copy) {
         int n = (((body.counts ?: [:]) as Map).ignoredLogErrors ?: 0) as int
-        return n > 0 ? copy.text("logs.ignored", [count: n]) : null
+        if (n <= 0) return []
+        List<Map> rows = list(body.ignoredLogErrors)
+        List<String> out = [copy.text("logs.ignored", [count: n])]
+        rows.take(IGNORED_SHOWN).each { Map r -> out << "  ${r.fingerprint} · ${r.count}".toString() }
+        if (rows.size() > IGNORED_SHOWN) out << "  " + copy.text("logs.ignored.more", [count: rows.size() - IGNORED_SHOWN])
+        return out
     }
 
     private static String footer(Map body, EmailCopyReader copy) {

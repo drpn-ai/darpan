@@ -245,7 +245,7 @@ class ErrorDigestSupportTests {
     // email says how many lines it left out; a setting row replaces the shipped list.
     @Test
     void theShippedIgnoreListLeavesOutDeliberateRefusalsAndTheEmailSaysHowMany() {
-        Closure row = { String logger, String message, int n -> [fingerprint: "${logger} ${message}".toString(), loggerName: logger, sampleMessage: message, count: n] }
+        Closure row = { String logger, String message, int n -> [fingerprint: ErrorLogCapture.fingerprint(logger, message), loggerName: logger, sampleMessage: message, count: n] }
         input.logRows = [
                 row("org.moqui.impl.actions.XmlAction", "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null] while finding url", 91),
                 row("org.moqui.impl.context.MessageFacadeImpl", "Password incorrect for username someone", 1),
@@ -254,8 +254,9 @@ class ErrorDigestSupportTests {
                 row("org.moqui.impl.webapp.ElasticRequestLogFilter", "In ElasticRequestLogFilter init could not find ElasticClient with name logger or default, not starting", 9),
                 row("org.moqui.impl.context.MessageFacadeImpl", "'first: 250' on 'orders' exceeds maxFirst 100", 2),
                 row("org.moqui.impl.context.MessageFacadeImpl", "search term 'OR' must be key:value", 1),
-                row("org.moqui.impl.context.MessageFacadeImpl", "Darpan reads Shopify customer data at Level 1 only, so a search on ordersCount by \"name:EXC*\" was not sent", 1),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Darpan reads Shopify customer data at Level 1 only, so a search on ordersCount by \"name:EXC*\" was not sent; searches use key:value terms on keys that name no person.", 1),
                 row("org.moqui.impl.service.ServiceCallSyncImpl", "Error running service create#moqui.security.UserLoginHistory", 2),
+                // Kept: its masked fingerprint ("for key *") would hide every duplicate-key error, not only login history.
                 row("org.moqui.impl.context.MessageFacadeImpl", "Duplicate entry '100000-2026-11-27 05:07:03.653' for key 'USER_LOGIN_HISTORY.PRIMARY'", 2),
                 // Kept: these may be Darpan's own bug, not a refusal.
                 row("org.moqui.impl.context.MessageFacadeImpl", "Sync pair '100102' was not found.", 652),
@@ -263,21 +264,40 @@ class ErrorDigestSupportTests {
                 row("org.moqui.impl.context.MessageFacadeImpl", "Shopify auth config '100005 Outlet' was not found.", 1)]
         ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
         Map body = mails[0].body.digestBody as Map
-        assertEquals(["Sync pair '100102' was not found.", "[serviceName:facade.ReconciliationFacadeServices.get#Automation, message:Field cannot be empty]",
+        assertEquals(["Sync pair '100102' was not found.", "[serviceName:facade.ReconciliationFacadeServices.get#Automation, message:Field cannot be empty]", "Duplicate entry '100000-2026-11-27 05:07:03.653' for key 'USER_LOGIN_HISTORY.PRIMARY'",
                       "Shopify auth config '100005 Outlet' was not found."], (body.logErrors as List<Map>)*.sampleMessage)
-        assertEquals(113, body.counts.ignoredLogErrors)
-        assertEquals("[prod] Darpan errors 2026-11-25: 0 checks, 657 log errors", mails[0].body.digestSubject)
+        assertEquals(111, body.counts.ignoredLogErrors)
+        assertEquals("[prod] Darpan errors 2026-11-25: 0 checks, 659 log errors", mails[0].body.digestSubject)
         String text = ErrorDigestMessage.emailText(body, shippedCopy())
-        assertTrue(text.contains("Left out 113 log lines that match the ignore patterns (Errors settings)."), text)
-        assertTrue(ErrorDigestMessage.emailHtml(body, shippedCopy()).contains("Left out 113 log lines that match the ignore patterns (Errors settings)."))
+        assertTrue(text.contains("Left out 111 log lines that match the ignore patterns (Errors settings)."), text)
+        // Each left-out fingerprint is named with its count, so a flood hidden by the list still shows (10 at most).
+        assertTrue(text.contains("[Login] under screen [null]") && text.contains("· 91"), text)
+        assertTrue(text.contains("Password incorrect for username someone · 1"), text)
+        String html = ErrorDigestMessage.emailHtml(body, shippedCopy())
+        assertTrue(html.contains("Left out 111 log lines that match the ignore patterns (Errors settings).") && html.contains("[Login]"), html)
 
         mails.clear(); claims.clear()
-        settings["errors.email.ignorePatterns"] = "Sync pair '\\d+' was not found"
+        settings["errors.email.ignorePatterns"] = "^org\\.moqui\\.impl\\.context\\.MessageFacadeImpl Sync pair \\* was not found\\.\$"
         DarpanSettings.expire()
         ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
         Map edited = mails[0].body.digestBody as Map
         assertEquals(652, edited.counts.ignoredLogErrors, "a setting row replaces the shipped list")
         assertTrue((edited.logErrors as List<Map>)*.sampleMessage.any { it.toString().contains("[Login]") })
+    }
+
+    // A password guess across many usernames is one fingerprint each: the email names ten and says how many more.
+    @Test
+    void moreThanTenLeftOutFingerprintsNameTenAndCountTheRest() {
+        input.logRows = (1..12).collect { int i ->
+            String message = "Password incorrect for username guess-user-" + ('abcdefghijkl'[i - 1])
+            [fingerprint: ErrorLogCapture.fingerprint("org.moqui.impl.context.MessageFacadeImpl", message),
+             loggerName: "org.moqui.impl.context.MessageFacadeImpl", sampleMessage: message, count: 1]
+        }
+        ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        String text = ErrorDigestMessage.emailText(mails[0].body.digestBody as Map, shippedCopy())
+        assertTrue(text.contains("Left out 12 log lines"), text)
+        assertEquals(10, (text =~ /Password incorrect for username guess-user-/).size(), text)
+        assertTrue(text.contains("2 more not shown."), text)
     }
 
     @Test

@@ -63,7 +63,8 @@ class TenantNotificationServiceSmokeTests {
         assertTrue(text.contains("API Automation — 4 to look at, missing on both sides."), text)
         assertTrue(text.contains("Tenant: Tenant A"))
         assertFalse(text.contains("Result ID"), "the link names the result; the id line is only a fallback: ${text}".toString())
-        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
+        // DAR-BE-384: the run's short address; the page reads its name and systems from the run.
+        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/runs/RS_ORDER/RUN_RESULT_1?tenantId=TENANT_A|Open run result>"), text)
         // Inversion: onlyInFile1Count is the SHOPIFY-side count, so it is what OMS is missing.
         assertTrue(text.contains("Missing from OMS: 1"), text)
         assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
@@ -391,8 +392,20 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = (String) ((Map) result.payload).text
-        assertTrue(text.contains("/reconciliation/run-result/RS_ORDER/"), text)
+        assertTrue(text.contains("/runs/RS_ORDER/100511|"), text)
         assertFalse(text.contains("tenantId"),
                 "a blank tenant must drop the parameter, not emit an empty one: ${text}")
+    }
+
+    /** DAR-BE-384: with no run id the link names the result file, as links already sent do. */
+    @Test
+    void runResultUrlNamesTheResultFileWithoutTheRunId() {
+        String url = TenantNotificationSupport.buildRunResultUrl(ec, [
+                savedRunId           : "RS_ORDER",
+                runName              : "API Automation",
+                resultDataManagerPath: "reconciliation-runs/AUTO_API/20260501/result.json",
+                companyUserGroupId   : "TENANT_A",
+        ])
+        assertEquals("https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&tenantId=TENANT_A", url)
     }
 }

@@ -1582,8 +1582,8 @@ class AutomationExecutionSupportTests {
             assertTrue(text.startsWith("API Automation"), text)
             assertTrue(text.contains("Tenant: Tenant A"))
             assertFalse(text.contains("Result ID"), text)
-            // URL from main: the deep link now names the tenant so the app can switch into it.
-            assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS_GQL&tenantId=TENANT_A|Open run result>"))
+            // DAR-BE-384: the run's short address, naming the tenant so the app can switch into it.
+            assertTrue((text =~ /Run result: <https:\/\/hotwax-darpan-dev\.web\.app\/runs\/RS_ORDER\/[^?|\/]+\?tenantId=TENANT_A\|Open run result>/).find(), text)
             assertTrue(text.contains("Missing from "), text)
             // Original intent preserved: the system labels must RESOLVE, never fall back.
             assertFalse(text.contains("Missing from File 1"), text)
@@ -4899,6 +4899,19 @@ class AutomationExecutionSupportTests {
         } finally {
             System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
         }
+    }
+
+    /** DAR-BE-384: an error card links the run's one short address, whether or not the run wrote a result. */
+    @Test
+    void runErrorUrlLinksTheRunsShortAddress() {
+        FakeEc ec = fakeEc()
+        Map automation = [savedRunId: "RS_ORDER", automationName: "API Automation", companyUserGroupId: "TENANT_A"]
+
+        assertEquals("https://hotwax-darpan-dev.web.app/runs/RS_ORDER/100511?tenantId=TENANT_A",
+                AutomationExecutionSupport.runErrorUrl(ec, automation, [resultDataManagerPath: "reconciliation-runs/RS_ORDER/20260501/result.json"], "100511"))
+        assertEquals("https://hotwax-darpan-dev.web.app/runs/RS_ORDER/100511?tenantId=TENANT_A",
+                AutomationExecutionSupport.runErrorUrl(ec, automation, [:], "100511"))
+        assertNull(AutomationExecutionSupport.runErrorUrl(ec, automation, [:], null), "no run and no result: nothing to link")
     }
 
     // The per-automation canary allow-list was removed with the default flip (step 4). It existed to

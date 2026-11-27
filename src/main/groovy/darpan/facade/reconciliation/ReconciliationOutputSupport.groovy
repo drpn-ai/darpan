@@ -429,9 +429,13 @@ class ReconciliationOutputSupport {
                 // disk, which re-stamping the files going forward can never do. Tenant access was
                 // enforced by canAccessGeneratedOutputFile above, so this read is already gated.
                 Object runResultCreatedDate = OutputDescriptorSupport.timestampValue(artifactRunResult?.createdDate)
-                if (runResultCreatedDate != null) {
+                String runResultId = normalize(artifactRunResult?.reconciliationRunResultId)
+                if (runResultCreatedDate != null || runResultId) {
                     metadata = new LinkedHashMap<String, Object>(metadata)
-                    metadata.put("createdDate", runResultCreatedDate)
+                    if (runResultCreatedDate != null) metadata.put("createdDate", runResultCreatedDate)
+                    // DAR-BE-384: the run this result belongs to, so the page can move an old long link to the run's short
+                    // address without listing every output the tenant has.
+                    if (runResultId) metadata.put("reconciliationRunResultId", runResultId)
                 }
 
                 result = [metadata: metadata, summary: summary, outputFile: outputFile]

@@ -56,7 +56,7 @@ class EmailSamples {
                              errorText: "Keep runs on the extract's records array, and this side's key paths do not read it.",
                              readCounts: [file1: 6982, file2: 29963], keptCounts: [file1: 5525, file2: 0],
                              files: ["oms-order-lines.json", "netsuite-invoices.json"],
-                             runUrl: "https://app.drpn.ai/reconciliation/run-live/SR1/RR1?tenantId=MALBON",
+                             runUrl: "https://app.drpn.ai/runs/SR1/RR1?tenantId=MALBON",
                              completedDate: at("2026-11-25T09:20:00Z")]],
                 watchdog : [[tenant: "MALBON", auditName: "Month close", statement: "R4", check: "returns-vs-credit-memos",
                              kind: "NO_AUTOMATION", lastSuccessDate: null]],

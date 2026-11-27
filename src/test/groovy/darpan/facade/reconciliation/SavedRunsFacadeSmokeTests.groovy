@@ -655,6 +655,8 @@ class SavedRunsFacadeSmokeTests {
         Map<String, Object> found = differences(outputFileName)
         assertEquals(true, found.ok, found.errors?.toString())
         assertEquals(outputFileName, found.outputFile.fileName)
+        // DAR-BE-384: the result names its run, so an old long link becomes the run's short one with no list read.
+        assertEquals(runResult.runResult.reconciliationRunResultId as String, found.metadata.reconciliationRunResultId)
         assertEquals("json", found.outputFile.sourceFormat)
         assertTrue(found.differences instanceof List)
         assertNotNull(found.summary)

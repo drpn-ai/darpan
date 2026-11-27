@@ -1,6 +1,7 @@
 package darpan.facade.search
 
 import darpan.reconciliation.support.SharedMoqui
+import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -79,6 +80,33 @@ class NavigationSearchFacadeSmokeTests {
         assertEquals("OrderIdSchemaMap", ((Map) outputTarget.routeParams).savedRunId)
         assertEquals("search-csv-order-compare-result.json", ((Map) outputTarget.routeParams).outputFileName)
         assertEquals("CSV Order Compare", ((Map) outputTarget.routeQuery).runName)
+    }
+
+    /** DAR-BE-384: a result its run names opens at the run's short address; the page reads the rest from the run. */
+    @Test
+    void searchLinksARunsResultAtTheRunsShortAddress() {
+        File runsRoot = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveReconciliationRunsLocation(ec), true)
+        File resultFile = new File(runsRoot, "SearchShortRun/20261127-100000000/SearchShortRun_result.json")
+        resultFile.parentFile.mkdirs()
+        resultFile.setText(JsonOutput.toJson([
+                metadata: [companyUserGroupId: KREWE, savedRunId: "SearchShortRun", savedRunName: "Short Link Returns",
+                           file1Label: "Shopify", file2Label: "HotWax"],
+                summary : [totalDifferences: 3, onlyInFile1Count: 1, onlyInFile2Count: 2],
+        ]), "UTF-8")
+        upsertEntity("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "SEARCH_SHORT_1"], [
+                reconciliationRunResultId: "SEARCH_SHORT_1",
+                savedRunId               : "SearchShortRun",
+                companyUserGroupId       : KREWE,
+                resultDataManagerPath    : DataManagerSupport.relativeDataManagerPath(ec, resultFile),
+                createdDate              : TEST_FROM_DATE,
+        ])
+
+        Map<String, Object> target = firstTarget(search("short link returns"), "run-result", DataManagerSupport.relativeDataManagerPath(ec, resultFile))
+        assertNotNull(target)
+        assertEquals("reconciliation-run-live", target.routeName)
+        assertEquals("/runs/SearchShortRun/SEARCH_SHORT_1", target.routePath)
+        assertEquals([savedRunId: "SearchShortRun", runResultId: "SEARCH_SHORT_1"], target.routeParams)
+        assertEquals([:], target.routeQuery)
     }
 
     @Test

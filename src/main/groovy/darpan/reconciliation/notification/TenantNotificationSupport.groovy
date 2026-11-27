@@ -552,10 +552,19 @@ class TenantNotificationSupport {
         String savedRunId = ((context.savedRunId)?.toString()?.trim()) ?:
                 ((context.reconciliationMappingId)?.toString()?.trim()) ?:
                 ((context.ruleSetId)?.toString()?.trim())
+        String runResultId = ((context.reconciliationRunResultId)?.toString()?.trim())
+        String tenantId = ((context.companyUserGroupId)?.toString()?.trim())
+        String encodedSavedRunId = savedRunId ? URLEncoder.encode(savedRunId, StandardCharsets.UTF_8.name()).replace("+", "%20") : null
+        // DAR-BE-384: a run's one address. The page reads its name, systems and result from the run, so only the tenant
+        // rides along (the app cannot switch into a tenant the link never names).
+        if (appBaseUrl && savedRunId && runResultId) {
+            String tenantQuery = tenantId ? "?tenantId=${URLEncoder.encode(tenantId, StandardCharsets.UTF_8.name())}" : ""
+            return "${appBaseUrl}/runs/${encodedSavedRunId}/${URLEncoder.encode(runResultId, StandardCharsets.UTF_8.name()).replace("+", "%20")}${tenantQuery}".toString()
+        }
+
         String outputFileName = ((context.resultDataManagerPath)?.toString()?.trim())
         if (!appBaseUrl || !savedRunId || !outputFileName) return null
 
-        String encodedSavedRunId = URLEncoder.encode(savedRunId, StandardCharsets.UTF_8.name()).replace("+", "%20")
         String encodedOutputFileName = URLEncoder.encode(outputFileName, StandardCharsets.UTF_8.name()).replace("+", "%20")
         String path = "/reconciliation/run-result/${encodedSavedRunId}/${encodedOutputFileName}"
         Map<String, String> queryParams = [
@@ -566,7 +575,7 @@ class TenantNotificationSupport {
                 // cannot switch into a tenant the link never names. Appended last so the parameters
                 // already in circulation keep their positions. The findAll below drops it when blank,
                 // which is also what makes links sent before this change keep working.
-                tenantId        : ((context.companyUserGroupId)?.toString()?.trim()),
+                tenantId        : tenantId,
         ].findAll { entry -> ((entry.value)?.toString()?.trim()) } as Map<String, String>
 
         String queryText = queryParams.collect { entry ->

@@ -393,15 +393,18 @@ class NavigationSearchSupport {
                             "${diffText} for ${systemLabelParts[0]} and ${systemLabelParts[1]}." :
                             (systemLabelParts ? "${diffText} for ${systemLabelParts[0]}." : "${diffText}.")
 
+                    // DAR-BE-384: a result its run names opens at the run's short address, which reads the rest from the run.
+                    String runResultId = normalize(descriptor.reconciliationRunResultId)
                     return [target(
                             "data:run-result:${savedRunId}:${fileName}",
                             TYPE_RUN_RESULT,
                             "Open Result: ${label}",
                             description,
-                            "reconciliation-run-result",
-                            "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(fileName)}",
-                            [savedRunId: savedRunId, outputFileName: fileName],
-                            [
+                            runResultId ? "reconciliation-run-live" : "reconciliation-run-result",
+                            runResultId ? "/runs/${encodePathSegment(savedRunId)}/${encodePathSegment(runResultId)}" :
+                                    "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(fileName)}",
+                            runResultId ? [savedRunId: savedRunId, runResultId: runResultId] : [savedRunId: savedRunId, outputFileName: fileName],
+                            runResultId ? [:] : [
                                     runName         : normalize(descriptor.savedRunName ?: descriptor.mappingName),
                                     file1SystemLabel: file1Label,
                                     file2SystemLabel: file2Label,

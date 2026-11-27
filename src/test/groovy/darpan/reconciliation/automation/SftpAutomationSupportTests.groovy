@@ -104,7 +104,7 @@ class SftpAutomationSupportTests {
         assertEquals(1, deliveries.size())
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
         String text = deliveries[0].payload.text as String
-        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_SFTP%2F20260501%2Fresult.json?runName=SFTP+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=NETSUITE&tenantId=TENANT_A|Open run result>"))
+        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/runs/RS_ORDER/RUN_RESULT_1?tenantId=TENANT_A|Open run result>"), text)
         assertTrue(text.contains("Missing from "), text)
         // Original intent preserved: the system labels must RESOLVE, never fall back.
         assertFalse(text.contains("Missing from File 1"), text)

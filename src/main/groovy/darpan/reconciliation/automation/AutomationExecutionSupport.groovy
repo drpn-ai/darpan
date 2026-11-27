@@ -3967,19 +3967,12 @@ class AutomationExecutionSupport {
         return [read: read ?: null, kept: kept ?: null]
     }
 
-    /** The run's result page when it wrote one, else its progress page (which also shows a failed run's stages). */
+    /** The run's page (its result, or the stages of a run that failed), else the result file's page when no run is known. */
     protected static String runErrorUrl(def ec, def automation, Map execution, String runResultId) {
         try {
-            String savedRunId = normalize(readField(automation, "savedRunId"))
-            String resultUrl = TenantNotificationSupport.buildRunResultUrl(ec, [savedRunId: savedRunId,
-                    resultDataManagerPath: execution.resultDataManagerPath, runName: readField(automation, "automationName"),
-                    companyUserGroupId: readField(automation, "companyUserGroupId")])
-            if (resultUrl) return resultUrl
-            String base = TenantNotificationSupport.resolveAppBaseUrl(ec)
-            if (!base || !savedRunId || !runResultId) return null
-            String tenantId = normalize(readField(automation, "companyUserGroupId"))
-            return "${base}/reconciliation/run-live/${URLEncoder.encode(savedRunId, "UTF-8").replace("+", "%20")}/" +
-                    "${URLEncoder.encode(runResultId, "UTF-8")}${tenantId ? "?tenantId=" + URLEncoder.encode(tenantId, "UTF-8") : ""}"
+            return TenantNotificationSupport.buildRunResultUrl(ec, [savedRunId: normalize(readField(automation, "savedRunId")),
+                    reconciliationRunResultId: runResultId, resultDataManagerPath: execution?.resultDataManagerPath,
+                    runName: readField(automation, "automationName"), companyUserGroupId: readField(automation, "companyUserGroupId")])
         } catch (Throwable ignored) {
             return null
         }

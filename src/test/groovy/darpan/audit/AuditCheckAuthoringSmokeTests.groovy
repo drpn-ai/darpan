@@ -221,6 +221,66 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals(null, scopeSays(), "an empty list counts Unexplained again")
     }
 
+    // DAR-BE-395 (RAILS: R7 checks that can never find anything, Outlet Loop exchanges and Canada store exchanges). Removing a
+    // check unlinks it from this audit's statements and stops its automation unless another check runs through it. The check
+    // row stays, as findings and check runs name it. Refused while it has open findings; another tenant's audit is not found.
+    @Test
+    @Order(6)
+    void removingACheckUnlinksItAndStopsItsOwnAutomation() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            ["TCHK_AUTO_OWN", "TCHK_AUTO_SHARED"].each { String id ->
+                insert("darpan.reconciliation.ReconciliationAutomation", [automationId: id, automationName: id, isActive: "Y",
+                        companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "TCHK_RS2"])
+            }
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Closure<Object> save = { String code, String automationId ->
+            Map out = facade("save#AuditCheck", [audit: "month-close-t", check: [id: code, label: code, savedRunId: "TCHK_RS2"],
+                    statements: [[id: "R7", diffTypes: ["MISSING_IN_FILE_2"]]]])
+            assertFalse(out.hadError as boolean, out.errorText as String)
+            def row = checkRow(code)
+            boolean off = ec.artifactExecution.disableAuthz()
+            try { row.set("automationId", automationId); row.update() } finally { if (!off) ec.artifactExecution.enableAuthz() }
+            return row
+        }
+        def own = save("loop-exchanges-outlet-t", "TCHK_AUTO_OWN")
+        save("shared-a-t", "TCHK_AUTO_SHARED")
+        save("shared-b-t", "TCHK_AUTO_SHARED")
+
+        Map removed = facade("remove#AuditCheck", [audit: "month-close-t", check: "loop-exchanges-outlet-t"])
+        assertFalse(removed.hadError as boolean, removed.errorText as String)
+        assertNull(link(own.checkId, "${MINE}_R7"), "unlinked from the audit's statement")
+        assertFalse((facade("get#AuditCheckOptions", [audit: "month-close-t"]).options as Map).checks*.id.contains("loop-exchanges-outlet-t"))
+        assertNull(checkRow("loop-exchanges-outlet-t").automationId)
+        assertEquals("N", automation("TCHK_AUTO_OWN").isActive, "its own automation stops")
+
+        assertFalse(facade("remove#AuditCheck", [audit: "month-close-t", check: "shared-a-t"]).hadError as boolean)
+        assertEquals("Y", automation("TCHK_AUTO_SHARED").isActive, "another check still runs through it")
+
+        def open = checkRow("shared-b-t")
+        wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.AuditFinding", [findingId: "TCHK_F1", companyUserGroupId: MINE, statementId: "${MINE}_R7".toString(),
+                    checkId: open.checkId, recordKey: "#1001", period: "2026-11", stateEnumId: "AUDFS_OPEN", headline: "x",
+                    firstFoundDate: java.sql.Date.valueOf("2026-11-01"), lastSeenDate: java.sql.Date.valueOf("2026-11-02")])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map refused = facade("remove#AuditCheck", [audit: "month-close-t", check: "shared-b-t"])
+        assertTrue(refused.hadError as boolean, "a check with open findings stays")
+        assertTrue((refused.errorText as String).contains("open finding"), refused.errorText as String)
+        assertTrue(link(open.checkId, "${MINE}_R7") != null, "nothing changed")
+
+        assertTrue(facade("remove#AuditCheck", [audit: "other-only", check: "shared-b-t"]).hadError as boolean, "another tenant's audit")
+        assertTrue(facade("remove#AuditCheck", [audit: "month-close-t", check: "no-such-check"]).hadError as boolean)
+    }
+
+    private def automation(String id) {
+        return ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", id).disableAuthz().useCache(false).one()
+    }
+
     private Map facade(String verbNoun, Map params = [:]) {
         Map out = ec.service.sync().name("${FACADE}.${verbNoun}").parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

@@ -402,6 +402,9 @@
                                         "$ref": "#/components/schemas/GetAuditsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RemoveAuditCheckRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/RetryAuditCheckRequest"
                                     },
                                     {
@@ -1164,6 +1167,7 @@
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
+                                        "facade.AuditFacadeServices.remove#AuditCheck": "#/components/schemas/RemoveAuditCheckRequest",
                                         "facade.AuditFacadeServices.retry#AuditCheck": "#/components/schemas/RetryAuditCheckRequest",
                                         "facade.AuditFacadeServices.run#Audit": "#/components/schemas/RunAuditRequest",
                                         "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
@@ -1768,6 +1772,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RemoveAuditCheckResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RetryAuditCheckResponse"
@@ -14966,6 +14973,106 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RemoveAuditCheckParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string"
+                    },
+                    "check": {
+                        "type": "string",
+                        "description": "The check's id (its code)."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "check"
+                ],
+                "description": "DAR-BE-395. Removes a check from an audit: it is unlinked from the audit's statements, so the audit no longer\n            runs or shows it, and the automation it ran through stops unless another check still runs through it. The check's\n            findings and history stay. Refused in words while the check has open findings, or when it is not in the audit."
+            },
+            "RemoveAuditCheckResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "removedCheck": {
+                        "type": "object"
+                    }
+                }
+            },
+            "RemoveAuditCheckRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.remove#AuditCheck",
+                "x-darpan-method": "facade.AuditFacadeServices.remove#AuditCheck",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.remove#AuditCheck"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RemoveAuditCheckParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RemoveAuditCheckResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.remove#AuditCheck. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RemoveAuditCheckResult"
                     }
                 },
                 "required": [
@@ -43452,6 +43559,7 @@
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",
+        "facade.AuditFacadeServices.remove#AuditCheck": "RemoveAuditCheck",
         "facade.AuditFacadeServices.retry#AuditCheck": "RetryAuditCheck",
         "facade.AuditFacadeServices.run#Audit": "RunAudit",
         "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",

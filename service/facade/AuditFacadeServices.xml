@@ -886,4 +886,27 @@
             <set field="errors" from="[]"/>
         </actions>
     </service>
+
+    <service verb="remove" noun="AuditCheck" allow-remote="true" authenticate="true">
+        <description>DAR-BE-395. Removes a check from an audit: it is unlinked from the audit's statements, so the audit no longer
+            runs or shows it, and the automation it ran through stops unless another check still runs through it. The check's
+            findings and history stay. Refused in words while the check has open findings, or when it is not in the audit.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"/>
+            <parameter name="check" required="true"><description>The check's id (its code).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="removedCheck" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="removedCheck" from="darpan.audit.AuditCheckAuthoringSupport.removeCheck(ec, audit, check)"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
 </services>

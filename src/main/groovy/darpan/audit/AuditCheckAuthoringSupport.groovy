@@ -185,6 +185,49 @@ class AuditCheckAuthoringSupport {
         return describe(ec, row, statements)
     }
 
+    /**
+     * DAR-BE-395. Removes a check from an audit: its links to this audit's statements go, so the audit no longer runs or shows
+     * it, and the automation it ran through stops (isActive N) unless another check still runs through it. The check row stays:
+     * findings and check runs name it. Refused in words while the check has open findings in this audit, or when the check is
+     * not in the audit. Answers [id, automationId, automationStopped].
+     */
+    static Map<String, Object> removeCheck(def ec, String auditCode, String checkCode) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot change an audit.")) return null
+        Map audit = auditFor(ec, auditCode)
+        if (audit == null) return null
+        Set<String> statementIds = statementsOf(ec, audit)*.statementId.collect { it as String } as Set<String>
+        def row = checkFor(ec, checkCode)
+        List links = row == null ? [] : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditStatementCheck")
+                .condition("checkId", row.checkId).useCache(false).list().findAll { (it.statementId as String) in statementIds }
+        if (!links) {
+            ec.message.addError("Check '${normalize(checkCode)}' is not in audit '${normalize(auditCode)}'.")
+            return null
+        }
+        long open = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditFinding").condition("checkId", row.checkId)
+                .condition("statementId", "in", statementIds).condition("stateEnumId", OrderWorlds.OPEN).useCache(false).count()
+        if (open > 0) {
+            ec.message.addError("Check '${row.checkCode}' has ${open} open finding${open == 1 ? '' : 's'}; close or acknowledge them before removing it.")
+            return null
+        }
+        links.each { it.delete() }
+        String automationId = normalize(row.automationId)
+        boolean stopped = false
+        if (automationId) {
+            row.set("automationId", null)
+            row.update()
+            boolean shared = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditCheck").condition("automationId", automationId)
+                    .useCache(false).count() > 0
+            def automation = shared ? null : TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomation")
+                    .condition("automationId", automationId).useCache(false).list().find()
+            if (automation != null && (automation.isActive as String) != "N") {
+                automation.set("isActive", "N")
+                automation.update()
+                stopped = true
+            }
+        }
+        return [id: row.checkCode, automationId: automationId, automationStopped: stopped] as Map<String, Object>
+    }
+
     private static Map<String, Object> describe(def ec, def check, List<Map> statements) {
         Map<String, String> codeById = statements.collectEntries { [(it.statementId as String): it.statementCode as String] }
         List<Map<String, Object>> links = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditStatementCheck")

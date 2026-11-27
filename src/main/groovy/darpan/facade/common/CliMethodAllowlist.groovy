@@ -155,6 +155,8 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.create#Audit",
             "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
             "facade.AuditFacadeServices.get#AuditRecheckProgress",
+            // DAR-BE-395: removes a check from the active tenant's audit (write access); no credential.
+            "facade.AuditFacadeServices.remove#AuditCheck",
             "facade.AuditFacadeServices.save#AuditCheck",
             "facade.AuditFacadeServices.save#AuditSettings",
             "facade.AuditFacadeServices.send#AuditFindingFeedback",

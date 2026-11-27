@@ -128,8 +128,8 @@ class RunVerificationSupport {
      * count: a side is checked against the OTHER side's records, DAR-BE-320 share gate) and
      * {@code compareScopeId} (a side whose key is not the lookup's id kind is never looked up).</p>
      *
-     * <p>Returns {@code [applies: true, run: Closure, verifiedLabels: List, missingInFile1,
-     * missingInFile2]}, or {@code [applies: false, skipReason, skipDetail]}. A null {@code skipReason}
+     * <p>Returns {@code [applies: true, run: Closure, verifiedLabels: List, blockedSides: List
+     * ("label: reason" per side that could not be rechecked), missingInFile1, missingInFile2]}, or {@code [applies: false, skipReason, skipDetail]}. A null {@code skipReason}
      * means there was nothing to verify in the first place (no missing rows, or a rule-execution
      * failure whose partial diffs are preserved deliberately) — that is not a skip and must not be
      * reported as one, or every clean run carries an "unverified" note.</p>
@@ -206,6 +206,7 @@ class RunVerificationSupport {
 
         return [applies       : true,
                 verifiedLabels: sideLookups.keySet() as List,
+                blockedSides  : blockers,
                 missingInFile1: missingInFile1,
                 missingInFile2: missingInFile2,
                 run           : {
@@ -270,6 +271,13 @@ class RunVerificationSupport {
             ec.message.clearErrors()
         }
         applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+        // A side that could not be rechecked leaves its differences unverified: say so, as a skipped pass does.
+        List blockedSides = (prepared.get("blockedSides") ?: []) as List
+        if (serviceResult != null && blockedSides) {
+            serviceResult.put("processingWarnings",
+                    ((serviceResult.get("processingWarnings") ?: []) as List) +
+                            blockedSides.collect { "Differences were not verified: ${it}".toString() })
+        }
         // DAR-BE-320 phase 1b: each side's lookup outcome (side label -> candidates, gate, looked up, found or why
         // skipped) travels with the compare result to the audit's source reads.
         if (serviceResult != null && verification.sideOutcomes instanceof Map) serviceResult.verificationSides = verification.sideOutcomes

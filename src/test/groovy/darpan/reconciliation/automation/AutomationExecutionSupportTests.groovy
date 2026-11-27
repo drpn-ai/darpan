@@ -1677,7 +1677,8 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void noDataRunDoesNotNotify() {
+    void aQuietDayTellsTheAutomationSpaceOneLine() {
+        // DAR-BE-390 (Aditi 2026-11-27) reverses the silence below for a quiet day: the run's own space hears one line.
         // Task 7 / Task 2b: NO_DATA must stay silent even when the automation has a configured
         // chatSpaceId. Since 2b the run-result row is minted at RUNNING, so "no row" is no longer the
         // thing that keeps it quiet — the assertions below check what actually matters now: the one
@@ -1723,12 +1724,16 @@ class AutomationExecutionSupportTests {
             ])
 
             assertEquals(1, result.noDataCount)
-            assertTrue(deliveries.isEmpty())
+            // DAR-BE-390: a quiet day now tells the automation's space, in one plain line (never the run's payload)
+            assertEquals(1, deliveries.size())
+            assertEquals("https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token", deliveries[0].webhookUrl)
+            assertEquals(["text"], (deliveries[0].payload as Map).keySet() as List)
+            assertTrue(((deliveries[0].payload as Map).text as String).contains("nothing to compare"))
             assertTrue(cards.isEmpty(), "a quiet day is not a run error")
             List<FakeValue> runResults = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult")
             assertEquals(1, runResults.size())
             assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, runResults[0].statusEnumId)
-            assertNull(runResults[0].notifiedDate)
+            assertNotNull(runResults[0].notifiedDate, "claimed, so it is told once")
         } finally {
             resetRunErrorSeams()
         }
@@ -3978,15 +3983,23 @@ class AutomationExecutionSupportTests {
         }
     }
 
+    // DAR-BE-390 (Aditi 2026-11-27 16:00 IST: "going forward send a nothing to compare message in this case"; MEPHISTO's
+    // Returns check read HotWax 0, Shopify 0 on Thanksgiving and told nobody). A quiet day tells the destinations a finished
+    // run tells, the automation's space and each notify-me subscriber's, one plain line each, once.
     @Test
-    void aQuietDayPostsNothing() {
+    void aQuietDayTellsItsSpaceAndSubscribersOnce() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
+        [SHOPIFY: "Shopify", OMS_GQL: "HotWax"].each { String id, String name ->
+            ec.entity.add("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanSystemSource", description: name])
+        }
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
         addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        String meWebhook = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+        addChatSpace(ec, "CS_ME", meWebhook)
         ec.service.responder = { FakeServiceCall call ->
             if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
-                subscribeMidRun(ec, "USER_A", "CS_OPS")
+                subscribeMidRun(ec, "USER_A", "CS_ME")
                 return [dataAvailable: false, fileName: "${call.params.fileSide}.json".toString(), recordCount: 0]
             }
             throw new IllegalStateException("Reconcile should not run for no-data windows")
@@ -3998,13 +4011,49 @@ class AutomationExecutionSupportTests {
 
             assertEquals(1, result.noDataCount)
             assertTrue(cards.isEmpty(), "both sides read 0: a quiet day, not an error")
-            assertTrue(deliveries.isEmpty())
-            assertNull(ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0].notifiedDate)
-            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
-                    "a terminal run that never notifies still purges its own subscriptions")
+            String line = "API Automation · Apr 30: nothing to compare (Shopify 0, HotWax 0)"
+            assertEquals([[webhookUrl: OPS_WEBHOOK, payload: [text: line]], [webhookUrl: meWebhook, payload: [text: line]]] as Set,
+                    deliveries as Set, "the automation's space and the subscriber's, the window's day in its zone")
+            Map runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertNotNull(runResult.notifiedDate)
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(), "told, so its subscriptions go")
+
+            def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+            def sources = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].findAll { it.automationId == "AUTO_API" }
+            AutomationExecutionSupport.notifyQuietDay(ec, automation, sources.find { it.fileSide == "FILE_1" }, sources.find { it.fileSide == "FILE_2" },
+                    [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")],
+                    runResult.reconciliationRunResultId as String, false)
+            assertEquals(2, deliveries.size(), "a second try (a retry) finds the run already told")
         } finally {
             resetRunErrorSeams()
         }
+    }
+
+    // DAR-BE-390: a verify reads by design and answers the person on the finding; an empty read there tells no room. A side
+    // empty while the other read stays the DAR-BE-015 run error.
+    @Test
+    void aNoDataCloseTellsAQuietDayButNeverAVerify() {
+        Map side0 = [readCount: 0, recordCount: 0]
+        Map side5 = [readCount: 5, recordCount: 5]
+        assertEquals(AutomationExecutionSupport.NOTICE_QUIET_DAY, AutomationExecutionSupport.noDataNotice(null, false, side0, side0, null, false))
+        assertNull(AutomationExecutionSupport.noDataNotice(null, true, side0, side0, null, false), "a verify is not a quiet day")
+        assertNull(AutomationExecutionSupport.noDataNotice(null, ["#1001"], side0, side0, null, false), "verify keys are the verify flag")
+        assertEquals(AutomationExecutionSupport.NOTICE_RUN_ERROR, AutomationExecutionSupport.noDataNotice("ONE_SIDE_EMPTY", false, side5, side0, null, false))
+        assertNull(AutomationExecutionSupport.noDataNotice(null, false, side5, side5, null, false), "records on both sides is no quiet day")
+    }
+
+    @Test
+    void aQuietDayNamesItsDaysInTheWindowZone() {
+        java.time.ZoneId chicago = java.time.ZoneId.of("America/Chicago")
+        assertEquals("Nov 26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-26T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago),
+                "MEPHISTO's Thanksgiving window, midnight to midnight in Chicago")
+        assertEquals("Nov 20–26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-20T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago))
+        assertEquals("Oct 30–Nov 2", AutomationExecutionSupport.windowDayWords(timestamp("2026-10-30T05:00:00Z"), timestamp("2026-11-03T06:00:00Z"), chicago))
+        assertEquals("Nov 26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-26T06:00:00Z"), null, chicago))
+        assertTrue(AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
+        assertTrue(!AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], [readCount: 85, recordCount: 85], null, false),
+                "one side empty is a run error (DAR-BE-015), not a quiet day")
+        assertTrue(AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], null, null, true), "an evaluate reads its first side only")
     }
 
     @Test

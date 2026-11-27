@@ -17,4 +17,7 @@
     <!-- DAR-BE-362: a failed interactive saved run (someone pressed Run, not a morning run): its notify-me subscribers get this. -->
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.runfailed"
             defaultText="${name} did not finish. Darpan has been alerted and is working on a fix."/>
+    <!-- DAR-BE-390: a scheduled check that read nothing on both sides (a quiet day) tells its run's own destinations so. -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.nothing"
+            defaultText="${name} · ${day}: nothing to compare (${counts})"/>
 </entity-facade-xml>

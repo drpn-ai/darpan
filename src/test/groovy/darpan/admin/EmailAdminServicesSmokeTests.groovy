@@ -423,6 +423,12 @@ class EmailAdminServicesSmokeTests {
         Map block = (shown.blocks as List<Map>).find { it.blockId == "client.notrun" }
         assertEquals('${name} did not run this morning. Darpan has been alerted and is working on a fix.', block.defaultText)
         assertEquals(["name"], block.variables)
+        // DAR-BE-390: the quiet-day line is its own block, with its own words and variables, and previews with the sample day
+        Map nothing = (shown.blocks as List<Map>).find { it.blockId == "client.nothing" }
+        assertEquals('${name} · ${day}: nothing to compare (${counts})', nothing.defaultText)
+        assertEquals(["counts", "day", "name"] as Set, nothing.variables as Set)
+        Map preview = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_ERROR_NOTICE"])).result
+        assertTrue((preview.text as String).contains("Daily Order Reconciliation · Nov 26: nothing to compare (HotWax 0, Shopify 0)"), preview.text)
 
         ok(svc("update#EmailTemplate", [emailTemplateId: "DARPAN_ERROR_NOTICE",
                 blocks: ["client.notrun": '${name} did not run today. Darpan is on it.']]))

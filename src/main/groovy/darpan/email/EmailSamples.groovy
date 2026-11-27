@@ -68,7 +68,7 @@ class EmailSamples {
 
     /** DAR-BE-015: chat lines kept as copy (never sent as email); the admin editor previews them through their screen. */
     static final Map<String, Map> CHAT = [
-            ErrorNotice: [name: "Daily Order Reconciliation"],
+            ErrorNotice: [name: "Daily Order Reconciliation", day: "Nov 26", counts: "HotWax 0, Shopify 0"],
     ].asImmutable()
 
     /** screen -> branch name -> how the base sample changes. The first branch of a screen is its default. */

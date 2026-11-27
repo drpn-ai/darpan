@@ -34,6 +34,7 @@ import org.moqui.impl.service.ScheduledJobRunner
 
 import java.sql.Timestamp
 import java.util.concurrent.Future
+import java.util.Locale
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
@@ -44,6 +45,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
+import java.time.format.DateTimeFormatter
 
 import darpan.reconciliation.flowchart.RunFlowchartSupport
 import darpan.peak.AllowanceSpec
@@ -812,13 +814,17 @@ class AutomationExecutionSupport {
                     completeAutomationRunResult(ec, automation, mintedRunResultId, STATUS_NO_DATA, completedTimestamp, [:])
                     // DAR-BE-015: a side that read nothing (or kept nothing) while the other read is a check that did
                     // not run: Darpan gets the card, a client destination the neutral line (notifyRunError purges).
-                    // A quiet day (both sides 0) or a verify still does not notify, and because it does not, nothing
-                    // else will ever clean up a "notify me" subscription taken against this row while it was RUNNING
-                    // (purgeRunSubscriptions only runs after a won notification claim). An orphan there never fires
-                    // AND pins its chat space against deletion forever, so purge it here.
+                    // DAR-BE-390: a quiet day (both sides read 0) tells the run's own destinations so in one line. A verify
+                    // still does not notify, and because it does not, nothing else will ever clean up a "notify me"
+                    // subscription taken against this row while it was RUNNING (purgeRunSubscriptions only runs after a
+                    // won notification claim). An orphan there never fires AND pins its chat space against deletion
+                    // forever, so purge it here.
                     Map<String, Object> closedExecution = executionMap(execution) + noDataFields
-                    if (RunErrorKinds.of(closedExecution) != null) {
+                    String notice = noDataNotice(RunErrorKinds.of(closedExecution), verifying, file1Result, file2Result, reconcileResult, evaluateMode)
+                    if (notice == NOTICE_RUN_ERROR) {
                         AutomationExecutionSupport.notifyRunError(ec, automation, closedExecution, mintedRunResultId, sideReason)
+                    } else if (notice == NOTICE_QUIET_DAY) {
+                        AutomationExecutionSupport.notifyQuietDay(ec, automation, file1Source, file2Source, window, mintedRunResultId, evaluateMode)
                     } else {
                         TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                     }
@@ -3885,6 +3891,69 @@ class AutomationExecutionSupport {
                 TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
             } catch (Throwable ignored) { }
         }
+    }
+
+    /**
+     * DAR-BE-390 (Aditi 2026-11-27: "going forward send a nothing to compare message in this case", MEPHISTO's Returns check
+     * on Thanksgiving read HotWax 0, Shopify 0 and told nobody). A NO_DATA window is a quiet day when every side it reads
+     * read 0 (an evaluate reads its first side only); one side empty or kept nothing is a run error, not this.
+     */
+    static final String NOTICE_RUN_ERROR = "RUN_ERROR", NOTICE_QUIET_DAY = "QUIET_DAY"
+
+    /** DAR-BE-390. Who a NO_DATA close tells: NOTICE_RUN_ERROR (a did-not-run kind), NOTICE_QUIET_DAY, or null (a verify, or a shape neither is: nobody). */
+    static String noDataNotice(String errorKind, Object verifying, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
+        if (errorKind != null) return NOTICE_RUN_ERROR
+        return !verifying && quietDay(file1Result, file2Result, reconcileResult, evaluateMode) ? NOTICE_QUIET_DAY : null
+    }
+
+    static boolean quietDay(Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
+        int read1 = keepGiven(file1Result, reconcileResult, "file1") ?: 0
+        int read2 = keepGiven(file2Result, reconcileResult, "file2") ?: 0
+        return read1 == 0 && (evaluateMode || read2 == 0)
+    }
+
+    /**
+     * DAR-BE-390. A quiet day tells the destinations a finished run tells (the automation's chat space and notify-me
+     * subscribers), once (notifyRunLine claims the run result and purges its subscriptions): one plain line, copy block
+     * DARPAN_ERROR_NOTICE / client.nothing, "Daily Return Reconciliation · Nov 26: nothing to compare (HotWax 0, Shopify 0)",
+     * the day in the automation's window zone. No card, no finding. Never throws; on any failure the subscriptions still go.
+     */
+    static void notifyQuietDay(def ec, def automation, def file1Source, def file2Source, Map window, String runResultId, boolean evaluateMode) {
+        try {
+            String name = normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId"))
+            String day = windowDayWords(toTimestamp(window?.childWindowStartDate), toTimestamp(window?.childWindowEndDate),
+                    resolveZoneId(readField(automation, "windowTimeZone")))
+            List<String> sides = [sideName(ec, file1Source)] + (evaluateMode ? [] : [sideName(ec, file2Source)])
+            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
+                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text("client.nothing",
+                    [name: name, day: day, counts: sides.collect { "${it} 0" }.join(", ")])
+            TenantNotificationSupport.notifyRunLine(ec, normalize(readField(automation, "companyUserGroupId")),
+                    normalize(readField(automation, "chatSpaceId")), runResultId, line)
+        } catch (Throwable notifyError) {
+            logger.warn("Quiet day notification failed (best-effort): {}", notifyError.getClass().name)
+            try {
+                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+            } catch (Throwable ignored) { }
+        }
+    }
+
+    /** A side's system as a client reads it ("HotWax", "Shopify"): the system source's name, else its root system key. */
+    private static String sideName(def ec, def source) {
+        String systemEnumId = normalize(readField(source, "systemEnumId"))
+        return TenantNotificationSupport.resolveSystemSourceName(ec, systemEnumId) ?:
+                AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(systemEnumId)) ?: "Side"
+    }
+
+    private static final DateTimeFormatter MONTH_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
+
+    /** DAR-BE-390. A window's days in zone, its end exclusive: "Nov 26", "Nov 20–26", "Oct 30–Nov 2"; "" without a start. */
+    static String windowDayWords(Timestamp start, Timestamp end, ZoneId zone) {
+        if (start == null) return ""
+        LocalDate first = start.toInstant().atZone(zone).toLocalDate()
+        LocalDate last = end != null && end.after(start) ? end.toInstant().minusNanos(1).atZone(zone).toLocalDate() : first
+        if (!last.isAfter(first)) return MONTH_DAY.format(first)
+        String to = last.month == first.month ? String.valueOf(last.dayOfMonth) : MONTH_DAY.format(last)
+        return "${MONTH_DAY.format(first)}–${to}".toString()
     }
 
     /** DAR-BE-015: what a rule failure says for Darpan's card: the first rule error, else the first warning; null when neither. */

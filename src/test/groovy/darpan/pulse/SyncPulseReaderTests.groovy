@@ -228,6 +228,16 @@ class SyncPulseReaderTests {
         assertEquals(null, SyncPulseReader.createdAt(null))
     }
 
+    /** DAR-BE-386: a database endpoint's extract writes "+0000"; a pulse over it read no order at all and said all clear. */
+    @Test
+    void createdAtReadsADatabaseOffsetWithoutAColon() {
+        assertEquals(Instant.parse("2026-11-26T14:41:46Z"), SyncPulseReader.createdAt("2026-11-26T14:41:46+0000"))
+        Map read = SyncPulseReader.upstreamRecords(json("db.json", [[order_name: "8H-24739", created_at: "2026-11-27T05:30:42+0000"]]),
+                "order_name", "created_at", "order_name")
+        assertEquals(["8H-24739"], read.records*.key)
+        assertEquals(Instant.parse("2026-11-27T05:30:42Z"), read.records[0].createdAt)
+    }
+
     private static final List<Map> UPSTREAM = [
             [orderId: "O1", orderName: "#GOR1", orderDate: "2026-11-21T10:15:00Z"],
             [orderId: "O2", orderName: "#GOR2", orderDate: "2026-11-21T10:16:00Z"],

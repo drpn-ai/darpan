@@ -359,6 +359,16 @@ class KeptCopyStoreTests {
         assertNull(KeptCopyStore.parseInstant(1234567))
     }
 
+    /** DAR-BE-386: the database extractor writes offsets without a colon ("+0000"); ISO text with one, as before. */
+    @Test void anOffsetWithoutAColonParses() {
+        assertEquals(Instant.parse("2026-11-26T14:41:46Z"), KeptCopyStore.parseInstant("2026-11-26T14:41:46+0000"))
+        assertEquals(Instant.parse("2026-11-26T09:11:46Z"), KeptCopyStore.parseInstant("2026-11-26T14:41:46+0530"))
+        assertEquals(Instant.parse("2026-11-26T19:41:46Z"), KeptCopyStore.parseInstant("2026-11-26T14:41:46-0500"))
+        assertEquals(Instant.parse("2026-11-26T14:41:46.250Z"), KeptCopyStore.parseInstant("2026-11-26T14:41:46.250+0000"))
+        assertEquals(Instant.parse("2026-11-26T14:41:46Z"), KeptCopyStore.parseInstant("2026-11-26T14:41:46+00:00"))
+        assertNull(KeptCopyStore.parseInstant("2026-11-26T14:41:46"), "no zone: not placed in one")
+    }
+
     @Test void pruneKeepsTwoVersions() {
         List<String> made = (1..4).collect { merge(dir, [rec("r" + it, "2026-10-03T14:22:01Z")]).version }
         KeptCopyStore.prune(dir)

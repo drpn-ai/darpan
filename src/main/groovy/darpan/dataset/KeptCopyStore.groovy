@@ -15,6 +15,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -457,8 +459,13 @@ class KeptCopyStore {
         if (!s) return null
         try { return Instant.parse(s) } catch (Exception ignored) { }
         try { return OffsetDateTime.parse(s).toInstant() } catch (Exception ignored) { }
+        try { return OffsetDateTime.parse(s, OFFSET_WITHOUT_COLON).toInstant() } catch (Exception ignored) { }
         return null
     }
+
+    /** DAR-BE-386: a database endpoint's extract writes "2026-11-26T14:41:46+0000" (no colon in the offset). */
+    private static final DateTimeFormatter OFFSET_WITHOUT_COLON = new DateTimeFormatterBuilder()
+            .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME).appendOffset("+HHMM", "Z").toFormatter()
 
     /**
      * Whether a record's created value is before a bound (the horizon or the never-read line). A full instant compares as an

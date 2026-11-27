@@ -107,17 +107,20 @@ class AuditRunFactsTests {
     void theCardIsASummaryAndOneLinkNothingElse() {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
         Map card = AuditRunMessage.card(facts, [:], BASE, COPY)
-        assertEquals("Gorjana · Month close: 57 open findings", card.text)
+        // the card alone in Chat: the one line is fallbackText (notifications, Slack), never text above the card
+        assertEquals("Gorjana · Month close: 57 open findings", card.fallbackText)
+        assertFalse(card.containsKey("text"))
         Map body = (card.cardsV2 as List<Map>)[0].card as Map
         assertEquals([title: "Gorjana · Month close", subtitle: "Run of 10 Nov 2026 · 1–10 November",
                       imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"], body.header)
         List<Map> sections = body.sections as List<Map>
         assertEquals(1, sections.size(), "no rule sections")
         List<Map> widgets = sections[0].widgets as List<Map>
-        assertEquals(3, widgets.size(), "findings line, what did not run, the button: no headline without a writer")
+        // DAR-BE-378: what did not run goes to Darpan's alerts room, never the client's card
+        assertEquals(2, widgets.size(), "findings line and the button: no headline without a writer, no did-not-run line")
         assertTrue((widgets[0].decoratedText.text as String).contains(">57 open</font>  ·  3 new  ·  "))
-        assertTrue((widgets[1].decoratedText.text as String).contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."))
-        List buttons = widgets[2].buttonList.buttons as List
+        assertFalse(card.toString().contains("did not run"), "the client's card never says what did not run")
+        List buttons = widgets[1].buttonList.buttons as List
         assertEquals(1, buttons.size())
         assertEquals("Open the report", buttons[0].text)
         // DAR-BE-293: the link names its tenant, last, as a run link does, so the app switches into it.

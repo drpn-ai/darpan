@@ -151,7 +151,9 @@ class AuditRunMessage {
         if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)
         if (url) widgets << [buttonList: [buttons: [[text: "Open the report", onClick: [openLink: [url: url]]]]]]
-        return [text   : "${title(facts)}: ${t.open} open findings".toString(),
+        // The card alone (Aditi 2026-11-27, DAR-BE-391): Chat shows a message's text above its card, so the one line
+        // travels as fallbackText, which Chat shows only in notifications and a Slack room takes as its text.
+        return [fallbackText: "${title(facts)}: ${t.open} open findings".toString(),
                 cardsV2: [[cardId: "audit-run", card: [
                         header  : [title: title(facts), subtitle: subtitle(facts, copy), imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
                         sections: [[widgets: widgets]]]]]]

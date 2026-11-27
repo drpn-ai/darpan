@@ -106,7 +106,7 @@ class AuditRunMessageTests {
         String text = AuditRunMessage.emailText(f, [:], null, COPY)
         assertTrue(text.contains("R2 partly ran this morning. ${ALERTED}"), text)
         assertFalse(text.contains("did not run this morning. Darpan"), "no rule wholly not run, so no 'did not run' notice: ${text}")
-        assertEquals(1, times(AuditRunMessage.card(f, [:], null, COPY).toString(), ALERTED))
+        assertEquals(0, times(AuditRunMessage.card(f, [:], null, COPY).toString(), ALERTED), "DAR-BE-378: never in the client's card")
     }
 
     @Test
@@ -120,13 +120,14 @@ class AuditRunMessageTests {
     }
 
     @Test
-    void theAlertedSentenceIsInTheNoticeOnceInEmailHtmlTextAndCard() {
+    void theAlertedSentenceIsInTheNoticeOnceInEmailHtmlAndTextNeverTheCard() {
         assertEquals(1, times(AuditRunMessage.emailText(facts(), [:], null, COPY), ALERTED))
         String html = AuditRunMessage.emailHtml(facts(), [:], null, COPY)
         assertEquals(1, times(html, ALERTED))
         assertTrue(html.contains(NOTICE) && html.contains(ROW_NOT_RUN) && html.contains(ROW_PARTLY) && html.contains("3 open"))
+        // DAR-BE-378: what did not run goes to Darpan's alerts room (alertText), never the client's chat card
         String card = AuditRunMessage.card(facts(), [:], null, COPY).toString()
-        assertEquals(1, times(card, ALERTED))
-        assertTrue(card.contains(NOTICE), card)
+        assertEquals(0, times(card, ALERTED), card)
+        assertFalse(card.contains(NOTICE), card)
     }
 }

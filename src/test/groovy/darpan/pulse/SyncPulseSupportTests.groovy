@@ -100,5 +100,23 @@ class SyncPulseSupportTests {
                 SyncPulseSupport.effectiveValues(pair + [pulseEveryMinutes: null], windows, [:], day.minusDays(1)))
     }
 
+    @Test
+    void aPulsePostEndsWithALinkToItsPulseInItsTenant() {
+        String url = SyncPulseSupport.pulseUrl("https://app.drpn.ai/", "100000", "GORJANA")
+        assertEquals("https://app.drpn.ai/pulses/100000?tenantId=GORJANA", url)
+        assertEquals("HotWax → NetSuite orders: 1 past the 6h allowance.\nOldest #954037, 6h 4m · 4 waiting\n" +
+                "<https://app.drpn.ai/pulses/100000?tenantId=GORJANA|Open the pulse>",
+                SyncPulseSupport.withPulseLink("HotWax → NetSuite orders: 1 past the 6h allowance.\nOldest #954037, 6h 4m · 4 waiting", url))
+    }
+
+    @Test
+    void withoutTheAppsAddressAPulsePostCarriesNoLink() {
+        assertEquals(null, SyncPulseSupport.pulseUrl(null, "100000", "GORJANA"))
+        assertEquals(null, SyncPulseSupport.pulseUrl("  ", "100000", "GORJANA"))
+        assertEquals("caught up", SyncPulseSupport.withPulseLink("caught up", null))
+        // an id that is not URL-safe is encoded, so the link stays one link
+        assertEquals("https://x.test/pulses/a%7Cb?tenantId=T%26U", SyncPulseSupport.pulseUrl("https://x.test", "a|b", "T&U"))
+    }
+
     private static Timestamp ts(Instant i) { Timestamp.from(i) }
 }

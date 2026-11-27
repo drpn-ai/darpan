@@ -58,6 +58,8 @@ class SyncPulseChatTests {
     private List<Map> posts = Collections.synchronizedList([])
     /** Every payload as delivered (after provider shaping), for the card checks. */
     private List<Map> payloads = Collections.synchronizedList([])
+    /** DAR-BE-391: each post's last-line pulse link, kept apart so the word checks stay about the words. */
+    private List<String> links = Collections.synchronizedList([])
     /** DAR-BE-382: what reached Darpan's alerts room (ErrorChatSupport.postHook). */
     private List<Map> alerts = Collections.synchronizedList([])
     private static final String ALERTS = "https://chat.googleapis.com/v1/spaces/DARPANALERTS/messages?key=k&token=t"
@@ -99,7 +101,7 @@ class SyncPulseChatTests {
         ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         SyncPulseSupport.forgetPresentMemoryForTests()
-        upstream.clear(); arrived.clear(); posts.clear(); payloads.clear(); alerts.clear(); pulseThreads.clear()
+        upstream.clear(); arrived.clear(); posts.clear(); payloads.clear(); links.clear(); alerts.clear(); pulseThreads.clear()
         alertsRoom = ALERTS
         DarpanSettings.rowLoader = { -> alertsRoom ? [(ErrorChatSupport.WEBHOOK_SETTING): [settingValue: alertsRoom]] : [:] }
         DarpanSettings.expire()
@@ -119,7 +121,10 @@ class SyncPulseChatTests {
         })
         TenantNotificationSupport.setDeliveryHook({ String ref, Map payload ->
             if (postsThrow) throw new IllegalStateException("chat is down")
-            posts << [ref: ref, text: payload.text ?: payload.fallbackText]
+            String said = (payload.text ?: payload.fallbackText) as String
+            java.util.regex.Matcher link = said == null ? null : (said =~ /\n<([^|>]+)\|Open the pulse>\z/)
+            if (link?.find()) { links << link.group(1); said = said.substring(0, link.start()) }
+            posts << [ref: ref, text: said]
             payloads << [ref: ref, payload: payload]
             return [ok: true]
         })
@@ -143,6 +148,7 @@ class SyncPulseChatTests {
 
         pulse(T0)
         assertEquals([[ref: URL1, text: "${LABEL}: 1 past the 1h allowance.\nOldest #A1, 1h 40m${DOT}0 waiting".toString()]], posts)
+        assertEquals(["http://localhost:5173/pulses/${SP}?tenantId=${A}".toString()], links, "the post ends with a link to its pulse, in its tenant")
 
         pulse(T0.plus(Duration.ofMinutes(5)))
         pulse(T0.plus(Duration.ofMinutes(10)))

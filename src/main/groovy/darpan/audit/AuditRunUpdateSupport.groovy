@@ -310,11 +310,11 @@ class AuditRunUpdateSupport {
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         boolean delivered = false
         if (destination != null) {
-            // A Slack space takes the card's one-line text; cardsV2 is Google Chat's.
+            // A Slack space takes the card's one line (its fallbackText) as text; cardsV2 is Google Chat's.
             boolean slack = destination.deliveryMode == TenantNotificationSupport.DELIVERY_SLACK_BOT ||
                     destination.chatProviderEnumId == TenantNotificationSupport.PROVIDER_SLACK
             Map card = built.card as Map
-            Map delivery = TenantNotificationSupport.deliverToDestination(destination, slack ? [text: card.text] : card)
+            Map delivery = TenantNotificationSupport.deliverToDestination(destination, slack ? [text: card.fallbackText] : card)
             if (delivery?.ok == true) delivered = true
             else logger.warn("Audit run update {} to space {} returned status {}", digest.auditDigestId, chatSpaceId, delivery?.statusCode)
         }

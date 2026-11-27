@@ -795,6 +795,19 @@ class SyncPulseSupport {
                 (droppedCount > 0 ? "${DOT}${droppedCount} left the check".toString() : "")
     }
 
+    /** The pulse's page (DAR-UI-154), naming its tenant so the app switches into it (DAR-BE-293); null without the app's address. */
+    static String pulseUrl(String base, String syncPairId, String tenantId) {
+        String b = normalize(base)?.replaceAll('/+$', '')
+        if (!b || !normalize(syncPairId)) return null
+        String url = "${b}/pulses/${URLEncoder.encode(normalize(syncPairId), 'UTF-8')}".toString()
+        return normalize(tenantId) ? "${url}?tenantId=${URLEncoder.encode(normalize(tenantId), 'UTF-8')}".toString() : url
+    }
+
+    /** A post's last line opens its pulse (DAR-BE-391): "<url|Open the pulse>" is a link in Google Chat and Slack text alike. */
+    static String withPulseLink(String text, String url) {
+        return url ? "${text}\n<${url}|Open the pulse>".toString() : text
+    }
+
     static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
         return "${label}: ${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${pastCount} past allowance".toString()
     }
@@ -886,7 +899,9 @@ class SyncPulseSupport {
                 return
             }
             if (!chatSpaceId) return
-            boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, decision.text as String)
+            String link = decision.text == null ? null
+                    : pulseUrl(TenantNotificationSupport.resolveAppBaseUrl(ec), normalize(pair.syncPairId), tenantId)
+            boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, withPulseLink(decision.text as String, link))
             Integer wanted = decision.lastPostedPastCount as Integer
             // the episode opens with the 0 -> >0 post and ends with the >0 -> 0 post
             boolean episodeChange = posted && (decision.kind == "past" || decision.kind == "clear")

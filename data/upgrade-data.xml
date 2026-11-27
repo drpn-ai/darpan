@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.5.7.
+Candidate release-scoped upgrade data for Darpan 3.5.8.
 Generated from backend compare range: v3.5.6..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.

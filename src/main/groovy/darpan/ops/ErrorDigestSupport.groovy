@@ -33,6 +33,8 @@ class ErrorDigestSupport {
     static final String HOUR_SETTING = "errors.digest.hourUtc"
     static final String WATCHDOG_SETTING = "errors.watchdog.hours"
     static final String EMPTY_STREAK_SETTING = "errors.emptyStreak.days"
+    /** DAR-BE-396: regexes, one per line, for log lines Darpan wrote while refusing something on purpose. */
+    static final String IGNORE_SETTING = "errors.email.ignorePatterns"
     /** The furthest back an email reaches (a long outage of the email does not make one huge email); also the streak history read. */
     static final int LOOKBACK_DAYS = 30
     private static final String WHY = "DAR-BE-015 daily Darpan error email: read-only scan across every tenant for Darpan's own staff"
@@ -104,8 +106,9 @@ class ErrorDigestSupport {
             int watchdogHours = DarpanSettings.intValue(WATCHDOG_SETTING)
             int emptyStreakDays = DarpanSettings.intValue(EMPTY_STREAK_SETTING)
             Map input = (loadInput.call(ec, since, now, watchdogHours, emptyStreakDays) ?: [:]) as Map
+            List<String> ignorePatterns = (DarpanSettings.stringValue(IGNORE_SETTING) ?: "").readLines()
             Map digest = ErrorDigestAssembler.assemble(input + [since: since, now: now, watchdogHours: watchdogHours,
-                                                                emptyStreakDays: emptyStreakDays])
+                                                                emptyStreakDays: emptyStreakDays, ignorePatterns: ignorePatterns])
             counts = digest.counts as Map
             subject = digest.subject
             Map body = [instance       : input.instance, since: since, now: now, generatedAt: new Timestamp(System.currentTimeMillis()),

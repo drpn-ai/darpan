@@ -68,6 +68,8 @@ class ErrorDigestMessage {
                     "<pre style=\"${F}margin:6px 0 0;white-space:pre-wrap;font-size:11px;line-height:1.45;color:${MUTED};\">${esc(l.sampleStack as String)}</pre></details>"
             out << "</div>"
         }
+        String leftOut = ignoredLine(body, copy)
+        if (leftOut) out << p(leftOut, DIM)
 
         out << "<div class=\"dp-note\">${esc(footer(body, copy))}</div>" <<
                 "<div class=\"dp-sign\">— Darpan</div>" <<
@@ -117,6 +119,8 @@ class ErrorDigestMessage {
             }
             logs << lines.join("\n")
         }
+        String leftOut = ignoredLine(body, copy)
+        if (leftOut) logs << leftOut
         parts << logs.join("\n\n")
 
         parts << footer(body, copy)
@@ -200,6 +204,12 @@ class ErrorDigestMessage {
         String line = copy.text("log.seen", [count: l.count ?: 0, day: day, first: EmailFrame.when(l.firstSeen as Timestamp, UTC),
                                               last: EmailFrame.when(l.lastSeen as Timestamp, UTC)])
         return l.tenantId ? "${line} ${tenantLabel(body, l.tenantId)}".toString() : line
+    }
+
+    /** DAR-BE-396: how many lines errors.email.ignorePatterns left out; null when none, so a quiet list stays quiet. */
+    private static String ignoredLine(Map body, EmailCopyReader copy) {
+        int n = (((body.counts ?: [:]) as Map).ignoredLogErrors ?: 0) as int
+        return n > 0 ? copy.text("logs.ignored", [count: n]) : null
     }
 
     private static String footer(Map body, EmailCopyReader copy) {

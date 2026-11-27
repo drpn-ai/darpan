@@ -241,6 +241,53 @@ class ErrorDigestSupportTests {
         assertTrue(text.contains("5 times on 2026-11-24 (UTC) so far") && text.contains("2 times on 2026-11-25 (UTC) so far"), text)
     }
 
+    // DAR-BE-396: the shipped errors.email.ignorePatterns leave out the 2026-11-27 email's deliberate refusals, and the
+    // email says how many lines it left out; a setting row replaces the shipped list.
+    @Test
+    void theShippedIgnoreListLeavesOutDeliberateRefusalsAndTheEmailSaysHowMany() {
+        Closure row = { String logger, String message, int n -> [fingerprint: "${logger} ${message}".toString(), loggerName: logger, sampleMessage: message, count: n] }
+        input.logRows = [
+                row("org.moqui.impl.actions.XmlAction", "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null] while finding url", 91),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Password incorrect for username someone", 1),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Invalid username or password", 1),
+                row("org.moqui.impl.service.ServiceJsonRpcDispatcher", "Error calling service facade.SyncPulseFacadeServices.get#SyncPair from JSON-RPC request: org.moqui.context.AuthenticationRequiredException: User must be logged in to call service facade.SyncPulseFacadeServices.get#SyncPair", 3),
+                row("org.moqui.impl.webapp.ElasticRequestLogFilter", "In ElasticRequestLogFilter init could not find ElasticClient with name logger or default, not starting", 9),
+                row("org.moqui.impl.context.MessageFacadeImpl", "'first: 250' on 'orders' exceeds maxFirst 100", 2),
+                row("org.moqui.impl.context.MessageFacadeImpl", "search term 'OR' must be key:value", 1),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Darpan reads Shopify customer data at Level 1 only, so a search on ordersCount by \"name:EXC*\" was not sent", 1),
+                row("org.moqui.impl.service.ServiceCallSyncImpl", "Error running service create#moqui.security.UserLoginHistory", 2),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Duplicate entry '100000-2026-11-27 05:07:03.653' for key 'USER_LOGIN_HISTORY.PRIMARY'", 2),
+                // Kept: these may be Darpan's own bug, not a refusal.
+                row("org.moqui.impl.context.MessageFacadeImpl", "Sync pair '100102' was not found.", 652),
+                row("org.moqui.impl.context.MessageFacadeImpl", "[serviceName:facade.ReconciliationFacadeServices.get#Automation, message:Field cannot be empty]", 4),
+                row("org.moqui.impl.context.MessageFacadeImpl", "Shopify auth config '100005 Outlet' was not found.", 1)]
+        ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        Map body = mails[0].body.digestBody as Map
+        assertEquals(["Sync pair '100102' was not found.", "[serviceName:facade.ReconciliationFacadeServices.get#Automation, message:Field cannot be empty]",
+                      "Shopify auth config '100005 Outlet' was not found."], (body.logErrors as List<Map>)*.sampleMessage)
+        assertEquals(113, body.counts.ignoredLogErrors)
+        assertEquals("[prod] Darpan errors 2026-11-25: 0 checks, 657 log errors", mails[0].body.digestSubject)
+        String text = ErrorDigestMessage.emailText(body, shippedCopy())
+        assertTrue(text.contains("Left out 113 log lines that match the ignore patterns (Errors settings)."), text)
+        assertTrue(ErrorDigestMessage.emailHtml(body, shippedCopy()).contains("Left out 113 log lines that match the ignore patterns (Errors settings)."))
+
+        mails.clear(); claims.clear()
+        settings["errors.email.ignorePatterns"] = "Sync pair '\\d+' was not found"
+        DarpanSettings.expire()
+        ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        Map edited = mails[0].body.digestBody as Map
+        assertEquals(652, edited.counts.ignoredLogErrors, "a setting row replaces the shipped list")
+        assertTrue((edited.logErrors as List<Map>)*.sampleMessage.any { it.toString().contains("[Login]") })
+    }
+
+    @Test
+    void nothingLeftOutSaysNothingAboutIt() {
+        input.logRows = [[fingerprint: "darpan.x Boom #", count: 2, loggerName: "darpan.x", sampleMessage: "Boom 4"]]
+        ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        String text = ErrorDigestMessage.emailText(mails[0].body.digestBody as Map, shippedCopy())
+        assertFalse(text.contains("Left out"), text)
+    }
+
     // ---------------------------------------------------------------- the real send's outcome (DEFAULT_SEND_EMAIL)
 
     /** Moqui's MessageFacade, as far as the send and its message scope use it. */

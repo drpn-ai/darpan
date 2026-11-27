@@ -3,6 +3,8 @@ package darpan.ops
 import java.sql.Timestamp
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 
 /**
  * DAR-BE-015. Pure assembly of the daily Darpan error digest from rows the caller already loaded: run errors grouped by
@@ -27,7 +29,12 @@ class ErrorDigestAssembler {
 
         List<Map> runErrors = buildRunErrors(executions, checks, since, now)
         List<Map> watchdog = buildWatchdog(checks, executions, now, watchdogHours, emptyStreakDays)
-        List<Map> logErrors = buildLogErrors((input.logRows ?: []) as List<Map>)
+        List<Pattern> ignore = compileIgnorePatterns((input.ignorePatterns ?: []) as List<String>)
+        List<Map> logRows = (input.logRows ?: []) as List<Map>
+        Map<Boolean, List<Map>> split = logRows.groupBy { ignoredLine(it, ignore) }
+        List<Map> ignored = split[true] ?: []
+        List<Map> logErrors = buildLogErrors(split[false] ?: [])
+        int ignoredCount = ignored.sum { (it.count ?: 0) as int } as Integer ?: 0
 
         Set<String> subjects = new LinkedHashSet<String>()
         runErrors.each { subjects.add("${it.tenant}|${it.check ?: ('automation:' + it.automationId)}".toString()) }
@@ -38,7 +45,27 @@ class ErrorDigestAssembler {
                 ? "[${instance}] Darpan errors ${day}: none"
                 : "[${instance}] Darpan errors ${day}: ${subjects.size()} checks, ${logCount} log errors"
         return [subject: subject, runErrors: runErrors, watchdog: watchdog, logErrors: logErrors,
-                counts: [checks: subjects.size(), logErrors: logCount]]
+                counts: [checks: subjects.size(), logErrors: logCount, ignoredLogErrors: ignoredCount]]
+    }
+
+    /** One regex per entry; a blank or broken one is skipped (a bad setting edit never stops the email). */
+    private static List<Pattern> compileIgnorePatterns(List<String> patterns) {
+        List<Pattern> out = []
+        patterns.each { String p ->
+            if (!p?.trim()) return
+            try { out.add(Pattern.compile(p.trim())) } catch (PatternSyntaxException ignored) { }
+        }
+        return out
+    }
+
+    /**
+     * DAR-BE-396: a line Darpan logs while refusing something on purpose (errors.email.ignorePatterns), found in
+     * "logger message" or in the fingerprint. The OVERFLOW row is never left out: what it hides is unknown.
+     */
+    private static boolean ignoredLine(Map row, List<Pattern> ignore) {
+        if (!ignore || row.fingerprint == ErrorLogCapture.OVERFLOW) return false
+        String text = "${row.loggerName ?: ''} ${row.sampleMessage ?: ''}\n${row.fingerprint ?: ''}".toString()
+        return ignore.any { it.matcher(text).find() }
     }
 
     private static boolean isScheduled(Map ex) {

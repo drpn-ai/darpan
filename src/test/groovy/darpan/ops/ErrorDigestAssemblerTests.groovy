@@ -51,6 +51,42 @@ class ErrorDigestAssemblerTests {
         assertEquals(30, d.logErrors[0].count)
     }
 
+    // DAR-BE-396: the 2026-11-27 email's 140 "[Login]" lines were the DAR-BE-264 fence turning scanners away on purpose.
+    @Test
+    void logLinesMatchingAnIgnorePatternAreLeftOutAndCounted() {
+        String fence = "Error running groovy script (org.moqui.impl.webapp.ScreenResourceNotFoundException: Could not find subscreen or transition or file/content [Login] under screen [null]"
+        Map d = ErrorDigestAssembler.assemble(input(
+                ignorePatterns: ["ScreenResourceNotFoundException: Could not find subscreen or transition or file/content \\[(Login|SecondFactor|ChangePassword)\\]",
+                                 "^org\\.moqui\\.impl\\.webapp\\.ElasticRequestLogFilter "],
+                logRows: [[fingerprint: "org.moqui.impl.actions.XmlAction ~91b2e17b", loggerName: "org.moqui.impl.actions.XmlAction", sampleMessage: fence, count: 91],
+                          [fingerprint: "org.moqui.impl.webapp.ElasticRequestLogFilter In ElasticRequestLogFilter init", loggerName: "org.moqui.impl.webapp.ElasticRequestLogFilter",
+                           sampleMessage: "In ElasticRequestLogFilter init could not find ElasticClient", count: 9],
+                          [fingerprint: "org.moqui.impl.context.MessageFacadeImpl Sync pair * was not found.", loggerName: "org.moqui.impl.context.MessageFacadeImpl",
+                           sampleMessage: "Sync pair '100102' was not found.", count: 652],
+                          [fingerprint: "OVERFLOW", count: 3]]))
+        assertEquals(["org.moqui.impl.context.MessageFacadeImpl Sync pair * was not found.", "OVERFLOW"], d.logErrors*.fingerprint)
+        assertEquals(655, d.counts.logErrors)
+        assertEquals(100, d.counts.ignoredLogErrors)
+        assertEquals("[prod] Darpan errors 2026-11-25: 0 checks, 655 log errors", d.subject)
+    }
+
+    @Test
+    void aBrokenIgnorePatternIsSkippedNotFatal() {
+        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["([unclosed", "Elastic"],
+                logRows: [[fingerprint: "f1", loggerName: "x", sampleMessage: "Elastic down", count: 2],
+                          [fingerprint: "f2", loggerName: "x", sampleMessage: "([unclosed", count: 5]]))
+        assertEquals(["f2"], d.logErrors*.fingerprint)
+        assertEquals(2, d.counts.ignoredLogErrors)
+    }
+
+    @Test
+    void everyLineIgnoredSaysNone() {
+        Map d = ErrorDigestAssembler.assemble(input(ignorePatterns: ["Elastic"],
+                logRows: [[fingerprint: "f1", loggerName: "x", sampleMessage: "Elastic down", count: 2]]))
+        assertEquals("[prod] Darpan errors 2026-11-25: none", d.subject)
+        assertEquals(2, d.counts.ignoredLogErrors)
+    }
+
     @Test
     void aCheckWithNoSuccessFor31HoursIsStale() {
         Map d = ErrorDigestAssembler.assemble(input(checks: [check(lastSuccessDate: hoursAgo(31))]))

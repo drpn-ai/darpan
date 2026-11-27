@@ -3519,6 +3519,64 @@ class AutomationExecutionSupportTests {
         assertNull(AutomationExecutionSupport.windowNoDataFinding("A", "B", [readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
     }
 
+    // DAR-BE-393: RAILS' Outlet check on Thanksgiving. Shopify Outlet read 0; OMS read 752 for every store and its Keep
+    // (EXCLUDE_IN the other stores) keeps 0. Both sides end with nothing: a quiet day, not "the Shopify side read no records".
+    @Test
+    void aSideThatReadNothingBesideASideThatKeptNothingIsAQuietDay() {
+        assertNull(AutomationExecutionSupport.noDataFinding("Shopify", 0, 0, "OMS", 752, 0))
+        assertNull(AutomationExecutionSupport.noDataFinding("OMS", 752, 0, "Shopify", 0, 0), "either side")
+        assertEquals("ONE_SIDE_EMPTY", AutomationExecutionSupport.noDataFinding("Shopify", 0, 0, "OMS", 752, 31).kind,
+                "the other side kept records: the empty side is still the error")
+        assertEquals("ONE_SIDE_EMPTY", AutomationExecutionSupport.noDataFinding("Shopify", 0, 0, "OMS", 752, null).kind,
+                "the other side's kept count unknown: still the error")
+    }
+
+    // DAR-BE-393 (Aditi 2026-11-27, option 1): the first kept-nothing day after a run that kept records on that side is a
+    // quiet day (RAILS R2 Outlet: OMS kept 0 of 1,062 the morning after keeping 31); from the second day in a row it alerts
+    // (DOLLS_KILL R1: NetSuite keeps 0 of ~33k every day).
+    @Test
+    void keptNothingAlertsOnlyWhenTheSidesLastRunKeptNothingToo() {
+        assertNull(AutomationExecutionSupport.noDataFinding("Shopify", 59, 59, "OMS", 1062, 0, [file1: 81, file2: 31]),
+                "the last run kept 31 on the OMS side: a quiet day")
+        assertEquals("KEPT_NOTHING", AutomationExecutionSupport.noDataFinding("Shopify", 59, 59, "OMS", 1062, 0, [file1: 81, file2: 0]).kind,
+                "the last run kept nothing there either: the second day alerts")
+        assertEquals("KEPT_NOTHING", AutomationExecutionSupport.noDataFinding("OMS", 12476, 9673, "NetSuite", 33412, 0, null).kind,
+                "no earlier run to go by: alerts")
+        assertEquals("KEPT_NOTHING", AutomationExecutionSupport.noDataFinding("OMS", 12476, 0, "NetSuite", 33412, 9, [file1: 0, file2: 50]).kind,
+                "only the side that kept nothing counts: side 1 kept nothing last time too")
+        assertNull(AutomationExecutionSupport.noDataFinding("OMS", 12476, 0, "NetSuite", 33412, 9, [file1: 7, file2: 0]))
+        Map summary = [keepSummaryBySide: [file2: [keptCount: 0, setAsideCount: 1062]]]
+        assertNull(AutomationExecutionSupport.windowNoDataFinding("Shopify", "OMS", [readCount: 59, recordCount: 59],
+                [readCount: 769, recordCount: 0], summary, false, [file1: 81, file2: 31]), "the window path carries the last run's counts")
+    }
+
+    // DAR-BE-393: when one side read nothing, the other side's Keep runs before the day is judged (the compare, where Keep
+    // usually runs, is skipped). Its count becomes the side's kept count; the read count stays.
+    @Test
+    void theReadSideIsKeptBeforeAnEmptyDayIsJudged() {
+        Map empty = [readCount: 0, recordCount: 0, dataAvailable: false]
+        Map read = [readCount: 752, recordCount: 752, dataAvailable: true]
+        List<String> asked = []
+        AutomationExecutionSupport.keepTheReadSide(empty, read) { String side -> asked << side; 0 }
+        assertEquals(["FILE_2"], asked)
+        assertEquals(0, read.recordCount)
+        assertEquals(752, read.readCount, "the read count stays: it is what the side read")
+        assertEquals(false, read.dataAvailable)
+
+        Map read1 = [readCount: 40, recordCount: 40, dataAvailable: true]
+        AutomationExecutionSupport.keepTheReadSide(read1, [readCount: 0, recordCount: 0]) { String side -> asked << side; 12 }
+        assertEquals(12, read1.recordCount)
+        assertEquals(true, read1.dataAvailable)
+
+        asked.clear()
+        AutomationExecutionSupport.keepTheReadSide([readCount: 5, recordCount: 5], [readCount: 6, recordCount: 6]) { String side -> asked << side; 0 }
+        AutomationExecutionSupport.keepTheReadSide([readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0]) { String side -> asked << side; 0 }
+        assertTrue(asked.isEmpty(), "both sides read, or neither: nothing to keep here")
+        Map unchanged = [readCount: 9, recordCount: 9]
+        AutomationExecutionSupport.keepTheReadSide([readCount: 0, recordCount: 0], unchanged) { String side -> null }
+        assertEquals(9, unchanged.recordCount, "a Keep that could not run leaves the side as read")
+    }
+
     @Test
     void aVerifyCloseRecordsNoFindingEvenWhenOneSideReadNothing() {
         Map side5 = [readCount: 5, recordCount: 5]
@@ -4040,6 +4098,21 @@ class AutomationExecutionSupportTests {
         assertNull(AutomationExecutionSupport.noDataNotice(null, ["#1001"], side0, side0, null, false), "verify keys are the verify flag")
         assertEquals(AutomationExecutionSupport.NOTICE_RUN_ERROR, AutomationExecutionSupport.noDataNotice("ONE_SIDE_EMPTY", false, side5, side0, null, false))
         assertNull(AutomationExecutionSupport.noDataNotice(null, false, side5, side5, null, false), "records on both sides is no quiet day")
+        // DAR-BE-393: a side that kept nothing with no finding (the other side read 0, or its last run kept records) is quiet too
+        assertEquals(AutomationExecutionSupport.NOTICE_QUIET_DAY,
+                AutomationExecutionSupport.noDataNotice(null, false, side0, [readCount: 752, recordCount: 0], null, false))
+        assertEquals(AutomationExecutionSupport.NOTICE_QUIET_DAY,
+                AutomationExecutionSupport.noDataNotice(null, false, [readCount: 59, recordCount: 59], [readCount: 1062, recordCount: 0], null, false))
+    }
+
+    // DAR-BE-393: the quiet line names what each side kept, so a first kept-nothing day reads "Shopify 59, HotWax 0".
+    @Test
+    void aQuietDayLineCountsWhatEachSideKept() {
+        assertEquals("Shopify 0, HotWax 0", AutomationExecutionSupport.quietDayCounts(["Shopify", "HotWax"],
+                [[readCount: 0, recordCount: 0], [readCount: 752, recordCount: 0]]))
+        assertEquals("Shopify 59, HotWax 0", AutomationExecutionSupport.quietDayCounts(["Shopify", "HotWax"],
+                [[readCount: 59, recordCount: 59], [readCount: 1062, recordCount: 0]]))
+        assertEquals("Shopify 0", AutomationExecutionSupport.quietDayCounts(["Shopify"], [null]))
     }
 
     @Test
@@ -4051,8 +4124,12 @@ class AutomationExecutionSupportTests {
         assertEquals("Oct 30–Nov 2", AutomationExecutionSupport.windowDayWords(timestamp("2026-10-30T05:00:00Z"), timestamp("2026-11-03T06:00:00Z"), chicago))
         assertEquals("Nov 26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-26T06:00:00Z"), null, chicago))
         assertTrue(AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
-        assertTrue(!AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], [readCount: 85, recordCount: 85], null, false),
-                "one side empty is a run error (DAR-BE-015), not a quiet day")
+        assertTrue(!AutomationExecutionSupport.quietDay([readCount: 5, recordCount: 5], [readCount: 85, recordCount: 85], null, false),
+                "both sides kept records: no quiet day")
+        // DAR-BE-393: quietDay is the shape (a side ended with nothing); whether that side is a run error is the finding's
+        // (noDataNotice asks the kind first), so a side empty while the other kept records still alerts.
+        assertEquals(AutomationExecutionSupport.NOTICE_RUN_ERROR, AutomationExecutionSupport.noDataNotice("ONE_SIDE_EMPTY", false,
+                [readCount: 0, recordCount: 0], [readCount: 85, recordCount: 85], null, false))
         assertTrue(AutomationExecutionSupport.quietDay([readCount: 0, recordCount: 0], null, null, true), "an evaluate reads its first side only")
     }
 

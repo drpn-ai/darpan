@@ -248,6 +248,16 @@ class AuditAutomationSupport {
     }
 
     /**
+     * DAR-BE-393. Empties the keys the compare listed as examined (auditFile1KeysOut, auditFile2KeysOut), so a window that
+     * closes as a quiet day records its check as ran but closes no finding: nothing was compared (a side kept nothing).
+     */
+    static void forgetExaminedKeys(Map<String, Object> window) {
+        [window?.auditFile1KeysOut, window?.auditFile2KeysOut].each { Object location ->
+            if (location) new File(location as String).delete()
+        }
+    }
+
+    /**
      * After one window: health, findings, closings for every check the automation runs. A side with no result was
      * not read: the side that threw failed, a side never reached failed for that reason. Reads that completed but
      * whose compare failed make the check notRun, so nothing closes. noDataReason (DAR-BE-015) does the same for a

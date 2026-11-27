@@ -785,11 +785,16 @@ class AutomationExecutionSupport {
                 // DAR-BE-318 (plan 3b-2b, Task 14): also how a window closes when a side's Keep, run in Spark at the compare,
                 // kept nothing: today that side's read filtered every record away and reported no data.
                 Closure closeAsNoData = { ->
+                    // DAR-BE-393: a side that kept nothing alerts only when its last run kept nothing there too
+                    Map priorKept = !verifying && AutomationExecutionSupport.keptNothingSide(file1Result, file2Result, reconcileResult) ?
+                            AutomationExecutionSupport.priorKeptCounts(ec, automation, automationExecutionId) : null
                     // A verify reads one side by design: its empty side is its answer, not a failed read.
                     Map<String, String> finding = AutomationExecutionSupport.closeFinding(verifying,
                             AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId")))),
                             AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId")))),
-                            file1Result, file2Result, reconcileResult, evaluateMode)
+                            file1Result, file2Result, reconcileResult, evaluateMode, priorKept)
+                    // DAR-BE-393: a quiet day compared nothing, so the audit closes no finding on the keys the compare listed
+                    if (finding == null && !verifying) AuditAutomationSupport.forgetExaminedKeys(window)
                     String sideReason = finding?.reason
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
@@ -824,7 +829,8 @@ class AutomationExecutionSupport {
                     if (notice == NOTICE_RUN_ERROR) {
                         AutomationExecutionSupport.notifyRunError(ec, automation, closedExecution, mintedRunResultId, sideReason)
                     } else if (notice == NOTICE_QUIET_DAY) {
-                        AutomationExecutionSupport.notifyQuietDay(ec, automation, file1Source, file2Source, window, mintedRunResultId, evaluateMode)
+                        AutomationExecutionSupport.notifyQuietDay(ec, automation, file1Source, file2Source, window, mintedRunResultId, evaluateMode,
+                                file1Result, file2Result)
                     } else {
                         TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                     }
@@ -839,6 +845,14 @@ class AutomationExecutionSupport {
                 }
                 if (verifying ? (!normalize(file1Result?.fileLocation) || (!evaluateMode && !normalize(file2Result?.fileLocation))) :
                         (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result)))) {
+                    // DAR-BE-393: the compare (and the Spark Keep in it) is skipped, so the side that read records is kept
+                    // here: a store-scoped side whose store sold nothing then reads as nothing, and the day is quiet.
+                    if (!verifying && !evaluateMode) {
+                        AutomationExecutionSupport.keepTheReadSide(file1Result, file2Result) { String keptSide ->
+                            AutomationExecutionSupport.keptCountOf(ec, automation, keptSide == FILE_SIDE_1 ? file1Source : file2Source,
+                                    keptSide == FILE_SIDE_1 ? file1Result : file2Result, keptSide, windowParams)
+                        }
+                    }
                     closeAsNoData.call()
                     return
                 }
@@ -3449,16 +3463,30 @@ class AutomationExecutionSupport {
         return noDataFinding(side1Label, read1, kept1, side2Label, read2, kept2)?.reason
     }
 
-    /** DAR-BE-015. The did-not-run finding of a NO_DATA window: [kind: ONE_SIDE_EMPTY | KEPT_NOTHING, reason], or null for a quiet day. */
-    static Map<String, String> noDataFinding(String side1Label, Integer read1, Integer kept1, String side2Label, Integer read2, Integer kept2) {
+    /**
+     * DAR-BE-015. The did-not-run finding of a NO_DATA window: [kind: ONE_SIDE_EMPTY | KEPT_NOTHING, reason], or null for a quiet day.
+     * DAR-BE-393: a side that read nothing beside a side whose Keep kept nothing is a quiet day (a store-scoped check on a day the
+     * store sold nothing: the other side's read is every store's). A side that kept nothing is a quiet day the first time after a
+     * run that kept records on that side (priorKept: [file1, file2], that run's kept counts); it alerts from the second day.
+     */
+    static Map<String, String> noDataFinding(String side1Label, Integer read1, Integer kept1, String side2Label, Integer read2, Integer kept2,
+                                             Map priorKept = null) {
         int r1 = read1 ?: 0
         int r2 = read2 ?: 0
         if (r1 == 0 && r2 == 0) return null
-        if (r1 == 0) return [kind: "ONE_SIDE_EMPTY", reason: "The ${side1Label} side read no records.".toString()]
-        if (r2 == 0) return [kind: "ONE_SIDE_EMPTY", reason: "The ${side2Label} side read no records.".toString()]
-        if (kept1 != null && kept1 == 0) return [kind: "KEPT_NOTHING", reason: "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()]
-        if (kept2 != null && kept2 == 0) return [kind: "KEPT_NOTHING", reason: "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()]
+        if (r1 == 0) return kept2 == 0 ? null : [kind: "ONE_SIDE_EMPTY", reason: "The ${side1Label} side read no records.".toString()]
+        if (r2 == 0) return kept1 == 0 ? null : [kind: "ONE_SIDE_EMPTY", reason: "The ${side2Label} side read no records.".toString()]
+        if (kept1 != null && kept1 == 0 && !keptLastRun(priorKept, "file1")) {
+            return [kind: "KEPT_NOTHING", reason: "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()]
+        }
+        if (kept2 != null && kept2 == 0 && !keptLastRun(priorKept, "file2")) {
+            return [kind: "KEPT_NOTHING", reason: "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()]
+        }
         return null
+    }
+
+    private static boolean keptLastRun(Map priorKept, String sideKey) {
+        return ((priorKept?.get(sideKey) as Integer) ?: 0) > 0
     }
 
     /**
@@ -3473,20 +3501,88 @@ class AutomationExecutionSupport {
 
     /** DAR-BE-015. The finding a NO_DATA close persists: none for a verify, which reads one side by design (its empty side is its answer). */
     static Map<String, String> closeFinding(Object verifying, String label1, String label2, Map file1Result, Map file2Result,
-                                            Map reconcileResult, boolean evaluateMode) {
-        return verifying ? null : windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
+                                            Map reconcileResult, boolean evaluateMode, Map priorKept = null) {
+        return verifying ? null : windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode, priorKept)
     }
 
     /** The kind and reason together, from the one derivation (persisted as the execution's noDataKind and errorMessage). */
-    static Map<String, String> windowNoDataFinding(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
+    static Map<String, String> windowNoDataFinding(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult,
+                                                   boolean evaluateMode, Map priorKept = null) {
         Integer read1 = keepGiven(file1Result, reconcileResult, "file1")
         Integer read2 = keepGiven(file2Result, reconcileResult, "file2")
         Integer kept1 = file1Result?.recordCount as Integer
         Integer kept2 = file2Result?.recordCount as Integer
         if (evaluateMode) {
-            return read1 > 0 && kept1 == 0 ? noDataFinding(label1, read1, kept1, label2, 1, null) : null
+            return read1 > 0 && kept1 == 0 ? noDataFinding(label1, read1, kept1, label2, 1, null, priorKept) : null
         }
-        return noDataFinding(label1, read1, kept1, label2, read2, kept2)
+        return noDataFinding(label1, read1, kept1, label2, read2, kept2, priorKept)
+    }
+
+    /** DAR-BE-393. True when a side read records and kept none (so whether it alerts depends on the side's last run). */
+    static boolean keptNothingSide(Map file1Result, Map file2Result, Map reconcileResult) {
+        return [[file1Result, "file1"], [file2Result, "file2"]].any { List pair ->
+            Map result = (Map) pair[0]
+            result != null && (keepGiven(result, reconcileResult, (String) pair[1]) ?: 0) > 0 && (result.recordCount as Integer) == 0
+        }
+    }
+
+    /**
+     * DAR-BE-393. One side read nothing, so the compare (where a Spark Keep runs) is skipped: the side that read records is kept
+     * here first, keptCount(fileSide) answering its kept count (null when its Keep could not run: the side stays as read). Its
+     * recordCount becomes what Keep kept, as after a compare; its readCount stays. Nothing happens when both sides or neither read.
+     */
+    static void keepTheReadSide(Map file1Result, Map file2Result, Closure keptCount) {
+        int read1 = (file1Result?.readCount ?: file1Result?.recordCount ?: 0) as int
+        int read2 = (file2Result?.readCount ?: file2Result?.recordCount ?: 0) as int
+        if ((read1 == 0) == (read2 == 0)) return
+        Map side = read1 == 0 ? file2Result : file1Result
+        Integer kept = keptCount.call(read1 == 0 ? FILE_SIDE_2 : FILE_SIDE_1) as Integer
+        if (kept == null) return
+        if (side.readCount == null) side.readCount = side.recordCount
+        side.recordCount = kept
+        side.dataAvailable = kept > 0
+    }
+
+    /**
+     * DAR-BE-393. What a side's Spark Keep keeps of its extract, run as the read by the other side's keys runs it
+     * (KeepStepSupport.keptValues over the side's first key field, writing the Keep artifact beside the extract). Null when the
+     * side has no Spark Keep (a read that filtered already counted what it kept), no file or no plain key field, or Keep fails.
+     */
+    static Integer keptCountOf(def ec, def automation, def source, Map result, String side, Map windowParams) {
+        try {
+            Map sideKeep = result?.get(SIDE_KEEP) instanceof Map ? (Map) result.get(SIDE_KEEP) :
+                    sideKeepOfResult(ec, automation, source, result, windowParams, windowParams?.get(KEEP_IN_SPARK) == true)
+            if (!KeepStepSupport.applies(sideKeep)) return null
+            File file = RunVerificationSupport.resolveLocationFile(ec, normalize(result?.fileLocation))
+            String key = AuditRecheckSupport.firstKeyField(ec, normalize(readField(automation, "compareScopeId")), side)
+            if (file == null || !key) return null
+            return KeepStepSupport.keptValues(ec, file, sideKeep, key).size()
+        } catch (Throwable keepError) {
+            logger.warn("Keep of {} before an empty day is judged failed for automation {}: {}", side,
+                    readField(automation, "automationId"), keepError.getClass().name)
+            return null
+        }
+    }
+
+    /**
+     * DAR-BE-393. The kept counts of this automation's last finished run before this execution ([file1, file2]), or null when
+     * there is none: the first kept-nothing day after a run that kept records on that side is a quiet day.
+     */
+    static Map<String, Integer> priorKeptCounts(def ec, def automation, Object automationExecutionId) {
+        try {
+            // the run's own automation, its tenant named explicitly (a scheduled run has no active tenant to scope by)
+            def prior = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                            "DAR-BE-393: an empty day reads its automation's last run's kept counts")
+                    .condition("companyUserGroupId", normalize(readField(automation, "companyUserGroupId")))
+                    .condition("automationId", normalize(readField(automation, "automationId")))
+                    .condition("automationExecutionId", org.moqui.entity.EntityCondition.ComparisonOperator.NOT_EQUAL, normalize(automationExecutionId))
+                    .condition("statusEnumId", org.moqui.entity.EntityCondition.ComparisonOperator.IN, [STATUS_SUCCEEDED, STATUS_NO_DATA])
+                    .orderBy(["-createdDate", "-automationExecutionId"]).limit(1).useCache(false).list()?.find { true }
+            return prior == null ? null : [file1: normalizeInt(prior.file1RecordCount), file2: normalizeInt(prior.file2RecordCount)]
+        } catch (Throwable lookupError) {
+            logger.warn("Last run's kept counts unreadable for automation {}: {}", readField(automation, "automationId"), lookupError.getClass().name)
+            return null
+        }
     }
 
     private static Integer keepGiven(Map result, Map reconcileResult, String sideKey) {
@@ -3906,10 +4002,20 @@ class AutomationExecutionSupport {
         return !verifying && quietDay(file1Result, file2Result, reconcileResult, evaluateMode) ? NOTICE_QUIET_DAY : null
     }
 
+    /**
+     * DAR-BE-393: the shape of a quiet day, a side (an evaluate: its first) that ended with nothing, read or kept. Whether that
+     * side is a run error instead is the finding's (noDataFinding), which noDataNotice asks first.
+     */
     static boolean quietDay(Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
-        int read1 = keepGiven(file1Result, reconcileResult, "file1") ?: 0
-        int read2 = keepGiven(file2Result, reconcileResult, "file2") ?: 0
-        return read1 == 0 && (evaluateMode || read2 == 0)
+        Closure nothing = { Map result, String sideKey ->
+            (keepGiven(result, reconcileResult, sideKey) ?: 0) == 0 || (result?.recordCount != null && (result.recordCount as Integer) == 0)
+        }
+        return evaluateMode ? nothing(file1Result, "file1") : (nothing(file1Result, "file1") || nothing(file2Result, "file2"))
+    }
+
+    /** DAR-BE-393. "Shopify 59, HotWax 0": each side's name with what it kept (its recordCount; nothing read is 0). */
+    static String quietDayCounts(List<String> names, List<Map> results) {
+        return (0..<names.size()).collect { int i -> "${names[i]} ${(results[i]?.recordCount as Integer) ?: 0}" }.join(", ")
     }
 
     /**
@@ -3918,15 +4024,17 @@ class AutomationExecutionSupport {
      * DARPAN_ERROR_NOTICE / client.nothing, "Daily Return Reconciliation · Nov 26: nothing to compare (HotWax 0, Shopify 0)",
      * the day in the automation's window zone. No card, no finding. Never throws; on any failure the subscriptions still go.
      */
-    static void notifyQuietDay(def ec, def automation, def file1Source, def file2Source, Map window, String runResultId, boolean evaluateMode) {
+    static void notifyQuietDay(def ec, def automation, def file1Source, def file2Source, Map window, String runResultId, boolean evaluateMode,
+                               Map file1Result = null, Map file2Result = null) {
         try {
             String name = normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId"))
             String day = windowDayWords(toTimestamp(window?.childWindowStartDate), toTimestamp(window?.childWindowEndDate),
                     resolveZoneId(readField(automation, "windowTimeZone")))
             List<String> sides = [sideName(ec, file1Source)] + (evaluateMode ? [] : [sideName(ec, file2Source)])
+            // DAR-BE-393: what each side kept, so a first kept-nothing day says "Shopify 59, HotWax 0"
             String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
                     new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text("client.nothing",
-                    [name: name, day: day, counts: sides.collect { "${it} 0" }.join(", ")])
+                    [name: name, day: day, counts: quietDayCounts(sides, [file1Result, file2Result].take(sides.size()))])
             TenantNotificationSupport.notifyRunLine(ec, normalize(readField(automation, "companyUserGroupId")),
                     normalize(readField(automation, "chatSpaceId")), runResultId, line)
         } catch (Throwable notifyError) {

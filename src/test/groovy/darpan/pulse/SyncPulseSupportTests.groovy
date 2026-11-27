@@ -118,5 +118,38 @@ class SyncPulseSupportTests {
         assertEquals("https://x.test/pulses/a%7Cb?tenantId=T%26U", SyncPulseSupport.pulseUrl("https://x.test", "a|b", "T&U"))
     }
 
+    @Test
+    void aCaughtUpPostIsACardWithWhatTheEpisodeClosedAndSlackGetsTheWordsAndLink() {
+        Map decision = [kind: "clear", text: "HotWax → NetSuite orders: caught up. Nothing past the 6h allowance.\n0 waiting · oldest none · 1 finding closed",
+                        card: SyncPulseSupport.clearCard("HotWax → NetSuite orders", 360, 1, 0)]
+        Map msg = SyncPulseSupport.pulseMessage(decision, "https://app.drpn.ai/pulses/100000?tenantId=GORJANA")
+        assertFalse(msg.containsKey("text"), "Chat shows text above a card: the card goes alone")
+        assertEquals(decision.text, msg.fallbackText)
+        assertEquals(decision.text + "\n<https://app.drpn.ai/pulses/100000?tenantId=GORJANA|Open the pulse>", msg.slackText)
+        Map card = (msg.cardsV2 as List<Map>)[0].card as Map
+        assertEquals("pulse-clear", (msg.cardsV2 as List<Map>)[0].cardId)
+        assertEquals("Caught up · nothing past the 6h allowance", card.header.subtitle)
+        List<Map> widgets = (card.sections as List<Map>)[0].widgets as List<Map>
+        assertEquals("<font color=\"#188038\">1 finding closed</font>", widgets[0].decoratedText.text)
+        assertEquals("Open the pulse", widgets[1].buttonList.buttons[0].text)
+        assertEquals(2, widgets.size(), "no waiting row (Aditi 2026-11-27)")
+    }
+
+    @Test
+    void aPastCardEscapesTheOrderNameAndACardWithoutTheAppsAddressHasNoButton() {
+        Map card = SyncPulseSupport.pastCard("L", 120, 3, [orderName: "#<9>", ageMinutes: 125])
+        assertEquals("3 past the 2h allowance", card.subtitle)
+        assertEquals("<font color=\"#d93025\">#&lt;9&gt;</font> · waiting 2h 5m", card.widgets[0].decoratedText.text)
+        Map msg = SyncPulseSupport.pulseMessage([kind: "past", text: "words", card: card], null)
+        assertEquals(1, (((msg.cardsV2 as List<Map>)[0].card.sections as List<Map>)[0].widgets as List).size())
+        assertEquals("words", msg.slackText)
+    }
+
+    @Test
+    void theHourlySummaryStaysTextWithTheLink() {
+        assertEquals([text: "summary\n<https://x.test/pulses/1|Open the pulse>"],
+                SyncPulseSupport.pulseMessage([kind: "summary", text: "summary"], "https://x.test/pulses/1"))
+    }
+
     private static Timestamp ts(Instant i) { Timestamp.from(i) }
 }

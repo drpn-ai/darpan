@@ -124,6 +124,9 @@ class SyncPulseChatTests {
             String said = (payload.text ?: payload.fallbackText) as String
             java.util.regex.Matcher link = said == null ? null : (said =~ /\n<([^|>]+)\|Open the pulse>\z/)
             if (link?.find()) { links << link.group(1); said = said.substring(0, link.start()) }
+            // a card carries its link as its button (DAR-BE-391)
+            Object button = ((payload.cardsV2 as List<Map>)?.getAt(0)?.card?.sections as List<Map>)?.getAt(0)?.widgets?.find { it.buttonList }
+            if (button) links << (button.buttonList.buttons[0].onClick.openLink.url as String)
             posts << [ref: ref, text: said]
             payloads << [ref: ref, payload: payload]
             return [ok: true]
@@ -148,7 +151,16 @@ class SyncPulseChatTests {
 
         pulse(T0)
         assertEquals([[ref: URL1, text: "${LABEL}: 1 past the 1h allowance.\nOldest #A1, 1h 40m${DOT}0 waiting".toString()]], posts)
-        assertEquals(["http://localhost:5173/pulses/${SP}?tenantId=${A}".toString()], links, "the post ends with a link to its pulse, in its tenant")
+        assertEquals(["http://localhost:5173/pulses/${SP}?tenantId=${A}".toString()], links, "the post links to its pulse, in its tenant")
+        // DAR-BE-391: a card alone in Google Chat (no text above it); the words ride as fallbackText
+        Map sent = payloads[0].payload as Map
+        assertNull(sent.text, "no text above the card")
+        assertNull(sent.slackText, "Slack's words never reach Google Chat")
+        Map card = (sent.cardsV2 as List<Map>)[0].card as Map
+        assertEquals([title: LABEL, subtitle: "1 past the 1h allowance", imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"], card.header)
+        List<Map> widgets = (card.sections as List<Map>)[0].widgets as List<Map>
+        assertEquals(2, widgets.size(), "the oldest and the button; no waiting row")
+        assertEquals("<font color=\"#d93025\">#A1</font>${DOT}waiting 1h 40m".toString(), widgets[0].decoratedText.text)
 
         pulse(T0.plus(Duration.ofMinutes(5)))
         pulse(T0.plus(Duration.ofMinutes(10)))

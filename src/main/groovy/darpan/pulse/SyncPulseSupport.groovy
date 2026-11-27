@@ -747,6 +747,8 @@ class SyncPulseSupport {
 
     private static final String ARROW = "→"
     private static final String DOT = " · "
+    private static final String PAST_RED = "#d93025"
+    private static final String CLEAR_GREEN = "#188038"
     /** SyncPulseOrder.closeReason: it reached the target, or it left the check (cancelled, filtered, aged out). */
     static final String ARRIVED = "ARRIVED"
     static final String DROPPED = "DROPPED"
@@ -808,6 +810,39 @@ class SyncPulseSupport {
         return url ? "${text}\n<${url}|Open the pulse>".toString() : text
     }
 
+    /** DAR-BE-391 (Aditi 2026-11-27, seen in her test room): a past post's card: the pair, how many are past, the oldest in red. */
+    static Map pastCard(String label, Integer allowance, int pastCount, Map oldest) {
+        String name = normalize(oldest?.get("orderName")) ?: "unknown"
+        return [title  : label, subtitle: "${pastCount} past the ${allowanceWords(allowance)} allowance".toString(),
+                widgets: [[decoratedText: [topLabel : "Oldest", wrapText: true, startIcon: [materialIcon: [name: "schedule"]],
+                                           text     : "<font color=\"${PAST_RED}\">${esc(name)}</font>${DOT}waiting ${oldestWords(oldest)}".toString()]]]]
+    }
+
+    /** DAR-BE-391: a caught-up post's card: the pair, nothing past, what the episode closed in green. No waiting row (Aditi). */
+    static Map clearCard(String label, Integer allowance, int closedCount, int droppedCount) {
+        String closed = "${closedCount} ${closedCount == 1 ? 'finding' : 'findings'} closed"
+        String text = "<font color=\"${CLEAR_GREEN}\">${closed}</font>" + (droppedCount > 0 ? "${DOT}${droppedCount} left the check" : "")
+        return [title  : label, subtitle: "Caught up${DOT}nothing past the ${allowanceWords(allowance)} allowance".toString(),
+                widgets: [[decoratedText: [topLabel: "This episode", text: text.toString(), wrapText: true, startIcon: [materialIcon: [name: "task_alt"]]]]]]
+    }
+
+    /**
+     * The message a pulse post becomes. With a card: the card alone in Google Chat (Darpan header, its rows, "Open the pulse"),
+     * the words in fallbackText (Chat's notifications), and slackText (the words + the link) for a Slack room. Without one (the
+     * hourly summary): the words and the link as text.
+     */
+    static Map pulseMessage(Map decision, String link) {
+        String text = decision.text as String
+        Map card = decision.card as Map
+        if (card == null) return [text: withPulseLink(text, link)]
+        List<Map> widgets = new ArrayList<Map>(card.widgets as List<Map>)
+        if (link) widgets << [buttonList: [buttons: [[text: "Open the pulse", onClick: [openLink: [url: link]]]]]]
+        return [fallbackText: text, slackText: withPulseLink(text, link),
+                cardsV2     : [[cardId: "pulse-${decision.kind}".toString(), card: [
+                        header  : [title: card.title, subtitle: card.subtitle, imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
+                        sections: [[widgets: widgets]]]]]]
+    }
+
     static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
         return "${label}: ${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${pastCount} past allowance".toString()
     }
@@ -843,14 +878,15 @@ class SyncPulseSupport {
         Map oldest = result.get("oldest") as Map
         Integer waiting = result.get("waitingCount") as Integer
         if (prior == 0 && past > 0) {
-            return [kind: "past", text: pastText(label, allowance, past, oldest, waiting), lastPostedPastCount: past]
+            return [kind: "past", text: pastText(label, allowance, past, oldest, waiting), card: pastCard(label, allowance, past, oldest),
+                    lastPostedPastCount: past]
         }
         if (past == 0 && prior > 0) {
             // the episode's own counts when the caller read them; this pulse's alone otherwise (an episode that began before they were kept)
             int closedCount = (result.get("episodeClosed") ?: ((result.get("closed") ?: []) as List).size()) as int
             int droppedCount = (result.get("episodeDropped") ?: ((result.get("dropped") ?: []) as List).size()) as int
             return [kind: "clear", text: clearText(label, allowance, oldest, waiting, closedCount, droppedCount),
-                    lastPostedPastCount: 0]
+                    card: clearCard(label, allowance, closedCount, droppedCount), lastPostedPastCount: 0]
         }
         // a count that changed but stays above zero announces nothing (the hourly summary carries it); the stored count follows
         Integer stored = past != prior ? (Integer) past : priorPosted
@@ -901,7 +937,7 @@ class SyncPulseSupport {
             if (!chatSpaceId) return
             String link = decision.text == null ? null
                     : pulseUrl(TenantNotificationSupport.resolveAppBaseUrl(ec), normalize(pair.syncPairId), tenantId)
-            boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, withPulseLink(decision.text as String, link))
+            boolean posted = decision.text == null || postMessage(ec, tenantId, chatSpaceId, pulseMessage(decision, link))
             Integer wanted = decision.lastPostedPastCount as Integer
             // the episode opens with the 0 -> >0 post and ends with the >0 -> 0 post
             boolean episodeChange = posted && (decision.kind == "past" || decision.kind == "clear")
@@ -930,33 +966,23 @@ class SyncPulseSupport {
     }
 
     /** One post; false when it could not be delivered. Never throws. */
-    /** A period message (a card with fallbackText, or plain text) to a room: a Slack room takes the words as text. Never throws. */
+    /** A pulse or period message (a card with fallbackText, or plain text) to a room: a Slack room takes the words as text. Never throws. */
     private static boolean postMessage(def ec, String tenantId, String chatSpaceId, Map message) {
         if (!tenantId || !chatSpaceId || !message) return false
         try {
             def space = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.reconciliation.TenantChatSpace", "chatSpaceId", chatSpaceId,
-                    tenantId, "peak period post — owner re-checked against the tenant")
+                    tenantId, "sync pulse post — owner re-checked against the tenant")
             Map destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
             if (destination == null) return false
             boolean slack = destination.deliveryMode == TenantNotificationSupport.DELIVERY_SLACK_BOT ||
                     destination.chatProviderEnumId == TenantNotificationSupport.PROVIDER_SLACK
-            Map result = TenantNotificationSupport.deliverToDestination(destination, slack ? [text: message.text ?: message.fallbackText] : message)
-            if (result?.ok == false) logger.warn("Sync pulse period post to space {} returned status {}", chatSpaceId, result?.statusCode)
+            // slackText (a pulse card's words + link) is Slack's; Google Chat would refuse the unknown field
+            Map result = TenantNotificationSupport.deliverToDestination(destination,
+                    slack ? [text: message.slackText ?: message.text ?: message.fallbackText] : message.findAll { it.key != "slackText" })
+            if (result?.ok == false) logger.warn("Sync pulse post to space {} returned status {}", chatSpaceId, result?.statusCode)
             return result != null && result.get("ok") != false
         } catch (Throwable t) {
-            logger.warn("Sync pulse period post to space {} failed: {}", chatSpaceId, t.message ?: t.toString())
-            clearErrors(ec)
-            return false
-        }
-    }
-
-    private static boolean postChat(def ec, String tenantId, String chatSpaceId, String text) {
-        if (!tenantId || !chatSpaceId || !text) return false
-        try {
-            Map result = TenantNotificationSupport.postToChatSpace(ec, tenantId, chatSpaceId, [text: text])
-            return result != null && result.get("ok") != false
-        } catch (Throwable t) {
-            logger.warn("Sync pulse chat post to space {} failed: {}", chatSpaceId, t.message ?: t.toString())
+            logger.warn("Sync pulse post to space {} failed: {}", chatSpaceId, t.message ?: t.toString())
             clearErrors(ec)
             return false
         }

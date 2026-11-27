@@ -157,7 +157,7 @@ class SyncPulseChatTests {
         assertNull(sent.text, "no text above the card")
         assertNull(sent.slackText, "Slack's words never reach Google Chat")
         Map card = (sent.cardsV2 as List<Map>)[0].card as Map
-        assertEquals([title: LABEL, subtitle: "1 past the 1h allowance", imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"], card.header)
+        assertEquals([title: LABEL, subtitle: "1 past the 1h allowance", imageUrl: "https://docs.drpn.ai/logo/darpan-mark.png", imageType: "CIRCLE"], card.header)
         List<Map> widgets = (card.sections as List<Map>)[0].widgets as List<Map>
         assertEquals(2, widgets.size(), "the oldest and the button; no waiting row")
         assertEquals("<font color=\"#d93025\">#A1</font>${DOT}waiting 1h 40m".toString(), widgets[0].decoratedText.text)

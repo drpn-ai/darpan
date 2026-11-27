@@ -155,7 +155,7 @@ class AuditRunMessage {
         // travels as fallbackText, which Chat shows only in notifications and a Slack room takes as its text.
         return [fallbackText: "${title(facts)}: ${t.open} open findings".toString(),
                 cardsV2: [[cardId: "audit-run", card: [
-                        header  : [title: title(facts), subtitle: subtitle(facts, copy), imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
+                        header  : [title: title(facts), subtitle: subtitle(facts, copy), imageUrl: "https://docs.drpn.ai/logo/darpan-mark.png", imageType: "CIRCLE"],
                         sections: [[widgets: widgets]]]]]]
     }
 

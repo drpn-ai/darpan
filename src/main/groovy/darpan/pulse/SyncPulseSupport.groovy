@@ -839,7 +839,7 @@ class SyncPulseSupport {
         if (link) widgets << [buttonList: [buttons: [[text: "Open the pulse", onClick: [openLink: [url: link]]]]]]
         return [fallbackText: text, slackText: withPulseLink(text, link),
                 cardsV2     : [[cardId: "pulse-${decision.kind}".toString(), card: [
-                        header  : [title: card.title, subtitle: card.subtitle, imageUrl: "https://docs.drpn.ai/logo/darpan-mark.png", imageType: "CIRCLE"],
+                        header  : [title: card.title, subtitle: card.subtitle],
                         sections: [[widgets: widgets]]]]]]
     }
 
@@ -1081,7 +1081,7 @@ class SyncPulseSupport {
         List<String> lines = (items ?: []).collect { Map i -> itemWords(i) }
         String text = lines ? ([title + ". " + subtitle + ":"] + lines).join("\n") : "${title}.${subtitle ? ' ' + subtitle + '.' : ''}".toString()
         if (!lines) return [text: text]
-        Map card = [header: [title: title, imageUrl: "https://docs.drpn.ai/logo/darpan-mark.png", imageType: "CIRCLE"] + (subtitle ? [subtitle: subtitle] : [:]),
+        Map card = [header: [title: title] + (subtitle ? [subtitle: subtitle] : [:]),
                     sections: [[widgets: lines.collect { String line -> [decoratedText: [text: esc(line), wrapText: true]] }]]]
         return [fallbackText: text, cardsV2: [[cardId: "peak-period", card: card]]]
     }

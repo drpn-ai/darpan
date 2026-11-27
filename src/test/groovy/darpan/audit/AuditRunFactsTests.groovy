@@ -111,8 +111,7 @@ class AuditRunFactsTests {
         assertEquals("Gorjana · Month close: 57 open findings", card.fallbackText)
         assertFalse(card.containsKey("text"))
         Map body = (card.cardsV2 as List<Map>)[0].card as Map
-        assertEquals([title: "Gorjana · Month close", subtitle: "Run of 10 Nov 2026 · 1–10 November",
-                      imageUrl: "https://docs.drpn.ai/logo/darpan-mark.png", imageType: "CIRCLE"], body.header)
+        assertEquals([title: "Gorjana · Month close", subtitle: "Run of 10 Nov 2026 · 1–10 November"], body.header)
         List<Map> sections = body.sections as List<Map>
         assertEquals(1, sections.size(), "no rule sections")
         List<Map> widgets = sections[0].widgets as List<Map>

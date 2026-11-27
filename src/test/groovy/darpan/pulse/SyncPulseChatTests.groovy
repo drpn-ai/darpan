@@ -46,6 +46,8 @@ class SyncPulseChatTests {
     private static final String URL1 = "https://chat.googleapis.com/v1/spaces/PULSEC1/messages?key=k&token=t"
     private static final String URL2 = "https://chat.googleapis.com/v1/spaces/PULSEC2/messages?key=k&token=t"
     private static final String LABEL = "HotWax → NetSuite orders"
+    /** DAR-BE-388: a period post names the systems only (a pulse always reads orders). */
+    private static final String SYS = "HotWax → NetSuite"
     private static final String DOT = " · "
     private static final Instant T0 = Instant.parse("2026-11-21T10:00:00Z")
 
@@ -54,6 +56,8 @@ class SyncPulseChatTests {
     private Set<String> arrived = [] as Set
     private Map upstreamFailure = null
     private List<Map> posts = Collections.synchronizedList([])
+    /** Every payload as delivered (after provider shaping), for the card checks. */
+    private List<Map> payloads = Collections.synchronizedList([])
     /** DAR-BE-382: what reached Darpan's alerts room (ErrorChatSupport.postHook). */
     private List<Map> alerts = Collections.synchronizedList([])
     private static final String ALERTS = "https://chat.googleapis.com/v1/spaces/DARPANALERTS/messages?key=k&token=t"
@@ -95,7 +99,7 @@ class SyncPulseChatTests {
         ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         SyncPulseSupport.forgetPresentMemoryForTests()
-        upstream.clear(); arrived.clear(); posts.clear(); alerts.clear(); pulseThreads.clear()
+        upstream.clear(); arrived.clear(); posts.clear(); payloads.clear(); alerts.clear(); pulseThreads.clear()
         alertsRoom = ALERTS
         DarpanSettings.rowLoader = { -> alertsRoom ? [(ErrorChatSupport.WEBHOOK_SETTING): [settingValue: alertsRoom]] : [:] }
         DarpanSettings.expire()
@@ -115,7 +119,8 @@ class SyncPulseChatTests {
         })
         TenantNotificationSupport.setDeliveryHook({ String ref, Map payload ->
             if (postsThrow) throw new IllegalStateException("chat is down")
-            posts << [ref: ref, text: payload.text]
+            posts << [ref: ref, text: payload.text ?: payload.fallbackText]
+            payloads << [ref: ref, payload: payload]
             return [ok: true]
         })
         AutomationExecutionSupport.setRunAdmission(admission())
@@ -344,10 +349,14 @@ class SyncPulseChatTests {
                 peakHoursStart: "08:00", peakHoursEnd: "23:00"]).create()
         ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_BF", syncPairId: SP, companyUserGroupId: A,
                 allowanceMinutes: 360, pulseEveryMinutes: 60]).create()
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_BF", syncPairId: SP2, companyUserGroupId: A,
+                allowanceMinutes: 240]).create()
 
         scan(T0)
-        String start = "Black Friday started. Until Nov 23:\nNetSuite sync allowance 6h\nPulse every hour\nHeavy runs wait 08:00–23:00"
-        assertEquals([[ref: URL1, text: start], [ref: URL2, text: start]] as Set, posts as Set)
+        // DAR-BE-388: each room hears only its own pairs, one line each; peak hours are Darpan's own scheduling, not said
+        assertEquals([[ref: URL1, text: "Black Friday started. Until Nov 23:\n${SYS} · hourly · late after 6h".toString()],
+                      [ref: URL2, text: "Black Friday started. Until Nov 23:\n${SYS} · hourly · late after 4h".toString()]] as Set,
+                posts as Set, "a null cadence in the period is the pair's own (hourly)")
         assertEquals(2, posts.size(), "one post per distinct space")
         assertNotNull(period("PC_BF").startPostedStamp)
 
@@ -366,7 +375,8 @@ class SyncPulseChatTests {
     }
 
     // DAR-BE-389 (Aditi 2026-11-27, RAILS "PEAK Nov 27 started. Until Nov 27:" then six pairs on one line): "dont like how
-    // this message looks". A one-day period says so; each setting is its own line.
+    // this message looks". A one-day period says so; each setting is its own line. DAR-BE-388: a period that changes no pair
+    // the room hears from posts nothing, and is still stamped (so it is not looked at again every tick).
     @Test
     void aOneDayPeriodSaysTodayOnly() {
         pair(SP, 60, 60, SPACE, [lastPulseStamp: Timestamp.from(T0)])
@@ -374,29 +384,138 @@ class SyncPulseChatTests {
         ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_ONE", companyUserGroupId: A, periodName: "PEAK Nov 21",
                 fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today), isActive: "Y",
                 peakHoursStart: "00:00", peakHoursEnd: "01:30"]).create()
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_ONE", syncPairId: SP, companyUserGroupId: A,
+                allowanceMinutes: 360, pulseEveryMinutes: 60]).create()
         ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_BARE", companyUserGroupId: A, periodName: "Quiet",
-                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today.plusDays(2)), isActive: "Y"]).create()
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today.plusDays(2)), isActive: "Y",
+                peakHoursStart: "00:00", peakHoursEnd: "01:30"]).create()
         scan(T0)
-        assertEquals(["PEAK Nov 21 started. Today only:\nHeavy runs wait 00:00–01:30", "Quiet started. Until Nov 23."] as Set,
-                posts*.text as Set, "a period that changes nothing ends on a full stop, not a colon")
+        assertEquals(["PEAK Nov 21 started. Today only:\n${SYS} · hourly · late after 6h".toString()], posts*.text)
+        assertNotNull(period("PC_BARE").startPostedStamp, "nothing to say is still done")
+
+        posts.clear()
+        scan(T0.plus(Duration.ofDays(4)))
+        assertEquals(["PEAK Nov 21 ended. Normal settings are back."], posts*.text, "a period that said nothing says nothing at its end")
+        assertNotNull(period("PC_BARE").endPostedStamp)
     }
 
+    // DAR-BE-388 (Aditi 2026-11-27 15:18 IST, GORJANA "Gorjana Go live": "PEAK Nov 27 started. Until Nov 27:" then 16 pairs). Of
+    // GORJANA's 16 pairs only two are checked in the period; the returns pair and the 13 month-close pairs are there only so the
+    // period moves their check's start, and never reach the client room.
     @Test
-    void pairsWithTheSameNameAndAllowanceAreSaidOnce() {
-        Map shop = [upstream: "Shopify", target: "HotWax", label: "Shopify → HotWax orders"]
-        Map ns = [upstream: "HotWax", target: "NetSuite", label: "HotWax → NetSuite orders"]
-        Map<String, Map> names = [S1: shop, S2: shop, S3: shop, S4: shop, S5: shop, N1: ns]
-        List<Map> rows = (1..5).collect { [syncPairId: "S${it}".toString(), allowanceMinutes: 120, pulseEveryMinutes: 60] } +
-                [[syncPairId: "N1", allowanceMinutes: 360, pulseEveryMinutes: 60]]
-        assertEquals(["Shopify → HotWax orders allowance 2h (5 pairs)", "HotWax → NetSuite orders allowance 6h", "Pulse every hour",
-                "Heavy runs wait 00:00–01:30"], SyncPulseSupport.overrideLines([peakHoursStart: "00:00", peakHoursEnd: "01:30"], rows, names))
+    void onlyThePairsCheckedInThePeriodAreSaid() {
+        Map<String, Map> pairs = [N: [syncPairId: "N", chatSpaceId: SPACE, allowanceMinutes: 120, pulseEveryMinutes: null],
+                                  S: [syncPairId: "S", chatSpaceId: SPACE, allowanceMinutes: 120, pulseEveryMinutes: 60]]
+        Map<String, String> labels = [N: SYS, S: "Shopify → HotWax"]
+        List<Map> rows = [[syncPairId: "N", allowanceMinutes: 360, pulseEveryMinutes: 60],
+                          [syncPairId: "R", allowanceMinutes: 360],
+                          [syncPairId: "S", allowanceMinutes: 120]] +
+                (51..63).collect { [syncPairId: "M${it}".toString(), allowanceMinutes: 1440] }
+        // R and M51..M63 cannot pulse (returns upstream, month-close checks): the caller leaves them out of pairs
+        assertEquals([(SPACE): ["${SYS} · hourly · late after 6h".toString(), "Shopify → HotWax · hourly · late after 2h"]],
+                SyncPulseSupport.clientLines(rows, pairs, labels))
 
-        Map ns2 = [upstream: "Shopify", target: "NetSuite", label: "Shopify → NetSuite orders"]
-        assertEquals(["Shopify → HotWax orders allowance 2h", "Shopify → NetSuite orders allowance 2h"],
-                SyncPulseSupport.overrideLines([:], [[syncPairId: "S1", allowanceMinutes: 120], [syncPairId: "M1", allowanceMinutes: 120]],
-                        [S1: shop, M1: ns2]), "one allowance over two targets names each pair, never the first target alone")
-        assertEquals(["HotWax sync allowance 2h"], SyncPulseSupport.overrideLines([:],
-                [[syncPairId: "S1", allowanceMinutes: 120], [syncPairId: "S2", allowanceMinutes: 120]], [S1: shop, S2: shop]))
+        Map<String, Map> off = [N: [syncPairId: "N", chatSpaceId: SPACE, allowanceMinutes: 120, pulseEveryMinutes: 60]]
+        assertEquals([:], SyncPulseSupport.clientLines([[syncPairId: "N", pulseEveryMinutes: 0]], off, labels), "0 in the period is off")
+        assertEquals([:], SyncPulseSupport.clientLines([[syncPairId: "N", allowanceMinutes: 60]],
+                [N: off.N + [chatSpaceId: null]], labels), "a pair with no room is said nowhere")
+
+        Map<String, Map> five = (1..5).collectEntries { ["S${it}".toString(), [syncPairId: "S${it}".toString(), chatSpaceId: SPACE, allowanceMinutes: 60, pulseEveryMinutes: 30]] }
+        assertEquals([(SPACE): ["Shopify → HotWax · every 30m · late after 2h (5 pairs)"]],
+                SyncPulseSupport.clientLines((1..5).collect { [syncPairId: "S${it}".toString(), allowanceMinutes: 120] }, five,
+                        five.keySet().collectEntries { [(it): "Shopify → HotWax"] }), "the same line for several pairs is said once")
+    }
+
+    // DAR-BE-388: GORJANA's periods run back to back (PEAK Nov 27, then Sale Nov 28-29 from the next midnight). The new period's
+    // start says the new settings; "Normal settings are back" would be wrong, so the ending period is stamped without a post.
+    @Test
+    void backToBackPeriodsPostOnlyTheNextStart() {
+        pair(SP, 60, null, SPACE, [lastPulseStamp: Timestamp.from(T0)])
+        LocalDate today = T0.atZone(ZoneOffset.UTC).toLocalDate()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_PEAK", companyUserGroupId: A, periodName: "PEAK Nov 20",
+                fromDate: java.sql.Date.valueOf(today.minusDays(1)), thruDate: java.sql.Date.valueOf(today.minusDays(1)), isActive: "Y",
+                startPostedStamp: Timestamp.from(T0.minus(Duration.ofDays(1)))]).create()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_SALE", companyUserGroupId: A, periodName: "Sale Nov 21-22",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today.plusDays(1)), isActive: "Y"]).create()
+        [PC_PEAK: 360, PC_SALE: 240].each { String id, Integer minutes ->
+            ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: id, syncPairId: SP, companyUserGroupId: A,
+                    allowanceMinutes: minutes, pulseEveryMinutes: 60]).create()
+        }
+        scan(T0)
+        assertEquals(["Sale Nov 21-22 started. Until Nov 22:\n${SYS} · hourly · late after 4h".toString()], posts*.text)
+        assertNotNull(period("PC_PEAK").endPostedStamp, "the ended period is done, without a post")
+    }
+
+    // DAR-BE-388 (Coordinator review 2026-11-27): GORJANA's PEAK Nov 27 ends into Sale Nov 28-29, which checks no pair hourly
+    // but still holds other allowances, so "Normal settings are back" would not be true: the end says only that it ended.
+    @Test
+    void anEndInsideAnotherPeriodSaysOnlyThatItEnded() {
+        pair(SP, 60, null, SPACE, [lastPulseStamp: Timestamp.from(T0)])
+        LocalDate today = T0.atZone(ZoneOffset.UTC).toLocalDate()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_PEAK", companyUserGroupId: A, periodName: "PEAK Nov 20",
+                fromDate: java.sql.Date.valueOf(today.minusDays(1)), thruDate: java.sql.Date.valueOf(today.minusDays(1)), isActive: "Y",
+                startPostedStamp: Timestamp.from(T0.minus(Duration.ofDays(1)))]).create()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_SALE", companyUserGroupId: A, periodName: "Sale Nov 21-22",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today.plusDays(1)), isActive: "Y"]).create()
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_PEAK", syncPairId: SP, companyUserGroupId: A,
+                allowanceMinutes: 360, pulseEveryMinutes: 60]).create()
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_SALE", syncPairId: SP, companyUserGroupId: A,
+                allowanceMinutes: 240]).create()
+        scan(T0)
+        assertEquals(["PEAK Nov 20 ended."], posts*.text)
+        assertNotNull(period("PC_SALE").startPostedStamp, "the sale has nothing to say and is still done")
+    }
+
+    // DAR-BE-388 (Aditi 2026-11-27 15:42 IST: "can it be a card?"): a Google Chat room gets a card, the Darpan header with the
+    // period and a row per pair; a Slack room gets the same words as text, never cardsV2.
+    @Test
+    void aPeriodPostIsACardInGoogleChatAndTextInSlack() {
+        Map start = SyncPulseSupport.periodMessage("PEAK Nov 27 started", "Today only",
+                [[label: SYS, cadence: 60, allowance: 360, count: 1], [label: "Shopify → HotWax", cadence: 60, allowance: 120, count: 2]])
+        assertEquals("PEAK Nov 27 started. Today only:\n${SYS} · hourly · late after 6h\nShopify → HotWax · hourly · late after 2h (2 pairs)".toString(), start.fallbackText)
+        Map card = (start.cardsV2 as List<Map>)[0].card as Map
+        assertEquals([title: "PEAK Nov 27 started", subtitle: "Today only"], (card.header as Map).subMap(["title", "subtitle"]))
+        List<Map> rows = (card.sections as List<Map>)[0].widgets as List<Map>
+        assertEquals(["${SYS} · hourly · late after 6h".toString(), "Shopify → HotWax · hourly · late after 2h (2 pairs)"],
+                rows.collect { it.decoratedText.text })
+        Map end = SyncPulseSupport.periodMessage("PEAK Nov 27 ended", null, [])
+        assertNull(start.text, "the card alone: Chat shows a message's text above its card")
+        assertEquals([text: "PEAK Nov 27 ended."], end, "an end is a plain message, not a card")
+        assertEquals([text: "Black Friday ended. Normal settings are back."], SyncPulseSupport.periodMessage("Black Friday ended", "Normal settings are back", []))
+
+        String slackUrl = "https://hooks.slack.com/services/T000/B000/XXXX"
+        ec.entity.makeDataLoader().dummyFks(true).xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.TenantChatSpace chatSpaceId="PULSE_C_SLACK" companyUserGroupId="${A}" spaceName="Slack room" webhookUrl="${slackUrl}" chatProviderEnumId="CHAT_PROV_SLACK" isActive="Y"/>
+        </entity-facade-xml>""").load()
+        pair(SP, 60, 60, SPACE, [lastPulseStamp: Timestamp.from(T0)])
+        pair(SP2, 60, 60, "PULSE_C_SLACK", [lastPulseStamp: Timestamp.from(T0)])
+        LocalDate today = T0.atZone(ZoneOffset.UTC).toLocalDate()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_CARD", companyUserGroupId: A, periodName: "PEAK Nov 21",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today), isActive: "Y"]).create()
+        [SP, SP2].each { String id ->
+            ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_CARD", syncPairId: id, companyUserGroupId: A,
+                    allowanceMinutes: 360, pulseEveryMinutes: 60]).create()
+        }
+        scan(T0)
+        Map google = payloads.find { it.ref == URL1 }?.payload as Map
+        Map slack = payloads.find { it.ref == slackUrl }?.payload as Map
+        assertNotNull(google?.cardsV2, "the Google Chat room gets the card")
+        assertNull(google.text, "and no text above it")
+        assertEquals([text: "PEAK Nov 21 started. Today only:\n${SYS} · hourly · late after 6h".toString()], slack, "Slack gets the text alone")
+    }
+
+    // DAR-BE-388: a pair whose upstream a pulse cannot read (here NetSuite; GORJANA's returns pair) is never said.
+    @Test
+    void aPairThatCannotPulseIsNeverSaid() {
+        pair(SP, 60, 60, SPACE, [upstreamSide: "FILE_2", lastPulseStamp: Timestamp.from(T0)])
+        LocalDate today = T0.atZone(ZoneOffset.UTC).toLocalDate()
+        ec.entity.makeValue("darpan.peak.PeakPeriod").setAll([peakPeriodId: "PC_NP", companyUserGroupId: A, periodName: "PEAK Nov 21",
+                fromDate: java.sql.Date.valueOf(today), thruDate: java.sql.Date.valueOf(today), isActive: "Y"]).create()
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: "PC_NP", syncPairId: SP, companyUserGroupId: A,
+                allowanceMinutes: 1440, pulseEveryMinutes: 60]).create()
+        scan(T0)
+        assertEquals([], posts*.text)
+        assertNotNull(period("PC_NP").startPostedStamp)
     }
 
     @Test

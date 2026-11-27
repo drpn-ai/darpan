@@ -750,7 +750,6 @@ class SyncPulseSupport {
     /** SyncPulseOrder.closeReason: it reached the target, or it left the check (cancelled, filtered, aged out). */
     static final String ARRIVED = "ARRIVED"
     static final String DROPPED = "DROPPED"
-    private static final String DASH = "–"
     private static final DateTimeFormatter MONTH_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
 
     /** "6h" for whole hours, else "90m". */
@@ -768,12 +767,16 @@ class SyncPulseSupport {
         return (r == 0L ? "${h}h" : "${h}h ${r}m").toString()
     }
 
-    private static String cadenceWords(Integer minutes) {
-        if (minutes == null) return null
-        if (minutes <= 0) return "Pulse off"
-        if (minutes == 60) return "Pulse every hour"
-        if (minutes % 60 == 0) return "Pulse every ${minutes.intdiv(60)} hours".toString()
-        return "Pulse every ${minutes} min".toString()
+    /** "hourly", "every 2h", "every 30m". */
+    static String everyWords(Integer minutes) {
+        int m = Math.max(0, minutes ?: 0)
+        if (m == 60) return "hourly"
+        return "every ${allowanceWords(m)}".toString()
+    }
+
+    /** One pair's period line: "HotWax → NetSuite · hourly · late after 6h", "(2 pairs)" when several say the same. */
+    static String itemWords(Map i) {
+        return "${i.label}${DOT}${everyWords(i.cadence as Integer)}${DOT}late after ${allowanceWords(i.allowance as Integer)}${pairsWords(i.count as int)}".toString()
     }
 
     private static String oldestWords(Map oldest) {
@@ -912,6 +915,26 @@ class SyncPulseSupport {
     }
 
     /** One post; false when it could not be delivered. Never throws. */
+    /** A period message (a card with fallbackText, or plain text) to a room: a Slack room takes the words as text. Never throws. */
+    private static boolean postMessage(def ec, String tenantId, String chatSpaceId, Map message) {
+        if (!tenantId || !chatSpaceId || !message) return false
+        try {
+            def space = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.reconciliation.TenantChatSpace", "chatSpaceId", chatSpaceId,
+                    tenantId, "peak period post — owner re-checked against the tenant")
+            Map destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
+            if (destination == null) return false
+            boolean slack = destination.deliveryMode == TenantNotificationSupport.DELIVERY_SLACK_BOT ||
+                    destination.chatProviderEnumId == TenantNotificationSupport.PROVIDER_SLACK
+            Map result = TenantNotificationSupport.deliverToDestination(destination, slack ? [text: message.text ?: message.fallbackText] : message)
+            if (result?.ok == false) logger.warn("Sync pulse period post to space {} returned status {}", chatSpaceId, result?.statusCode)
+            return result != null && result.get("ok") != false
+        } catch (Throwable t) {
+            logger.warn("Sync pulse period post to space {} failed: {}", chatSpaceId, t.message ?: t.toString())
+            clearErrors(ec)
+            return false
+        }
+    }
+
     private static boolean postChat(def ec, String tenantId, String chatSpaceId, String text) {
         if (!tenantId || !chatSpaceId || !text) return false
         try {
@@ -974,66 +997,103 @@ class SyncPulseSupport {
     }
 
     /**
-     * One line per setting the period changes, for the start post (DAR-BE-389): "NetSuite sync allowance 6h" when every pair
-     * shares one allowance and one target, else a line per pair name and allowance, a count when several pairs share both
-     * ("Shopify → HotWax orders allowance 2h (5 pairs)"); then "Pulse every hour" and "Heavy runs wait 08:00–23:00". Empty when
-     * the period changes nothing.
+     * DAR-BE-388. What each client room is told about a peak period: one line per pair in that room the period touches and
+     * that is checked during it, "HotWax → NetSuite · hourly · late after 6h"; the same line for several pairs
+     * once, with "(N pairs)". A row's null value is the pair's own; a cadence of 0 is off. pairsById holds only the pairs that
+     * can pulse, so the pairs a period carries only to move their check's start (returns, month-close checks) are never said.
+     * Peak hours are Darpan's own scheduling and are never said. Rooms with nothing to say are left out.
      */
-    static List<String> overrideLines(Map period, List<Map> syncRows, Map<String, Map> namesByPair) {
-        List<String> lines = []
-        List<Map> withAllowance = (syncRows ?: []).findAll { it.get("allowanceMinutes") != null }
-        Closure<Map> nameOf = { Map r -> namesByPair?.get(r.get("syncPairId")) ?: [:] }
-        Set<Integer> allowances = withAllowance.collect { it.get("allowanceMinutes") as Integer } as LinkedHashSet
-        Set<String> targets = withAllowance.collect { nameOf(it).get("target") ?: "Sync" } as LinkedHashSet
-        if (allowances.size() == 1 && targets.size() == 1) {
-            lines << "${targets.first()} sync allowance ${allowanceWords(allowances.first())}".toString()
-        } else {
-            withAllowance.groupBy { Map r -> [nameOf(r).get("label") ?: r.get("syncPairId"), r.get("allowanceMinutes") as Integer] }
-                    .each { List key, List<Map> same ->
-                        String count = same.size() > 1 ? " (${same.size()} pairs)" : ""
-                        lines << "${key[0]} allowance ${allowanceWords(key[1] as Integer)}${count}".toString()
-                    }
+    static Map<String, List<String>> clientLines(List<Map> rows, Map<String, Map> pairsById, Map<String, String> labelByPair) {
+        return clientItems(rows, pairsById, labelByPair).collectEntries { String space, List<Map> items ->
+            [(space): items.collect { Map i -> itemWords(i) }]
+        } as Map<String, List<String>>
+    }
+
+    /** clientLines' items by room: [label, cadence, allowance, count], in row order. */
+    static Map<String, List<Map>> clientItems(List<Map> rows, Map<String, Map> pairsById, Map<String, String> labelByPair) {
+        Map<String, Map<List, Map>> bySpace = [:]
+        (rows ?: []).each { Map row ->
+            String id = normalize(row.get("syncPairId"))
+            Map pair = pairsById?.get(id)
+            String space = normalize(pair?.get("chatSpaceId"))
+            if (!space) return
+            Integer cadence = (row.get("pulseEveryMinutes") != null ? row.get("pulseEveryMinutes") : pair.get("pulseEveryMinutes")) as Integer
+            if (cadence == null || cadence <= 0) return
+            Integer allowance = (row.get("allowanceMinutes") != null ? row.get("allowanceMinutes") : pair.get("allowanceMinutes")) as Integer
+            String label = labelByPair?.get(id) ?: id
+            Map<List, Map> items = bySpace.computeIfAbsent(space) { new LinkedHashMap<List, Map>() }
+            Map item = items.computeIfAbsent([label, cadence, allowance]) { [label: label, cadence: cadence, allowance: allowance, count: 0] }
+            item.count = (item.count as int) + 1
         }
-        Set<Integer> cadences = (syncRows ?: []).findAll { it.get("pulseEveryMinutes") != null }
-                .collect { it.get("pulseEveryMinutes") as Integer } as LinkedHashSet
-        cadences.each { Integer c -> lines << cadenceWords(c) }
-        String from = normalize(period.get("peakHoursStart")), thru = normalize(period.get("peakHoursEnd"))
-        if (from && thru) lines << "Heavy runs wait ${from}${DASH}${thru}".toString()
-        return lines
+        return bySpace.collectEntries { String space, Map<List, Map> items -> [(space): new ArrayList<Map>(items.values())] } as Map<String, List<Map>>
+    }
+
+    private static String pairsWords(int count) { return count > 1 ? " (${count} pairs)".toString() : "" }
+
+    /**
+     * A period's chat message: a Google Chat card alone (Darpan header, the period as title, "Today only" / "Until Nov 29" /
+     * "Normal settings are back" as subtitle, one line per item; Aditi 2026-11-27: "no message... just card"), with the same
+     * words as plain lines in fallbackText, which Chat shows only in notifications and which a Slack room takes as its text.
+     * With no items (an end) it is a plain message (Aditi: "ended one can be a message... that as a card is not good").
+     */
+    static Map periodMessage(String title, String subtitle, List<Map> items) {
+        List<String> lines = (items ?: []).collect { Map i -> itemWords(i) }
+        String text = lines ? ([title + ". " + subtitle + ":"] + lines).join("\n") : "${title}.${subtitle ? ' ' + subtitle + '.' : ''}".toString()
+        if (!lines) return [text: text]
+        Map card = [header: [title: title, imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"] + (subtitle ? [subtitle: subtitle] : [:]),
+                    sections: [[widgets: lines.collect { String line -> [decoratedText: [text: esc(line), wrapText: true]] }]]]
+        return [fallbackText: text, cardsV2: [[cardId: "peak-period", card: card]]]
+    }
+
+    private static String esc(Object value) {
+        return (value ?: "").toString().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     }
 
     /**
-     * Once per period per boundary: "<name> started. Until <MMM d>:" ("Today only:" for a one-day period) + its overrides, and "<name> ended. Normal settings are
-     * back.", to every distinct chat space of the tenant's active pairs. The period's startPostedStamp / endPostedStamp say it
-     * was done; a tenant with no chat space posts and stamps nothing (a space added later still gets the start). An end is only
-     * posted for a start that was.
+     * Once per period per boundary, to each room with something to say (clientLines): "<name> started. Until <MMM d>:"
+     * ("Today only:" for a one-day period) + that room's lines, and "<name> ended. Normal settings are back." to the rooms its
+     * start spoke to, except a room another period covering today speaks to (back to back: the next start says the new
+     * settings); just "<name> ended." while another period covers today, since its other settings still hold. The period's startPostedStamp / endPostedStamp say the boundary was done, posted or not; a tenant with no
+     * chat space stamps nothing (a space added later still gets the start). An end is only done for a start that was.
      */
     private static void postPeriodBoundaries(def ec, List<Map> pairs, Instant now, Map<String, Map> tenantDays) {
         pairs.groupBy { normalize(it.get("companyUserGroupId")) }.each { String tenantId, List<Map> tenantPairs ->
             if (!tenantId) return
             try {
-                List<String> spaces = tenantPairs.collect { normalize(it.get("chatSpaceId")) }.findAll { it }.unique()
-                if (!spaces) return
+                if (!tenantPairs.any { normalize(it.get("chatSpaceId")) }) return
                 Map day = tenantDays.computeIfAbsent(tenantId) { String t -> tenantDay(ec, t, now) }
                 LocalDate today = day.date as LocalDate
-                List periods = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.peak.PeakPeriod", WHY)
-                        .condition("companyUserGroupId", tenantId).useCache(false).list() ?: []
-                periods.findAll { normalize(it.get("isActive")) != "N" }.each { period ->
+                List periods = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.peak.PeakPeriod", WHY)
+                        .condition("companyUserGroupId", tenantId).useCache(false).list() ?: [])
+                        .findAll { normalize(it.get("isActive")) != "N" && dateOf(it.get("fromDate")) != null && dateOf(it.get("thruDate")) != null }
+                        .sort { dateOf(it.get("fromDate")) }
+                Map<String, Map<String, List<Map>>> linesByPeriod = [:]
+                Closure<Map<String, List<Map>>> linesOf = { def p ->
+                    String id = normalize(p.get("peakPeriodId"))
+                    if (!linesByPeriod.containsKey(id)) linesByPeriod[id] = periodLines(ec, tenantId, tenantPairs, id)
+                    return linesByPeriod[id]
+                }
+                periods.each { period ->
                     LocalDate from = dateOf(period.get("fromDate")), thru = dateOf(period.get("thruDate"))
-                    if (from == null || thru == null) return
                     boolean started = period.get("startPostedStamp") != null
                     boolean ended = period.get("endPostedStamp") != null
-                    String text = null
-                    String stampField = null
+                    String name = normalize(period.get("periodName"))
+                    Map<String, Map> messageBySpace = [:]
+                    String stampField
                     if (!started && !ended && !today.isBefore(from) && !today.isAfter(thru)) {
-                        text = startText(ec, tenantId, tenantPairs, period.getMap() as Map, thru)
+                        String until = thru == from ? "Today only" : "Until ${MONTH_DAY.format(thru)}".toString()
+                        linesOf(period).each { String space, List<Map> items -> messageBySpace[space] = periodMessage("${name} started".toString(), until, items) }
                         stampField = "startPostedStamp"
                     } else if (started && !ended && today.isAfter(thru)) {
-                        text = "${normalize(period.get('periodName'))} ended. Normal settings are back.".toString()
+                        List others = periods.findAll { it != period && !today.isBefore(dateOf(it.get("fromDate"))) && !today.isAfter(dateOf(it.get("thruDate"))) }
+                        Set<String> continuing = others.collectMany { linesOf(it).keySet() } as Set<String>
+                        Map message = periodMessage("${name} ended".toString(), others ? null : "Normal settings are back", [])
+                        linesOf(period).keySet().findAll { !continuing.contains(it) }.each { String space -> messageBySpace[space] = message }
                         stampField = "endPostedStamp"
+                    } else {
+                        return
                     }
-                    if (text == null) return
-                    spaces.each { String space -> postChat(ec, tenantId, space, text) }
+                    messageBySpace.each { String space, Map message -> postMessage(ec, tenantId, space, message) }
                     ec.transaction.runUseOrBegin(30, "Sync pulse could not stamp the ${stampField} of a peak period".toString()) {
                         period.set(stampField, Timestamp.from(now))
                         period.update()
@@ -1046,19 +1106,22 @@ class SyncPulseSupport {
         }
     }
 
-    private static String startText(def ec, String tenantId, List<Map> tenantPairs, Map period, LocalDate thru) {
-        String periodId = normalize(period.get("peakPeriodId"))
-        Map<String, Map> names = [:]
-        tenantPairs.each { Map p -> names[normalize(p.get("syncPairId"))] = pairNames(ec, p) }
+    /** clientItems for one period of the tenant: its PeakPeriodSync rows over the tenant's active pairs that can pulse. */
+    private static Map<String, List<Map>> periodLines(def ec, String tenantId, List<Map> tenantPairs, String periodId) {
         List<Map> rows = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.PeakPeriodSync", WHY)
                 .condition("peakPeriodId", periodId).condition("companyUserGroupId", tenantId).useCache(false).list() ?: [])
-                .collect { it.getMap() as Map }.findAll { names.containsKey(normalize(it.get("syncPairId"))) }
-                .sort { normalize(it.get("syncPairId")) }
-        LocalDate from = dateOf(period.get("fromDate"))
-        String until = thru == from ? "Today only" : "Until ${MONTH_DAY.format(thru)}".toString()
-        List<String> lines = overrideLines(period, rows, names)
-        String head = "${normalize(period.get('periodName'))} started. ${until}".toString()
-        return lines ? ([head + ":"] + lines).join("\n") : head + "."
+                .collect { it.getMap() as Map }.sort { normalize(it.get("syncPairId")) }
+        Set<String> touched = rows.collect { normalize(it.get("syncPairId")) } as Set<String>
+        Map<String, Map> pairsById = [:]
+        Map<String, String> labels = [:]
+        tenantPairs.findAll { touched.contains(normalize(it.get("syncPairId"))) && normalize(it.get("chatSpaceId")) }.each { Map p ->
+            if (pulseableAutomation(ec, p) == null) return
+            String id = normalize(p.get("syncPairId"))
+            pairsById[id] = p
+            Map n = pairNames(ec, p)
+            labels[id] = "${n.upstream} ${ARROW} ${n.target}".toString() // a pulse reads orders, so the record word is left out
+        }
+        return clientItems(rows, pairsById, labels)
     }
 
     private static LocalDate dateOf(Object value) {

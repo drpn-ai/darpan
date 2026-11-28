@@ -14,8 +14,8 @@ import org.slf4j.LoggerFactory
  * reason, its subtree is NOT_RUN, its siblings still run, and every question in the walk ends with a
  * row — so a chart can never look "in progress" forever because the walk died between questions.
  *
- * DAR-OPS-029 OC125: the walk is NO_DATA when no question succeeded and none failed or was cancelled (the start read
- * nothing), never a clean SUCCESS.
+ * DAR-OPS-029 OC125 / OC136: the walk is NO_DATA when no question succeeded with records (yes + no > 0) and none
+ * failed or was cancelled (the start read nothing, or read no keys), never a clean SUCCESS.
  */
 class RunFlowchartWalker {
     private static final Logger logger = LoggerFactory.getLogger(RunFlowchartWalker.class)
@@ -96,12 +96,13 @@ class RunFlowchartWalker {
                 ranRowId = ran.runResultId as String
                 String status = ran.statusEnumId as String
                 Map outcome = [runResultId: ranRowId, statusEnumId: status]
-                if (status == SUCCESS) anySuccess = true
                 if (status in [SUCCESS, NO_DATA]) {
                     Map split = QuestionOutcomeSupport.split([questionRole  : q.questionRole, scopeMode: q.scopeMode,
                                                               inputKeysFile : branchKeys, file1KeysFile: file1Keys,
                                                               resultDocument: (File) ran.resultDocument, outDir: workDir, token: id])
                     outcome.putAll(split)
+                    // OC136: a success is a question that passed records; a START that read no keys found nothing.
+                    if (status == SUCCESS && (split.yesCount as long) + (split.noCount as long) > 0L) anySuccess = true
                     recordCounts.call(ranRowId, split.yesCount as long, split.noCount as long, split.unaskedCount as long)
                 } else if (status == CANCELLED) {
                     cancelled = true

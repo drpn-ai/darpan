@@ -114,5 +114,53 @@ class LifecycleStageCompilerTests {
         assertEquals(["x0", "NO", "PRESENT", "Fulfillment not expected, done"],
                 qs.find { it.reconciliationRunId == "x0.done" }.with { [it.parentReconciliationRunId, it.parentBranch, it.check, it.noOutcomeLabel] })
     }
-}
 
+    /**
+     * DAR-OPS-029 S08, lens E1 (Aditi 2026-11-28 18:02): every start record lands in exactly ONE place. A place is a
+     * question's "no" (its noOutcomeLabel); a written finding (ROLE_FINDING, LifecycleSupport.saveFinding) is an OVERLAY that
+     * flags records on top of their place, counted separately and never subtracted, so it is not compiled here.
+     * Every record shape is tried: for each stage, reached or not, and waived by an exception or not. The checks mean what
+     * the snapshot path computes (NsLifecycleSnapshot): "missing?" = NOT (has OR waived), "has?" = has OR waived,
+     * "excused?" = NOT has AND waived.
+     */
+    @Test
+    void everyRecordShapeLandsInExactlyOnePlace() {
+        [["ItemShip"], ["CustInvc", "ItemShip"], ["ItemRcpt", "CustCred", "CustRfnd"]].each { List<String> stages ->
+            List<Map> qs = LifecycleStageCompiler.compile("SalesOrd", stages)
+            int n = stages.size()
+            List<Map> records = (0..<(1 << (2 * n))).collect { int bits ->
+                [has   : (0..<n).findAll { (bits >> it) & 1 }.collect { stages[it] } as Set,
+                 waived: (0..<n).findAll { (bits >> (n + it)) & 1 }.collect { stages[it] } as Set]
+            }
+            records.each { Map r ->
+                List<String> places = placesOf(qs, r)
+                assertEquals(1, places.size(), "${stages}: has ${r.has}, waived ${r.waived} lands in ${places}")
+            }
+        }
+    }
+
+    /** The places a record reaches walking the compiled tree: each question asks its parent branch's records. */
+    private static List<String> placesOf(List<Map> qs, Map r) {
+        Closure<Boolean> finds = { Map q ->
+            String st = q.stageRecordType
+            boolean has = r.has.contains(st), waived = r.waived.contains(st)
+            switch (q.check) {
+                case LifecycleStageCompiler.ABSENT: return !(has || waived)
+                case LifecycleStageCompiler.PRESENT: return has || waived
+                case LifecycleStageCompiler.EXCUSED: return !has && waived
+                default: return false   // START: everyone passes on its yes
+            }
+        }
+        List<String> places = []
+        Closure visit
+        visit = { String parentKey, String branch ->
+            qs.findAll { it.parentKey == parentKey && it.parentBranch == branch }.each { Map q ->
+                boolean no = finds(q)
+                if (no && q.noOutcomeLabel) places << (q.noOutcomeLabel as String)
+                visit(q.key as String, no ? "NO" : "YES")
+            }
+        }
+        visit("start", "YES")
+        return places
+    }
+}

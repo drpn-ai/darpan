@@ -215,7 +215,10 @@ class RunFlowchartSupport {
                     if (!runResultId) throw new IllegalStateException(why ?: "the run was refused before it started.")
                     Map row = RunObservability.readRunRow(ec, runResultId) ?: [statusEnumId: RunObservability.STATUS_FAILED]
                     File doc = row.resultDataManagerPath ? DataManagerSupport.resolveDataManagerFile(ec, row.resultDataManagerPath, false) : null
-                    return [runResultId: runResultId, statusEnumId: row.statusEnumId, resultDocument: doc?.isFile() ? doc : null]
+                    Map end = questionEnd(row.statusEnumId as String, doc)
+                    // OC137: the question's own row says why, so the chart never shows it as a success with no findings.
+                    if (end.failure) RunObservability.failRun(ec, runResultId, null, null, RunFlowchartWalker.REASON_COULD_NOT_FINISH + end.failure)
+                    return [runResultId: runResultId, statusEnumId: end.statusEnumId, resultDocument: end.resultDocument]
                 },
                 recordSkipped  : { Map q, String parentRunResultId, String status, String reason ->
                     RunObservability.recordTerminalRun(ec, [savedRunId: q.ruleSetId, savedRunType: SAVED_RUN_TYPE,
@@ -231,6 +234,19 @@ class RunFlowchartSupport {
             ((Map) walked.outcomes)[it.reconciliationRunId]?.runResultId }.find { it }
         return [reconciliationExecutionId: executionId, statusEnumId: walked.statusEnumId,
                 firstRunResultId: first, outcomes: walked.outcomes]
+    }
+
+    /**
+     * DAR-OPS-029 OC137. How a finished question ends for the walk: [statusEnumId, resultDocument, failure]. A SUCCESS
+     * question with no readable result document (unnamed, purged or gone) fails: read as "no findings" it would pass every
+     * record down as yes. A NO_DATA (or failed) question may have none.
+     */
+    static Map questionEnd(String statusEnumId, File doc) {
+        File readable = doc?.isFile() ? doc : null
+        if (statusEnumId == RunFlowchartWalker.SUCCESS && readable == null) {
+            return [statusEnumId: RunFlowchartWalker.FAILED, resultDocument: null, failure: "its result document is missing."]
+        }
+        return [statusEnumId: statusEnumId, resultDocument: readable, failure: null]
     }
 
     /** DAR-UI-048 plan 3. One row per press of Run, newest first. A deleted question's rows still count. */

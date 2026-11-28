@@ -34,6 +34,16 @@ class RunFlowchartTreeTests {
     }
 
     @Test
+    void aSequenceOfZeroSortsFirstNotLast() {
+        // DAR-OPS-029 S08 (QA): `runSequence ?: MAX` read 0 as unset and walked that question last among its siblings.
+        List<Map> qs = [q("S", [questionRole: "START"]),
+                        q("A", [parentReconciliationRunId: "S", parentBranch: "YES", runSequence: 1]),
+                        q("Z", [parentReconciliationRunId: "S", parentBranch: "YES", runSequence: 0]),
+                        q("N", [parentReconciliationRunId: "S", parentBranch: "YES"])]
+        assertEquals(["S", "Z", "A", "N"], RunFlowchartTree.walkOrder(qs)*.reconciliationRunId)
+    }
+
+    @Test
     void anInactiveQuestionTakesItsSubtreeOutOfTheWalk() {
         List<Map> qs = chain()
         qs.find { it.reconciliationRunId == "A" }.isActive = "N"

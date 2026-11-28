@@ -128,6 +128,33 @@ class RunFlowchartWalkerTests {
         assertEquals("AUT_STAT_SUCCESS", some.statusEnumId, "the start succeeded, so the walk did")
     }
 
+    /** OC136: a question counts as a success only when it passed records; a START that read no keys found nothing. */
+    @Test
+    void aStartThatSucceedsWithNoKeysMakesTheWalkNoData() {
+        List calls = [], skipped = []; Map yes = [:]
+        Map r = walk(chart(), [S: [file1: []]], calls, skipped, yes)
+        assertEquals(["S"], calls*.id)
+        assertEquals(0L, yes["RR_S"])
+        assertEquals("AUT_STAT_NO_DATA", r.statusEnumId)
+    }
+
+    /**
+     * OC137: a SUCCESS question whose result document cannot be read FAILS: read as "no findings" it would pass every
+     * record down as yes. A NO_DATA question may have no document.
+     */
+    @Test
+    void aSucceededQuestionWithNoReadableResultDocumentFails() {
+        File doc = fakeDoc(["K1"]).file as File
+        assertEquals([statusEnumId: "AUT_STAT_SUCCESS", resultDocument: doc, failure: null],
+                RunFlowchartSupport.questionEnd("AUT_STAT_SUCCESS", doc))
+        Map gone = RunFlowchartSupport.questionEnd("AUT_STAT_SUCCESS", new File(tmp.toFile(), "purged.json"))
+        assertEquals("AUT_STAT_FAILED", gone.statusEnumId)
+        assertEquals("its result document is missing.", gone.failure)
+        assertEquals("AUT_STAT_FAILED", RunFlowchartSupport.questionEnd("AUT_STAT_SUCCESS", null).statusEnumId)
+        assertEquals([statusEnumId: "AUT_STAT_NO_DATA", resultDocument: null, failure: null],
+                RunFlowchartSupport.questionEnd("AUT_STAT_NO_DATA", null))
+    }
+
     @Test
     void anExecutionWhoseQuestionsAllHadNoDataRollsUpAsNoData() {
         assertEquals("AUT_STAT_NO_DATA", RunFlowchartSupport.rollupStatus(["AUT_STAT_NO_DATA", "AUT_STAT_NO_DATA"]))

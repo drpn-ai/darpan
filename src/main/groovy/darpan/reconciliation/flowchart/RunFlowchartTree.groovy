@@ -88,7 +88,7 @@ class RunFlowchartTree {
                     .findAll { it.isActive != "N" }
                     .sort { Map a, Map b ->
                         (a.questionRole == ROLE_START ? 0 : 1) <=> (b.questionRole == ROLE_START ? 0 : 1) ?:
-                                ((a.runSequence ?: Integer.MAX_VALUE) as Integer) <=> ((b.runSequence ?: Integer.MAX_VALUE) as Integer) ?:
+                                sequenceOf(a) <=> sequenceOf(b) ?:
                                 (a.reconciliationRunId as String) <=> (b.reconciliationRunId as String)
                     }
                     .each { Map q ->
@@ -98,5 +98,10 @@ class RunFlowchartTree {
         }
         visit("")
         return ordered
+    }
+
+    /** A question's place among its siblings; unset sorts last, and 0 is a sequence like any other. */
+    private static int sequenceOf(Map q) {
+        return q.runSequence != null ? (q.runSequence as Integer) : Integer.MAX_VALUE
     }
 }

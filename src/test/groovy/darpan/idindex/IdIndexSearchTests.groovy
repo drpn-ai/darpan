@@ -96,6 +96,22 @@ class IdIndexSearchTests {
         assertTrue(out.capped as boolean)
     }
 
+    /** OC101: one index state, one answer: the rows' order (the database's) changes neither the records' order nor which
+     *  ones a capped answer keeps. */
+    @Test
+    void "the same index read in any row order gives the same answer, capped or not"() {
+        Map asStored = deps(GOR123)
+        List<Map> reversed = GOR123.reverse()
+        Map otherOrder = [byIdNorm: { String v -> reversed.findAll { it.idNorm == v } },
+                          byRecord: { List<Map> refs -> reversed.findAll { r -> refs.any { it.connectionId == r.connectionId && it.recordKind == r.recordKind && it.recordKey == r.recordKey } } }]
+        assertEquals(keys(IdIndexSearch.search(asStored, "M100")), keys(IdIndexSearch.search(otherOrder, "M100")))
+        assertEquals(keys(IdIndexSearch.search(asStored + [maxRecords: 2], "GOR123")), keys(IdIndexSearch.search(otherOrder + [maxRecords: 2], "GOR123")),
+                "a capped answer keeps the same records")
+        Map one = IdIndexSearch.search(asStored, "M100")
+        Map two = IdIndexSearch.search(otherOrder, "M100")
+        assertEquals((one.records as List<Map>).collect { it.ids }, (two.records as List<Map>).collect { it.ids }, "and each record's ids in the same order")
+    }
+
     @Test
     void "a value that is not an id finds nothing"() {
         Map out = IdIndexSearch.search(deps(GOR123), "   ")

@@ -7,6 +7,7 @@ import org.moqui.entity.EntityCondition
  * a breadth-first walk inside the index follows the values those records hold (a REF to the record that owns it, an OWN value
  * to the records that name it, a value two systems share) up to maxHops, maxRecords records, and never through a value more
  * than maxRowsPerValue rows share (a hub, such as a store id indexed by mistake). Reads are seams: tests pass an in-memory index.
+ * Every row list is walked in ROW_ORDER (OC101), whatever order the reads hand it over in.
  */
 class IdIndexSearch {
 
@@ -37,7 +38,7 @@ class IdIndexSearch {
             return true
         }
 
-        List<Map> hits = byIdNorm.call(norm) ?: []
+        List<Map> hits = inOrder(byIdNorm.call(norm))
         if (hits.size() > maxRows) { out.capped = true; out.cappedReason = "hub value ${value}".toString() }
         List<String> frontier = []
         for (Map hit : hits) {
@@ -46,7 +47,7 @@ class IdIndexSearch {
         }
         int hop = 0
         while (frontier) {
-            List<Map> rows = byRecord.call(frontier.collect { refOf(records.get(it)) }) ?: []
+            List<Map> rows = inOrder(byRecord.call(frontier.collect { refOf(records.get(it)) }))
             Map<String, List<Map>> rowsByRecord = rows.groupBy { keyOf(it) }
             frontier.each { String key ->
                 Map rec = records.get(key)
@@ -61,7 +62,7 @@ class IdIndexSearch {
                 for (Map row : (rowsByRecord.get(key) ?: [])) {
                     String v = row.idNorm as String
                     if (!followed.add(v)) continue
-                    List<Map> sharing = byIdNorm.call(v) ?: []
+                    List<Map> sharing = inOrder(byIdNorm.call(v))
                     if (sharing.size() > maxRows) { out.capped = true; out.cappedReason = out.cappedReason ?: "hub value ${row.idRaw}".toString(); continue }
                     for (Map other : sharing) {
                         String otherKey = keyOf(other)
@@ -81,14 +82,14 @@ class IdIndexSearch {
     /** The live reads for one tenant: every condition carries companyUserGroupId (the tenant filter is skipped with authz off). */
     static Map liveDeps(def ec, String tenantId) {
         return [byIdNorm: { String v ->
-                    ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("idNorm", v)
+                    ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("idNorm", v).orderBy(ROW_ORDER)
                             .limit(MAX_ROWS_PER_VALUE + 1).useCache(false).disableAuthz().list().collect { it.getMap() }
                 },
                 byRecord: { List<Map> refs ->
                     List<Map> out = []
                     refs.groupBy { [it.connectionId, it.recordKind] }.each { List k, List<Map> ofKind ->
                         out.addAll(ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("connectionId", k[0])
-                                .condition("recordKind", k[1]).condition("recordKey", EntityCondition.IN, ofKind*.recordKey)
+                                .condition("recordKind", k[1]).condition("recordKey", EntityCondition.IN, ofKind*.recordKey).orderBy(ROW_ORDER)
                                 .useCache(false).disableAuthz().list().collect { it.getMap() })
                     }
                     return out
@@ -107,6 +108,19 @@ class IdIndexSearch {
             [datasetId: d.datasetId, connectionId: d.sourceConfigId, systemEnumId: d.systemEnumId, lastReadAt: d.lastReadAt,
              lastIndexedAt: c.lastIndexedAt, rowsLastPass: c.rowsLastPass, lastStatus: c.lastStatus ?: "NOT_INDEXED",
              lastError: c.lastError, behind: behind, stale: behind || c.lastStatus == "FAILED"]
+        }
+    }
+
+    /** OC101: the one order every row list is walked in, so one index state gives one answer (records, their ids, a capped set). */
+    static final List<String> ROW_ORDER = ["systemCode", "connectionId", "recordKind", "recordKey", "fieldPath", "idNorm"].asImmutable()
+
+    private static List<Map> inOrder(List<Map> rows) {
+        return (rows ?: []).sort(false) { Map a, Map b ->
+            for (String f : ROW_ORDER) {
+                int c = ((a.get(f) ?: "") as String) <=> ((b.get(f) ?: "") as String)
+                if (c != 0) return c
+            }
+            return 0
         }
     }
 

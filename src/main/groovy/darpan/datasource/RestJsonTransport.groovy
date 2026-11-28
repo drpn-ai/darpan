@@ -72,9 +72,10 @@ class RestJsonTransport {
         boolean hasNext
         switch (paging.mode) {
             case "OFFSET":
+                // OC133 (reverses DAR-BE-234's stop on a short page): a server may cap its page below what was asked, so a
+                // short page is not the last one. Only an empty page ends the read: one more call, never a truncated read.
                 long offset = (variables?.get(paging.offsetVariable) ?: 0) as long
-                int asked = ((variables?.get(paging.sizeVariable) ?: 0) as Number).intValue()
-                hasNext = !page.isEmpty() && page.size() >= asked
+                hasNext = !page.isEmpty()
                 next = hasNext ? (offset + page.size()).toString() : null
                 break
             default:

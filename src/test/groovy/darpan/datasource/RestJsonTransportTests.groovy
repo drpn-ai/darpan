@@ -63,18 +63,34 @@ class RestJsonTransportTests {
         assertEquals("Bearer t0k", t.headers.Authorization)
     }
 
+    /**
+     * OC133 (DAR-OPS-029 S15a) reverses DAR-BE-234's "stop on a short page": a short page does not mean the last page, since a
+     * server may cap its page below what was asked. OFFSET paging now stops only on an EMPTY page: one more call per read,
+     * and never a silently truncated one.
+     */
     @Test
-    void offsetPagesAdvanceByWhatCameBackAndStopOnAShortPage() {
+    void offsetPagesAdvanceByWhatCameBackAndStopOnAnEmptyPage() {
         Map request = cursorRequest() + [query: [size: '$first', from: '$after'], paging: [mode: "OFFSET", sizeVariable: "first", offsetVariable: "after"]]
         List<String> froms = []
-        List<List<Map>> pages = [[order("B1"), order("B2")], [order("B3"), order("B4")], [order("B5")]]
+        List<Map> all = ["B1", "B2", "B3", "B4", "B5"].collect { order(it) }
         def t = new RestJsonTransport(definition(request), CONNECTION, { String m, String url, Map h, String b ->
             String from = query(url).from
             froms << from
-            [statusCode: 200, body: JsonOutput.toJson([data: pages[((from ?: "0") as int).intdiv(2)]])]
+            [statusCode: 200, body: JsonOutput.toJson([data: all.drop((from ?: "0") as int).take(query(url).size as int)])]
         })
         assertEquals(["B1", "B2", "B3", "B4", "B5"], run(definition(request), t))
-        assertEquals([null, "2", "4"], froms)
+        assertEquals([null, "2", "4", "5"], froms, "the short page at 4 is followed by one more ask, which comes back empty")
+    }
+
+    @Test
+    void aServerThatCapsItsPageBelowWhatWasAskedIsStillReadToTheEnd() {
+        // Asked for 2, the server gives at most 1: a short first page used to end the read after B1, with no error.
+        Map request = cursorRequest() + [query: [size: '$first', from: '$after'], paging: [mode: "OFFSET", sizeVariable: "first", offsetVariable: "after"]]
+        List<Map> all = ["B1", "B2", "B3", "B4", "B5"].collect { order(it) }
+        def t = new RestJsonTransport(definition(request), CONNECTION, { String m, String url, Map h, String b ->
+            [statusCode: 200, body: JsonOutput.toJson([data: all.drop((query(url).from ?: "0") as int).take(1)])]
+        })
+        assertEquals(["B1", "B2", "B3", "B4", "B5"], run(definition(request), t))
     }
 
     @Test

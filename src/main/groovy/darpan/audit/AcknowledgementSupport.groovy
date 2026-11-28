@@ -27,19 +27,20 @@ class AcknowledgementSupport {
     }
 
     /** "acknowledged" when every open finding holds an effective acknowledgement; "reminded" when all rows survive
-     *  reopen but at least one is past its remind day; otherwise "open" (also for an empty unit). */
+     *  reopen but at least one is past its remind day; "open" when any finding has none, or one a reopen voided (also for
+     *  an empty unit). */
     static String unitState(List<String> openFindingIds, Map<String, Map> acksByFinding,
                             Map<String, Timestamp> reopenByFinding, LocalDate today) {
         if (openFindingIds == null || openFindingIds.isEmpty()) return 'open'
         boolean allEffective = true
-        boolean anyPast = false
         for (String id : openFindingIds) {
             Map ack = acksByFinding?.get(id)
             Timestamp reopen = reopenByFinding?.get(id)
             if (ack == null || !survivesReopen(ack, reopen)) return 'open'
-            if (!effective(ack, today, reopen)) { allEffective = false; anyPast = true }
+            // It survives the reopen, so not effective means past its remind day.
+            if (!effective(ack, today, reopen)) allEffective = false
         }
-        return allEffective ? 'acknowledged' : (anyPast ? 'reminded' : 'open')
+        return allEffective ? 'acknowledged' : 'reminded'
     }
 
     /** The row's acknowledgement block: note, who, when (caller formats in the tenant zone), remind day, reminded flag. */

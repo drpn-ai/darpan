@@ -166,6 +166,8 @@ class FeedbackSupportTests {
         Map fb = out.feedback as Map
         assertEquals(row.feedbackId, fb.feedbackId)
         assertEquals("The 3PL ships these a day late", fb.note)
+        // DAR-OPS-029 S12 (U05b F22): the sent note names its record as the list does, so it reads the same before and after a reload.
+        assertEquals("M201/01", fb.record)
         assertEquals(ec.user.userId, (fb.by as Map).id)
         assertEquals("Smoke Test Customer", (fb.by as Map).label)
         assertTrue((fb.sentAt as String) ==~ /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[-+]\d\d:\d\d/, fb.sentAt as String)

@@ -57,7 +57,8 @@ class FeedbackSupport {
 
     /**
      * Saves the note on the tenant's finding, then posts the card and thanks the sender. [feedbackId, note, sentAt, by: [id,
-     * label]]; null when the finding is not the tenant's or the note is blank (the facade refuses both first).
+     * label], record], the shape recent() lists; null when the finding is not the tenant's or the note is blank (the facade
+     * refuses both first).
      */
     static Map send(def ec, String tenantId, String findingId, String note) {
         String text = note?.trim()
@@ -83,7 +84,7 @@ class FeedbackSupport {
         Map byUser = userInfo(ec, userId)
         ZoneId zone = AuditDigestSupport.tenantZone(ec, tenantId)
         Map out = [feedbackId: saved.feedbackId, note: text, sentAt: AuditReportAssembler.isoDateTime(now, zone),
-                   by: [id: userId, label: byUser.label]]
+                   by: [id: userId, label: byUser.label], record: row.recordKey]
         Map facts = [tenantId: tenantId, findingId: findingId, row: row, count: saved.count as long, shownDays: shownDays,
                      user: byUser]
         postCard(ec, facts)
@@ -229,7 +230,7 @@ class FeedbackSupport {
     }
 
     /** Trusted lines first, then the link, then the note: one quoted line, last, so it cannot pose as another line. */
-    static String cardText(Map c) {
+    private static String cardText(Map c) {
         String note = neutral(c.note)
         if (note.length() > CARD_NOTE_MAX) note = note.substring(0, CARD_NOTE_MAX) + "\u2026"
         long n = (c.count ?: 1) as long
@@ -249,7 +250,7 @@ class FeedbackSupport {
      * characters Google Chat and Slack read as markup for mentions and links (<users/all>, <!channel>, <https://x|text>,
      * &lt; entities) become look-alikes, so nothing in a value can mention, link or start a line of its own.
      */
-    static String neutral(Object value) {
+    private static String neutral(Object value) {
         String text = (value ?: "").toString()
         // Escapes, not literals (Groovy reads source in the platform encoding): single angle quotes, broken bar, fullwidth ampersand.
         return text.replaceAll("[\\p{Cntrl}\\u2028\\u2029]+", " ").replace("<", "\u2039").replace(">", "\u203A")
@@ -260,7 +261,7 @@ class FeedbackSupport {
      * The finding in the app, on the audit route the run email links (AuditRunMessage.reportUrl): base/audits/code?finding=id,
      * naming its tenant last so the app switches into it (DAR-BE-293). With no app address configured, the path alone.
      */
-    static String findingUrl(String base, String auditCode, String findingId, String tenantId) {
+    private static String findingUrl(String base, String auditCode, String findingId, String tenantId) {
         if (!auditCode || !findingId) return null
         String url = "${base ?: ''}/audits/${enc(auditCode)}?finding=${enc(findingId)}"
         return (tenantId ? "${url}&tenantId=${enc(tenantId)}" : url).toString()

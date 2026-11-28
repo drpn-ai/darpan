@@ -565,6 +565,41 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["CM-1"], out.opened, "October's open R2 finding is another period's; November's would be new")
     }
 
+    /**
+     * S99-215: the basis window's days are read in the automation's zone. An IST tenant's November 1 runs
+     * 2026-10-31T18:30Z to 2026-11-01T18:30Z: in IST that is one November day, inside the month-2026-11 findings' period,
+     * so they close as in the UTC test above. Read in UTC it would start on October 31 and close nothing.
+     */
+    @Test
+    void "a non-UTC tenant's basis window is read in its own zone at the month boundary"() {
+        def automation = asSystem { ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).useCache(false).one() }
+        def execution = asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").useCache(false).one() }
+        String zoneBefore = automation.windowTimeZone
+        Timestamp startBefore = execution.windowStartDate as Timestamp, endBefore = execution.windowEndDate as Timestamp
+        try {
+            asSystem {
+                automation.set("windowTimeZone", "Asia/Kolkata"); automation.update()
+                execution.set("windowStartDate", Timestamp.from(java.time.Instant.parse("2026-10-31T18:30:00Z")))
+                execution.set("windowEndDate", Timestamp.from(java.time.Instant.parse("2026-11-01T18:30:00Z")))
+                execution.update()
+            }
+            Map target = [savedRunId: runId, fileSide: "FILE_1"]
+            Map merged = AuditChangeLevers.merge("EXCLUSION_FILTER", AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target),
+                    [fieldExpression: '$.records[*].tranId', filterValues: ["CM-2"]])
+
+            Map out = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, merged)
+
+            assertFalse(ec.message.hasError(), ec.message.errorsString)
+            assertEquals("TBT_EXEC1", out.basisExecutionId, out.toString())
+            assertEquals(["F-TBT2", "F-TBT3"], out.closed, "IST's November 1 is a November day; October's F-TBT7 stays open")
+        } finally {
+            asSystem {
+                automation.set("windowTimeZone", zoneBefore); automation.update()
+                execution.set("windowStartDate", startBefore); execution.set("windowEndDate", endBefore); execution.update()
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** The summary a Spark Keep leaves beside extract, with setAside records set aside by one tenant rule. */

@@ -5,14 +5,10 @@ import darpan.conclusion.brain.fact.BestCause
 import darpan.conclusion.brain.fact.Cause
 import darpan.conclusion.brain.fact.Conclusion
 import darpan.conclusion.brain.fact.GraphParam
-import org.kie.api.KieServices
-import org.kie.api.builder.KieBuilder
-import org.kie.api.builder.KieFileSystem
-import org.kie.api.builder.Message
-import org.kie.api.builder.ReleaseId
 import org.kie.api.runtime.ClassObjectFilter
 import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
+import reconciliation.rule.EngineModule
 import reconciliation.rule.RuleEngineSupport
 
 import java.util.concurrent.ConcurrentHashMap
@@ -47,26 +43,9 @@ class BrainEngine {
     }
 
     private static BrainEngine compile(List<String> packs) {
-        ClassLoader loader = BrainEngine.class.getClassLoader()
-        ClassLoader previous = Thread.currentThread().getContextClassLoader()
-        try {
-            Thread.currentThread().setContextClassLoader(loader)
-            KieServices ks = KieServices.Factory.get()
-            ReleaseId rid = ks.newReleaseId("darpan.conclusion", "brain-" + UUID.randomUUID().toString().replace("-", ""), "1.0.0")
-            KieFileSystem kfs = ks.newKieFileSystem()
-            kfs.generateAndWritePomXML(rid)
-            packs.each { String pack -> kfs.write("src/main/resources/${RESOURCE_DIR}${pack}.drl".toString(), packText(pack)) }
-            KieBuilder kb = ks.newKieBuilder(kfs)
-            kb.buildAll()
-            if (kb.getResults().hasMessages(Message.Level.ERROR)) {
-                String errors = kb.getResults().getMessages(Message.Level.ERROR).collect { Message m -> m.text }.join(" | ")
-                ks.getRepository().removeKieModule(rid)
-                throw new IllegalStateException("Brain packs ${packs} did not compile: ${errors}")
-            }
-            return new BrainEngine(packs, ks.newKieContainer(rid, loader))
-        } finally {
-            Thread.currentThread().setContextClassLoader(previous)
-        }
+        Map<String, String> drlByPath = packs.collectEntries { String pack -> [("src/main/resources/${RESOURCE_DIR}${pack}.drl".toString()): packText(pack)] }
+        // Cached for the JVM, so the module is never closed.
+        return new BrainEngine(packs, EngineModule.open("darpan.conclusion", "brain-", drlByPath, BrainEngine.class.getClassLoader(), "Brain packs ${packs}").container)
     }
 
     /** DAR-BE-229. What the rules read as GraphParam facts; a number is a BigDecimal, a text is a String. Today's conclusions. */
@@ -99,8 +78,7 @@ class BrainEngine {
             (facts ?: []).each { session.insert(it) }
             Map<String, Object> fired = RuleEngineSupport.fireAllRulesBounded(session, "conclusion-brain")
             if (fired.halted) {
-                throw new IllegalStateException("Brain evaluation exceeded ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms " +
-                        "and was halted; no conclusions were written")
+                throw new IllegalStateException("Brain evaluation ${RuleEngineSupport.incompleteReason(fired)}; no conclusions were written")
             }
             Map<Object, Cause> best = [:]
             session.getObjects(new ClassObjectFilter(BestCause)).each { Object b -> best.put(((BestCause) b).subject, ((BestCause) b).cause) }

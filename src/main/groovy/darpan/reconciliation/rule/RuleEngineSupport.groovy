@@ -3,9 +3,6 @@ package reconciliation.rule
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import org.kie.api.KieServices
-import org.kie.api.builder.KieBuilder
-import org.kie.api.builder.KieFileSystem
-import org.kie.api.builder.Message
 import org.kie.api.builder.ReleaseId
 import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
@@ -440,18 +437,9 @@ class RuleEngineSupport {
         String version = "1.0.0-" + MessageDigest.getInstance("SHA-256").digest((signature ?: "").getBytes("UTF-8"))
                 .encodeHex().toString().take(16)
         ReleaseId releaseId = ks.newReleaseId("darpan.rules", artifact, version)
-        KieFileSystem kfs = ks.newKieFileSystem()
-        kfs.generateAndWritePomXML(releaseId)
-        kfs.write("src/main/resources/${packageName.replace('.', '/')}/${artifact}.drl", drlText)
-        KieBuilder kb = ks.newKieBuilder(kfs)
-        kb.buildAll()
-        if (kb.getResults().hasMessages(Message.Level.ERROR)) {
-            List<String> errors = (kb.getResults().getMessages(Message.Level.ERROR) ?: [])
-                    .collect { Message m -> m?.text ?: m?.toString() }
-                    .findAll { it }
-            String errSummary = errors ? errors.join(" | ") : kb.getResults().toString()
-            throw new IllegalArgumentException("Drools build errors for ${ruleSetId}: ${errSummary}")
-        }
+        List<String> errors = EngineModule.build(ks, releaseId,
+                [("src/main/resources/${packageName.replace('.', '/')}/${artifact}.drl".toString()): drlText])
+        if (errors) throw new IllegalArgumentException("Drools build errors for ${ruleSetId}: ${errors.join(' | ')}")
         return releaseId
     }
 

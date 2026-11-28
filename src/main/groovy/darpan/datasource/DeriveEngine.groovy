@@ -1,12 +1,8 @@
 package darpan.datasource
 
-import org.kie.api.KieServices
-import org.kie.api.builder.KieBuilder
-import org.kie.api.builder.KieFileSystem
-import org.kie.api.builder.Message
 import org.kie.api.builder.ReleaseId
-import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
+import reconciliation.rule.EngineModule
 import reconciliation.rule.RuleEngineSupport
 
 /**
@@ -23,15 +19,15 @@ class DeriveEngine implements Closeable {
 
     static final String PACKAGE = "darpan.datasource.derive"
 
-    final ReleaseId releaseId
-    private final KieContainer container
+    private final EngineModule module
     private final List<Map> rules
 
-    private DeriveEngine(ReleaseId releaseId, KieContainer container, List<Map> rules) {
-        this.releaseId = releaseId
-        this.container = container
+    private DeriveEngine(EngineModule module, List<Map> rules) {
+        this.module = module
         this.rules = rules
     }
+
+    ReleaseId getReleaseId() { module.releaseId }
 
     /**
      * The whole DRL. `eval(...)` here is Drools' condition element calling DeriveRules.matches, not dynamic code: the only
@@ -57,28 +53,9 @@ class DeriveEngine implements Closeable {
     }
 
     static DeriveEngine compile(List<Map> rules) {
-        String drl = drl(rules.size())
-        ClassLoader loader = DeriveEngine.class.getClassLoader()
-        ClassLoader previous = Thread.currentThread().getContextClassLoader()
-        try {
-            // Drools 8 resolves evaluators on the thread-context loader during buildAll() (see RuleEngineSupport).
-            Thread.currentThread().setContextClassLoader(loader)
-            KieServices ks = KieServices.Factory.get()
-            ReleaseId rid = ks.newReleaseId(PACKAGE, "derive-" + UUID.randomUUID().toString().replace("-", ""), "1.0.0")
-            KieFileSystem kfs = ks.newKieFileSystem()
-            kfs.generateAndWritePomXML(rid)
-            kfs.write("src/main/resources/darpan/datasource/derive/derive.drl", drl)
-            KieBuilder kb = ks.newKieBuilder(kfs)
-            kb.buildAll()
-            if (kb.getResults().hasMessages(Message.Level.ERROR)) {
-                String errors = kb.getResults().getMessages(Message.Level.ERROR).collect { Message m -> m.text }.join(" | ")
-                ks.getRepository().removeKieModule(rid)
-                throw new IllegalStateException("Derive rules did not compile: ${errors}")
-            }
-            return new DeriveEngine(rid, ks.newKieContainer(rid, loader), new ArrayList<Map>(rules))
-        } finally {
-            Thread.currentThread().setContextClassLoader(previous)
-        }
+        EngineModule module = EngineModule.open(PACKAGE, "derive-",
+                ["src/main/resources/darpan/datasource/derive/derive.drl": drl(rules.size())], DeriveEngine.class.getClassLoader(), "Derive rules")
+        return new DeriveEngine(module, new ArrayList<Map>(rules))
     }
 
     /**
@@ -87,7 +64,7 @@ class DeriveEngine implements Closeable {
      */
     void derive(List<Map> records, String label, Long referenceMillis = null) {
         if (!records) return
-        KieSession session = container.newKieSession()
+        KieSession session = module.container.newKieSession()
         try {
             session.setGlobal("rules", rules)
             session.setGlobal("referenceMillis", referenceMillis != null ? referenceMillis : System.currentTimeMillis())
@@ -113,10 +90,6 @@ class DeriveEngine implements Closeable {
 
     @Override
     void close() {
-        try {
-            container.dispose()
-        } finally {
-            KieServices.Factory.get().getRepository().removeKieModule(releaseId)
-        }
+        module.close()
     }
 }

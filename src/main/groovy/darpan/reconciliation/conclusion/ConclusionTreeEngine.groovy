@@ -1,12 +1,8 @@
 package darpan.reconciliation.conclusion
 
-import org.kie.api.KieServices
-import org.kie.api.builder.KieBuilder
-import org.kie.api.builder.KieFileSystem
-import org.kie.api.builder.Message
 import org.kie.api.builder.ReleaseId
-import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
+import reconciliation.rule.EngineModule
 import reconciliation.rule.RuleEngineSupport
 
 /**
@@ -23,50 +19,30 @@ import reconciliation.rule.RuleEngineSupport
  */
 class ConclusionTreeEngine implements Closeable {
 
-    final ReleaseId releaseId
-    private final KieContainer container
+    private final EngineModule module
     private final Map<String, Map> nodesById
 
-    private ConclusionTreeEngine(ReleaseId releaseId, KieContainer container, Map<String, Map> nodesById) {
-        this.releaseId = releaseId
-        this.container = container
+    private ConclusionTreeEngine(EngineModule module, Map<String, Map> nodesById) {
+        this.module = module
         this.nodesById = nodesById
     }
+
+    ReleaseId getReleaseId() { module.releaseId }
 
     static ConclusionTreeEngine compile(List<Map> rules) {
         List<Map> nodes = ConclusionRuleLogicGenerator.assignNodes(rules)
         String drl = ConclusionRuleLogicGenerator.generate(nodes)
         Map<String, Map> byId = nodes.collectEntries { Map n -> [(n.nodeId): n] }
-
-        // Same TCCL pinning as RuleEngineSupport: Drools 8 resolves evaluators on the thread-context
-        // loader during buildAll(), and under Moqui's component loader they would otherwise split.
-        ClassLoader loader = ConclusionTreeEngine.class.getClassLoader()
-        ClassLoader previous = Thread.currentThread().getContextClassLoader()
-        try {
-            Thread.currentThread().setContextClassLoader(loader)
-            KieServices ks = KieServices.Factory.get()
-            ReleaseId rid = ks.newReleaseId("darpan.conclusion", "tree-" + UUID.randomUUID().toString().replace("-", ""), "1.0.0")
-            KieFileSystem kfs = ks.newKieFileSystem()
-            kfs.generateAndWritePomXML(rid)
-            kfs.write("src/main/resources/darpan/conclusion/tree/tree.drl", drl)
-            KieBuilder kb = ks.newKieBuilder(kfs)
-            kb.buildAll()
-            if (kb.getResults().hasMessages(Message.Level.ERROR)) {
-                String errors = kb.getResults().getMessages(Message.Level.ERROR).collect { Message m -> m.text }.join(" | ")
-                ks.getRepository().removeKieModule(rid)
-                throw new IllegalStateException("Conclusion tree did not compile: ${errors}")
-            }
-            return new ConclusionTreeEngine(rid, ks.newKieContainer(rid, loader), byId)
-        } finally {
-            Thread.currentThread().setContextClassLoader(previous)
-        }
+        EngineModule module = EngineModule.open("darpan.conclusion", "tree-",
+                ["src/main/resources/darpan/conclusion/tree/tree.drl": drl], ConclusionTreeEngine.class.getClassLoader(), "Conclusion tree")
+        return new ConclusionTreeEngine(module, byId)
     }
 
     /** asOfMillis: the pass's one instant for WITHIN_HOURS (ConclusionConditionSupport); null reads the clock. */
     List<Map> conclude(List<Map> findings, Long asOfMillis = null) {
         List<Map> facts = (findings ?: []).collect { Map f -> ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides, asOfMillis) }
         if (facts.isEmpty()) return []
-        KieSession session = container.newKieSession()
+        KieSession session = module.container.newKieSession()
         try {
             session.setGlobal("nodes", nodesById)
             facts.each { Map fact -> session.insert(fact) }
@@ -82,10 +58,6 @@ class ConclusionTreeEngine implements Closeable {
 
     @Override
     void close() {
-        try {
-            container.dispose()
-        } finally {
-            KieServices.Factory.get().getRepository().removeKieModule(releaseId)
-        }
+        module.close()
     }
 }

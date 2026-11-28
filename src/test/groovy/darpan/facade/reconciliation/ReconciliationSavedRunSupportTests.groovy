@@ -400,4 +400,14 @@ class ReconciliationSavedRunSupportTests {
         assertTrue((code =~ /ReconciliationSavedRunSupport\.manualNoDataClose\(/).size() >= 2, "the API and evaluate branches both ask the judge")
         assertTrue(code.contains("!obsNoData || obsNoDataRulesFailed"), "the completion notify skips a no-data run whose rules did not fail")
     }
+
+    /** F23: the result document's summary carries the duplicate count, so its total can be checked against its buckets. */
+    @Test
+    void runSavedRunDiffWritesTheDuplicateCountIntoTheDocumentSummary() {
+        String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
+                .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
+        assertTrue(code.contains("[duplicateDifferenceCount: serviceResult.duplicateDifferenceCount]"),
+                "writeRuleSetOutput's summary passes duplicateDifferenceCount through from the compare")
+    }
 }

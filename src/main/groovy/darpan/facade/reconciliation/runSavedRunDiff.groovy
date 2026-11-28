@@ -473,7 +473,9 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
                     onlyInFile2Count             : serviceResult.missingInFile1Count,
                     missingObjectDifferenceCount : serviceResult.missingObjectDifferenceCount,
                     ruleDifferenceCount          : serviceResult.ruleDifferenceCount,
-            ],
+            ] + (serviceResult.duplicateDifferenceCount != null ?
+                    // F23: so the stored document shows totalDifferences = onlyIn1 + onlyIn2 + rule + duplicate (only a compare reports it)
+                    [duplicateDifferenceCount: serviceResult.duplicateDifferenceCount] : [:]),
             (List) (serviceResult.validationErrors ?: []),
             (List) (serviceResult.processingWarnings ?: [])
     )

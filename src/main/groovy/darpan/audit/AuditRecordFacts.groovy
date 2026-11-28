@@ -126,8 +126,8 @@ class AuditRecordFacts {
                 shipMethod : text("shipmentMethodTypeId") ?: text("omsItemShipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
                 fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
                 orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null) ?:
-                        text("tranDate"), zone),
-                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate") ?: text("closedAt"), zone) : null,
+                        text("tranDate"), zone)?.toString(),
+                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate") ?: text("closedAt"), zone)?.toString() : null,
                 heldBy     : heldBy ? [id: heldBy, status: statusWords(text("openReturnOnOrderStatus"))] : null,
                 exchange   : exchange ? [id: exchange, netsuiteId: text("exchangeOrderNetsuiteId")] : null,
                 channel    : text("returnChannelEnumId"),
@@ -181,16 +181,22 @@ class AuditRecordFacts {
      * DAR-UI-080. A record's date as the tenant's calendar day (2026-10-21): epoch millis (an OMS return's returnDate), an
      * ISO instant (GraphQL orderDate, Shopify createdAt), a date already written as one, or NetSuite's M/d/yyyy (DAR-BE-372). Anything else is no date.
      */
-    private static String dayOf(String text, ZoneId zone) {
+    /**
+     * The calendar day a record's date names, in zone, or null: epoch millis, an ISO timestamp with an offset or Z,
+     * YYYY-MM-DD (with or without a time after it, read as written), or NetSuite's M/d/yyyy. DAR-OPS-029 S99-016: the one
+     * parser for finding facts and the judged window (AuditRecentReadSupport.judged), so both read the same day.
+     */
+    static LocalDate dayOf(Object value, ZoneId zone) {
+        String text = value?.toString()?.trim()
         if (!text) return null
         try {
-            if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate().toString()
-            if (text ==~ /\d{4}-\d{2}-\d{2}T.+/) return OffsetDateTime.parse(text).atZoneSameInstant(zone).toLocalDate().toString()
-            if (text ==~ /\d{4}-\d{2}-\d{2}.*/) return text.substring(0, 10)
+            if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate()
+            if (text ==~ /\d{4}-\d{2}-\d{2}T.+/) return OffsetDateTime.parse(text).atZoneSameInstant(zone).toLocalDate()
+            if (text ==~ /\d{4}-\d{2}-\d{2}.*/) return LocalDate.parse(text.substring(0, 10))
             // DAR-BE-372. NetSuite's tranDate as its SuiteQL gives it: 11/7/2026 (M/d/yyyy).
             def us = text =~ /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
-            if (us.find()) return LocalDate.of(us.group(3) as int, us.group(1) as int, us.group(2) as int).toString()
-        } catch (DateTimeException ignored) { }
+            if (us.find()) return LocalDate.of(us.group(3) as int, us.group(1) as int, us.group(2) as int)
+        } catch (DateTimeException | NumberFormatException ignored) { }
         return null
     }
 

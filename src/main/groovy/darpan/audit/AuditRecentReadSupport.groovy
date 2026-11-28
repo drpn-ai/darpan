@@ -1,10 +1,8 @@
 package darpan.audit
 
 import java.sql.Timestamp
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * DAR-BE-116 / DAR-BE-122. An audit reads rate-limited HotWax OMS from its checks' last complete read (incrementalStart);
@@ -19,7 +17,6 @@ class AuditRecentReadSupport {
      */
     static final int EDGE_SLACK_DAYS = 3
 
-    private static final DateTimeFormatter NETSUITE_DATE = DateTimeFormatter.ofPattern("M/d/yyyy")
 
     /** Where the non-OMS side of an OMS-paired check starts reading: EDGE_SLACK_DAYS before the OMS read, never before the window. */
     static Timestamp otherSideStart(Timestamp recentStart, Timestamp windowStart) {
@@ -108,25 +105,14 @@ class AuditRecentReadSupport {
         return readsRecentOnly(systemEnumId, connector)
     }
 
-    /** The calendar day a record's date names, in `zone`: YYYY-MM-DD, NetSuite M/d/yyyy or an ISO instant. */
-    static LocalDate dayOf(Object value, ZoneId zone) {
-        String text = value?.toString()?.trim()
-        try {
-            if (text ==~ /\d{4}-\d{2}-\d{2}/) return LocalDate.parse(text)
-            if (text ==~ /\d{1,2}\/\d{1,2}\/\d{4}/) return LocalDate.parse(text, NETSUITE_DATE)
-            return Instant.parse(text).atZone(zone).toLocalDate()
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
     /**
      * Whether a record only the other system holds is judged this run: its `dateField` names a day on or after
      * `judgedFrom`. No field, or no readable date on the record: not judged (it can be neither raised nor closed).
      */
     static boolean judged(Map record, String dateField, Timestamp judgedFrom, ZoneId zone) {
         if (!dateField || record == null) return false
-        LocalDate day = dayOf(record.get(dateField), zone)
+        // DAR-OPS-029 S99-016: the finding facts' parser, so the window and the card read the same day.
+        LocalDate day = AuditRecordFacts.dayOf(record.get(dateField), zone)
         return day != null && !day.isBefore(judgedFrom.toInstant().atZone(zone).toLocalDate())
     }
 }

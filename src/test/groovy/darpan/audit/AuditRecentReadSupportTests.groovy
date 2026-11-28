@@ -45,11 +45,26 @@ class AuditRecentReadSupportTests {
     @Test
     void aRecordDateIsReadInEveryShapeTheSourcesWrite() {
         LocalDate d = LocalDate.parse("2026-10-17")
-        assertEquals(d, AuditRecentReadSupport.dayOf("2026-10-17", LA))                 // NetSuite TO_CHAR(trandate, 'YYYY-MM-DD')
-        assertEquals(d, AuditRecentReadSupport.dayOf("10/17/2026", LA))                 // NetSuite bare trandate
-        assertEquals(d, AuditRecentReadSupport.dayOf("2026-10-17T19:30:00Z", LA))       // Shopify createdAt, still the 17th in LA
-        assertNull(AuditRecentReadSupport.dayOf("not a date", LA))
-        assertNull(AuditRecentReadSupport.dayOf(null, LA))
+        assertEquals(d, AuditRecordFacts.dayOf("2026-10-17", LA))                 // NetSuite TO_CHAR(trandate, 'YYYY-MM-DD')
+        assertEquals(d, AuditRecordFacts.dayOf("10/17/2026", LA))                 // NetSuite bare trandate
+        assertEquals(d, AuditRecordFacts.dayOf("2026-10-17T19:30:00Z", LA))       // Shopify createdAt, still the 17th in LA
+        assertNull(AuditRecordFacts.dayOf("not a date", LA))
+        assertNull(AuditRecordFacts.dayOf(null, LA))
+    }
+
+    /**
+     * DAR-OPS-029 S99-016: the judged window reads a record's date with the same parser the finding facts use, so an epoch
+     * millis, an offset timestamp or a "YYYY-MM-DD hh:mm" date is judged (it read "not judged", so it was neither raised
+     * nor closed, while the finding card showed the same date).
+     */
+    @Test
+    void theJudgedWindowReadsEveryDateShapeTheFactsRead() {
+        Timestamp start = at("2026-10-16")
+        String epochMillis = java.time.Instant.parse("2026-10-17T19:30:00Z").toEpochMilli().toString()
+        assertTrue(AuditRecentReadSupport.judged([createdAt: epochMillis], "createdAt", start, LA), "epoch millis")
+        assertTrue(AuditRecentReadSupport.judged([createdAt: "2026-10-17T12:30:00-07:00"], "createdAt", start, LA), "offset")
+        assertTrue(AuditRecentReadSupport.judged([orderDate: "2026-10-17 08:15:00"], "orderDate", start, LA), "date and time")
+        assertFalse(AuditRecentReadSupport.judged([orderDate: "2026-10-15 08:15:00"], "orderDate", start, LA))
     }
 
     @Test

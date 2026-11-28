@@ -36,8 +36,9 @@ class SourceEndpointWriteSupport {
      *         touched) otherwise.
      */
     static boolean storeAccess(def ec, String configTypeEnumId, String configId, List enabledSystemEnumIds) {
-        // DAR-CLI-008: the owner gate below let a view-only member of the owning tenant switch endpoints; hold the role.
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for connections.")) return false
+        // DAR-CLI-008: the owner gate below let a view-only member of the owning tenant switch endpoints; hold the role. OC206: the
+        // role is run access, as every connection write (save#SftpServer, the OMS REST save, the app's canManageConnections).
+        if (!TenantAccessSupport.requireActiveTenantRunAccess(ec, "Your active tenant only has view access for connections.")) return false
         Map<String, String> typeRow = SharedConfigAccessSupport.configType(configTypeEnumId)
         if (typeRow == null) {
             ec.message.addError("Unknown config type '${configTypeEnumId}'.".toString())

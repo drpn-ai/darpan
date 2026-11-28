@@ -25,11 +25,8 @@ class FactText {
         return out
     }
 
+    /** OC219: bounded (BoundedDecimal), so a huge exponent keeps its own text instead of expanding; NaN and Infinity too. */
     private static String numberText(Number value) {
-        try {
-            return new BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
-        } catch (NumberFormatException ignored) {
-            return value.toString()   // NaN, Infinity
-        }
+        return BoundedDecimal.plainText(value)
     }
 }

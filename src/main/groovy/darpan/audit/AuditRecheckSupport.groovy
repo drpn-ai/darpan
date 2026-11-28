@@ -132,7 +132,7 @@ class AuditRecheckSupport {
             int added = append((File) p.file, (File) p.changedFile, (String) p.keyField, already)
             Map result = (Map) ((Map) p.side).result
             result.recordCount = ((result.recordCount ?: 0) as int) + added
-            records[(String) p.fileSide] = (records[(String) p.fileSide] ?: 0) + added
+            records.put((String) p.fileSide, (records.get(p.fileSide) ?: 0) + added)
         }
     }
 
@@ -157,7 +157,7 @@ class AuditRecheckSupport {
                 p.read = batches(ordered, lacking).collect { List<String> keys ->
                     File f = (File) readSide.call(p.side, keys)
                     if (f == null) throw new IllegalStateException("the ${p.fileSide} read by key wrote no file")
-                    keysRead[(String) p.fileSide] = (keysRead[(String) p.fileSide] ?: 0) + keys.size()
+                    keysRead.put((String) p.fileSide, (keysRead.get(p.fileSide) ?: 0) + keys.size())
                     f
                 }
             }
@@ -166,7 +166,7 @@ class AuditRecheckSupport {
                 ((List<File>) p.read).each { File f ->
                     int added = append((File) p.file, f, (String) p.keyField, [] as Set<String>)
                     result.recordCount = ((result.recordCount ?: 0) as int) + added
-                    recordsAdded[(String) p.fileSide] = (recordsAdded[(String) p.fileSide] ?: 0) + added
+                    recordsAdded.put((String) p.fileSide, (recordsAdded.get(p.fileSide) ?: 0) + added)
                 }
             }
             return [keys: keysRead, records: recordsAdded, millis: System.currentTimeMillis() - started]
@@ -239,7 +239,8 @@ class AuditRecheckSupport {
                 write(r); added++
             }
             w.write("]")
-            head.findAll { k, v -> k != "records" && k != "truncated" }.each { k, v -> w.write(",${JsonOutput.toJson(k)}:${JsonOutput.toJson(v)}") }
+            // Every other top-level field is kept, a truncated flag too: appending records never makes a cut read whole.
+            head.findAll { k, v -> k != "records" }.each { k, v -> w.write(",${JsonOutput.toJson(k)}:${JsonOutput.toJson(v)}") }
             w.write("}")
         }
         if (!merged.renameTo(extract)) { extract.delete(); merged.renameTo(extract) }

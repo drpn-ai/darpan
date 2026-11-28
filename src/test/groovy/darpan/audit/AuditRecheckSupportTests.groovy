@@ -79,6 +79,19 @@ class AuditRecheckSupportTests {
         assertTrue((sidecar.records[0]._excludedBy as String).startsWith("1:"))
     }
 
+    // DAR-OPS-029 S11: a read that was cut short stays marked so after older findings are appended to it; dropping the
+    // flag would hand the compare a cut read as a whole one.
+    @Test
+    void appendingToACutReadKeepsItMarkedCut() {
+        File side = new File(dir, "cut.json")
+        side.text = JsonOutput.toJson([records: [[returnId: "M3"]], truncated: true, metadata: [windowFrom: "2026-10-16"]])
+        AuditRecheckSupport.append(side, extract("cut-key.json", [[returnId: "M1"]]), "returnId", [] as Set)
+        Map head = JsonRecordStream.forEachRecord(side, "records") { }
+        assertEquals(true, head.truncated)
+        assertEquals("2026-10-16", head.metadata.windowFrom)
+        assertEquals(["M3", "M1"], records(side)*.returnId)
+    }
+
     @Test
     void eachSideIsAskedOnlyForTheKeysItLacks() {
         // DAR-BE-156, gorjana R1: NetSuite's recent read already holds M2's lines; HotWax's (yesterday only) holds neither.

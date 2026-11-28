@@ -92,6 +92,7 @@ class AuditAutomationSmokeTests {
 
     @AfterAll
     void cleanup() {
+        AuditAutomationSupport.resetForTests()
         dir?.deleteDir()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
@@ -310,6 +311,9 @@ class AuditAutomationSmokeTests {
         assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditFullRead: true])[0].auditRecentReadStartDate)
         assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditVerifyKeys: ["V1"]])[0].auditRecentReadStartDate,
                 "a verify reads its keys, not recent days")
+        // DAR-OPS-029 S11: a verify over picked days carries its keys on every window too, so it writes no check run either.
+        assertEquals([["V1"]], AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditVerifyKeys: ["V1"],
+                auditWindowFromDate: Date.valueOf("2026-10-20"), auditWindowThruDate: Date.valueOf("2026-10-21")])*.auditVerifyKeys)
     }
 
     // DAR-BE-015: Dolls Kill R1 hid for 19 days because a window with one side empty recorded as ran and closed every finding.
@@ -319,7 +323,7 @@ class AuditAutomationSmokeTests {
                 [recordCount: 1], [recordCount: 0], [diffLocation: diff("n1", [row("MISSING_IN_FILE_2", "N1", "missing in NetSuite")])], null)
         assertEquals("AUDFS_OPEN", finding("N1").stateEnumId)
 
-        String reason = AutomationExecutionSupport.noDataReason("OMS", 5, 5, "NetSuite", 0, 0)
+        String reason = AutomationExecutionSupport.noDataFinding("OMS", 5, 5, "NetSuite", 0, 0)?.reason
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-26", ["N1"], []), omsSource, nsSource,
                 [recordCount: 5, readCount: 5], [recordCount: 0, readCount: 0], null, null, null, null, reason)
         Map run = checkRun("2026-09-26")
@@ -329,11 +333,157 @@ class AuditAutomationSmokeTests {
 
     @Test
     void aQuietDayStillRecordsRan() {
-        String reason = AutomationExecutionSupport.noDataReason("OMS", 0, 0, "NetSuite", 0, 0)
+        String reason = AutomationExecutionSupport.noDataFinding("OMS", 0, 0, "NetSuite", 0, 0)?.reason
         assertNull(reason)
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-27", [], []), omsSource, nsSource,
                 [recordCount: 0, readCount: 0], [recordCount: 0, readCount: 0], null, null, null, null, reason)
         assertEquals("AUDCS_RAN", checkRun("2026-09-27").statusEnumId)
+    }
+
+    // DAR-OPS-029 S11: a compare that ran but left no readable result judged nothing. With no rows, every examined key
+    // would read as fixed: the finding below is still true, so the check did not run and it stays open.
+    @Test
+    void aCompareWhoseResultCannotBeReadClosesNothing() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-20", ["U1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: diff("u1", [row("MISSING_IN_FILE_2", "U1", "missing in NetSuite")])], null)
+        assertEquals("AUDFS_OPEN", finding("U1").stateEnumId)
+
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-21", ["U1"], ["U1"]), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: new File(dir, "no-such-diff.json").absolutePath, differenceCount: 0], null)
+        Map run = checkRun("2026-09-21")
+        assertEquals(["AUDCS_NOT_RUN", AuditAutomationSupport.NO_RESULT_REASON], [run.statusEnumId, run.reason])
+        assertEquals("AUDFS_OPEN", finding("U1").stateEnumId, "nothing was judged, so nothing is fixed")
+    }
+
+    // DAR-OPS-029 S11: the health is written before the findings. When the ledger refuses the findings (a deadlock, a bad
+    // row), the morning must not read as ran with none: the check is restated as not run and nothing closes.
+    @Test
+    void aCheckWhoseFindingsAreRefusedReadsAsNotRunAndClosesNothing() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-22", ["R1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: diff("r1", [row("MISSING_IN_FILE_2", "R1", "missing in NetSuite")])], null)
+        assertEquals("AUDFS_OPEN", finding("R1").stateEnumId)
+
+        Closure<Map> real = AuditAutomationSupport.ledger
+        List<String> asked = []
+        AuditAutomationSupport.ledger = { def e, String name, Map params ->
+            asked << name.tokenize(".").last()
+            if (name.endsWith("record#CheckFindings")) { e.message.addError("Deadlock found when trying to get lock"); return null }
+            return real.call(e, name, params)
+        }
+        try {
+            AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-23", ["R1"], ["R1"]), omsSource, nsSource,
+                    [recordCount: 1], [recordCount: 1], [diffLocation: diff("r2", [])], null)
+        } finally {
+            AuditAutomationSupport.resetForTests()
+        }
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(["record#CheckRun", "record#CheckFindings", "record#CheckRun"], asked,
+                "health, the refused findings, health restated; no close#ResolvedFindings")
+        Map run = checkRun("2026-09-23")
+        assertEquals(["AUDCS_NOT_RUN", AuditAutomationSupport.FINDINGS_NOT_RECORDED_REASON], [run.statusEnumId, run.reason])
+        assertEquals("AUDFS_OPEN", finding("R1").stateEnumId, "R1 was examined and not reported, but nothing was recorded: it stays open")
+    }
+
+    // DAR-OPS-029 S11 (H4): anything that fails after the health was written as ran (here the diff cannot be read at all)
+    // restates the check as not run, so the morning never reads as ran with no findings.
+    @Test
+    void aCheckWhoseDiffCannotBeJudgedIsRestatedNotRun() {
+        File unreadable = new File(diff("h4", [row("MISSING_IN_FILE_2", "H4", "missing in NetSuite")]))
+        assertTrue(unreadable.setReadable(false), "the test needs a file it cannot read")
+        try {
+            AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-18", ["H4"], []), omsSource, nsSource,
+                    [recordCount: 1], [recordCount: 1], [diffLocation: unreadable.absolutePath], null)
+        } finally {
+            unreadable.setReadable(true)
+        }
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(["AUDCS_NOT_RUN", AuditAutomationSupport.FINDINGS_NOT_RECORDED_REASON],
+                [checkRun("2026-09-18").statusEnumId, checkRun("2026-09-18").reason])
+        assertEquals(0L, count("H4"))
+    }
+
+    // DAR-OPS-029 S11 (H5): two rows for one statement and record keep the same one whatever order the compare wrote them
+    // in, and the findings come back in key order.
+    @Test
+    void theRowKeptForAFindingDoesNotDependOnTheCompareOrder() {
+        Map b = row("MISSING_IN_FILE_2", "H5", "b: missing in NetSuite")
+        Map a = row("MISSING_IN_FILE_2", "H5", "a: missing in NetSuite")
+        Map first = row("MISSING_IN_FILE_2", "H0", "missing in NetSuite")
+        Map check = checks()[0]
+        List<Map> one = AuditAutomationSupport.findingsFrom(ec, TENANT, check, new File(diff("h5a", [b, a, first])), omsSource, nsSource, [:])
+        List<Map> two = AuditAutomationSupport.findingsFrom(ec, TENANT, check, new File(diff("h5b", [first, a, b])), omsSource, nsSource, [:])
+        assertEquals([["R4", "H0", "missing in NetSuite"], ["R4", "H5", "a: missing in NetSuite"]],
+                one.collect { [it.statementCode, it.recordKey, it.ruleText] })
+        assertEquals(one.collect { [it.statementCode, it.recordKey, it.ruleText, it.headline] },
+                two.collect { [it.statementCode, it.recordKey, it.ruleText, it.headline] })
+    }
+
+    // F-E5 (Aditi 2026-11-28): a retry from a failed execution's extracts records them at the time they were read, and is
+    // refused when a later run of the check has already recorded; the failed execution's own run does not count as later.
+    @Test
+    void aReplayRecordsItsOwnReadTimeAndNeverOverwritesALaterRun() {
+        // Now: every run other tests of this class recorded is stamped before it, so none counts as later.
+        Timestamp readAt = new Timestamp(System.currentTimeMillis())
+        execution("TAUTO_EXF", readAt)
+        // The failed attempt recorded its own partial run.
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", [], []), omsSource, nsSource,
+                [recordCount: 1], null, null, new IllegalStateException("NetSuite timed out"), "TAUTO_EXF")
+        assertEquals("AUDCS_PARTIAL", checkRun("2026-09-14").statusEnumId)
+
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", ["P1"], []), omsSource, nsSource,
+                [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"], [recordCount: 0, replayedFromExecutionId: "TAUTO_EXF"],
+                [diffLocation: diff("p1", [row("MISSING_IN_FILE_2", "P1", "missing in NetSuite")])], null, "TAUTO_EXR1")
+        Map replayed = checkRun("2026-09-14")
+        assertEquals(["AUDCS_RAN", "TAUTO_EXR1"], [replayed.statusEnumId, replayed.automationExecutionId], "the replay replaces the failed run")
+        assertEquals([readAt, readAt], reads(replayed.checkRunId as String)*.readStamp, "read when the failed execution read, not now")
+        assertEquals("AUDFS_OPEN", finding("P1").stateEnumId)
+
+        // A later run records; a second replay of the same old read is refused and changes nothing.
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-15", [], []), omsSource, nsSource,
+                [recordCount: 0], [recordCount: 0], null, null, "TAUTO_EXLATER")
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", ["P1"], ["P1"]), omsSource, nsSource,
+                [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"], [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"],
+                [diffLocation: diff("p2", [])], null, "TAUTO_EXR2")
+        assertEquals("TAUTO_EXR1", checkRun("2026-09-14").automationExecutionId, "refused: the later run stands")
+        assertEquals("AUDFS_OPEN", finding("P1").stateEnumId, "an old read never closes what a later run judged")
+        assertTrue(AuditAutomationSupport.laterRunRecorded(ec, TENANT, [CHECK], null, "TAUTO_EXF"), "an unknown read time is refused")
+    }
+
+    // OC33 (F-E3): closing is by finding, not by record. K1 was missing in NetSuite (R4); now it is missing in HotWax (R8).
+    // Still reported under R8, its R4 finding is no longer true and closes; under the per-record close it stayed open forever.
+    @Test
+    void aRecordThatStopsBreakingOneStatementClosesThatFindingOnly() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-07", ["K1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("k1", [row("MISSING_IN_FILE_2", "K1", "missing in NetSuite")])], null)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-08", ["K1"], ["K1"]), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: diff("k2", [row("MISSING_IN_FILE_1", "K1", "missing in HotWax")])], null)
+        Map<String, String> stateByStatement = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", CHECK)
+                .condition("recordKey", "K1").useCache(false).list().collectEntries { [(it.statementId as String): it.stateEnumId as String] }
+        assertEquals([TAUTO_R4: "AUDFS_FIXED", TAUTO_R8: "AUDFS_OPEN"], stateByStatement)
+    }
+
+    // OC33: a link whose rules are none of its run's (here deleted) can never report a row, so its statement is not judged
+    // and the ledger closes none of its findings; a link naming a live rule, by id or by its DRL name, is judged.
+    @Test
+    void aLinkToRulesTheRunNoLongerHasIsNotJudged() {
+        insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_GONE", ruleSetName: "Gone", companyUserGroupId: TENANT])
+        insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_LIVE", ruleSetId: "TAUTO_RS_GONE", sequenceNum: 10L, enabled: "Y",
+                ruleLogic: 'rule "FIELD_COMPARISON_7"\nwhen\n    $m : Map()\nthen\nend'])
+        statement("TAUTO_RGONE", AUDIT, "RGONE")
+        statement("TAUTO_RLIVE", AUDIT, "RLIVE")
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_GONE", companyUserGroupId: TENANT, checkCode: "gone", label: "gone",
+                savedRunId: "TAUTO_RS_GONE"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_GONE", statementId: "TAUTO_RGONE", companyUserGroupId: TENANT,
+                sequenceNum: 1L, diffTypes: "FIELD_MISMATCH", ruleIds: "TAUTO_RULE_DELETED"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_GONE", statementId: "TAUTO_RLIVE", companyUserGroupId: TENANT,
+                sequenceNum: 2L, diffTypes: "FIELD_MISMATCH", ruleIds: "FIELD_COMPARISON_7"])
+        Set<String> unjudged = new LinkedHashSet<String>()
+        List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_GONE", savedRunId: "TAUTO_RS_GONE"],
+                new File(diff("gone", [row("FIELD_MISMATCH", "G1", "differs") + [ruleId: "FIELD_COMPARISON_7"]])), nsSource, nsSource, [:],
+                null, unjudged)
+        assertEquals(["TAUTO_RGONE"] as Set, unjudged)
+        assertEquals([["RLIVE", "G1"]], found.collect { [it.statementCode, it.recordKey] }, "a raw DRL name is still a rule of the run")
+        assertFalse(AuditAutomationSupport.namesNoRuleOfTheRun(null, [:]), "a blank ruleIds takes any rule")
     }
 
     @Test
@@ -428,6 +578,25 @@ class AuditAutomationSmokeTests {
                 recs.collect { [it.recordType, it.recordId, it.recordStatus] })
     }
 
+    // OC14 / S12 release gate: a duplicate's paired partner (DUPLICATE_IN_FILE_n_PAIRED) is recorded only by a link that names
+    // it; a link that takes any type ignores it, so no existing audit grows findings when the compare starts writing them.
+    @Test
+    void aPairedPartnerRowIsRecordedOnlyByALinkThatNamesIt() {
+        statement("TAUTO_RANY", AUDIT, "RANY")
+        statement("TAUTO_RPAIR", AUDIT, "RPAIR")
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_DUPS", companyUserGroupId: TENANT, checkCode: "dups", label: "dups"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_DUPS", statementId: "TAUTO_RANY", companyUserGroupId: TENANT, sequenceNum: 1L])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_DUPS", statementId: "TAUTO_RPAIR", companyUserGroupId: TENANT,
+                sequenceNum: 2L, diffTypes: "DUPLICATE_IN_FILE_1_PAIRED"])
+        List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_DUPS"], new File(diff("paired", [
+                row("DUPLICATE_IN_FILE_1_PAIRED", "D1", "paired with a key repeated in HotWax"),
+                row("MISSING_IN_FILE_2", "M1", "missing in NetSuite")])), omsSource, nsSource, [:])
+        assertEquals([["RANY", "M1"], ["RPAIR", "D1"]], found.collect { [it.statementCode, it.recordKey] },
+                "the blank link takes the missing row, not the paired one; the named link takes the paired one")
+        assertFalse(AuditAutomationSupport.matchesDiffType(null, "DUPLICATE_IN_FILE_2_PAIRED"))
+        assertTrue(AuditAutomationSupport.matchesDiffType("", "DUPLICATE_IN_FILE_1"), "a plain duplicate is still any type's")
+    }
+
     @Test
     void aLinkCanNameTheRulesWhoseMismatchesBreakItsStatement() {
         // DAR-BE-095: one compare, two field rules, two statements. A link's ruleIds picks its rule's FIELD_MISMATCH rows.
@@ -444,7 +613,7 @@ class AuditAutomationSmokeTests {
         Map amount = row("FIELD_MISMATCH", "80443000", "amount differs") + [ruleId: "RULE_AMOUNT"]
         List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_PAIR", file1RecordType: "creditMemo",
                 file2RecordType: "salesOrder"], new File(diff("pair", [customer, original, amount])), nsSource, nsSource, [:])
-        assertEquals([["R14", "80443722"], ["R13", "80443999"]], found.collect { [it.statementCode, it.recordKey] },
+        assertEquals([["R13", "80443999"], ["R14", "80443722"]], found.collect { [it.statementCode, it.recordKey] },
                 "each rule's rows break only its statement; a rule no link names breaks nothing")
         assertEquals(true, AuditAutomationSupport.matches(null, "ANY_RULE"), "a blank ruleIds takes every rule")
     }
@@ -478,7 +647,8 @@ class AuditAutomationSmokeTests {
         Map check = [checkId: "TAUTO_SHOP", savedRunId: "TAUTO_RS_SHOP", file1RecordType: "order"]
         List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, check,
                 new File(diff("shop", [unfulfilled, byId, stranger])), omsSource, omsSource, [:])
-        assertEquals([["R4F", "7458485076225"], ["R4F", "7458299445505"]], found.collect { [it.statementCode, it.recordKey] })
+        assertEquals([["R4F", "7458299445505"], ["R4F", "7458485076225"]], found.collect { [it.statementCode, it.recordKey] },
+                "in key order (H5)")
 
         // The run is read only as this tenant's: pointed at another tenant's run, the DRL name reaches nothing.
         assertEquals([:], AuditAutomationSupport.ruleNamesById(ec, TENANT, "TAUTO_RS_OTHER"))
@@ -668,6 +838,25 @@ class AuditAutomationSmokeTests {
         lines << "}"
         f.text = lines.join("\n")
         return f.absolutePath
+    }
+
+    /** An execution row for a replay to name; its automation row is AutomationExecution*Tests' concern, so the FK is held off. */
+    private void execution(String id, Timestamp startedDate) {
+        Connection connection = ec.entity.getConnection(ec.entity.getEntityGroupName("darpan.reconciliation.ReconciliationAutomationExecution"))
+        try {
+            Statement statement = connection.createStatement()
+            statement.execute("SET REFERENTIAL_INTEGRITY FALSE")
+            try {
+                ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationAutomationExecution",
+                        [automationExecutionId: id, automationId: "TAUTO_AUTO", companyUserGroupId: TENANT, statusEnumId: "AUT_STAT_FAILED",
+                         scheduledDate: startedDate, startedDate: startedDate])
+            } finally {
+                statement.execute("SET REFERENTIAL_INTEGRITY TRUE")
+                statement.close()
+            }
+        } finally {
+            connection.close()
+        }
     }
 
     private Map checkRun(String day) {

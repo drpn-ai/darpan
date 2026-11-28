@@ -49,6 +49,21 @@ class AuditAutomationSupport {
     /** The ledger's reason columns are text-intermediate (1023). */
     private static final int REASON_MAX = 1000
     private static final String WHY = "audit run hook on a scheduled thread: explicit companyUserGroupId condition applied"
+    /** DAR-OPS-029 S11: why a check whose compare left no readable result closes nothing. */
+    static final String NO_RESULT_REASON = "The compare finished but its result could not be read, so nothing was judged."
+    /** DAR-OPS-029 S11: why a check whose findings the ledger refused reads as not run, never as ran with none. */
+    static final String FINDINGS_NOT_RECORDED_REASON = "The check ran but its findings could not be recorded."
+
+    /** Every ledger call goes through here, so a test can refuse one. */
+    private static final Closure<Map> DEFAULT_LEDGER = { def ec, String serviceName, Map params ->
+        AutomationExecutionSupport.dispatchInternalService(ec, serviceName, params)
+    }
+    static Closure<Map> ledger = DEFAULT_LEDGER
+
+    /** Test-only: restores the ledger seam. Idempotent; never called from src/main. */
+    static void resetForTests() {
+        ledger = DEFAULT_LEDGER
+    }
 
     /**
      * The audit checks this automation runs; empty when it feeds no audit. A check on no statement is retired (an import or
@@ -84,8 +99,9 @@ class AuditAutomationSupport {
                 .condition("auditId", EntityCondition.IN, auditIds).list()*.getMap()
                 .collectEntries { Map a -> [(a.auditId as String): a] }
         return checks.sort(false) { it.checkCode as String }.collect { Map check ->
-            List<Map> tested = links.findAll { it.checkId == check.checkId }.collect { statements[it.statementId as String] }.findAll()
-            Map audit = audits[tested ? tested[0].auditId as String : null]
+            // DAR-BE-398: get, not [x as String]: Groovy 5 reads a subscript on a null String as a property named null and throws.
+            List<Map> tested = links.findAll { it.checkId == check.checkId }.collect { statements.get(it.statementId as String) }.findAll()
+            Map audit = tested ? audits.get(tested[0].auditId as String) : null
             [auditId    : audit?.auditId, auditName: audit?.auditName,
              statementId: (tested*.statementCode as List<String>).sort().join(", "), checkId: check.checkCode] as Map
         }
@@ -119,7 +135,8 @@ class AuditAutomationSupport {
         // DAR-BE-123: a verify reads its findings' records by key in each window (see AutomationExecutionSupport).
         Map verify = explicit?.auditVerifyKeys ? [auditVerifyKeys: explicit.auditVerifyKeys] : [:]
         if (explicit?.auditWindowFromDate && explicit?.auditWindowThruDate) {
-            return pickedWindows(ec, audit, zone, reportDay, toLocalDate(explicit.auditWindowFromDate), toLocalDate(explicit.auditWindowThruDate), checkIds)
+            return pickedWindows(ec, audit, zone, reportDay, toLocalDate(explicit.auditWindowFromDate), toLocalDate(explicit.auditWindowThruDate),
+                    checkIds, verify)
         }
         Map out = AutomationExecutionSupport.dispatchInternalService(ec, "audit.AuditReportServices.get#AuditWindow",
                 [companyUserGroupId: audit.companyUserGroupId, auditId: audit.auditId, reportDate: Date.valueOf(reportDay)])
@@ -134,17 +151,24 @@ class AuditAutomationSupport {
             Timestamp end = Timestamp.from((run.windowThruDate as Date).toLocalDate().plusDays(1).atStartOfDay(zone).toInstant())
             Timestamp start = fromGoLive(Timestamp.from((run.windowFromDate as Date).toLocalDate().atStartOfDay(zone).toInstant()), end, goLive)
             if (start == null) return
-            windows << ([sequenceNum         : windows.size() + 1,
-                         windowStartDate     : start,
-                         windowEndDate       : end,
-                         childWindowStartDate: start,
-                         childWindowEndDate  : end,
-                         auditId             : audit.auditId,
-                         auditPeriod         : run.period,
-                         auditReportDate     : Date.valueOf(reportDay),
-                         auditRecentReadStartDate: readStart(ec, audit, checkIds, run.period as String, start, end, zone)] + verify as Map<String, Object>)
+            windows << window(windows.size() + 1, start, end, audit, run.period as String, reportDay,
+                    readStart(ec, audit, checkIds, run.period as String, start, end, zone), verify)
         }
         return windows
+    }
+
+    /** One window of a morning or a play: its read [start, end), and what the ledger records it under. */
+    private static Map<String, Object> window(int sequenceNum, Timestamp start, Timestamp end, Map audit, String period,
+                                              LocalDate reportDay, Timestamp recentReadStart, Map extra) {
+        return ([sequenceNum             : sequenceNum,
+                 windowStartDate         : start,
+                 windowEndDate           : end,
+                 childWindowStartDate    : start,
+                 childWindowEndDate      : end,
+                 auditId                 : audit.auditId,
+                 auditPeriod             : period,
+                 auditReportDate         : Date.valueOf(reportDay),
+                 auditRecentReadStartDate: recentReadStart] + extra) as Map<String, Object>
     }
 
     /**
@@ -153,12 +177,14 @@ class AuditAutomationSupport {
      * period must still be recordable that morning (DAR-BE-178: the morning's own, or the one just ended); otherwise the
      * run is refused before anything is read, because the ledger would refuse each check's write and the run would record
      * nothing. A window that ends by the tenant's go-live is left out; a window it cuts starts at go-live (DAR-BE-145).
+     * verify: a verify's keys (DAR-BE-123), carried on every window so a verify over picked days writes no check run either.
      */
-    static List<Map<String, Object>> pickedWindows(def ec, Map audit, ZoneId zone, LocalDate reportDay, LocalDate from, LocalDate thru,
-                                                   List<String> checkIds = null) {
+    static List<Map<String, Object>> pickedWindows(def ec, Map audit, ZoneId zone, LocalDate reportDay, LocalDate from,
+                                                   LocalDate thru, List<String> checkIds = null, Map verify = [:]) {
+        verify = verify ?: [:]   // AuditSettingsSupport validates a play's days with the six-argument form
         if (from > thru) throw new IllegalArgumentException("The days run backwards: ${from} to ${thru}.")
         if (thru > reportDay) throw new IllegalArgumentException("${thru} has not ended yet; pick days up to ${reportDay}.")
-        String periodCode = AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String]
+        String periodCode = AuditReportAssembler.enumCodes(ec).get(audit.periodEnumId as String)
         List<Map> periods = []
         for (LocalDate day = from; day <= thru; ) {
             String period = AuditReportAssembler.periodOf(day, periodCode)
@@ -176,17 +202,9 @@ class AuditAutomationSupport {
             Timestamp end = Timestamp.from((p.thru as LocalDate).plusDays(1).atStartOfDay(zone).toInstant())
             Timestamp start = fromGoLive(Timestamp.from((p.from as LocalDate).atStartOfDay(zone).toInstant()), end, goLive)
             if (start == null) return
-            windows << ([sequenceNum         : windows.size() + 1,
-                         windowStartDate     : start,
-                         windowEndDate       : end,
-                         childWindowStartDate: start,
-                         childWindowEndDate  : end,
-                         auditId             : audit.auditId,
-                         auditPeriod         : p.period,
-                         auditReportDate     : Date.valueOf(reportDay),
-                         auditWindowFromDate : Date.valueOf(p.from as LocalDate),
-                         auditWindowThruDate : Date.valueOf(p.thru as LocalDate),
-                         auditRecentReadStartDate: readStart(ec, audit, checkIds, p.period as String, start, end, zone)] as Map<String, Object>)
+            windows << window(windows.size() + 1, start, end, audit, p.period as String, reportDay,
+                    readStart(ec, audit, checkIds, p.period as String, start, end, zone),
+                    [auditWindowFromDate: Date.valueOf(p.from as LocalDate), auditWindowThruDate: Date.valueOf(p.thru as LocalDate)] + verify)
         }
         if (!windows) {
             throw new IllegalStateException("Nothing before go-live (${goLiveText(goLive, zone)}) is audited; pick days from ${goLiveDay(goLive, zone)}.")
@@ -273,22 +291,42 @@ class AuditAutomationSupport {
         try {
             String tenantId = normalize(readField(automation, "companyUserGroupId"))
             Timestamp now = new Timestamp(System.currentTimeMillis())
+            // F-E5 (Aditi 2026-11-28): a replay's reads are recorded at the time they were read, not now.
+            String replayedFrom = normalize(file1Result?.replayedFromExecutionId) ?: normalize(file2Result?.replayedFromExecutionId)
+            Timestamp replayReadAt = replayedFrom ? replayReadStamp(ec, tenantId, replayedFrom) : null
             List<Map> reads = sourceReads(file1Source, file2Source, file1Result, file2Result, failure, now,
-                    [sideConfigIds: sideConfigIds, reconcileResult: reconcileResult])
+                    [sideConfigIds: sideConfigIds, reconcileResult: reconcileResult,
+                     readStamps: [FILE_1: file1Result?.replayedFromExecutionId ? replayReadAt : null,
+                                  FILE_2: file2Result?.replayedFromExecutionId ? replayReadAt : null]])
             String notRunReason = failure != null && file1Result != null && file2Result != null ?
                     truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
             // DAR-BE-015: a window that ended NO_DATA with a side empty or kept nothing did not run; it closes nothing.
             if (notRunReason == null && noDataReason) notRunReason = truncate(noDataReason, REASON_MAX)
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
+            // A compare that ran and left no readable result judged nothing: with no rows, every examined key would read
+            // as fixed, so the check did not run and closes nothing.
+            if (notRunReason == null && reconcileResult && failure == null && diff == null) notRunReason = NO_RESULT_REASON
             // DAR-BE-142: a Set, deduped once. List.unique() compares every key with every key kept so far: gorjana's
             // Shopify vs HotWax window (189k keys, two checks) held a worker thread for minutes after the run succeeded.
             Set<String> examined = new LinkedHashSet<String>(readKeys(window.auditFile1KeysOut as String))
             examined.addAll(readKeys(window.auditFile2KeysOut as String))
             checks.each { Map check ->
-                Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
-                List<String> judged = unjudged ? examined.findAll { !unjudged.contains(it) } as List<String> : new ArrayList<String>(examined)
-                recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
-                        judged, now, unjudged, automationExecutionId, sideConfigIds)
+                // F-E5 (Aditi 2026-11-28): a replay never overwrites what a later run of the check already recorded.
+                if (replayedFrom && laterRunRecorded(ec, tenantId, [check.checkId as String], replayReadAt, replayedFrom)) {
+                    logger.warn("Audit check ${check.checkCode}: replay of execution ${replayedFrom} (read ${replayReadAt}) refused; " +
+                            "a later run of the check has already recorded")
+                    return
+                }
+                // One check's failure never skips the window's other checks.
+                try {
+                    Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
+                    List<String> judged = unjudged ? examined.findAll { !unjudged.contains(it) } as List<String> : new ArrayList<String>(examined)
+                    recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
+                            judged, now, unjudged, automationExecutionId, sideConfigIds)
+                } catch (Exception e) {
+                    logger.error("Audit ledger write failed for check ${check.checkId} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
+                    ec.message.clearErrors()
+                }
             }
         } catch (Exception e) {
             logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
@@ -334,24 +372,80 @@ class AuditAutomationSupport {
         Map dates = window.auditWindowFromDate ? [windowFromDate: window.auditWindowFromDate, windowThruDate: window.auditWindowThruDate] : [:]
         // DAR-BE-123: a verify writes no check run: it moves neither the check's health nor its incremental read. As
         // record#CheckRun would, a read not complete makes it partial, which closes nothing (DAR-BE-124).
-        Map run = !window.auditVerifyKeys ? call(ec, "${LEDGER}.record#CheckRun", base + dates + [runStamp: now, sourceReads: reads,
-                notRunReason: notRunReason, automationExecutionId: automationExecutionId]) : notRunReason || !reads ? null :
-                [checkStatusEnumId: reads.every { it.statusEnumId == "AUDSR_COMPLETE" } ? "AUDCS_RAN" : "AUDCS_PARTIAL"]
+        Map runParams = base + dates + [runStamp: now, sourceReads: reads, automationExecutionId: automationExecutionId]
+        Map run = !window.auditVerifyKeys ? call(ec, "${LEDGER}.record#CheckRun", runParams + [notRunReason: notRunReason]) :
+                verifyStatus(ec, reads, notRunReason)
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
         Map<String, Map> explained = [:]
-        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds)
-                .findAll { !unjudged.contains(it.recordKey as String) } : []
-        if (call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings]) == null) return
-        // DAR-BE-118: closes what THIS run examined and did not report, so a later run the same morning closes too.
+        Set<String> unjudgedStatementIds = new LinkedHashSet<String>()
+        List<Map> findings = null
+        Map recorded = null
+        // From here the check's health reads ran (or partial): any failure to judge or record its findings restates it.
+        try {
+            findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds,
+                    unjudgedStatementIds).findAll { !unjudged.contains(it.recordKey as String) } : []
+            recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings])
+        } catch (Exception e) {
+            logger.error("Audit findings for check ${check.checkId} (${window.auditPeriod}) not recorded: ${sanitizeErrorDetail(e)}")
+            ec.message.clearErrors()
+            recorded = null
+        }
+        if (recorded == null) {
+            // The check's health is already written as ran (or partial): restate it as not run, so a morning whose findings
+            // were lost never reads as a clean one. A verify wrote no health, so there is nothing to restate.
+            if (!window.auditVerifyKeys) call(ec, "${LEDGER}.record#CheckRun", runParams + [notRunReason: FINDINGS_NOT_RECORDED_REASON])
+            return
+        }
+        // DAR-BE-118: closes what THIS run examined and did not report, so a later run the same morning closes too. OC33 (S13):
+        // by finding, not by record (a record still breaking one statement never keeps another's fixed finding open), and
+        // never a statement this run did not judge.
         call(ec, "${LEDGER}.close#ResolvedFindings", base + [checkStamp: now, checkStatusEnumId: run.checkStatusEnumId,
                                                             examinedRecordKeys: examined,
-                                                            reportedRecordKeys: findings*.recordKey.unique(),
+                                                            reportedFindingIds: (recorded.findingIds ?: []) as List,
+                                                            unjudgedStatementIds: unjudgedStatementIds as List,
                                                             explanations: explained])
+    }
+
+    /**
+     * DAR-BE-123. A verify's status as record#CheckRun would derive it, without writing a run: not run when it has a reason
+     * or no read, or when a read names a system that is not a DarpanSystemSource (record#CheckRun refuses those); partial
+     * when any read is not complete; else ran.
+     */
+    static Map verifyStatus(def ec, List<Map> reads, String notRunReason) {
+        if (notRunReason || !reads) return null
+        boolean known = reads.every { Map r ->
+            ec.entity.find("moqui.basic.Enumeration").condition("enumId", r.systemEnumId).useCache(true).one()?.enumTypeId == "DarpanSystemSource"
+        }
+        if (!known || !reads.every { it.statusEnumId in ["AUDSR_COMPLETE", "AUDSR_PARTIAL", "AUDSR_FAILED"] }) return null
+        return [checkStatusEnumId: reads.every { it.statusEnumId == "AUDSR_COMPLETE" } ? "AUDCS_RAN" : "AUDCS_PARTIAL"]
+    }
+
+    /**
+     * F-E5 (Aditi 2026-11-28). When a replayed extract was read: the start of the execution that read it (its reads came
+     * after). Null when the execution or its start cannot be found, which refuses the replay.
+     */
+    static Timestamp replayReadStamp(def ec, String tenantId, String executionId) {
+        def execution = tenantRows(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION, tenantId)
+                .condition("automationExecutionId", executionId).list().find()
+        Object at = execution?.startedDate ?: execution?.createdDate
+        return at instanceof java.util.Date ? new Timestamp(((java.util.Date) at).time) : null
+    }
+
+    /**
+     * F-E5 (Aditi 2026-11-28). Whether a run of any of these checks recorded after readAt, other than the run the replayed
+     * execution itself recorded: a replay of an older read must not overwrite it. An unknown readAt counts as recorded.
+     */
+    static boolean laterRunRecorded(def ec, String tenantId, List<String> checkIds, Timestamp readAt, String replayedFromExecutionId) {
+        if (readAt == null) return true
+        if (!checkIds) return false
+        return tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checkIds)
+                .condition("runStamp", EntityCondition.GREATER_THAN, readAt).list()
+                .any { normalize(it.automationExecutionId) != replayedFromExecutionId }
     }
 
     /** One ledger call; on an error, log it and answer null so the next step for this check is skipped. */
     private static Map call(def ec, String serviceName, Map params) {
-        Map out = AutomationExecutionSupport.dispatchInternalService(ec, serviceName, params)
+        Map out = ledger.call(ec, serviceName, params)
         if (ec.message.hasError()) {
             logger.error("Audit ledger ${serviceName} for check ${params.checkId} (${params.period}) refused: ${sanitizeText(ec.message.errorsString)}")
             ec.message.clearErrors()
@@ -360,15 +454,16 @@ class AuditAutomationSupport {
         return out ?: [:]
     }
 
-    /** One read per side, as record#CheckRun takes them. */
+    /** One read per side, as record#CheckRun takes them; context.readStamps (side -> when it was read) for a replay, else now. */
     static List<Map> sourceReads(def file1Source, def file2Source, Map file1Result, Map file2Result, Throwable failure,
                                  Timestamp now, Map context = null) {
         String why = failure ? truncate(sanitizeErrorMessage(failure), REASON_MAX) : null
         String system1 = normalize(readField(file1Source, "systemEnumId"))
         String system2 = normalize(readField(file2Source, "systemEnumId"))
         List<Map> reads = []
-        reads << readOf(system1, file1Result, now, why) + readStats("FILE_1", file1Result, context)
-        reads << readOf(system2, file2Result, now,
+        Map stamps = (Map) (context?.readStamps ?: [:])
+        reads << readOf(system1, file1Result, (Timestamp) stamps.get("FILE_1") ?: now, why) + readStats("FILE_1", file1Result, context)
+        reads << readOf(system2, file2Result, (Timestamp) stamps.get("FILE_2") ?: now,
                 file1Result == null && failure ? "Not read: the ${system1} read failed first.".toString() : why) +
                 readStats("FILE_2", file2Result, context)
         return reads.findAll { it.systemEnumId }
@@ -395,7 +490,7 @@ class AuditAutomationSupport {
         return out
     }
 
-    private static Map readOf(String systemEnumId, Map result, Timestamp now, String failureReason) {
+    private static Map readOf(String systemEnumId, Map result, Timestamp readAt, String failureReason) {
         if (result == null) {
             return [systemEnumId: systemEnumId, statusEnumId: "AUDSR_FAILED", recordCount: null, readStamp: null,
                     reason: failureReason ?: "The read did not finish."]
@@ -404,7 +499,7 @@ class AuditAutomationSupport {
         // and the board says why, where a log line used to be all there was.
         String recheckFailure = normalize(result.recheckFailure)
         return [systemEnumId: systemEnumId, statusEnumId: recheckFailure ? "AUDSR_PARTIAL" : "AUDSR_COMPLETE",
-                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now,
+                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: readAt,
                 reason: recheckFailure ? truncate(recheckFailure, REASON_MAX) : null]
     }
 
@@ -434,23 +529,35 @@ class AuditAutomationSupport {
      * finding.
      */
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source,
-                                  Map<String, Map> explained, Map<String, String> sideConfigIds = null) {
+                                  Map<String, Map> explained, Map<String, String> sideConfigIds = null,
+                                  Set<String> unjudgedStatementIds = null) {
         List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("checkId", check.checkId)
                 .orderBy("sequenceNum").list()*.getMap()
-        // DAR-UI-063. A statement turned off records no findings.
+        // DAR-UI-063. A statement turned off records no findings, so this run does not judge it (OC33: it closes nothing).
         List statementRows = tenantRows(ec, "darpan.audit.AuditStatement", tenantId)
                 .condition("statementId", EntityCondition.IN, links*.statementId).list()
                 .findAll { (it.isActive ?: "Y") != "N" }
+        unjudgedStatementIds?.addAll(links.findAll { link -> !statementRows.any { it.statementId == link.statementId } }
+                .collect { it.statementId as String })
         links = links.findAll { link -> statementRows.any { it.statementId == link.statementId } }
         // DAR-BE-208: a link names its rules by entity id; a row names the rule by its DRL name.
         Map<String, Set<String>> ruleNames = links.any { normalize(it.ruleIds) } ? ruleNamesById(ec, tenantId, check.savedRunId) : [:]
-        links = links.collect { Map link -> link + [ruleIds: AuditAutomationSupport.ruleIdsWithNames(link.ruleIds as String, ruleNames)] }
+        // OC33: a link whose rules are none of the run's (deleted, or the run is not the tenant's) can never report a row,
+        // so its statement is not judged: its open findings must not close. One link per statement and check (the PK).
+        List<Map> dangling = normalize(check.savedRunId) ?
+                links.findAll { Map link -> AuditAutomationSupport.namesNoRuleOfTheRun(link.ruleIds as String, ruleNames) } : []
+        unjudgedStatementIds?.addAll(dangling.collect { it.statementId as String })
+        links = (links - dangling).collect { Map link -> link + [ruleIds: AuditAutomationSupport.ruleIdsWithNames(link.ruleIds as String, ruleNames)] }
         Map<String, String> codeById = statementRows.collectEntries { [(it.statementId): it.statementCode] }
         Map<String, Map> byKey = new LinkedHashMap<>()
+        // DAR-OPS-029 S11 (H5): two rows for one statement and record (rule rows of one key under a link that takes any rule,
+        // duplicates) keep the row that ranks first by its content, not whichever the compare happened to write first.
+        Map<String, String> keptRank = [:]
         DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say
             // type / id / note. Read either.
             Map row = AuditAutomationSupport.rowOf(raw)
+            String rank = AuditAutomationSupport.rowRank(raw)
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
             // DAR-BE-196: Unexplained counts. DAR-BE-198 (b): unless its run marked it expected (unexplainedExpected).
@@ -460,18 +567,21 @@ class AuditAutomationSupport {
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer
                 // closure's metaclass and fails with "argument type mismatch".
-                if (expected && row.id && AuditAutomationSupport.matches(link.diffTypes as String, type)) {
-                    explained.putIfAbsent(row.id as String, [conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
+                if (expected && row.id && AuditAutomationSupport.matchesDiffType(link.diffTypes as String, type) &&
+                        AuditAutomationSupport.keeps(keptRank, "explained|${row.id}".toString(), rank)) {
+                    explained.put(row.id as String, [conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
                             diagnosisText: row.conclusionLabel,
                             headline: AuditAutomationSupport.headline(check, row, AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source))])
                 }
-                if (expected || !AuditAutomationSupport.matches(link.diffTypes as String, type) ||
+                if (expected || !AuditAutomationSupport.matchesDiffType(link.diffTypes as String, type) ||
                         !AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) return
-                String statementCode = codeById[link.statementId as String]
+                String statementCode = codeById.get(link.statementId as String)
                 String recordKey = row.id as String
                 if (!statementCode || !recordKey) return
+                String findingKey = "${statementCode}|${recordKey}".toString()
+                if (!AuditAutomationSupport.keeps(keptRank, findingKey, rank)) return
                 List<Map> records = AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source, sideConfigIds)
-                byKey.putIfAbsent("${statementCode}|${recordKey}".toString(), [
+                byKey.put(findingKey, [
                         statementCode   : statementCode,
                         recordKey       : recordKey,
                         headline        : AuditAutomationSupport.headline(check, row, records),
@@ -481,7 +591,23 @@ class AuditAutomationSupport {
                         checks          : AuditAutomationSupport.checksOf(row.checks)] + AuditAutomationSupport.amountsOf(check, row))
             }
         }
-        return byKey.values() as List<Map>
+        // In key order, so the ledger meets them (and numbers new findings) the same way whatever order the compare wrote.
+        return byKey.keySet().sort().collect { byKey.get(it) } as List<Map>
+    }
+
+    /** H5. A diff row's content as one comparable text: type, rule, note, the two values, cause, then its record. */
+    static String rowRank(Map raw) {
+        Map conclusion = raw.conclusion instanceof Map ? (Map) raw.conclusion : [:]
+        return [raw.diffType ?: raw.type, raw.ruleId, raw.message ?: raw.note, raw.file1Value, raw.file2Value,
+                conclusion.code, conclusion.label, raw.data].collect { it == null ? "" : it.toString() }.join("\u001F")
+    }
+
+    /** H5. True, and remembered, when rank comes before the rank kept for key (or none is kept yet). */
+    static boolean keeps(Map<String, String> keptRank, String key, String rank) {
+        String kept = keptRank.get(key)
+        if (kept != null && kept <= rank) return false
+        keptRank.put(key, rank)
+        return true
     }
 
     /**
@@ -563,11 +689,32 @@ class AuditAutomationSupport {
         }.findAll { it } as List<String>
     }
 
+    /**
+     * OC33. A link that names rules, none of which is a rule of the run by its id or by a DRL name it carries (namesById:
+     * ruleNamesById, empty when the run is not the tenant's or has no rules). Blank names any rule.
+     */
+    static boolean namesNoRuleOfTheRun(String ruleIds, Map<String, Set<String>> namesById) {
+        List<String> ids = (ruleIds ?: "").split(",")*.trim().findAll { it }
+        Set<String> known = new HashSet<String>((namesById ?: [:]).keySet())
+        (namesById ?: [:]).values().each { known.addAll(it) }
+        return ids && !ids.any { known.contains(it) }
+    }
+
     /** DAR-BE-208. A link's ruleIds with each id's DRL names added; blank stays blank (any rule). */
     static String ruleIdsWithNames(String ruleIds, Map<String, Set<String>> namesById) {
         List<String> ids = (ruleIds ?: "").split(",")*.trim().findAll { it }
         if (!ids) return ruleIds
         return ids.collectMany { String id -> (namesById?.get(id) ?: [id]) as List }.unique().join(",")
+    }
+
+    /**
+     * A row's diff type against a link's diffTypes. A link that names types takes those; one that names none takes every
+     * type but a duplicate's paired partner (DUPLICATE_IN_FILE_n_PAIRED, OC14): only a link that names it records it, so a
+     * statement that claims "any" never grows findings when the compare starts writing those rows (S12 release gate).
+     */
+    static boolean matchesDiffType(String allowed, String type) {
+        List<String> named = (allowed ?: "").split(",")*.trim().findAll { it }
+        return named ? (type != null && named.contains(type)) : !(type?.endsWith("_PAIRED"))
     }
 
     static boolean matches(String allowed, String value) {

@@ -56,13 +56,13 @@ class MigrationSupervisorSmokeTests {
                 .call()
 
         assertTrue(out.ok as Boolean, "bootstrap run reported failure: ${out.results}")
-        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size(), out.appliedCount)
+        assertEquals(MigrationRegistrySmokeTests.enabledInSeed().size(), out.appliedCount)
         assertEquals(0, out.failedCount)
         assertEquals(0, out.blockedCount)
 
         long successRows = ec.entity.find("darpan.migration.DarpanMigrationRun")
                 .condition("statusId", "SUCCESS").disableAuthz().count()
-        assertEquals((long) MigrationRegistrySmokeTests.registeredInSeed().size(), successRows)
+        assertEquals((long) MigrationRegistrySmokeTests.enabledInSeed().size(), successRows)
     }
 
     @Test
@@ -74,7 +74,7 @@ class MigrationSupervisorSmokeTests {
                 .parameters([:]).disableAuthz().call()
 
         assertEquals(0, second.appliedCount)
-        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size(), second.skippedCount)
+        assertEquals(MigrationRegistrySmokeTests.enabledInSeed().size(), second.skippedCount)
         (second.results as List<Map<String, Object>>).each { result ->
             assertEquals("ALREADY_APPLIED", result.outcome)
         }

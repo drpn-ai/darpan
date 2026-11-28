@@ -50,8 +50,9 @@ class MigrationStatusSmokeTests {
 
         List<Map<String, Object>> migrations = out.migrations as List<Map<String, Object>>
         assertEquals(MigrationRegistrySmokeTests.registeredInSeed(), migrations.collect { it.migrationId })
+        List<String> enabled = MigrationRegistrySmokeTests.enabledInSeed()
         migrations.each { row ->
-            assertEquals("PENDING", row.status)
+            assertEquals(row.migrationId in enabled ? "PENDING" : "DISABLED", row.status, "${row.migrationId}")
             assertNull(row.lastRunDate)
             assertEquals(0, row.attemptCount)
         }

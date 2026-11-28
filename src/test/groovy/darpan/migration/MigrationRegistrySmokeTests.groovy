@@ -55,6 +55,17 @@ class MigrationRegistrySmokeTests {
         return ids
     }
 
+    /** The seed rows run#PendingMigrations takes: a row may ship disabled (enabled="N", e.g. ORPHAN_SCHEMA_DROPS, which drops
+     *  tables only once someone enables it); no enabled attribute means the entity default, Y. */
+    static List<String> enabledInSeed() {
+        File seed = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toString(),
+                "runtime/component/darpan/data/MigrationRegistrySeedData.xml")
+        Set<String> disabled = new XmlSlurper().parse(seed).'**'
+                .findAll { it.name() == "darpan.migration.DarpanMigration" && it.@enabled.text() == "N" }
+                .collect { it.@migrationId.text() } as Set<String>
+        return registeredInSeed().findAll { !(it in disabled) }
+    }
+
     @Test
     void everyRegisteredServiceNameResolvesToARealService() {
         // A registry row naming a service that does not exist would fail mid-run, after earlier

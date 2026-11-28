@@ -191,6 +191,24 @@ class PairFactSupportTests {
         assertThrows(IllegalStateException) { batchIt.next() }
     }
 
+    /** R2 (DAR-OPS-029 S04): ask and parameter names fit the field limit, the same on every run, and never collide by case. */
+    @Test
+    void anAskOrParameterNameIsBoundedTheSameWayEveryTime() {
+        assertEquals("ask_orderInfo_status", PairFactSupport.boundedFieldName("ask_orderInfo_status"), "a name that fits is kept")
+        assertEquals("x" * 40, PairFactSupport.boundedFieldName("x" * 40))
+        String raw = "ask_orderInformationFromShopify_financialStatusAfterRefund"
+        String bounded = PairFactSupport.boundedFieldName(raw)
+        assertEquals(40, bounded.length())
+        assertTrue(bounded ==~ /ask_orderInformationFromShopify_[0-9a-f]{8}/, bounded)
+        assertEquals(bounded, PairFactSupport.boundedFieldName(raw), "the same on every run")
+        assertNotEquals(bounded.toLowerCase(), PairFactSupport.boundedFieldName(raw.toUpperCase()).toLowerCase(),
+                "names that differ only in case stay distinct ignoring case (prod MySQL compares names that way)")
+        Map fact = PairFactSupport.buildFact([compareId: "B1", file1: null, file2: null], state("hotwax", "netsuite"),
+                [("y" * 50): "1"], [(raw): "refunded"]).fact as Map
+        assertEquals("refunded", fact[bounded])
+        assertEquals("1", fact[PairFactSupport.boundedFieldName("param_" + "y" * 50)])
+    }
+
     @Test
     void aLongNameIsCutToTheFieldNameLimit() {
         String name = PairFactSupport.fieldName("hotwax", "x" * 80)

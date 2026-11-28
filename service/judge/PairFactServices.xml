@@ -85,15 +85,16 @@
                 <econdition field-name="checkId" from="checkId"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
             </entity-find>
-            <script>parameterList.collect { it.parameterName }.unique().each { wanted.put('param_' + it, 'Parameter ' + it) }</script>
+            <!-- Ask and parameter names are bounded to the field limit the same way buildFact names them (PairFactSupport.boundedFieldName). -->
+            <script>parameterList.collect { it.parameterName }.unique().each { wanted.put(darpan.judge.PairFactSupport.boundedFieldName('param_' + it), 'Parameter ' + it) }</script>
             <entity-find entity-name="darpan.judge.CheckAsk" list="askList">
                 <econdition field-name="checkId" from="checkId"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
             </entity-find>
             <script>
                 askList.each { ask -> ((ask.keepRecordFields ?: '').split(',') as List).collect { it.trim() }.findAll { it }.each { field ->
-                    wanted.put('ask_' + ask.askName + '_' + field, 'Ask ' + ask.askName + ': ' + field) } }
-                (sampleKeys?.get('asks') ?: []).each { name -> wanted.put(name as String, 'Ask field') }
+                    wanted.put(darpan.judge.PairFactSupport.boundedFieldName('ask_' + ask.askName + '_' + field), 'Ask ' + ask.askName + ': ' + field) } }
+                (sampleKeys?.get('asks') ?: []).each { name -> wanted.put(darpan.judge.PairFactSupport.boundedFieldName(name as String), 'Ask field') }
             </script>
 
             <set field="addedCount" from="0"/>

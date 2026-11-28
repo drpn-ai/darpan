@@ -296,6 +296,43 @@ class JudgeSupportTests {
                 "${out.out.warnings}")
     }
 
+    /**
+     * R2 (DAR-OPS-029 S04): an ask or parameter whose fact field name would pass rules.FactField's 40 characters gets a bounded
+     * name (cut, then a short hash of the full name), the same on every run, so generate#PairFactType neither fails nor adds a
+     * field twice, and buildFact puts the value under that name. A name of 40 or fewer characters is kept as it is.
+     */
+    @Test
+    void aLongAskOrParameterNameGetsTheSameBoundedFieldNameOnEveryRun() {
+        String check = seedCheck(A, "long-names")
+        insert("darpan.judge.CheckAsk", [checkId: check, askName: "orderInformationFromShopify", companyUserGroupId: A, subjectSide: "FILE_1",
+                idField: "orderId", systemEnumId: "SHOPIFY", sourceConfigId: "CFG", keyField: "name", many: "N",
+                keepRecordFields: "financialStatusAfterRefund,tag"])
+        insert("darpan.judge.CheckParameterSet", [checkId: check, parameterSetId: "PS1", companyUserGroupId: A, label: "default"])
+        insert("darpan.judge.CheckParameter", [checkId: check, parameterSetId: "PS1", parameterName: "minimumRefundAmountBeforeAnAlertIsRaised",
+                companyUserGroupId: A, parameterValue: "5"])
+        Map params = [checkId: check, sampleKeys: [file1: ["status"], file2: ["status"]]]
+        Map first = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", params))
+        List<String> names = rows("rules.FactField", [factTypeId: first.factTypeId])*.fieldName
+        assertTrue(names.every { it.length() <= 40 }, "${names}")
+        String askField = PairFactSupport.boundedFieldName("ask_orderInformationFromShopify_financialStatusAfterRefund")
+        String paramField = PairFactSupport.boundedFieldName("param_minimumRefundAmountBeforeAnAlertIsRaised")
+        assertTrue(askField in names && paramField in names, "${names}")
+        assertTrue("ask_orderInformationFromShopify_tag" in names, "a short name is kept as it is: ${names}")
+
+        Map again = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", params))
+        assertEquals(first.factTypeId, again.factTypeId)
+        assertEquals(names.sort(), rows("rules.FactField", [factTypeId: first.factTypeId])*.fieldName.sort(), "a rerun adds no field")
+
+        Map sideState = [factTypeId: first.factTypeId, file1: [prefix: "file1", setAside: [], keyNames: first.keyNames.file1],
+                         file2: [prefix: "file2", setAside: [], keyNames: first.keyNames.file2]]
+        Map fact = PairFactSupport.buildFact([compareId: "L1", file1: [status: "open"], file2: null], sideState,
+                [minimumRefundAmountBeforeAnAlertIsRaised: "5"],
+                ["ask_orderInformationFromShopify_financialStatusAfterRefund": "refunded"]).fact as Map
+        assertEquals("refunded", fact[askField])
+        assertEquals("5", fact[paramField])
+        assertTrue(fact.keySet().every { (it as String).length() <= 40 }, "${fact.keySet()}")
+    }
+
     /** The count in the presence warning for one check's judging of the fixture plus extra pairs; empty when there is none. */
     private List<String> presenceWarnings(String checkId, List<Map> extra) {
         Map out = judge(checkId, false, extra)

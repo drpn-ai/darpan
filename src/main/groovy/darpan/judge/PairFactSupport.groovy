@@ -2,6 +2,9 @@ package darpan.judge
 
 import groovy.transform.CompileStatic
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
 /**
  * DAR-BE-318 plan 2, Task 6 (D7). One fact per compare id. A pair row is [compareId, file1: Map or null, file2: Map or null]
  * (null = the side holds no record; the shape AskSupport.fetchAsks takes). The fact carries each side's presence, each
@@ -40,6 +43,19 @@ class PairFactSupport {
     static String fieldName(String prefix, String key) {
         String name = prefix + "_" + (key ?: "").replaceAll("[^A-Za-z0-9_]", "_")
         return name.length() > MAX_FIELD_NAME ? name.substring(0, MAX_FIELD_NAME) : name
+    }
+
+    /**
+     * An ask or parameter field name (ask_<name>_<field>, param_<name>) within rules.FactField's limit: the name itself when it
+     * fits, so every name made before is kept as it is; otherwise its start, "_" and the first 8 hex digits of the whole name's
+     * SHA-256. It depends on the name alone, so every run, generate#PairFactType and buildFact give the same name, and a rerun
+     * never adds a field twice.
+     */
+    static String boundedFieldName(String name) {
+        if (name == null || name.length() <= MAX_FIELD_NAME) return name
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(name.getBytes(StandardCharsets.UTF_8))
+        String hash = String.format("%02x%02x%02x%02x", digest[0] & 0xff, digest[1] & 0xff, digest[2] & 0xff, digest[3] & 0xff)
+        return name.substring(0, MAX_FIELD_NAME - hash.length() - 1) + "_" + hash
     }
 
     /**
@@ -99,11 +115,11 @@ class PairFactSupport {
         }
         for (Object e in (params ?: [:]).entrySet()) {
             Map.Entry entry = (Map.Entry) e
-            fact.put("param_" + entry.key, entry.value)
+            fact.put(boundedFieldName("param_" + entry.key), entry.value)
         }
         for (Object e in (askFields ?: [:]).entrySet()) {
             Map.Entry entry = (Map.Entry) e
-            fact.put(entry.key as String, entry.value)
+            fact.put(boundedFieldName(entry.key as String), entry.value)
         }
         return [factTypeId: sideState.get("factTypeId"), recordId: compareId, fact: fact] as Map<String, Object>
     }

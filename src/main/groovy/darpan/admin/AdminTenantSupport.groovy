@@ -45,6 +45,14 @@ class AdminTenantSupport {
         return [tenantUserGroupId: tenantId]
     }
 
+    /** Every group's display label by id (its description, else the id): how the cross-tenant admin boards name a tenant. */
+    static Map<String, String> tenantLabelsById(def ec) {
+        return (ec.entity.find("moqui.security.UserGroup").list() ?: []).collectEntries { group ->
+            String id = group.get("userGroupId")
+            [(id): (group.get("description") ?: id)]
+        }
+    }
+
     /**
      * DAR-BE-145. A go-live as typed: with an offset ("2026-10-20T21:05:23-07:00") it is that instant; without one
      * ("2026-10-20 21:05:23") it is that wall-clock time in the tenant's zone, as a go-live is handed over. Null when

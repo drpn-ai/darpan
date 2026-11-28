@@ -30,7 +30,7 @@ class AdminScheduleSupport {
 
         int hours = (horizonHours != null && horizonHours > 0) ? horizonHours : DEFAULT_HORIZON_HOURS
         Timestamp to = new Timestamp(now.time + (hours * 3600000L))
-        Map<String, String> tenantLabels = tenantLabelsById(ec)
+        Map<String, String> tenantLabels = AdminTenantSupport.tenantLabelsById(ec)
 
         // Partitioned in Groovy off a single read rather than two conditioned queries: the board
         // needs both halves, and a paused automation still carries a stale nextScheduledFireTime
@@ -144,13 +144,6 @@ class AdminScheduleSupport {
                 scheduleExpr     : automation.scheduleExpr,
                 windowTimeZone   : automation.windowTimeZone ?: "UTC",
         ]
-    }
-
-    private static Map<String, String> tenantLabelsById(def ec) {
-        return (ec.entity.find("moqui.security.UserGroup").list() ?: []).collectEntries { group ->
-            String id = readField(group, "userGroupId")
-            [(id): (readField(group, "description") ?: id)]
-        }
     }
 
     /**

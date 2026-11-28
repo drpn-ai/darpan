@@ -32,7 +32,7 @@ class AdminLiveOperationsSupport {
         if (!AdminAccessSupport.requireSuperAdmin(ec)) return null
 
         List<Map<String, Object>> unavailable = []
-        Map<String, String> tenantLabels = guarded("tenants", unavailable, [:]) { tenantLabelsById(ec) }
+        Map<String, String> tenantLabels = guarded("tenants", unavailable, [:]) { AdminTenantSupport.tenantLabelsById(ec) }
         Map<String, Map> automations = guarded("automations", unavailable, [:]) { automationsById(ec) }
         Map<String, String> auditNames = guarded("audits", unavailable, [:]) { auditNameByAutomationId(ec) }
         List<Map> runningExecutions = guarded("executions", unavailable, []) {
@@ -252,13 +252,6 @@ class AdminLiveOperationsSupport {
             if (automationId && auditName) byAutomation[automationId] = auditName
         }
         return byAutomation
-    }
-
-    private static Map<String, String> tenantLabelsById(def ec) {
-        return (ec.entity.find("moqui.security.UserGroup").list() ?: []).collectEntries { group ->
-            String id = readField(group, "userGroupId")
-            [(id): (readField(group, "description") ?: id)]
-        }
     }
 
     private static <T> T guarded(String source, List<Map<String, Object>> unavailable, T fallback, Closure<T> read) {

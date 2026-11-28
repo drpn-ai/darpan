@@ -40,6 +40,12 @@
                     conclusionEnumId, diagnosisText; claimRuleSetId, claimRuleId, causeRuleSetId, causeRuleId (DAR-BE-318:
                     the rules that judged it; blank when not given); records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
                     checks [{label, passed (Boolean), value}].</description></parameter>
+            <parameter name="outsideRules" type="Map">
+                <description>DAR-OPS-029 D11. The run's rows no statement owns: {count (Integer, the true total), rows
+                    [{recordKey, diffType, bucket, note, records (AuditFindingRecord-shaped: systemEnumId, recordType, recordId,
+                    internalId, recordStatus, recordData; systemEnumId is stored as its ROOT system)}]}. Kept on this morning's AuditCheckRun, first 200 rows;
+                    count below the number of rows is refused. Absent: left as record#CheckRun cleared it (null). No check
+                    run that morning (a verify): not kept.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="findingIds" type="List"/>
@@ -74,6 +80,12 @@
                         <return error="true" message="Unknown system ${r.systemEnumId} on finding ${f.recordKey}"/></if>
                 </iterate>
             </iterate>
+            <if condition="outsideRules != null">
+                <set field="outsideCount" from="outsideRules.count instanceof Number ? (outsideRules.count as Long) : null"/>
+                <set field="outsideRows" from="outsideRules.rows instanceof List ? outsideRules.rows : (outsideRules.rows == null ? [] : null)"/>
+                <if condition="outsideCount == null || outsideCount &lt; 0 || outsideRows == null || outsideCount &lt; outsideRows.size()">
+                    <return error="true" message="Check ${checkId}: outsideRules needs a count of at least its rows and a list of rows"/></if>
+            </if>
 
             <set field="findingIds" from="[]"/>
             <set field="foundCount" from="0" type="Integer"/>
@@ -214,6 +226,32 @@
                 </if>
                 <script>findingIds.add(finding.findingId)</script>
             </iterate>
+
+            <if condition="outsideRules != null">
+                <entity-find entity-name="darpan.audit.AuditCheckRun" list="morningRuns" for-update="true">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="checkId"/>
+                    <econdition field-name="period"/>
+                    <econdition field-name="reportDate"/>
+                </entity-find>
+                <if condition="morningRuns">
+                    <set field="morningRun" from="morningRuns[0]"/>
+                    <set field="morningRun.outsideRulesCount" from="outsideCount"/>
+                    <!-- Records read like AuditFindingRecord: the ROOT system, never the endpoint. -->
+                    <script><![CDATA[
+                        def rootOf = { String id ->
+                            def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", id).useCache(true).one()
+                            e?.enumTypeId == "DarpanSystemSource" ? (e.parentEnumId ?: e.enumId) : id
+                        }
+                        keptRows = outsideRows.take(200).collect { row ->
+                            (row instanceof Map && row.get("records") instanceof List) ? row + [records: row.get("records").collect { r ->
+                                (r instanceof Map && r.get("systemEnumId")) ? r + [systemEnumId: rootOf(r.get("systemEnumId") as String)] : r }] : row
+                        }
+                    ]]></script>
+                    <set field="morningRun.outsideRulesJson" from="groovy.json.JsonOutput.toJson(keptRows)"/>
+                    <entity-update value-field="morningRun"/>
+                </if>
+            </if>
         </actions>
     </service>
 
@@ -440,6 +478,9 @@
             <set field="checkRun.reason" from="reason"/>
             <set field="checkRun.runStamp" from="runStamp"/>
             <set field="checkRun.automationExecutionId" from="automationExecutionId"/>
+            <!-- D11: record#CheckFindings sets these for this run; a rerun never shows the last run's rows. -->
+            <set field="checkRun.outsideRulesCount" from="null"/>
+            <set field="checkRun.outsideRulesJson" from="null"/>
             <entity-create value-field="checkRun" or-update="true"/>
             <set field="checkRunId" from="checkRun.checkRunId"/>
 

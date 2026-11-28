@@ -181,6 +181,59 @@ class AuditLedgerInvariantsSmokeTests {
                 .condition("stateEnumId", "AUDFS_OPEN").count(), "one open finding per problem")
     }
 
+    // ---- D11: rows no statement owns are kept on the morning's run, never dropped ----------------
+
+    @Test
+    void rowsOutsideEveryRuleAreKeptOnTheMorningsRunAndARerunClearsThem() {
+        checkRun("2026-10-14", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
+        Map outside = [count: 2, rows: [[recordKey: "OUT-1", diffType: "MISSING_IN_FILE_2", bucket: "MISSING", note: "no rule",
+                                         records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "return", recordId: "OUT-1"]]],
+                                        [recordKey: "OUT-2", diffType: "FIELD_MISMATCH", bucket: "RULE", note: "no rule"]]]
+        record(CHECK, "2026-10-14", [finding("R4", "OUTK-1")], [outsideRules: outside])
+        Map run = morningRun("2026-10-14")
+        assertEquals(2L, run.outsideRulesCount as Long)
+        List stored = new groovy.json.JsonSlurper().parseText(run.outsideRulesJson as String) as List
+        assertEquals(["OUT-1", "OUT-2"], stored*.recordKey)
+        assertEquals("OMS", stored[0].records[0].systemEnumId, "records carry the ROOT system, as AuditFindingRecord does")
+
+        checkRun("2026-10-14", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
+        run = morningRun("2026-10-14")
+        assertEquals([null, null], [run.outsideRulesCount, run.outsideRulesJson], "a rerun never shows the last run's rows")
+
+        record(CHECK, "2026-10-14", [], [outsideRules: [count: 0, rows: []]])
+        run = morningRun("2026-10-14")
+        assertEquals([0L, "[]"], [run.outsideRulesCount as Long, run.outsideRulesJson], "none is 0 and [], not null")
+    }
+
+    @Test
+    void moreThanTwoHundredRowsKeepsTheFirstTwoHundredAndTheTrueCount() {
+        checkRun("2026-10-15", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
+        List rows = (1..250).collect { [recordKey: "BIG-${it}".toString(), diffType: "FIELD_MISMATCH", bucket: "RULE", note: "x"] }
+        record(CHECK, "2026-10-15", [], [outsideRules: [count: 900, rows: rows]])
+        Map run = morningRun("2026-10-15")
+        List kept = new groovy.json.JsonSlurper().parseText(run.outsideRulesJson as String) as List
+        assertEquals([900L, 200, "BIG-1", "BIG-200"], [run.outsideRulesCount as Long, kept.size(), kept[0].recordKey, kept[-1].recordKey])
+    }
+
+    @Test
+    void aCountBelowItsRowsIsRefusedAndNothingIsWritten() {
+        checkRun("2026-10-16", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
+        callExpectingError("record#CheckFindings", base("2026-10-16") + [findings: [finding("R4", "OUTBAD-1")],
+                outsideRules: [count: 1, rows: [[recordKey: "A"], [recordKey: "B"]]]], "outsideRules needs a count")
+        assertEquals(0L, countByKey("OUTBAD-1"), "validated before any finding is written")
+        assertEquals(null, morningRun("2026-10-16").outsideRulesCount)
+    }
+
+    @Test
+    void withoutACheckRunOrWithoutTheParameterNothingIsKept() {
+        record(CHECK, "2026-10-17", [], [outsideRules: [count: 1, rows: [[recordKey: "VERIFY-1"]]]])
+        assertEquals(0L, ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", CHECK)
+                .condition("reportDate", Date.valueOf("2026-10-17")).count(), "a verify writes no check run, and this writes none")
+        checkRun("2026-10-18", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
+        record(CHECK, "2026-10-18", [])
+        assertEquals(null, morningRun("2026-10-18").outsideRulesCount, "an old caller leaves it null")
+    }
+
     // ---- record#CheckRun: the status every close is gated on ----------------------------------
 
     @Test
@@ -248,11 +301,16 @@ class AuditLedgerInvariantsSmokeTests {
         return [companyUserGroupId: TENANT, checkId: CHECK, reportDate: Date.valueOf(day)]
     }
 
-    private Map record(String checkId, String day, List findings) {
+    private Map record(String checkId, String day, List findings, Map extra = [:]) {
         Map out = ec.service.sync().name("${SVC}.record#CheckFindings").parameters([companyUserGroupId: TENANT, checkId: checkId,
-                reportDate: Date.valueOf(day), checkStamp: Timestamp.valueOf("${day} 06:10:00"), findings: findings]).call()
+                reportDate: Date.valueOf(day), checkStamp: Timestamp.valueOf("${day} 06:10:00"), findings: findings] + extra).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         return out
+    }
+
+    private Map morningRun(String day) {
+        return ec.entity.find("darpan.audit.AuditCheckRun").condition("companyUserGroupId", TENANT).condition("checkId", CHECK)
+                .condition("reportDate", Date.valueOf(day)).useCache(false).one().getMap()
     }
 
     private Map close(String day, String status, List<String> examined) {

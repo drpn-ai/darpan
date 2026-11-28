@@ -581,6 +581,15 @@
             <description>DAR-UI-072. The automation execution whose reads this run is (ReconciliationAutomationExecution),
                 so the audit can hand out each system's extract. Empty on runs recorded before it was kept.</description>
         </field>
+        <field name="outsideRulesCount" type="number-integer">
+            <description>DAR-OPS-029 D11. How many rows of the check's run no statement owns ("Not covered by any rule"), shown,
+                never dropped. Null: the run predates it, or its caller sent none; 0: the run had none. Cleared by every
+                record#CheckRun and set by record#CheckFindings.</description>
+        </field>
+        <field name="outsideRulesJson" type="text-very-long">
+            <description>DAR-OPS-029 D11. The first 200 of those rows as a JSON array of {recordKey, diffType, bucket, note,
+                records}; outsideRulesCount is the true total. LONGTEXT: 200 rows do not fit MySQL's VARCHAR(4095).</description>
+        </field>
         <relationship type="one" related="darpan.audit.AuditCheck" fk-name="AUDCR_CHECK">
             <key-map field-name="checkId"/>
         </relationship>

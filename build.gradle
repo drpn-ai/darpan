@@ -472,11 +472,13 @@ tasks.register('mysqlTest', Test) {
     include '**/XaDeadlockPoolRegressionTests.class'
     include '**/AcknowledgementNoteMigrationMysqlTests.class'
     include '**/AcknowledgementNoteMigrationMoquiMysqlTests.class'
+    include '**/AuditCheckRunOutsideRulesMysqlTests.class'
     filter {
         includeTestsMatching '*LoginDeadlockRegressionTests'
         includeTestsMatching '*XaDeadlockPoolRegressionTests'
         includeTestsMatching '*AcknowledgementNoteMigrationMysqlTests'
         includeTestsMatching '*AcknowledgementNoteMigrationMoquiMysqlTests'
+        includeTestsMatching '*AuditCheckRunOutsideRulesMysqlTests'
         failOnNoMatchingTests = true
     }
     // Cap at 1, matching `test` above; this task is the only guard for MySQL-only defects (InnoDB

@@ -64,4 +64,13 @@
             <index-field name="eventTimestamp"/>
         </index>
     </entity>
+
+    <entity entity-name="SqlRunnerWindow" package="darpan.admin" cache="never">
+        <description>DAR-ADMIN-017. A super admin's open window on the read-only SQL runner (admin.SystemAdminServices
+            .get#SqlQueryResult): one fresh two-factor proof opens it for 15 minutes from opening (not sliding). One row
+            per person; signing out (facade.AuthFacadeServices.logout#Session or logout#AllSessions) deletes it.</description>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" not-null="true"/>
+        <field name="thruDate" type="date-time" not-null="true"/>
+    </entity>
 </entities>

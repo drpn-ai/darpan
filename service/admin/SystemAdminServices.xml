@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-ADMIN-017. What an operator used from the Moqui tools app (/apps, closed since DAR-BE-264), in the admin app and
+         darpan-admin: a read-only SQL runner, the server's facts, and the cache list with a per-cache clear. Super admins only.
+         Refusals start with a code ("CODE: sentence") so the app and the CLI can match them. Spec: wrapper
+         docs/superpowers/specs/2026-11-28-admin-moqui-tools-design.md. -->
+
+    <service verb="get" noun="SqlQueryResult" allow-remote="true" authz-action="view" transaction="ignore">
+        <description>Run one read-only SQL statement on the read-only datasource (darpan_sql_readonly, a SELECT-only DB user)
+            and return at most maxRows rows. The statement must start with SELECT, WITH, SHOW, EXPLAIN or DESCRIBE, holds no
+            ';', no write or lock word and no secret column name; it runs read-only and is always rolled back, with a 30-second
+            timeout. Secret columns come back masked; encrypted fields stay ciphertext. A fresh two-factor proof (adminCode or
+            adminPasskeyAssertion) opens a 15-minute window for the caller (not sliding; signing out ends it); while it is open
+            no proof is needed and one given is not spent. Every call, refused or not, writes an AdminAuditLog row (in its own
+            transaction, so it survives the query's rollback). Codes: SQL_READONLY_NOT_CONFIGURED, SQL_REFUSED,
+            SQL_WINDOW_CLOSED, a TwoFactorRefusal name (CODE, PASSKEY, NOT_ENROLLED, ...), SQL_TIMEOUT, SQL_FAILED.</description>
+        <in-parameters>
+            <parameter name="sql" required="true" allow-html="any"><description>One read-only statement.</description></parameter>
+            <parameter name="maxRows" type="Integer" default-value="500"><description>Rows to return, 1 to 5000.</description></parameter>
+            <parameter name="adminCode"><description>A current code from the caller's own authenticator app (or
+                adminPasskeyAssertion). Needed only when the window is closed.</description></parameter>
+            <parameter name="adminPasskeyAssertion"><description>Instead of adminCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the statement ran.</description></parameter>
+            <parameter name="columns" type="List"><description>Column labels, in order.</description><parameter name="column"/></parameter>
+            <parameter name="rows" type="List"><description>One list of cells per row (text, number, boolean or null; dates as
+                text, binary as "[binary N bytes]", text over 2000 characters cut with "…").</description>
+                <parameter name="row" type="List"/></parameter>
+            <parameter name="rowCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"><description>More rows existed than maxRows.</description></parameter>
+            <parameter name="maskedColumns" type="List"><description>Columns shown as "••••".</description><parameter name="column"/></parameter>
+            <parameter name="elapsedMs" type="Long"/>
+            <parameter name="windowThruDate" type="Timestamp"><description>When the caller's SQL window ends.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="auditBase" from="[adminUserId: ec.user.userId, serviceName: 'admin.SystemAdminServices.get#SqlQueryResult',
+                    targetType: 'SqlQuery', targetId: darpan.admin.system.SqlReadOnlyRunner.READ_ONLY_GROUP]"/>
+            <set field="sqlForTrail" from="sql?.length() &gt; 4000 ? sql.substring(0, 4000) + '…' : sql"/>
+
+            <!-- Refusals that spend no code come first: not set up, then the statement itself. The trail row is written before
+                 the error, since Moqui runs no service once an error is in ec.message. -->
+            <set field="refusal" from="darpan.admin.system.SystemAdminSupport.readOnlyProblem(ec)"/>
+            <set field="refusalCode" value="SQL_READONLY_NOT_CONFIGURED"/>
+            <if condition="!refusal">
+                <set field="refusal" from="darpan.admin.system.SqlReadOnlyRunner.statementRefusal(sql)"/>
+                <set field="refusalCode" value="SQL_REFUSED"/>
+            </if>
+            <if condition="!refusal">
+                <entity-find-one entity-name="darpan.admin.SqlRunnerWindow" value-field="window"><field-map field-name="userId" from="ec.user.userId"/></entity-find-one>
+                <if condition="window == null || !window.thruDate.after(ec.user.nowTimestamp)">
+                    <if condition="!adminCode &amp;&amp; !adminPasskeyAssertion">
+                        <set field="refusal" value="Give a fresh two-factor code to open a 15-minute SQL window."/>
+                        <set field="refusalCode" value="SQL_WINDOW_CLOSED"/>
+                        <else>
+                            <set field="proofProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion)"/>
+                            <if condition="proofProblem">
+                                <set field="refusal" from="proofProblem == darpan.facade.auth.TwoFactorRefusal.NOT_ENROLLED
+                                        ? 'Set up two-factor on your own account before using the SQL runner.' : proofProblem.toString()"/>
+                                <set field="refusalCode" from="proofProblem.name()"/>
+                                <else>
+                                    <set field="window" from="[userId: ec.user.userId, fromDate: ec.user.nowTimestamp,
+                                            thruDate: new java.sql.Timestamp(ec.user.nowTimestamp.time + 15L * 60_000L)]"/>
+                                    <service-call name="store#darpan.admin.SqlRunnerWindow" in-map="window"/>
+                                    <service-call name="create#darpan.admin.AdminAuditLog" in-map="auditBase + [targetType: 'SqlWindow',
+                                            targetId: ec.user.userId, detailText: 'SQL window opened until ' + window.thruDate + '.',
+                                            auditTimestamp: ec.user.nowTimestamp]"/>
+                                </else>
+                            </if>
+                        </else>
+                    </if>
+                </if>
+            </if>
+            <if condition="refusal">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="auditBase + [detailText: 'Refused ' + refusalCode + ': ' + sqlForTrail,
+                        auditTimestamp: ec.user.nowTimestamp]"/>
+                <return error="true" message="${refusalCode}: ${refusal}"/>
+            </if>
+
+            <set field="windowThruDate" from="window.thruDate"/>
+            <set field="result" from="darpan.admin.system.SystemAdminSupport.query(ec, sql,
+                    darpan.admin.system.SqlReadOnlyRunner.clampMaxRows(maxRows))"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="auditBase + [detailText: (result.errorCode
+                    ? result.errorCode + ' after ' + result.elapsedMs + ' ms: '
+                    : result.rowCount + (result.truncated ? '+' : '') + ' rows in ' + result.elapsedMs + ' ms: ') + sqlForTrail,
+                    auditTimestamp: ec.user.nowTimestamp]"/>
+            <if condition="result.errorCode"><return error="true" message="${result.errorCode}: ${result.errorMessage}"/></if>
+            <set field="columns" from="result.columns"/>
+            <set field="rows" from="result.rows"/>
+            <set field="rowCount" from="result.rowCount"/>
+            <set field="truncated" from="result.truncated"/>
+            <set field="maskedColumns" from="result.maskedColumns"/>
+            <set field="elapsedMs" from="result.elapsedMs"/>
+            <set field="ok" from="true"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="SqlWindow" allow-remote="true" authz-action="view">
+        <description>The caller's read-only SQL window: open until thruDate (15 minutes from the fresh proof that opened it),
+            or closed. Signing out ends it.</description>
+        <out-parameters>
+            <parameter name="open" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"><description>Empty when closed.</description></parameter>
+            <parameter name="minutesLeft" type="Integer"><description>Whole minutes left, rounded up; 0 when closed.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="open" from="false"/>
+            <set field="minutesLeft" from="0"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="darpan.admin.SqlRunnerWindow" value-field="window"><field-map field-name="userId" from="ec.user.userId"/></entity-find-one>
+            <if condition="window != null &amp;&amp; window.thruDate.after(ec.user.nowTimestamp)">
+                <set field="open" from="true"/>
+                <set field="thruDate" from="window.thruDate"/>
+                <set field="minutesLeft" from="(int) Math.ceil((window.thruDate.time - ec.user.nowTimestamp.time) / 60_000.0d)"/>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ServerInfo" allow-remote="true" authz-action="view">
+        <description>The server's facts (the Moqui tools app's System dashboard): Moqui and runtime versions, components,
+            Moqui's status map (utilization, heap, disk, threads, datasources without passwords), the worker and job pools,
+            and whether the read-only SQL datasource is set up.</description>
+        <out-parameters>
+            <parameter name="serverInfo" type="Map">
+                <parameter name="moquiVersion"/>
+                <parameter name="versionMap" type="Map"/>
+                <parameter name="components" type="List"><parameter name="component" type="Map">
+                    <parameter name="name"/><parameter name="version"/><parameter name="location"/></parameter></parameter>
+                <parameter name="statusMap" type="Map"/>
+                <parameter name="workerPool" type="Map"><parameter name="poolSize" type="Integer"/><parameter name="activeCount" type="Integer"/>
+                    <parameter name="maxPoolSize" type="Integer"/><parameter name="queueSize" type="Integer"/></parameter>
+                <parameter name="jobWorkerPool" type="Map"><parameter name="poolSize" type="Integer"/><parameter name="activeCount" type="Integer"/>
+                    <parameter name="maxPoolSize" type="Integer"/><parameter name="queueSize" type="Integer"/></parameter>
+                <parameter name="sqlReadOnlyConfigured" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="serverInfo" from="darpan.admin.system.SystemAdminSupport.serverInfo(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Caches" allow-remote="true" authz-action="view">
+        <description>Every Moqui cache with its size, limits and hit counts (the Moqui tools app's Cache screen).</description>
+        <in-parameters>
+            <parameter name="filterRegexp"><description>Only caches whose name matches this regular expression.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="caches" type="List"><parameter name="cache" type="Map">
+                <parameter name="name"/><parameter name="size" type="Long"/><parameter name="maxElements" type="Long"/>
+                <parameter name="expireTimeIdle" type="Long"/><parameter name="expireTimeLive" type="Long"/>
+                <parameter name="hitCount" type="Long"/><parameter name="missCountTotal" type="Long"/><parameter name="getCount" type="Long"/>
+                <parameter name="putCount" type="Long"/><parameter name="removeCount" type="Long"/><parameter name="evictionCount" type="Long"/>
+                <parameter name="expireCount" type="Long"/></parameter></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="caches" from="ec.cache.getAllCachesInfo('+name', filterRegexp ?: null)"/>
+        </actions>
+    </service>
+
+    <service verb="clear" noun="Cache" allow-remote="true">
+        <description>Empty one Moqui cache by its exact name (from get#Caches), e.g. after a data edit in prod that a cache still
+            hides. One at a time: there is no clear-all. Writes an AdminAuditLog row. Code: CACHE_UNKNOWN.</description>
+        <in-parameters>
+            <parameter name="cacheName" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="clearedCount" type="Integer"><description>Entries it held before.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!ec.cache.cacheExists(cacheName)">
+                <return error="true" message="CACHE_UNKNOWN: There is no cache named ${cacheName}."/></if>
+            <set field="cache" from="ec.cache.getCache(cacheName)"/>
+            <set field="clearedCount" from="cache.size()"/>
+            <script>cache.clear()</script>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.SystemAdminServices.clear#Cache', targetType: 'Cache', targetId: cacheName,
+                    detailText: 'Cleared ' + clearedCount + ' entries.', auditTimestamp: ec.user.nowTimestamp]"/>
+            <set field="ok" from="true"/>
+        </actions>
+    </service>
+</services>

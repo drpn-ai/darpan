@@ -357,6 +357,12 @@ class CliMethodAllowlist {
             // DAR-OPS-019: the field-key rotation is a super admin's, with their own two-factor code; never a CLI session's.
             "admin.SecurityAdminServices.rotate#EncryptedFields",
             "admin.SecurityAdminServices.update#TwoFactorPolicy",
+            // DAR-ADMIN-017: the read-only SQL runner, server facts and caches are a super admin's (admin app and darpan-admin).
+            "admin.SystemAdminServices.clear#Cache",
+            "admin.SystemAdminServices.get#Caches",
+            "admin.SystemAdminServices.get#ServerInfo",
+            "admin.SystemAdminServices.get#SqlQueryResult",
+            "admin.SystemAdminServices.get#SqlWindow",
 
             "admin.TransferAdminServices.begin#SecretHandoff",
             "admin.ShopifyAppAdminServices.list#ShopifyApps",

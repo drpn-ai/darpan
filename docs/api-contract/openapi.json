@@ -249,6 +249,21 @@
                                         "$ref": "#/components/schemas/SaveShopifyAppRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ClearCacheRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetCachesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetServerInfoRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetSqlQueryResultRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetSqlWindowRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateTenantRequest"
                                     },
                                     {
@@ -1101,6 +1116,11 @@
                                         "admin.SettingAdminServices.update#Setting": "#/components/schemas/UpdateSettingRequest",
                                         "admin.ShopifyAppAdminServices.list#ShopifyApps": "#/components/schemas/ListShopifyAppsRequest",
                                         "admin.ShopifyAppAdminServices.save#ShopifyApp": "#/components/schemas/SaveShopifyAppRequest",
+                                        "admin.SystemAdminServices.clear#Cache": "#/components/schemas/ClearCacheRequest",
+                                        "admin.SystemAdminServices.get#Caches": "#/components/schemas/GetCachesRequest",
+                                        "admin.SystemAdminServices.get#ServerInfo": "#/components/schemas/GetServerInfoRequest",
+                                        "admin.SystemAdminServices.get#SqlQueryResult": "#/components/schemas/GetSqlQueryResultRequest",
+                                        "admin.SystemAdminServices.get#SqlWindow": "#/components/schemas/GetSqlWindowRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
                                         "admin.TenantAdminServices.get#TenantDetail": "#/components/schemas/GetTenantDetailRequest",
@@ -1599,6 +1619,21 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveShopifyAppResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ClearCacheResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetCachesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetServerInfoResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSqlQueryResultResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSqlWindowResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CreateTenantResponse"
@@ -9688,6 +9723,590 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveShopifyAppResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ClearCacheParams": {
+                "type": "object",
+                "properties": {
+                    "cacheName": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "cacheName"
+                ],
+                "description": "Empty one Moqui cache by its exact name (from get#Caches), e.g. after a data edit in prod that a cache still\n            hides. One at a time: there is no clear-all. Writes an AdminAuditLog row. Code: CACHE_UNKNOWN."
+            },
+            "ClearCacheResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "clearedCount": {
+                        "type": "integer",
+                        "description": "Entries it held before."
+                    }
+                }
+            },
+            "ClearCacheRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SystemAdminServices.clear#Cache",
+                "x-darpan-method": "admin.SystemAdminServices.clear#Cache",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SystemAdminServices.clear#Cache"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ClearCacheParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ClearCacheResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SystemAdminServices.clear#Cache. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ClearCacheResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetCachesParams": {
+                "type": "object",
+                "properties": {
+                    "filterRegexp": {
+                        "type": "string",
+                        "description": "Only caches whose name matches this regular expression."
+                    }
+                },
+                "description": "Every Moqui cache with its size, limits and hit counts (the Moqui tools app's Cache screen)."
+            },
+            "GetCachesResult": {
+                "type": "object",
+                "properties": {
+                    "caches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "cache": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "size": {
+                                            "type": "integer"
+                                        },
+                                        "maxElements": {
+                                            "type": "integer"
+                                        },
+                                        "expireTimeIdle": {
+                                            "type": "integer"
+                                        },
+                                        "expireTimeLive": {
+                                            "type": "integer"
+                                        },
+                                        "hitCount": {
+                                            "type": "integer"
+                                        },
+                                        "missCountTotal": {
+                                            "type": "integer"
+                                        },
+                                        "getCount": {
+                                            "type": "integer"
+                                        },
+                                        "putCount": {
+                                            "type": "integer"
+                                        },
+                                        "removeCount": {
+                                            "type": "integer"
+                                        },
+                                        "evictionCount": {
+                                            "type": "integer"
+                                        },
+                                        "expireCount": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetCachesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SystemAdminServices.get#Caches",
+                "x-darpan-method": "admin.SystemAdminServices.get#Caches",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SystemAdminServices.get#Caches"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetCachesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetCachesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SystemAdminServices.get#Caches. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetCachesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetServerInfoParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The server's facts (the Moqui tools app's System dashboard): Moqui and runtime versions, components,\n            Moqui's status map (utilization, heap, disk, threads, datasources without passwords), the worker and job pools,\n            and whether the read-only SQL datasource is set up."
+            },
+            "GetServerInfoResult": {
+                "type": "object",
+                "properties": {
+                    "serverInfo": {
+                        "type": "object",
+                        "properties": {
+                            "moquiVersion": {
+                                "type": "string"
+                            },
+                            "versionMap": {
+                                "type": "object",
+                                "additionalProperties": true
+                            },
+                            "components": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "component": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string"
+                                                },
+                                                "version": {
+                                                    "type": "string"
+                                                },
+                                                "location": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "statusMap": {
+                                "type": "object",
+                                "additionalProperties": true
+                            },
+                            "workerPool": {
+                                "type": "object",
+                                "properties": {
+                                    "poolSize": {
+                                        "type": "integer"
+                                    },
+                                    "activeCount": {
+                                        "type": "integer"
+                                    },
+                                    "maxPoolSize": {
+                                        "type": "integer"
+                                    },
+                                    "queueSize": {
+                                        "type": "integer"
+                                    }
+                                }
+                            },
+                            "jobWorkerPool": {
+                                "type": "object",
+                                "properties": {
+                                    "poolSize": {
+                                        "type": "integer"
+                                    },
+                                    "activeCount": {
+                                        "type": "integer"
+                                    },
+                                    "maxPoolSize": {
+                                        "type": "integer"
+                                    },
+                                    "queueSize": {
+                                        "type": "integer"
+                                    }
+                                }
+                            },
+                            "sqlReadOnlyConfigured": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            },
+            "GetServerInfoRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SystemAdminServices.get#ServerInfo",
+                "x-darpan-method": "admin.SystemAdminServices.get#ServerInfo",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SystemAdminServices.get#ServerInfo"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetServerInfoParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetServerInfoResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SystemAdminServices.get#ServerInfo. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetServerInfoResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSqlQueryResultParams": {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "One read-only statement."
+                    },
+                    "maxRows": {
+                        "type": "integer",
+                        "description": "Rows to return, 1 to 5000."
+                    },
+                    "adminCode": {
+                        "type": "string",
+                        "description": "A current code from the caller's own authenticator app (or\n                adminPasskeyAssertion). Needed only when the window is closed."
+                    },
+                    "adminPasskeyAssertion": {
+                        "type": "string",
+                        "description": "Instead of adminCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
+                    }
+                },
+                "required": [
+                    "sql"
+                ],
+                "description": "Run one read-only SQL statement on the read-only datasource (darpan_sql_readonly, a SELECT-only DB user)\n            and return at most maxRows rows. The statement must start with SELECT, WITH, SHOW, EXPLAIN or DESCRIBE, holds no\n            ';', no write or lock word and no secret column name; it runs read-only and is always rolled back, with a 30-second\n            timeout. Secret columns come back masked; encrypted fields stay ciphertext. A fresh two-factor proof (adminCode or\n            adminPasskeyAssertion) opens a 15-minute window for the caller (not sliding; signing out ends it); while it is open\n            no proof is needed and one given is not spent. Every call, refused or not, writes an AdminAuditLog row (in its own\n            transaction, so it survives the query's rollback). Codes: SQL_READONLY_NOT_CONFIGURED, SQL_REFUSED,\n            SQL_WINDOW_CLOSED, a TwoFactorRefusal name (CODE, PASSKEY, NOT_ENROLLED, ...), SQL_TIMEOUT, SQL_FAILED."
+            },
+            "GetSqlQueryResultResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the statement ran."
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Column labels, in order."
+                    },
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                
+                            }
+                        },
+                        "description": "One list of cells per row (text, number, boolean or null; dates as\n                text, binary as \"[binary N bytes]\", text over 2000 characters cut with \"\u2026\")."
+                    },
+                    "rowCount": {
+                        "type": "integer"
+                    },
+                    "truncated": {
+                        "type": "boolean",
+                        "description": "More rows existed than maxRows."
+                    },
+                    "maskedColumns": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Columns shown as \"\u2022\u2022\u2022\u2022\"."
+                    },
+                    "elapsedMs": {
+                        "type": "integer"
+                    },
+                    "windowThruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When the caller's SQL window ends."
+                    }
+                }
+            },
+            "GetSqlQueryResultRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SystemAdminServices.get#SqlQueryResult",
+                "x-darpan-method": "admin.SystemAdminServices.get#SqlQueryResult",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SystemAdminServices.get#SqlQueryResult"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSqlQueryResultParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSqlQueryResultResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SystemAdminServices.get#SqlQueryResult. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSqlQueryResultResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSqlWindowParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The caller's read-only SQL window: open until thruDate (15 minutes from the fresh proof that opened it),\n            or closed. Signing out ends it."
+            },
+            "GetSqlWindowResult": {
+                "type": "object",
+                "properties": {
+                    "open": {
+                        "type": "boolean"
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Empty when closed."
+                    },
+                    "minutesLeft": {
+                        "type": "integer",
+                        "description": "Whole minutes left, rounded up; 0 when closed."
+                    }
+                }
+            },
+            "GetSqlWindowRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SystemAdminServices.get#SqlWindow",
+                "x-darpan-method": "admin.SystemAdminServices.get#SqlWindow",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SystemAdminServices.get#SqlWindow"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSqlWindowParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSqlWindowResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SystemAdminServices.get#SqlWindow. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSqlWindowResult"
                     }
                 },
                 "required": [
@@ -42740,6 +43359,11 @@
         "admin.SettingAdminServices.update#Setting": "UpdateSetting",
         "admin.ShopifyAppAdminServices.list#ShopifyApps": "ListShopifyApps",
         "admin.ShopifyAppAdminServices.save#ShopifyApp": "SaveShopifyApp",
+        "admin.SystemAdminServices.clear#Cache": "ClearCache",
+        "admin.SystemAdminServices.get#Caches": "GetCaches",
+        "admin.SystemAdminServices.get#ServerInfo": "GetServerInfo",
+        "admin.SystemAdminServices.get#SqlQueryResult": "GetSqlQueryResult",
+        "admin.SystemAdminServices.get#SqlWindow": "GetSqlWindow",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
         "admin.TenantAdminServices.get#TenantDetail": "GetTenantDetail",

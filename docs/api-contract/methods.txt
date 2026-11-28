@@ -73,6 +73,11 @@ admin.SettingAdminServices.reset#Setting
 admin.SettingAdminServices.update#Setting
 admin.ShopifyAppAdminServices.list#ShopifyApps
 admin.ShopifyAppAdminServices.save#ShopifyApp
+admin.SystemAdminServices.clear#Cache
+admin.SystemAdminServices.get#Caches
+admin.SystemAdminServices.get#ServerInfo
+admin.SystemAdminServices.get#SqlQueryResult
+admin.SystemAdminServices.get#SqlWindow
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant
 admin.TenantAdminServices.get#TenantDetail

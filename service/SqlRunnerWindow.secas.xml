@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-ADMIN-017. Signing out ends the person's read-only SQL window (darpan.admin.SqlRunnerWindow) early: the admin app's
+  sign-out and `darpan-admin logout` both call logout#Session. pre-service, while ec.user still names the person.
+-->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="SqlRunnerWindowEndOnLogout" service="facade.AuthFacadeServices.logout#Session" when="pre-service">
+        <condition><expression>ec.user.userId</expression></condition>
+        <actions>
+            <entity-delete-by-condition entity-name="darpan.admin.SqlRunnerWindow">
+                <econdition field-name="userId" from="ec.user.userId"/></entity-delete-by-condition>
+        </actions>
+    </seca>
+    <seca id="SqlRunnerWindowEndOnLogoutAll" service="facade.AuthFacadeServices.logout#AllSessions" when="pre-service">
+        <condition><expression>ec.user.userId</expression></condition>
+        <actions>
+            <entity-delete-by-condition entity-name="darpan.admin.SqlRunnerWindow">
+                <econdition field-name="userId" from="ec.user.userId"/></entity-delete-by-condition>
+        </actions>
+    </seca>
+</secas>

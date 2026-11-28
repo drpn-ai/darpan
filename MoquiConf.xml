@@ -95,4 +95,16 @@
             <subscreens-item name="darpan" menu-title="Darpan" menu-index="50" location="component://darpan/screen/darpan.xml"/>
         </screen>
     </screen-facade>
+    <!-- DAR-ADMIN-017: the read-only SQL runner's own datasource (admin.SystemAdminServices.get#SqlQueryResult). Off until
+         darpan_sql_ro_url is set (env or system property, with darpan_sql_ro_user and darpan_sql_ro_password): a DB user with
+         SELECT grants only (ops step in the wrapper spec docs/superpowers/specs/2026-11-28-admin-moqui-tools-design.md).
+         Off, the runner refuses (SqlReadOnlyRunner.readOnlySourceProblem); it never falls back to the app's own datasource.
+         pool-minsize 0, so a boot never waits on it. No entity is mapped to this group. -->
+    <entity-facade>
+        <datasource group-name="darpan_sql_readonly" database-conf-name="${entity_ds_db_conf}" schema-name="${entity_ds_schema}"
+                startup-add-missing="false" runtime-add-missing="false" disabled="${darpan_sql_ro_url ? 'false' : 'true'}">
+            <inline-jdbc jdbc-uri="${darpan_sql_ro_url}" jdbc-username="${darpan_sql_ro_user}" jdbc-password="${darpan_sql_ro_password}"
+                    pool-minsize="0" pool-maxsize="3"/>
+        </datasource>
+    </entity-facade>
 </moqui-conf>

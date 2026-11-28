@@ -368,7 +368,8 @@ class AutomationExecutionSupport {
                 firstRunResultId = summary.firstRunResultId as String
             } catch (Throwable t) {
                 status = STATUS_FAILED
-                error = t.message ?: t.toString()
+                // DAR-OPS-029 (S34): the one redactor, as every other run error, so a token in a 401 never reaches the digest
+                error = truncate(sanitizeErrorMessage(t), 3900)
                 logger.error("Flowchart automation {} failed: {}", automationId, error)
             }
             Timestamp completed = nowTimestamp(ec)

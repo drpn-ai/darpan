@@ -4164,6 +4164,32 @@ class AutomationExecutionSupportTests {
         assertEquals(noDuplicates.totalDifferences, [noDuplicates.onlyInFile1Count, noDuplicates.onlyInFile2Count, noDuplicates.ruleDifferenceCount].sum())
     }
 
+    // DAR-OPS-029 (S34, one-redactor rule): a flowchart automation's failure is stored masked, as every other run error is, so a
+    // token in a 401 never reaches the daily error digest or the alerts card.
+    @Test
+    void aFailedFlowchartAutomationStoresItsErrorMasked() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+                .put("savedRunType", darpan.reconciliation.flowchart.RunFlowchartSupport.SAVED_RUN_TYPE)
+        darpan.reconciliation.flowchart.RunFlowchartSupport.metaClass.static.runReconciliation = { def walkEc, Map params ->
+            throw new IllegalStateException("HotWax answered 401 for https://oms.example.com/api?token=zq81secretvalue " +
+                    "with Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.c2VjcmV0.c2ln")
+        }
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            Map execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find { it.automationId == "AUTO_API" }
+            assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
+            String stored = execution.errorMessage as String
+            assertNotNull(stored, "the failure still says why")
+            assertFalse(stored.contains("zq81secretvalue"), "no URL token in the stored error: ${stored}")
+            assertFalse(stored.contains("eyJhbGciOiJIUzI1NiJ9.c2VjcmV0.c2ln"), "no bearer token in the stored error: ${stored}")
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(darpan.reconciliation.flowchart.RunFlowchartSupport)
+        }
+    }
+
     // DAR-OPS-029 OC135: a real 0 is stored as 0 on the document and both rows, which read the counts in one order.
     @Test
     void aZeroSideStoresZeroAndTheSummaryAndRowsAgree() {

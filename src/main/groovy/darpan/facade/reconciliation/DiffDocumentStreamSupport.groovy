@@ -331,12 +331,16 @@ class DiffDocumentStreamSupport {
                         if (rowsDone) continue
                         if (!inRows) {
                             if (line.startsWith(SUMMARY_PREFIX)) {
+                                // OC56: an unreadable summary is refused, never written back as {}.
                                 Object fragment = headerFragment(slurper, line, SUMMARY_PREFIX)
-                                summary = fragment instanceof Map ? (Map) fragment : [:]
+                                if (!(fragment instanceof Map)) throw new IllegalStateException("Not rewritten: the result file's summary line could not be read.")
+                                summary = (Map) fragment
                                 headerLines << SUMMARY_PREFIX
                             } else if (transformWarnings != null && line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
+                                // OC56: an unreadable warnings line is refused, never written back as [] (the compare's own warnings).
                                 Object fragment = headerFragment(slurper, line, PROCESSING_WARNINGS_PREFIX)
-                                warnings = fragment instanceof List ? new ArrayList((List) fragment) : []
+                                if (!(fragment instanceof List)) throw new IllegalStateException("Not rewritten: the result file's processingWarnings line could not be read.")
+                                warnings = new ArrayList((List) fragment)
                                 headerLines << PROCESSING_WARNINGS_PREFIX
                             } else if (line.startsWith(DIFFERENCES_HEADER)) {
                                 scan.headerFound = true

@@ -330,4 +330,22 @@ class DiffDocumentStreamSupportTests {
         assertEquals(3, ((List) parse(f).differences).size(), "nothing a verify pass may remove was removed")
         assertEquals(3, ((Map) parse(f).summary).totalDifferences)
     }
+    /** OC56: an unreadable summary or warnings header is refused, never written back as {} or []. */
+    @Test
+    void rewriteDocumentRefusesAnUnreadableSummaryLine() {
+        File f = writeDiffDocument([row("1")])
+        f.text = f.getText("UTF-8").replaceFirst(/"summary":\{[^\n]*/, '"summary":{"totalDifferences":1,')
+        assertRefusedUntouched(f, "summary") {
+            DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s })
+        }
+    }
+
+    @Test
+    void rewriteDocumentRefusesAnUnreadableWarningsLineItWasAskedToChange() {
+        File f = writeDiffDocument([row("1")])
+        f.text = f.getText("UTF-8").replaceFirst(/"processingWarnings":\[[^\n]*/, '"processingWarnings":["compare warn,')
+        assertRefusedUntouched(f, "processingWarnings line") {
+            DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s }, { List w -> w + ["note"] })
+        }
+    }
 }

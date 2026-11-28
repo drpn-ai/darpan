@@ -24,7 +24,6 @@ class TenantConfigChangeTracker {
 
     static final String SYNC_NAME = "darpan.config.TenantConfigChanges"
     static final String NOTE_SERVICE = "config.TenantConfigServices.note#TenantConfigChange"
-    static final String EECA_LOCATION = "component://darpan/entity/TenantConfig.eecas.xml"
 
     /**
      * Where a row finds its tenant when it has no companyUserGroupId (or an old row left it empty): [parent entity, the
@@ -88,7 +87,7 @@ class TenantConfigChangeTracker {
     }
 
     /** The row's own companyUserGroupId, else its parent's (PARENTS); null when neither names one. */
-    static String tenantOf(def ec, String entityName, Map fields) {
+    private static String tenantOf(def ec, String entityName, Map fields) {
         if (fields == null) return null
         Object own = valueOf(fields, "companyUserGroupId")
         if (own) return own as String
@@ -106,7 +105,7 @@ class TenantConfigChangeTracker {
      * True when an update changes only operational columns. Only an EntityValue read from the database knows which
      * fields changed; any other update counts as a change (the snapshot then finds nothing new and writes no version).
      */
-    static boolean onlyOperational(def ec, String entityName, Map fields) {
+    private static boolean onlyOperational(def ec, String entityName, Map fields) {
         Set<String> operational = OPERATIONAL_FIELDS[entityName]
         if (!operational || !(fields instanceof org.moqui.entity.EntityValue)) return false
         def value = (org.moqui.entity.EntityValue) fields
@@ -126,13 +125,6 @@ class TenantConfigChangeTracker {
             return ((org.moqui.entity.EntityValue) fields).isField(name) ? fields.get(name) : null
         }
         return fields.get(name)
-    }
-
-    /** The entities TenantConfig.eecas.xml watches, read from the file itself so a test can hold it to the transfer specs. */
-    static List<String> watchedEntities(def ec) {
-        def root = new groovy.xml.XmlSlurper().parseText(ec.resource.getLocationText(EECA_LOCATION, false))
-        return root.eeca.findAll { it.@'on-create' == 'true' && it.@'on-update' == 'true' && it.@'on-delete' == 'true' }
-                .collect { it.@entity.toString() }.unique().sort()
     }
 
     /** The tenants one transaction changed, marked pending once it commits. */

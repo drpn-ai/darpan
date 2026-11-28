@@ -302,7 +302,7 @@ class TenantConfigAutoVersionSmokeTests {
         // DAR-BE-318 plan 2: the judge's tenant config is watched from the day it exists; TransferSpecs carries it later.
         held.addAll(["darpan.judge.DecisionOutcome", "darpan.judge.CheckDecision", "darpan.judge.CheckParameterSet",
                 "darpan.judge.CheckParameter", "darpan.judge.CheckAsk"])
-        assertEquals(held, TenantConfigChangeTracker.watchedEntities(ec) as Set<String>,
+        assertEquals(held, watchedEntities() as Set<String>,
                 "a table a version holds but nothing watches would change without a version")
         asSystem {
             held.findAll { ec.entity.isEntityDefined(it) }.each { String entityName ->
@@ -356,6 +356,20 @@ class TenantConfigAutoVersionSmokeTests {
 
     private void setR2Text(String text) {
         asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one().set("statementText", text).update() }
+    }
+
+    /** The entities TenantConfig.eecas.xml watches (create, update and delete), read from the file itself. */
+    private List<String> watchedEntities() {
+        String xml = ec.resource.getLocationText("component://darpan/entity/TenantConfig.eecas.xml", false)
+        def doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new ByteArrayInputStream(xml.getBytes("UTF-8")))
+        def nodes = doc.getElementsByTagName("eeca")
+        List<String> out = []
+        for (int i = 0; i < nodes.length; i++) {
+            def e = nodes.item(i)
+            if (["on-create", "on-update", "on-delete"].every { e.getAttribute(it) == "true" }) out.add(e.getAttribute("entity"))
+        }
+        return out.unique().sort()
     }
 
     private void inTransaction(Closure work) {

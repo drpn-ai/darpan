@@ -107,7 +107,7 @@ class TenantConfigVersionSupport {
     }
 
     /** Full name, else username, for each user id; one read for the whole list. */
-    static Map<String, String> userNames(def ec, Collection userIds) {
+    private static Map<String, String> userNames(def ec, Collection userIds) {
         List<String> ids = (userIds ?: []).findAll { it }.collect { it as String }.unique()
         if (!ids) return [:]
         return TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",

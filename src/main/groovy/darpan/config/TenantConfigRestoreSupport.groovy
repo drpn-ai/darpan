@@ -99,7 +99,7 @@ class TenantConfigRestoreSupport {
     }
 
     /** What the tenant has now that the version does not: statements to switch off, check links to remove, and the rest. */
-    static Map<String, List<Map>> addedSince(def ec, String tenantId, Map pack) {
+    private static Map<String, List<Map>> addedSince(def ec, String tenantId, Map pack) {
         Map<String, String> auditCodeByRef = ((pack.audits ?: []) as List<Map>).collectEntries {
             [(it.ref as String): it.fields?.auditCode as String] } as Map<String, String>
         Map<String, String> statementKeyByRef = ((pack.statements ?: []) as List<Map>).collectEntries {
@@ -155,7 +155,7 @@ class TenantConfigRestoreSupport {
     }
 
     /** SHA-256 over the version, the importer's plan hash and exactly which rows are switched off and unlinked. */
-    static String restoreHash(String configVersionId, String importerPlanHash, Map since) {
+    private static String restoreHash(String configVersionId, String importerPlanHash, Map since) {
         Map hashed = [version: configVersionId, importer: importerPlanHash,
                       switchOff: (since.switchOff as List<Map>)*.statementId,
                       unlink: (since.unlink as List<Map>).collect { "${it.statementId}|${it.checkId}".toString() }]

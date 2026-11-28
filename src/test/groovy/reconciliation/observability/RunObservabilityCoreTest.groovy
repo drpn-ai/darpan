@@ -22,6 +22,13 @@ class RunObservabilityCoreTest {
         assertFalse(RunObservability.isTerminalStatus(RunObservability.STATUS_PENDING))
     }
 
+    /** S99-074: the shared extract page heartbeat writes nothing without a run to write against (an ad-hoc extract). */
+    @Test
+    void thePageHeartbeatIsAbsentWithoutARunId() {
+        assertNull(RunObservability.throttledProgressListener(null, null, RunObservability.STAGE_EXTRACT_FILE1, 10))
+        assertNull(RunObservability.throttledProgressListener(null, "  ", null, null), "a blank run id is no run id")
+    }
+
     @Test
     void stageSequenceIsOrdered() {
         assertEquals(1, RunObservability.stageSequenceOf(RunObservability.STAGE_RESOLVE))

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.common.TenantScopedFinder
 import org.moqui.context.ExecutionContext
 
 class JsonSchemaUtil {
@@ -128,28 +129,6 @@ class JsonSchemaUtil {
         return schemaText?.trim() ? schemaText : null
     }
 
-    /**
-     * Resolves a location string to an absolute file path.
-     */
-    static String resolveFilePath(ExecutionContext ec, String location) {
-        if (!location) return null
-        def rr = ec.resource.getLocationReference(location)
-        if (rr != null && rr.supportsUrl()) {
-            def url = rr.getUrl()
-            if (url != null) {
-                if ("file".equalsIgnoreCase(url.protocol)) {
-                    try {
-                        return new File(url.toURI()).getAbsolutePath()
-                    } catch (Exception e) {
-                        return url.getPath()
-                    }
-                }
-                return url.toString()
-            }
-        }
-        return location
-    }
-
     static boolean ensureJsonSchemaTable(def ec) {
         String groupName = ec?.entity?.getEntityGroupName(JSON_SCHEMA_ENTITY_NAME) ?: "default"
         def datasourceFactory = ec?.entity?.getDatasourceFactory(groupName)
@@ -206,50 +185,21 @@ class JsonSchemaUtil {
         }
     }
 
-    // Hard cap on JSON/text uploads served via this helper. Audit M5.4: previously unbounded —
-    // `getString("UTF-8")` materializes the entire body into a Java String (2 bytes/char), so a
-    // multi-GB upload would OOM the JVM. Schemas are small; a 25 MB cap is generous and still
-    // protective. Callers can override via the second overload.
-    static final long DEFAULT_UPLOAD_MAX_BYTES = 25L * 1024L * 1024L
-
-    static Map<String, Object> readUploadedText(def fileItem, String fieldLabel = "schema file") {
-        return readUploadedText(fileItem, fieldLabel, DEFAULT_UPLOAD_MAX_BYTES)
-    }
-
-    static Map<String, Object> readUploadedText(def fileItem, String fieldLabel, long maxBytes) {
-        if (fileItem == null) {
-            return [fileName: null, text: null, error: "Uploaded ${fieldLabel} is empty"]
+    /**
+     * DAR-OPS-029 S31. The active tenant's schema by id, else by name ((companyUserGroupId, schemaName) is unique), or null
+     * with "Schema not found" on ec.message: another tenant's schema answers exactly as a missing one. Both reads carry the
+     * tenant themselves, so this holds with authz off too, where a bare find by schemaName can match several tenants' rows.
+     * flatten#JsonSchema and delete#JsonSchema each repeated this as XML.
+     */
+    static def findTenantSchema(def ec, Object rawJsonSchemaId, Object rawSchemaName) {
+        String jsonSchemaId = ((rawJsonSchemaId)?.toString()?.trim())
+        String schemaName = ((rawSchemaName)?.toString()?.trim())
+        def schema = jsonSchemaId ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, JSON_SCHEMA_ENTITY_NAME, "jsonSchemaId", jsonSchemaId) : null
+        if (schema == null && schemaName) {
+            schema = TenantScopedFinder.findTenantScoped(ec, JSON_SCHEMA_ENTITY_NAME).condition("schemaName", schemaName).useCache(false).one()
         }
-
-        String reportedName = fileItem?.getName()?.toString()?.trim()
-        long size = 0L
-        try {
-            size = (fileItem.getSize() ?: 0L) as long
-        } catch (Exception ignored) {
-            size = 0L
-        }
-
-        if (size <= 0L) {
-            return [fileName: reportedName, text: null, error: "Uploaded ${fieldLabel} is empty"]
-        }
-        if (size > maxBytes) {
-            return [
-                    fileName: reportedName,
-                    text    : null,
-                    error   : "Uploaded ${fieldLabel} exceeds the ${maxBytes >> 20} MB upload limit.",
-            ]
-        }
-
-        String text = fileItem.getString("UTF-8")
-        if (!((text)?.toString()?.trim())) {
-            return [fileName: reportedName, text: null, error: "Uploaded ${fieldLabel} is empty"]
-        }
-
-        return [
-                fileName : reportedName,
-                text     : text,
-                error    : null
-        ]
+        if (schema == null) ec.message.addError("Schema not found")
+        return schema
     }
 
     static def resolveSchemaRecord(def ec, Object rawJsonSchemaId, Object rawSchemaName = null,
@@ -286,21 +236,22 @@ class JsonSchemaUtil {
         if (!baseName) return null
         if (overwrite) return baseName
 
+        // DAR-OPS-029 S31: names are unique per tenant (JSON_SCHEMA_TENANT_NAME), so only the active tenant's schemas can
+        // clash; counted, so another tenant's same name never matches (a bare find matched it with authz off, or threw).
+        Closure<Boolean> taken = { String candidate ->
+            TenantScopedFinder.findTenantScoped(ec, JSON_SCHEMA_ENTITY_NAME).condition("schemaName", candidate).useCache(false).count() > 0
+        }
         String nameToSave = baseName
-        def existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
-            .condition("schemaName", nameToSave)
-            .one()
-        if (existingSchema == null) return nameToSave
+        boolean existing = taken(nameToSave)
+        if (!existing) return nameToSave
 
         int suffix = 1
-        while (existingSchema != null && suffix <= JsonSchemaConstants.UNIQUE_NAME_ATTEMPT_LIMIT) {
+        while (existing && suffix <= JsonSchemaConstants.UNIQUE_NAME_ATTEMPT_LIMIT) {
             nameToSave = "${baseName} (${suffix})"
-            existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
-                .condition("schemaName", nameToSave)
-                .one()
+            existing = taken(nameToSave)
             suffix++
         }
-        if (existingSchema != null) {
+        if (existing) {
             nameToSave = "${baseName} (${System.currentTimeMillis()})"
         }
         return nameToSave

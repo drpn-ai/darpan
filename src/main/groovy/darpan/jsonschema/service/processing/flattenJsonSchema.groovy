@@ -3,56 +3,26 @@ import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.SchemaFlattener
 import org.moqui.context.ExecutionContext
 
+// DAR-OPS-029 S31: flatten#JsonSchema (the facade) resolves the active tenant's schema and passes its id. The upload and
+// by-name inputs only the deleted legacy screens sent are gone.
 ExecutionContext ec = context.ec
-ec.logger.info("flattenJsonSchema called with: ${schemaFileName}")
-
 fieldList = []
 jsonSchemaString = ""
 
-String resolvedText = null
-if (schemaFile != null && schemaFile.getSize() > 0) {
-    resolvedText = schemaFile.getString("UTF-8")
-} else if (jsonSchemaId) {
-    def schema = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
-            .condition("jsonSchemaId", jsonSchemaId)
-            .one()
-    if (!schema) {
-        ec.message.addError("Schema not found for ID: ${jsonSchemaId}")
-        return
-    }
-    resolvedText = schema.schemaText
-} else if (filename || schemaFileName || schemaName) {
-    String lookupName = schemaName ?: (filename ?: schemaFileName)
-    def schema = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
-            .condition("schemaName", lookupName)
-            .one()
-    if (!schema) {
-        ec.message.addError("Schema not found for Name: ${lookupName}")
-        return
-    }
-    resolvedText = schema.schemaText
-    ec.logger.info("Found schema by Name '${lookupName}', text length: ${resolvedText?.length()}")
-} else {
-    ec.logger.warn("No jsonSchemaId, schemaName, filename, or schemaFile provided")
+def schema = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME).condition("jsonSchemaId", jsonSchemaId).one()
+if (!schema) {
+    ec.message.addError("Schema not found for ID: ${jsonSchemaId}")
     return
 }
-
-if (!resolvedText || resolvedText.trim().isEmpty()) {
-    ec.logger.error("schema text is empty for inputs: ID=${jsonSchemaId}, Name=${schemaName}, File=${filename}")
+String resolvedText = schema.schemaText
+if (!resolvedText?.trim()) {
     ec.message.addError("Schema content is empty")
     return
 }
-
 jsonSchemaString = resolvedText
 
 try {
-    ObjectMapper mapper = new ObjectMapper()
-    Map<String, Object> schemaMap = mapper.readValue(resolvedText, Map.class)
-    ec.logger.info("Schema parsed, keys: ${schemaMap.keySet()}")
-
-    fieldList = SchemaFlattener.flatten(schemaMap)
-
-    ec.logger.info("Flattened fieldList size: ${fieldList.size()}")
+    fieldList = SchemaFlattener.flatten((Map<String, Object>) new ObjectMapper().readValue(resolvedText, Map.class))
 } catch (Exception e) {
     ec.message.addError("Error parsing schema: ${e.message}")
     ec.logger.error("Error parsing schema", e)

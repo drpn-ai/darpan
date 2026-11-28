@@ -2,83 +2,6 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="create" noun="JsonSchemaFromJson" type="script" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/createJsonSchemaFromJson.groovy">
-        <description>Create a JSON schema from an uploaded JSON file and save it to the DB.</description>
-        <in-parameters>
-            <parameter name="jsonFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
-            <parameter name="schemaName"/>
-            <parameter name="description"/>
-            <parameter name="overwrite" type="Boolean" default-value="false"/>
-            <parameter name="strict" type="Boolean" default-value="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="schemaName"/>
-            <parameter name="filename"/><!-- Deprecated -->
-        </out-parameters>
-    </service>
-
-    <service verb="save" noun="JsonSchema" authenticate="true">
-        <description>Save an uploaded JSON schema file to the DB.</description>
-        <in-parameters>
-            <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
-            <parameter name="schemaName"/>
-            <parameter name="description"/>
-            <parameter name="overwrite" type="Boolean" default-value="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="schemaName"/>
-            <parameter name="filename"/><!-- Deprecated -->
-        </out-parameters>
-        <actions>
-            <set field="schemaUpload" from="jsonschema.common.JsonSchemaUtil.readUploadedText(schemaFile, 'schema file')"/>
-            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
-            <set field="overwriteMode" from="overwrite != null ? overwrite : false"/>
-            <set field="nameToSave" from="((schemaName)?.toString()?.trim()) ?: schemaUpload.fileName"/>
-            <set field="displayDescriptionValue" from="descriptionValue ?: nameToSave"/>
-            <if condition="schemaUpload.error">
-                <message error="true">${schemaUpload.error}</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="finalName" from="jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, overwriteMode)"/>
-                <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', finalName).useCache(false).one()"/>
-                <if condition="existingSchema != null">
-                    <set field="ignoreSchemaText" from="existingSchema.set('schemaText', schemaUpload.text)"/>
-                    <if condition="descriptionValue">
-                        <set field="ignoreDescription" from="existingSchema.set('description', descriptionValue)"/>
-                    </if>
-                    <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
-                    <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
-                    <set field="jsonSchemaId" from="existingSchema.jsonSchemaId"/>
-                </if>
-                <if condition="existingSchema == null">
-                    <service-call name="create#darpan.reconciliation.JsonSchema"
-                            in-map="[schemaName: finalName, schemaText: schemaUpload.text, description: displayDescriptionValue, statusId: 'Active']"
-                            out-map="createSchemaResult"/>
-                    <set field="jsonSchemaId" from="createSchemaResult.jsonSchemaId"/>
-                </if>
-                <set field="filename" from="finalName"/>
-                <set field="schemaName" from="finalName"/>
-                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, finalName, schemaUpload.text)"/>
-            </if>
-        </actions>
-    </service>
-
-
-    <service verb="infer" noun="JsonSchema" type="script" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/inferJsonSchema.groovy">
-        <description>Infer a flattened schema structure from a JSON file for the Creation Wizard.</description>
-        <in-parameters>
-            <parameter name="jsonFile" required="true" type="org.apache.commons.fileupload.FileItem"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="resultList" type="List"/>
-            <parameter name="jsonSchemaString" allow-html="any"/>
-        </out-parameters>
-    </service>
-
     <service verb="save" noun="RefinedSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/saveRefinedSchema.groovy">
         <description>Save a schema from the refined field list to DB; schemaName is required when creating a new schema.</description>
@@ -96,21 +19,6 @@
         </out-parameters>
     </service>
 
-    <service verb="validate" noun="JsonFileAgainstSchema" type="script" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonFileAgainstSchema.groovy">
-        <description>Validate an uploaded JSON file against a saved JSON schema.</description>
-        <in-parameters>
-            <parameter name="jsonFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="filename"/><!-- Deprecated -->
-            <parameter name="schemaName"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="valid" type="Boolean"/>
-            <parameter name="errorCount" type="Integer"/>
-            <parameter name="errorMessages" type="List"/>
-        </out-parameters>
-    </service>
     
     <service verb="validate" noun="JsonLocationAgainstSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonLocationAgainstSchema.groovy">
@@ -126,22 +34,6 @@
         </out-parameters>
     </service>
 
-    <service verb="resolve" noun="JsonPathForKey" type="script" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/resolveJsonPathForKey.groovy">
-        <description>Resolve a JSONPath from a key using a saved JSON schema.</description>
-        <in-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="schemaFileName"/> <!-- Valid filename or schemaName -->
-            <parameter name="filename"/> <!-- Deprecated -->
-            <parameter name="schemaName"/> 
-            <parameter name="key" required="true"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="resolvedJsonPath"/>
-            <parameter name="matchingPaths"><parameter name="jsonPath"/></parameter>
-            <parameter name="found" type="Boolean"/>
-        </out-parameters>
-    </service>
     <service verb="delete" noun="JsonSchema" authenticate="true">
         <description>Delete a JSON schema from DB.</description>
         <in-parameters>
@@ -170,13 +62,10 @@
 
     <service verb="flatten" noun="JsonSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/flattenJsonSchema.groovy">
-        <description>Read a JSON schema from DB or file and flatten it into a list of fields.</description>
+        <description>Flatten a saved JSON schema, by id, into a list of fields. The caller (facade flatten#JsonSchema) has
+            already checked it is the active tenant's.</description>
         <in-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="filename"/> <!-- Deprecated -->
-            <parameter name="schemaName"/>
-            <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem"/>
-            <parameter name="schemaFileName"/> <!-- Kept for backward compatibility if needed -->
+            <parameter name="jsonSchemaId" required="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="fieldList" type="List"/>

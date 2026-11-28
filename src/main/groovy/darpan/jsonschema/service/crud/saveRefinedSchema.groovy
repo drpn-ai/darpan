@@ -186,8 +186,10 @@ if (!finalSchemaName) {
 }
 
 if (existingSchema && finalSchemaName != existingSchema.schemaName) {
-    def duplicate = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
+    // DAR-OPS-029 S31: names are unique per tenant, so only the active tenant's schemas can clash.
+    def duplicate = darpan.facade.common.TenantScopedFinder.findTenantScoped(ec, JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
         .condition("schemaName", finalSchemaName)
+        .useCache(false)
         .one()
     if (duplicate && duplicate.jsonSchemaId != existingSchema.jsonSchemaId) {
         ec.message.addError("Schema name '${finalSchemaName}' already exists")

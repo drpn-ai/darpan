@@ -72,20 +72,6 @@ class JsonSchemaUtilTests {
         assertEquals("schema.json", JsonSchemaUtil.cleanFileName(" schema.json "))
     }
 
-    @Test
-    void readUploadedTextReadsUtf8AndRejectsEmptyUploads() {
-        FileItemStub goodFile = new FileItemStub(name: "schema.json", size: 12L, text: '{"a":1}')
-        FileItemStub emptyFile = new FileItemStub(name: "empty.json", size: 0L, text: '')
-
-        Map<String, Object> uploaded = JsonSchemaUtil.readUploadedText(goodFile, "schema file")
-        Map<String, Object> empty = JsonSchemaUtil.readUploadedText(emptyFile, "schema file")
-
-        assertEquals("schema.json", uploaded.fileName)
-        assertEquals('{"a":1}', uploaded.text)
-        assertNull(uploaded.error)
-        assertTrue(empty.error?.contains("Uploaded schema file is empty"))
-    }
-
     static class EntityFacadeStub {
         Map<String, FinderStub> finders = [:]
         DatasourceFactoryStub datasourceFactory = new DatasourceFactoryStub()
@@ -179,24 +165,6 @@ class JsonSchemaUtilTests {
         void delete() {
             if (failDelete) throw new IllegalStateException("boom")
             deleted = true
-        }
-    }
-
-    static class FileItemStub {
-        String name
-        long size
-        String text
-
-        String getName() {
-            return name
-        }
-
-        long getSize() {
-            return size
-        }
-
-        String getString(String charset) {
-            return text
         }
     }
 }

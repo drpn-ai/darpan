@@ -88,14 +88,9 @@
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
-            </if>
+            <!-- DAR-OPS-029 S31: the active tenant's schema, read with an explicit tenant condition (JsonSchemaUtil.findTenantSchema). -->
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
+                <set field="schema" from="jsonschema.common.JsonSchemaUtil.findTenantSchema(ec, jsonSchemaIdValue, schemaNameValue)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="systemEnumIdValue" from="((schema.systemEnumId)?.toString()?.trim())"/>
@@ -177,7 +172,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="resolvedName" from="existingSchema ? (schemaNameValue ?: existingSchema.schemaName) : jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, schemaNameValue, overwriteMode)"/>
                 <if condition="existingSchema &amp;&amp; resolvedName != existingSchema.schemaName">
-                    <set field="duplicateSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', resolvedName).useCache(false).one()"/>
+                    <!-- DAR-OPS-029 S31: a clash is only within the schema's own tenant (names are unique per tenant). -->
+                    <set field="duplicateSchema" from="darpan.facade.common.TenantScopedFinder.findTenantScoped(ec, 'darpan.reconciliation.JsonSchema').condition('schemaName', resolvedName).useCache(false).one()"/>
                     <if condition="duplicateSchema &amp;&amp; duplicateSchema.jsonSchemaId != existingSchema.jsonSchemaId">
                         <message error="true">Schema name '${resolvedName}' already exists</message>
                     </if>
@@ -311,18 +307,13 @@
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
-            </if>
+            <!-- DAR-OPS-029 S31: the active tenant's schema, read with an explicit tenant condition (JsonSchemaUtil.findTenantSchema). -->
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
+                <set field="schema" from="jsonschema.common.JsonSchemaUtil.findTenantSchema(ec, jsonSchemaIdValue, schemaNameValue)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.flatten#JsonSchema"
-                        in-map="[jsonSchemaId: schema?.jsonSchemaId, schemaName: schema?.schemaName]" out-map="flattenResult"/>
+                        in-map="[jsonSchemaId: schema.jsonSchemaId]" out-map="flattenResult"/>
                 <set field="fieldList" from="flattenResult.fieldList ?: []"/>
                 <set field="jsonSchemaString" from="flattenResult.jsonSchemaString"/>
             </if>
@@ -365,14 +356,9 @@
             <if condition="!(fieldList instanceof Collection) || ((Collection) fieldList).isEmpty()">
                 <message error="true">fieldList is required and cannot be empty</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
-            </if>
+            <!-- An existing schema named by id or name must be the active tenant's; with neither, a new one is saved. -->
             <if condition="!ec.message.hasError() &amp;&amp; (schemaIdValue || schemaNameValue)">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
+                <set field="schema" from="jsonschema.common.JsonSchemaUtil.findTenantSchema(ec, schemaIdValue, schemaNameValue)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
@@ -417,14 +403,9 @@
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
-                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
-            </if>
+            <!-- DAR-OPS-029 S31: the active tenant's schema, read with an explicit tenant condition (JsonSchemaUtil.findTenantSchema). -->
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
+                <set field="schema" from="jsonschema.common.JsonSchemaUtil.findTenantSchema(ec, jsonSchemaIdValue, schemaNameValue)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>

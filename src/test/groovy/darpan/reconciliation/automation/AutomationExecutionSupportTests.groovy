@@ -3993,7 +3993,7 @@ class AutomationExecutionSupportTests {
         List<Map> claims = capturedClaims
         List<Map> deliveries = captureDeliveries()
         try {
-            AutomationExecutionSupport.notifyRunError(ec, automation, [automationExecutionId: "EXEC_AUD",
+            AutomationRunNotifier.notifyRunError(ec, automation, [automationExecutionId: "EXEC_AUD",
                     statusEnumId: AutomationExecutionSupport.STATUS_FAILED, scheduledDate: NOW, triggerType: "scheduled",
                     file1ReadCount: 6982, file1RecordCount: 6982], "RR_AUDIT", "Compare scope SCOPE_ORDER was not found")
 
@@ -4071,7 +4071,7 @@ class AutomationExecutionSupportTests {
 
             def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
             def sources = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].findAll { it.automationId == "AUTO_API" }
-            AutomationExecutionSupport.notifyQuietDay(ec, automation, sources.find { it.fileSide == "FILE_1" }, sources.find { it.fileSide == "FILE_2" },
+            AutomationRunNotifier.notifyQuietDay(ec, automation, sources.find { it.fileSide == "FILE_1" }, sources.find { it.fileSide == "FILE_2" },
                     [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")],
                     runResult.reconciliationRunResultId as String, false)
             assertEquals(2, deliveries.size(), "a second try (a retry) finds the run already told")
@@ -4106,7 +4106,7 @@ class AutomationExecutionSupportTests {
         try {
             Map side1 = [readCount: 5, recordCount: 5], side2 = [readCount: 0, recordCount: 0]
             Map<String, String> finding = AutomationNoDataJudge.closeFinding(false, "HotWax", "Shopify", side1, side2, null, false)
-            AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, finding, [systemEnumId: "OMS_GQL"], [systemEnumId: "SHOPIFY"],
+            AutomationRunNotifier.notifySavedRunNoData(ec, MANUAL_RUN, finding, [systemEnumId: "OMS_GQL"], [systemEnumId: "SHOPIFY"],
                     side1, side2, false, timestamp("2026-04-30T00:00:00Z"), timestamp("2026-05-01T00:00:00Z"), "UTC")
 
             assertEquals(1, cards.size())
@@ -4128,7 +4128,7 @@ class AutomationExecutionSupportTests {
         try {
             Map side0 = [readCount: 0, recordCount: 0]
             Closure notify = { ->
-                AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
+                AutomationRunNotifier.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
                         side0, side0, false, timestamp("2026-04-30T07:00:00Z"), timestamp("2026-05-01T07:00:00Z"), "America/Los_Angeles")
             }
             notify()
@@ -4146,10 +4146,10 @@ class AutomationExecutionSupportTests {
     void aManualNoDataNotifyNeverThrowsAndStillDropsItsSubscriptions() {
         FakeEc ec = manualRunWithSubscriber()
         captureErrorCards()
-        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> throw new IllegalStateException("copy unreadable") }
+        AutomationRunNotifier.errorNoticeCopy = { def ignoredEc -> throw new IllegalStateException("copy unreadable") }
         try {
             Map side0 = [readCount: 0, recordCount: 0]
-            AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
+            AutomationRunNotifier.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
                     side0, side0, false, timestamp("2026-04-30T00:00:00Z"), timestamp("2026-05-01T00:00:00Z"), null)
             assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(), "no subscription outlives the run")
         } finally {
@@ -4397,11 +4397,11 @@ class AutomationExecutionSupportTests {
     @Test
     void aQuietDayNamesItsDaysInTheWindowZone() {
         java.time.ZoneId chicago = java.time.ZoneId.of("America/Chicago")
-        assertEquals("Nov 26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-26T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago),
+        assertEquals("Nov 26", AutomationRunNotifier.windowDayWords(timestamp("2026-11-26T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago),
                 "MEPHISTO's Thanksgiving window, midnight to midnight in Chicago")
-        assertEquals("Nov 20–26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-20T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago))
-        assertEquals("Oct 30–Nov 2", AutomationExecutionSupport.windowDayWords(timestamp("2026-10-30T05:00:00Z"), timestamp("2026-11-03T06:00:00Z"), chicago))
-        assertEquals("Nov 26", AutomationExecutionSupport.windowDayWords(timestamp("2026-11-26T06:00:00Z"), null, chicago))
+        assertEquals("Nov 20–26", AutomationRunNotifier.windowDayWords(timestamp("2026-11-20T06:00:00Z"), timestamp("2026-11-27T06:00:00Z"), chicago))
+        assertEquals("Oct 30–Nov 2", AutomationRunNotifier.windowDayWords(timestamp("2026-10-30T05:00:00Z"), timestamp("2026-11-03T06:00:00Z"), chicago))
+        assertEquals("Nov 26", AutomationRunNotifier.windowDayWords(timestamp("2026-11-26T06:00:00Z"), null, chicago))
         assertTrue(AutomationNoDataJudge.quietDay([readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
         assertTrue(!AutomationNoDataJudge.quietDay([readCount: 5, recordCount: 5], [readCount: 85, recordCount: 85], null, false),
                 "both sides kept records: no quiet day")
@@ -4602,8 +4602,8 @@ class AutomationExecutionSupportTests {
 
     private static List<Map> captureErrorCards() {
         List<Map> cards = Collections.synchronizedList([] as List<Map>)
-        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
-        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> opsNoticeSeedCopy() }
+        AutomationRunNotifier.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationRunNotifier.errorNoticeCopy = { def ignoredEc -> opsNoticeSeedCopy() }
         capturedClaims.clear()
         installInMemoryClaims(capturedClaims)
         return cards
@@ -5316,10 +5316,10 @@ class AutomationExecutionSupportTests {
         Map automation = [savedRunId: "RS_ORDER", automationName: "API Automation", companyUserGroupId: "TENANT_A"]
 
         assertEquals("https://hotwax-darpan-dev.web.app/runs/RS_ORDER/100511?tenantId=TENANT_A",
-                AutomationExecutionSupport.runErrorUrl(ec, automation, [resultDataManagerPath: "reconciliation-runs/RS_ORDER/20260501/result.json"], "100511"))
+                AutomationRunNotifier.runErrorUrl(ec, automation, [resultDataManagerPath: "reconciliation-runs/RS_ORDER/20260501/result.json"], "100511"))
         assertEquals("https://hotwax-darpan-dev.web.app/runs/RS_ORDER/100511?tenantId=TENANT_A",
-                AutomationExecutionSupport.runErrorUrl(ec, automation, [:], "100511"))
-        assertNull(AutomationExecutionSupport.runErrorUrl(ec, automation, [:], null), "no run and no result: nothing to link")
+                AutomationRunNotifier.runErrorUrl(ec, automation, [:], "100511"))
+        assertNull(AutomationRunNotifier.runErrorUrl(ec, automation, [:], null), "no run and no result: nothing to link")
     }
 
     // The per-automation canary allow-list was removed with the default flip (step 4). It existed to

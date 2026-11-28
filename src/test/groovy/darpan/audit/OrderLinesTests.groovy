@@ -34,6 +34,21 @@ class OrderLinesTests {
         assertEquals("EXCLUDED", recs[0].recordData.presence)
     }
 
+    // DAR-OPS-029 S11 (for S10). Lines past the firstKeyRecords cap are counted per side (S03a); the finding names them per
+    // system, so the page can say "N more lines" instead of showing an order as whole when it is not.
+    @Test
+    void linesLeftOffTheOrderAreCountedPerSystem() {
+        assertEquals([NETSUITE_SUITEQL: 2, OMS_ORDER_ITEMS_GQL: 5],
+                AuditAutomationSupport.orderLinesOmittedOf([firstKeyRecordsOmitted: [file2: 2, file1: 5]], OMS, NS))
+        assertEquals([OMS_ORDER_ITEMS_GQL: 7], AuditAutomationSupport.orderLinesOmittedOf([firstKeyRecordsOmitted: [file1: 5, file2: 2]], OMS, OMS),
+                "two sides of one system add up")
+        assertEquals([NETSUITE_SUITEQL: 2], AuditAutomationSupport.orderLinesOmittedOf([firstKeyRecordsOmitted: [file1: 0, file2: 2]], OMS, NS),
+                "a side with none left off is not named")
+        assertEquals(null, AuditAutomationSupport.orderLinesOmittedOf([firstKeyRecordsOmitted: [file1: 3]], [:], NS),
+                "a side with no system cannot be named")
+        assertEquals(null, AuditAutomationSupport.orderLinesOmittedOf([type: "MISSING_IN_FILE_2", id: "R1"], OMS, NS), "none left off: absent")
+    }
+
     @Test
     void aRowWithoutOrderLinesAddsNone() {
         assertEquals([], AuditAutomationSupport.orderLineRecords([type: "MISSING_IN_FILE_2", id: "R1"], OMS, NS))

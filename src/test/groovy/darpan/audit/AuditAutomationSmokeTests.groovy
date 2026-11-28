@@ -299,6 +299,20 @@ class AuditAutomationSmokeTests {
                 .condition("reportDate", Date.valueOf("2026-10-16")).count(), "a verify moves neither health nor the incremental read")
     }
 
+    // DAR-OPS-029 S11 (for S10). Lines of a finding's order left off past the cap reach the finding by root system (S13
+    // 0694eab8); a later read with none left off clears them.
+    @Test
+    void linesLeftOffTheOrderRideOnTheFinding() {
+        Map cut = row("MISSING_IN_FILE_2", "L1", "missing in NetSuite") + [firstKeyRecordsOmitted: [file1: 4]]
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-25", ["L1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("lines1", [cut])], null)
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals('{"OMS":4}', finding("L1").orderLinesOmittedJson, "the OMS endpoint counts toward OMS")
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-26", ["L1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("lines2", [row("MISSING_IN_FILE_2", "L1", "missing in NetSuite")])], null)
+        assertNull(finding("L1").orderLinesOmittedJson, "none left off this time")
+    }
+
     // DAR-OPS-029 S11 (OC103 on the verify path). record#CheckRun calls a check whose every read failed not run (S13
     // 2ec02a18); a verify writes no run, so verifyStatus must say the same, or the verify goes on to judge an empty read.
     @Test

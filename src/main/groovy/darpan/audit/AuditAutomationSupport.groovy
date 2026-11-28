@@ -538,7 +538,7 @@ class AuditAutomationSupport {
         return [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                 note: normalize(raw.message ?: raw.note), data: rowData(raw.data),
                 ids: rowData(raw.ids), sideRecords: rowData(raw.sideRecords),
-                firstKeyRecords: rowData(raw.firstKeyRecords),
+                firstKeyRecords: rowData(raw.firstKeyRecords), firstKeyRecordsOmitted: rowData(raw.firstKeyRecordsOmitted),
                 file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                 lookedUp: raw.lookedUp instanceof List ? raw.lookedUp : null,
                 systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
@@ -621,7 +621,8 @@ class AuditAutomationSupport {
                 String findingKey = "${statementCode}|${recordKey}".toString()
                 if (!AuditAutomationSupport.keeps(keptRank, findingKey, rank)) return
                 List<Map> records = AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source, sideConfigIds)
-                byKey.put(findingKey, [
+                Map omitted = AuditAutomationSupport.orderLinesOmittedOf(row, file1Source, file2Source)
+                byKey.put(findingKey, (omitted ? [orderLinesOmitted: omitted] : [:]) + [
                         statementCode   : statementCode,
                         recordKey       : recordKey,
                         headline        : AuditAutomationSupport.headline(check, row, records),
@@ -883,6 +884,24 @@ class AuditAutomationSupport {
         return own + lookedUp.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
                 related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
                 orderLineRecords(row, file1Source, file2Source, sideConfigIds)
+    }
+
+    /**
+     * DAR-OPS-029 S11 (for S10). Lines of the row's order left off past the firstKeyRecords cap (S03a), per side's system:
+     * {systemEnumId: count above 0}, two sides of one system added up; null when none were. The ledger stores them by root
+     * system as AuditFinding.orderLinesOmittedJson (S13).
+     */
+    static Map<String, Integer> orderLinesOmittedOf(Map row, def file1Source, def file2Source) {
+        Map byFile = row.firstKeyRecordsOmitted instanceof Map ? (Map) row.firstKeyRecordsOmitted : null
+        if (!byFile) return null
+        Map<String, Integer> out = new TreeMap<String, Integer>()
+        [file1: file1Source, file2: file2Source].each { String file, def source ->
+            Object n = byFile.get(file)
+            String systemEnumId = normalize(readField(source, "systemEnumId"))
+            if (!systemEnumId || !(n instanceof Number) || ((Number) n).intValue() <= 0) return
+            out.put(systemEnumId, (out.get(systemEnumId) ?: 0) + ((Number) n).intValue())
+        }
+        return out ?: null
     }
 
     /** DAR-UI-099: the record type of every other line of a finding's order (firstKeyRecords). */

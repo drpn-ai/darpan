@@ -248,6 +248,11 @@ class CompareDatasetJsonFrameTests {
             darpan.reconciliation.conclusion.ConclusionKeySupport.compareKey((Map) new groovy.json.JsonSlurper().parseText(r), ['$.id'], null)
         }.sort(), ids(CompareDatasetSupport.buildJsonIdDf(json(decimals as String[]), paths('$.id'), "File 1", [null], ['$.id'])))
         assertEquals(["1.5", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json(decimals as String[]), paths('$.id'), "File 1", [null], ['$.id'])))
+        // OC140: a key edged by a tab or CR is the same key in both passes (Spark trims as Java's String.trim; b76b5f77).
+        List<String> edged = ['{"id":" K1\\t"}', '{"id":"K2\\r"}']
+        assertEquals(edged.collect { String r ->
+            darpan.reconciliation.conclusion.ConclusionKeySupport.compareKey((Map) new groovy.json.JsonSlurper().parseText(r), ['$.id'], null)
+        }.sort(), ids(CompareDatasetSupport.buildJsonIdDf(json(edged as String[]), paths('$.id'), "File 1", [null], ['$.id'])))
         // An integer-only column was always read as a long: unchanged.
         assertEquals(["12345678901", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":7}', '{"id":12345678901}'), paths('$.id'), "File 1", [null], ['$.id'])))
     }

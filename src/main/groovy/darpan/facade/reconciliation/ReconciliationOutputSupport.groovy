@@ -6,6 +6,7 @@ import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.automation.ExtractReplaySupport
 import groovy.io.FileType
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
@@ -519,11 +520,19 @@ class ReconciliationOutputSupport {
         String runsLocation = DataManagerSupport.resolveReconciliationRunsLocation(ec)
         File runsDir = runsLocation ? ec.resource.getLocationReference(runsLocation)?.getFile() : null
         long cutoffMillis = ec.user.nowTimestamp.getTime() - (retentionDays * 24L * 60L * 60L * 1000L)
-        int scanned = 0, deleted = 0, retained = 0, foldersRemoved = 0
+        int scanned = 0, deleted = 0, retained = 0, foldersRemoved = 0, inUseFolders = 0
         List<Map> failed = []
         if (runsDir != null && runsDir.isDirectory()) {
+            Set<String> inUse = filesActiveRunsRead(ec)
             runsDir.listFiles()?.findAll { it.isDirectory() }?.each { File runDir ->
                 runDir.listFiles()?.findAll { it.isDirectory() && EXTRACT_FOLDER.matcher(it.name).matches() }?.each { File extractDir ->
+                    // A folder an active run still reads stays whole, sidecars included (S19 QA): a retry checks its files at
+                    // plan time, and a purge between that check and its read would take them away.
+                    String folderPrefix = extractDir.canonicalPath + File.separator
+                    if (inUse.any { it.startsWith(folderPrefix) }) {
+                        inUseFolders++
+                        return
+                    }
                     // DAR-BE-318: interactive extracts and copy slices sit one level deeper, in <ts>/file1-api and file2-api.
                     List<File> scanDirs = [extractDir]
                     extractDir.listFiles()?.findAll { it.isDirectory() && API_EXTRACT_FOLDER.matcher(it.name).matches() }
@@ -548,12 +557,35 @@ class ReconciliationOutputSupport {
             }
         }
         String statusMessage = "Extract purge complete. Scanned=${scanned}, Deleted=${deleted}, Retained=${retained}, " +
-                "FoldersRemoved=${foldersRemoved}, Failed=${failed.size()}"
+                "FoldersRemoved=${foldersRemoved}, InUseFolders=${inUseFolders}, Failed=${failed.size()}"
         if (failed) logger.warn("Reconciliation extract purge completed with failures: ${statusMessage}")
         else logger.info("Reconciliation extract purge completed: ${statusMessage}")
         return [retentionDays: retentionDays, outputLocation: runsLocation, cutoffTimestamp: cutoffMillis, scannedCount: scanned,
-                deletedCount: deleted, retainedCount: retained, foldersRemovedCount: foldersRemoved, failedFiles: failed,
-                statusMessage: statusMessage]
+                deletedCount: deleted, retainedCount: retained, foldersRemovedCount: foldersRemoved, inUseFolderCount: inUseFolders,
+                failedFiles: failed, statusMessage: statusMessage]
+    }
+
+    /**
+     * The extract files an active run still reads, as canonical paths: the file1/file2 paths stamped on every tenant's pending
+     * or running run result and automation execution. A retry queued against an older execution is a pending execution
+     * stamped with that execution's files (ExtractReplaySupport.replayResults).
+     */
+    private static Set<String> filesActiveRunsRead(def ec) {
+        String dataManagerLocation = DataManagerSupport.resolveDataManagerLocation(ec)
+        File root = DataManagerSupport.resolveDirectoryFile(ec, dataManagerLocation, false)
+        Set<String> paths = [] as Set
+        [DarpanEntityConstants.RECONCILIATION_RUN_RESULT, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION].each { String entityName ->
+            List rows = TenantScopedFinder.findGlobalUnscoped(ec, entityName,
+                    "extract purge: every tenant's active runs keep the extract files they read")
+                    .condition("statusEnumId", "in", ACTIVE_STATUSES as List).useCache(false).list() ?: []
+            rows.each { row ->
+                ["file1DataManagerPath", "file2DataManagerPath"].each { String field ->
+                    File file = (File) ExtractReplaySupport.resolveStamped(normalize(row.get(field)), dataManagerLocation, root)?.file
+                    if (file != null) paths.add(file.canonicalPath)
+                }
+            }
+        }
+        return paths
     }
 
     /** The folders inside an extract folder that are purged like extracts (DAR-BE-318): interactive extracts and copy slices (file1-api, file2-api) and lookup captures (lookups). */

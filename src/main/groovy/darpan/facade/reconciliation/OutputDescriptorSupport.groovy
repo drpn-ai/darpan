@@ -407,9 +407,9 @@ class OutputDescriptorSupport {
                 reconciliationType      : normalize(metadata.reconciliation ?: metadata.reconciliationType),
                 file1Label              : normalize(metadata.file1Label ?: metadata.json1Label),
                 file2Label              : normalize(metadata.file2Label ?: metadata.json2Label),
-                totalDifferences        : normalizeLong(summary.totalDifferences ?: summary.differenceCount),
-                onlyInFile1Count        : normalizeLong(summary.onlyInFile1Count ?: summary.onlyInJson1Count),
-                onlyInFile2Count        : normalizeLong(summary.onlyInFile2Count ?: summary.onlyInJson2Count),
+                totalDifferences        : normalizeLong(firstPresent(summary.totalDifferences, summary.differenceCount)),
+                onlyInFile1Count        : normalizeLong(firstPresent(summary.onlyInFile1Count, summary.onlyInJson1Count)),
+                onlyInFile2Count        : normalizeLong(firstPresent(summary.onlyInFile2Count, summary.onlyInJson2Count)),
                 createdDate             : createdDate,
                 sizeBytes               : sizeBytes,
                 statusEnumId            : ReconciliationOutputSupport.STATUS_SUCCEEDED,
@@ -443,9 +443,10 @@ class OutputDescriptorSupport {
         descriptor.ruleSetId = descriptor.ruleSetId ?: normalize(runResult?.ruleSetId)
         descriptor.compareScopeId = descriptor.compareScopeId ?: normalize(runResult?.compareScopeId)
         descriptor.reconciliationType = descriptor.reconciliationType ?: normalize(runResult?.reconciliationType)
-        descriptor.totalDifferences = descriptor.totalDifferences ?: normalizeLong(runResult?.differenceCount)
-        descriptor.onlyInFile1Count = descriptor.onlyInFile1Count ?: normalizeLong(runResult?.onlyInFile1Count)
-        descriptor.onlyInFile2Count = descriptor.onlyInFile2Count ?: normalizeLong(runResult?.onlyInFile2Count)
+        // OC57: the document's count first, the run row's only when the document has none; 0 is a count.
+        descriptor.totalDifferences = firstPresent(descriptor.totalDifferences, normalizeLong(runResult?.differenceCount))
+        descriptor.onlyInFile1Count = firstPresent(descriptor.onlyInFile1Count, normalizeLong(runResult?.onlyInFile1Count))
+        descriptor.onlyInFile2Count = firstPresent(descriptor.onlyInFile2Count, normalizeLong(runResult?.onlyInFile2Count))
         descriptor.createdDate = descriptor.createdDate ?: timestampValue(runResult?.createdDate ?: runResult?.startedDate ?: runResult?.lastUpdatedDate)
         descriptor.startedDate = timestampValue(runResult?.startedDate)
         descriptor.completedDate = timestampValue(runResult?.completedDate)
@@ -459,6 +460,11 @@ class OutputDescriptorSupport {
         descriptor.progressPercent = progressPercent != null ? (progressPercent as Integer) : null
         descriptor.resultAvailable = resultAvailable
         return descriptor
+    }
+
+    /** The first value that is there at all (OC57): a count of 0 is a count, never a missing one. */
+    private static Object firstPresent(Object... values) {
+        return values.find { it != null }
     }
 
     static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String savedRunId, String search) {

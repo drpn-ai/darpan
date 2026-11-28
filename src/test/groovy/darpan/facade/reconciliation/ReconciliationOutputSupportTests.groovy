@@ -133,6 +133,39 @@ class ReconciliationOutputSupportTests {
         assertEquals(2048L, row.sizeBytes)
     }
 
+    // OC57: a count of 0 is a count. The descriptor took the first truthy value, so a clean result's 0 became blank (or the
+    // run row's count).
+    @Test
+    void buildGeneratedOutputDescriptorKeepsAZeroCount() {
+        Map<String, Object> row = OutputDescriptorSupport.buildGeneratedOutputDescriptor("clean_result.json",
+                [summary: [totalDifferences: 0, onlyInFile1Count: 0, onlyInFile2Count: 0]], 10L, Timestamp.valueOf("2026-11-28 10:00:00"))
+        assertEquals(0L, row.totalDifferences)
+        assertEquals(0L, row.onlyInFile1Count)
+        assertEquals(0L, row.onlyInFile2Count)
+    }
+
+    @Test
+    void buildRunResultDescriptorTakesTheDocumentsZeroOverTheRunRow(@TempDir File dir) {
+        String path = "reconciliation-runs/RS_ZERO/20261128-100000000/RS_ZERO_result.json"
+        File resultFile = new File(dir, "RS_ZERO_result.json")
+        resultFile.text = "{}"
+        Map<String, Object> row = OutputDescriptorSupport.buildRunResultDescriptor(null, [
+                reconciliationRunResultId: "RRR_ZERO", resultDataManagerPath: path, statusEnumId: ReconciliationOutputSupport.STATUS_SUCCEEDED,
+                differenceCount: 5, onlyInFile1Count: 2, onlyInFile2Count: 3,
+        ], resultFile, [summary: [totalDifferences: 0, onlyInFile1Count: 0, onlyInFile2Count: 0]])
+        assertEquals(0L, row.totalDifferences)
+        assertEquals(0L, row.onlyInFile1Count)
+        assertEquals(0L, row.onlyInFile2Count)
+    }
+
+    @Test
+    void buildRunResultDescriptorFallsBackToTheRunRowWhenTheDocumentHasNoCount() {
+        Map<String, Object> row = OutputDescriptorSupport.buildRunResultDescriptor(null, [
+                reconciliationRunResultId: "RRR_NOFILE", statusEnumId: ReconciliationOutputSupport.STATUS_FAILED, differenceCount: 0,
+        ], null, [:])
+        assertEquals(0L, row.totalDifferences)
+    }
+
     @Test
     void buildRunResultDescriptorExposesRunningStatusWithoutResultFile() {
         Map<String, Object> row = ReconciliationOutputSupport.buildRunResultDescriptor(null, [
@@ -922,6 +955,64 @@ class ReconciliationOutputSupportTests {
 
         assertEquals("Legacy", ((Map) header.metadata).savedRunName)
         assertEquals(1, ((Map) header.summary).totalDifferences)
+    }
+
+    /**
+     * S19 QA lead: the 7-day extract purge deleted by age alone, so a retry queued against an old execution could lose the
+     * extract it was told to read between its plan (which checks the file is on disk) and its compare. A folder holding a
+     * file named on an active run row (pending, running, or queued to retry) stays, sidecars and all.
+     */
+    @Test
+    void extractPurgeKeepsTheFolderAnActiveRunStillReads(@TempDir File root) {
+        File busyDir = new File(root, "reconciliation-runs/EXEC_OLD/20261101-000000000")
+        File idleDir = new File(root, "reconciliation-runs/EXEC_DONE/20261101-000000000")
+        File interactiveDir = new File(root, "reconciliation-runs/RS_LIVE/20261101-000000000/file2-api")
+        [busyDir, idleDir, interactiveDir].each { assertTrue(it.mkdirs()) }
+        File busyFile = new File(busyDir, "orders_file1.json"), busyManifest = new File(busyDir, "orders.manifest.json")
+        File idleFile = new File(idleDir, "orders_file1.json"), interactiveFile = new File(interactiveDir, "RS_LIVE_file2.json")
+        [busyFile, busyManifest, idleFile, interactiveFile].each { File f ->
+            f.text = "[]"
+            f.lastModified = Timestamp.valueOf("2026-11-01 00:00:00").time
+        }
+        def ec = new Expando(
+                resource: new FakeRunsResource(root),
+                user    : new Expando(nowTimestamp: Timestamp.valueOf("2026-11-28 00:00:00")),
+                entity  : new FakeEntity([
+                        // A retry queued against EXEC_OLD: a new execution stamped with the old extract's path.
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [
+                                [automationExecutionId: "EXEC_RETRY", statusEnumId: ReconciliationOutputSupport.STATUS_PENDING,
+                                 file1DataManagerPath: "reconciliation-runs/EXEC_OLD/20261101-000000000/orders_file1.json"],
+                                [automationExecutionId: "EXEC_DONE", statusEnumId: ReconciliationOutputSupport.STATUS_SUCCEEDED,
+                                 file1DataManagerPath: "reconciliation-runs/EXEC_DONE/20261101-000000000/orders_file1.json"],
+                        ],
+                        // A running interactive run whose second side is still being read, in the data-manager location form.
+                        "darpan.reconciliation.ReconciliationRunResult"         : [
+                                [reconciliationRunResultId: "RRR_LIVE", statusEnumId: ReconciliationOutputSupport.STATUS_RUNNING,
+                                 file2DataManagerPath: "runtime://datamanager/reconciliation-runs/RS_LIVE/20261101-000000000/file2-api/RS_LIVE_file2.json"],
+                        ],
+                ])
+        )
+
+        Map<String, Object> result = ReconciliationOutputSupport.purgeExtractFiles(ec, 7)
+
+        assertTrue(busyFile.exists(), "a file a queued retry will read must not be purged")
+        assertTrue(busyManifest.exists(), "nor its sidecars")
+        assertTrue(interactiveFile.exists(), "nor a file a running run is reading")
+        assertFalse(idleFile.exists(), "a finished execution's old extract still goes")
+        assertEquals(1, result.deletedCount)
+    }
+
+    /** FakeResource that also resolves locations under the data manager, as the purge walks reconciliation-runs. */
+    static class FakeRunsResource extends FakeResource {
+        FakeRunsResource(File root) { super(root) }
+
+        @Override
+        Object getLocationReference(String location) {
+            String prefix = "runtime://datamanager"
+            if (location == null || !location.startsWith(prefix)) return null
+            String rest = location.substring(prefix.length()).replaceFirst('^/+', '')
+            return new FakeLocationReference(rest ? new File(dataManagerRoot, rest) : dataManagerRoot)
+        }
     }
 
     static class FakeResource {

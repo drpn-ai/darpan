@@ -95,9 +95,10 @@ class RestJsonTransport {
     }
 
     private Map call(String method, String url, String body, int reservation) {
-        int maxAttempts = Math.max(1, ((limits.maxAttempts ?: 3) as Number).intValue())
-        long retryBackoff = Math.max(0L, ((limits.retryBackoffMillis ?: 1000) as Number).longValue())
-        long maxThrottleWait = ((limits.maxThrottleWaitSeconds != null ? limits.maxThrottleWaitSeconds : 300) as Number).longValue() * 1000L
+        Map retry = GraphQlTransport.retryLimitsOf(limits)
+        int maxAttempts = (int) retry.maxAttempts
+        long retryBackoff = (long) retry.retryBackoff
+        long maxThrottleWait = (long) retry.maxThrottleWait
         long throttledWait = 0L
         int transientFailures = 0
         def check = OutboundHttpPolicy.validate(url)
@@ -111,35 +112,35 @@ class RestJsonTransport {
             String outcome = "error"
             long backoff = 0L
             long retryAfter = 0L
-            governor.acquireCall()
+            GraphQlTransport.acquireOrGiveBack(governor, reservation)
             try {
                 Map answer = (Map) sender.call(method, url, headers, body)
                 int status = ((answer?.statusCode ?: 0) as Number).intValue()
                 String code = "HTTP_${status}".toString()
-                if (codes("throttledCodes").contains(code)) {
+                if (GraphQlTransport.codesOf(limits, "throttledCodes").contains(code)) {
                     retryAfter = retryAfterMillis(answer?.headers)
                     throw new DataSourceCallException(code, "HTTP ${status}: throttled".toString())
                 }
-                if (retryStatuses().contains(status)) throw new DataSourceCallException(code, "HTTP ${status}".toString())
+                if (GraphQlTransport.retryStatusesOf(limits).contains(status)) throw new DataSourceCallException(code, "HTTP ${status}".toString())
                 if (status < 200 || status >= 300) throw new DataSourceCallException(code, "HTTP ${status}: ${(answer?.body as String)?.take(200)}".toString())
                 parsed = parseBody(status, answer?.body as String)
                 outcome = "ok"
                 return parsed
             } catch (DataSourceCallException e) {
                 outcome = e.code
-                if (codes("throttledCodes").contains(e.code) && throttledWait < maxThrottleWait) {
+                if (GraphQlTransport.codesOf(limits, "throttledCodes").contains(e.code) && throttledWait < maxThrottleWait) {
                     // The source's Retry-After when it gives one (at most a minute), else the GraphQL throttle pause.
                     backoff = retryAfter > 0L ? retryAfter : GraphQlTransport.MIN_THROTTLE_BACKOFF_MILLIS + (long) (Math.random() * 1000L)
-                } else if (isRetryStatusCode(e.code)) {
-                    backoff = transientBackoff(++transientFailures, maxAttempts, retryBackoff, url, e.message)
+                } else if (GraphQlTransport.isRetryStatusCode(limits, e.code)) {
+                    backoff = GraphQlTransport.transientBackoff(++transientFailures, maxAttempts, retryBackoff, URI.create(url).path, e.message)
                 } else {
                     throw e
                 }
             } catch (IOException e) {
                 outcome = "IO"
-                backoff = transientBackoff(++transientFailures, maxAttempts, retryBackoff, url, e.toString())
+                backoff = GraphQlTransport.transientBackoff(++transientFailures, maxAttempts, retryBackoff, URI.create(url).path, e.toString())
             } finally {
-                governor.settle(reservation, bucketOf(parsed), (Map) limits.costBucket)
+                governor.settle(reservation, GraphQlTransport.bucketOf(limits, parsed), (Map) limits.costBucket)
                 governor.releaseCall()
                 logger.info("data source REST call n={} attempt={} outcome={} waitMs={} reserved={} ms={}",
                         n, attempt, outcome, wait, reservation, System.currentTimeMillis() - started)
@@ -150,7 +151,7 @@ class RestJsonTransport {
     }
 
     /** Retry-After in seconds, capped at MAX_RETRY_AFTER_MILLIS; 0 when absent or not a number. */
-    static long retryAfterMillis(Object headers) {
+    private static long retryAfterMillis(Object headers) {
         Object v = headers instanceof Map ? ((Map) headers).find { k, x -> k?.toString()?.equalsIgnoreCase("Retry-After") }?.value : null
         String t = v?.toString()?.trim()
         return t ==~ /\d{1,6}/ ? Math.min((t as long) * 1000L, MAX_RETRY_AFTER_MILLIS) : 0L
@@ -164,31 +165,11 @@ class RestJsonTransport {
         throw new DataSourceCallException("UNPARSEABLE", "HTTP ${status}: the answer was not JSON: ${raw?.take(200)}".toString())
     }
 
-    private Map bucketOf(Map body) {
-        Map bucket = (Map) limits.costBucket
-        if (body == null || bucket == null) return null
-        Object status = JsonPathValues.value(body, (String) bucket.at)
-        return status instanceof Map ? (Map) status : null
-    }
-
-    private long transientBackoff(int failures, int maxAttempts, long retryBackoff, String url, String cause) {
-        if (failures >= maxAttempts) {
-            throw new DataSourceCallException("TRANSIENT", "${URI.create(url).path} failed ${failures} attempts; last: ${cause}".toString())
-        }
-        return retryBackoff * failures
-    }
-
-    private boolean isRetryStatusCode(String code) { code?.startsWith("HTTP_") && retryStatuses().contains(code.substring(5) as int) }
-
-    private Set<Integer> retryStatuses() { ((limits.retryStatuses ?: []) as List).collect { (it as Number).intValue() } as Set<Integer> }
-
-    private Set<String> codes(String key) { ((limits[key] ?: []) as List).collect { it.toString() } as Set<String> }
-
     /** The first field of a path ("data" of "data[*].x"): present in the answer, or the answer is not this read's. */
-    static String rootOf(String path) { path?.split(/[.\[]/, 2)?.getAt(0) }
+    private static String rootOf(String path) { path?.split(/[.\[]/, 2)?.getAt(0) }
 
     /** "$name" is the variable's value; anything else is as written. */
-    static Object fillValue(Object template, Map variables) {
+    private static Object fillValue(Object template, Map variables) {
         if (template instanceof Map) return ((Map) template).collectEntries { k, v -> [(k): fillValue(v, variables)] }
         if (template instanceof List) return ((List) template).collect { fillValue(it, variables) }
         String t = template?.toString()
@@ -211,7 +192,7 @@ class RestJsonTransport {
     }
 
     /** "?a=1&b=2" from the query, a parameter whose "$name" is unset left out. */
-    static String queryString(Map query, Map variables) {
+    private static String queryString(Map query, Map variables) {
         List<String> parts = []
         (query ?: [:]).each { k, v ->
             Object value = fillValue(v, variables)

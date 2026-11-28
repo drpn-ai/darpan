@@ -71,9 +71,10 @@ class GraphQlTransport {
         if (variables) payload.variables = variables
         String json = JsonOutput.toJson(payload)
         String operation = (document =~ /query\s+(\w+)/).with { it.find() ? it.group(1) : "query" }
-        int maxAttempts = Math.max(1, ((limits.maxAttempts ?: 3) as Number).intValue())
-        long retryBackoff = Math.max(0L, ((limits.retryBackoffMillis ?: 1000) as Number).longValue())
-        long maxThrottleWait = ((limits.maxThrottleWaitSeconds != null ? limits.maxThrottleWaitSeconds : 300) as Number).longValue() * 1000L
+        Map retry = retryLimitsOf(limits)
+        int maxAttempts = (int) retry.maxAttempts
+        long retryBackoff = (long) retry.retryBackoff
+        long maxThrottleWait = (long) retry.maxThrottleWait
         long throttledWait = 0L
         int transientFailures = 0
         for (int attempt = 0; ; attempt++) {
@@ -84,7 +85,7 @@ class GraphQlTransport {
             Map body = null
             String outcome = "error"
             long backoff = 0L
-            governor.acquireCall()
+            acquireOrGiveBack(governor, reservation)
             try {
                 Map answer = (Map) sender.call(url, headers, json)
                 int status = ((answer?.statusCode ?: 0) as Number).intValue()
@@ -95,9 +96,9 @@ class GraphQlTransport {
             } catch (DataSourceCallException e) {
                 outcome = e.code
                 if (e.costRefused) throw e
-                if (isRetryStatusCode(e.code)) {
+                if (isRetryStatusCode(limits, e.code)) {
                     backoff = transientBackoff(++transientFailures, maxAttempts, retryBackoff, operation, e.message)
-                } else if (codes("throttledCodes").contains(e.code) && throttledWait < maxThrottleWait) {
+                } else if (codesOf(limits, "throttledCodes").contains(e.code) && throttledWait < maxThrottleWait) {
                     backoff = MIN_THROTTLE_BACKOFF_MILLIS + (long) (Math.random() * 1000L)
                 } else {
                     throw e
@@ -106,7 +107,7 @@ class GraphQlTransport {
                 outcome = "IO"
                 backoff = transientBackoff(++transientFailures, maxAttempts, retryBackoff, operation, e.toString())
             } finally {
-                governor.settle(reservation, bucketOf(body), (Map) limits.costBucket)
+                governor.settle(reservation, bucketOf(limits, body), (Map) limits.costBucket)
                 governor.releaseCall()
                 logger.info("data source call op={} n={} attempt={} outcome={} waitMs={} reserved={} ms={}",
                         operation, n, attempt, outcome, wait, reservation, System.currentTimeMillis() - started)
@@ -120,7 +121,7 @@ class GraphQlTransport {
         Object parsed = null
         try { parsed = raw ? new JsonSlurper().parseText(raw) : null } catch (ignored) { }
         if (parsed instanceof Map) return (Map) parsed
-        if (retryStatuses().contains(status)) throw new DataSourceCallException("HTTP_${status}".toString(), "HTTP ${status}: ${raw?.take(200)}".toString())
+        if (retryStatusesOf(limits).contains(status)) throw new DataSourceCallException("HTTP_${status}".toString(), "HTTP ${status}: ${raw?.take(200)}".toString())
         throw new DataSourceCallException("UNPARSEABLE", "HTTP ${status}: the answer was not JSON: ${raw?.take(200)}".toString())
     }
 
@@ -135,38 +136,62 @@ class GraphQlTransport {
             Object first = ((List) errors)[0]
             String message = first instanceof Map ? ((Map) first).message as String : first as String
             String c = code?.toString() ?: "GRAPHQL_ERROR"
-            throw new DataSourceCallException(c, message ?: c, codes("costRefusedCodes").contains(c))
+            throw new DataSourceCallException(c, message ?: c, codesOf(limits, "costRefusedCodes").contains(c))
         }
         if (errors != null && !(errors instanceof List)) throw new DataSourceCallException("REJECTED", "HTTP ${status}: ${errors}".toString())
-        if (retryStatuses().contains(status)) throw new DataSourceCallException("HTTP_${status}".toString(), "HTTP ${status}".toString())
+        if (retryStatusesOf(limits).contains(status)) throw new DataSourceCallException("HTTP_${status}".toString(), "HTTP ${status}".toString())
         if (status < 200 || status >= 300) throw new DataSourceCallException("HTTP_${status}".toString(), "HTTP ${status} with no error body".toString())
         return (body.data instanceof Map) ? (Map) body.data : [:]
     }
 
-    private Map bucketOf(Map body) {
-        Map bucket = (Map) limits.costBucket
+    // ---------------------------------------------------------------- limits, read the same way by both transports
+
+    /** The definition's retry limits: attempts (at least 1), the backoff step, and the longest throttle wait in millis. */
+    static Map retryLimitsOf(Map limits) {
+        return [maxAttempts    : Math.max(1, ((limits?.maxAttempts ?: 3) as Number).intValue()),
+                retryBackoff   : Math.max(0L, ((limits?.retryBackoffMillis ?: 1000) as Number).longValue()),
+                maxThrottleWait: ((limits?.maxThrottleWaitSeconds != null ? limits.maxThrottleWaitSeconds : 300) as Number).longValue() * 1000L]
+    }
+
+    /** The cost bucket an answer reports, at the definition's path, or null. */
+    static Map bucketOf(Map limits, Map body) {
+        Map bucket = (Map) limits?.costBucket
         if (body == null || bucket == null) return null
         Object status = JsonPathValues.value(body, (String) bucket.at)
         return status instanceof Map ? (Map) status : null
     }
 
-    private long transientBackoff(int failures, int maxAttempts, long retryBackoff, String operation, String cause) {
+    /** The wait before the next attempt after `failures` transient failures, or TRANSIENT once they reach maxAttempts. */
+    static long transientBackoff(int failures, int maxAttempts, long retryBackoff, String what, String cause) {
         if (failures >= maxAttempts) {
-            throw new DataSourceCallException("TRANSIENT", "${operation} failed ${failures} attempts; last: ${cause}".toString())
+            throw new DataSourceCallException("TRANSIENT", "${what} failed ${failures} attempts; last: ${cause}".toString())
         }
         return retryBackoff * failures
     }
 
-    private boolean isRetryStatusCode(String code) {
-        return code?.startsWith("HTTP_") && retryStatuses().contains(code.substring(5) as int)
+    static boolean isRetryStatusCode(Map limits, String code) {
+        return code?.startsWith("HTTP_") && retryStatusesOf(limits).contains(code.substring(5) as int)
     }
 
-    private Set<Integer> retryStatuses() {
-        return ((limits.retryStatuses ?: []) as List).collect { (it as Number).intValue() } as Set<Integer>
+    static Set<Integer> retryStatusesOf(Map limits) {
+        return ((limits?.retryStatuses ?: []) as List).collect { (it as Number).intValue() } as Set<Integer>
     }
 
-    private Set<String> codes(String key) {
-        return ((limits[key] ?: []) as List).collect { it.toString() } as Set<String>
+    static Set<String> codesOf(Map limits, String key) {
+        return ((limits?.get(key) ?: []) as List).collect { it.toString() } as Set<String>
+    }
+
+    /**
+     * Takes a call slot; an interrupt while waiting for one gives the reservation back, since no answer will settle it.
+     * Without that, an interrupted read left its reservation outstanding on the shared bucket for the JVM's life.
+     */
+    static void acquireOrGiveBack(CostBucketGovernor governor, int reservation) {
+        try {
+            governor.acquireCall()
+        } catch (InterruptedException e) {
+            governor.settle(reservation, null, null)
+            throw e
+        }
     }
 
     /** The URL template filled from the connection record; a field followed by "/" loses its own trailing slashes. */

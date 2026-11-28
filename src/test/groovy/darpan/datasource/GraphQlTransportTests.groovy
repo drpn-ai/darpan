@@ -150,4 +150,19 @@ class GraphQlTransportTests {
             transport([[status: 500, json: [data: null]]], []).execute("query Q { n }", [:], 10)
         }.code)
     }
+
+    @Test
+    void anInterruptedWaitForACallSlotGivesItsReservationBack() {
+        // DAR-OPS-029 S15a: the reservation is taken before the slot; an interrupt while waiting for the slot meant no
+        // answer would ever settle it, and the shared bucket kept it outstanding for the JVM's life.
+        CostBucketGovernor governor = new CostBucketGovernor(1)
+        governor.sleepMillisFor(40)
+        Thread.currentThread().interrupt()
+        try {
+            assertThrows(InterruptedException) { GraphQlTransport.acquireOrGiveBack(governor, 40) }
+        } finally {
+            Thread.interrupted()
+        }
+        assertEquals(0L, governor.@outstanding, "the reservation went back")
+    }
 }

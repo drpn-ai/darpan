@@ -4734,6 +4734,9 @@ class AutomationExecutionSupportTests {
         // when told to, not unconditionally.
         String orderByField
 
+        /** OC49 (S09a): the notify claim reads its run-result row FOR UPDATE. One thread, one in-memory row: nothing to lock. */
+        FakeFind forUpdate(boolean ignored) { return this }
+
         FakeFind condition(String fieldName, Object value) {
             conditions[fieldName] = value
             return this

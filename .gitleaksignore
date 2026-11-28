@@ -9,3 +9,6 @@
 482fac7c93b8fe73e4cbde09405bef0b9efd6216:src/test/groovy/darpan/admin/SettingAdminServicesSmokeTests.groovy:generic-api-key:122
 abf8e8fd8c47df9f41eb46bfba7c6a3e3804b7a2:src/test/groovy/darpan/config/DarpanSettingsTests.groovy:generic-api-key:76
 f33731ea672d40d96ea8a76967dade6ed118b182:.gitleaksignore:generic-api-key:7
+
+# A made-up PEM block: AutomationRuntimeSupportTests asserts a PEM block is masked whole (S07a, 646b366c). Not a key.
+646b366c27ca5b8aaf716e65a8364dd92cdd61d2:src/test/groovy/darpan/reconciliation/automation/AutomationRuntimeSupportTests.groovy:private-key:64

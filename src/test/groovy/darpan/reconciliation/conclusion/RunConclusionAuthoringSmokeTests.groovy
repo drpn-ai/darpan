@@ -93,7 +93,8 @@ class RunConclusionAuthoringSmokeTests {
         assertEquals(nodes, read.conclusions)
         assertTrue(read.catalog*.id.contains("CONC_TCON_OPEN"))
         assertFalse(read.catalog*.id.contains("TCON_NOT_A_CONCLUSION"))
-        assertEquals(["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "FINDING"], read.buckets)
+        assertEquals(["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2",
+                      "DUPLICATE_IN_FILE_1_PAIRED", "DUPLICATE_IN_FILE_2_PAIRED", "FINDING"], read.buckets)
     }
 
     @Test

@@ -602,6 +602,64 @@ class RunConclusionSupportTests {
         assertEquals([MISSING_FROM_FILE_2: 1], out.hiddenByBucket)
     }
 
+    // ---- Aditi D7 (2026-11-28): a key repeated on one side is shown with the other side's partner row, typed
+    // DUPLICATE_IN_FILE_y_PAIRED (a FILE_y record). Hiding the repeats of key K hides K's partner too.
+
+    private static Map repeatRow(String type, String id, String presentIn, Map data) {
+        return [diffType: type, compareScopeId: "SCOPE_1", objectType: "RETURN", primaryId: id, presentIn: presentIn, missingIn: "",
+                data: JsonOutput.toJson(data), message: "Repeated key"]
+    }
+
+    private static final List SPLIT_RMA_HIDE = [[conclusionEnumId: "CONC_SPLIT_RMA", label: "One RMA per resolution", outcome: "HIDE",
+            appliesToBucket: "DUPLICATE_IN_FILE_2",
+            conditions: [cond(subject: "FILE_2", fieldExpression: "reason", operator: "IN", conditionValues: ["split"], checkLabel: "Split")]]]
+
+    private static List<Map> repeatedOnFile2(String key, String reason) {
+        return [repeatRow("DUPLICATE_IN_FILE_1_PAIRED", key, FILE1, [omsOrderId: key]),
+                repeatRow("DUPLICATE_IN_FILE_2", key, FILE2, [orderId: key, reason: reason, rma: "${key}-A".toString()]),
+                repeatRow("DUPLICATE_IN_FILE_2", key, FILE2, [orderId: key, reason: reason, rma: "${key}-B".toString()])]
+    }
+
+    @Test
+    void hidingAKeysRepeatsHidesItsPartnerRowAndTheWarning() {
+        String repeats = "Compare scope 'Returns' FILE_2 (NetSuite) has 1 key(s) on more than one record; " +
+                darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+        // The partner row comes first: the repeats that decide it are read later in the document.
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split"),
+                [totalDifferences: 3, duplicateDifferenceCount: 3, processingWarnings: [repeats]])
+        Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
+        Map d = parse(doc)
+        assertEquals([], d.differences)
+        assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
+        assertEquals([totalDifferences: 0, duplicateDifferenceCount: 0, processingWarnings: []],
+                ((Map) d.summary).subMap(["totalDifferences", "duplicateDifferenceCount", "processingWarnings"]))
+        assertEquals([[code: "CONC_SPLIT_RMA", label: "One RMA per resolution", count: 3]], d.summary.conclusions.hidden)
+    }
+
+    @Test
+    void aKeyWhoseRepeatsAreNotHiddenKeepsItsPartnerRow() {
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"),
+                [totalDifferences: 6, duplicateDifferenceCount: 6])
+        Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
+        Map d = parse(doc)
+        assertEquals([["J", "DUPLICATE_IN_FILE_1_PAIRED"], ["J", "DUPLICATE_IN_FILE_2"], ["J", "DUPLICATE_IN_FILE_2"]],
+                ((List<Map>) d.differences).collect { [it.primaryId, it.diffType] })
+        assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
+        assertEquals([totalDifferences: 3, duplicateDifferenceCount: 3], ((Map) d.summary).subMap(["totalDifferences", "duplicateDifferenceCount"]))
+    }
+
+    // A DUPLICATE_IN_FILE_2_PAIRED row is FILE_2's record: a rule reading FILE_2's field on it holds (read as FILE_1's, FILE_2
+    // would be looked up instead and the rule could not hold).
+    @Test
+    void aFile2PartnerRowReadsAsFile2sRecord() {
+        File doc = writeDiffDocument([repeatRow("DUPLICATE_IN_FILE_2_PAIRED", "P", FILE2, [orderId: "P", reason: "split"])])
+        List rules = [[conclusionEnumId: "CONC_PARTNER", label: "Partner", appliesToBucket: "DUPLICATE_IN_FILE_2_PAIRED",
+                       conditions: [cond(subject: "FILE_2", presence: "KEPT", fieldExpression: "reason", operator: "IN",
+                                         conditionValues: ["split"], checkLabel: "Split")]]]
+        RunConclusionSupport.concludeRun(args(doc, rules))
+        assertEquals("CONC_PARTNER", onlyConclusion(doc).code)
+    }
+
     // DAR-BE-196: an EXPECTED rule keeps its rows (unlike HIDE) and marks each conclusion expected, which no audit statement
     // counts; any other cause, and Unexplained, is not expected.
     @Test

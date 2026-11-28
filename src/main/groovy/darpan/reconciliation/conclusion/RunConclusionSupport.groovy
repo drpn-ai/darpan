@@ -166,8 +166,9 @@ class RunConclusionSupport {
         Closure<Map> finding = { Map row ->
             String bucket = singleSided ? "FINDING" : bucketOf(row, file1Label, file2Label)
             String key = row.get("primaryId")?.toString()
+            // A DUPLICATE_IN_FILE_2 row, and its FILE_2 partner row DUPLICATE_IN_FILE_2_PAIRED (Aditi D7), are FILE_2's record.
             String presentSide = singleSided ? "FILE_1" :
-                    (bucket == "MISSING_FROM_FILE_1" || bucket == "DUPLICATE_IN_FILE_2" ? "FILE_2" : "FILE_1")
+                    (bucket == "MISSING_FROM_FILE_1" || bucket?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1")
             Map presentRecord = parseData(slurper, row.get("data"))
 
             Map sides = [:]
@@ -242,7 +243,8 @@ class RunConclusionSupport {
             }
         }
 
-        DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
+        // One row's finding, with what each lookup found attached, and the conclusion it reaches.
+        Closure<Map> concludeRow = { Map row ->
             Map f = finding(row)
             Map sides = (Map) f.sides
             // DAR-BE-372 rule 2: what each lookup found for this row rides on it too, so a finding keeps the other system's
@@ -257,9 +259,21 @@ class RunConclusionSupport {
             }
             Map conclusion = (Map) ((Map) (brain?.byKey ?: [:])).get(row.get("primaryId")?.toString()) ?:
                     (engine ? engine.conclude([f])[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides)))
+            return [f: f, sides: sides, lookedUp: lookedUp, conclusion: conclusion]
+        }
+        Map<String, Map<String, String>> hiddenRepeats = hiddenCodes ? hiddenRepeatedKeys(diffFile, finding, concludeRow, hiddenCodes) : [:]
+
+        DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
+            Map one = concludeRow(row)
+            Map f = (Map) one.f
+            Map sides = (Map) one.sides
+            List<Map> lookedUp = (List<Map>) one.lookedUp
+            Map conclusion = (Map) one.conclusion
             String code = conclusion.code?.toString()
-            if (hiddenCodes.contains(code)) {
-                hidden.put(code, (hidden.get(code) ?: 0) + 1)
+            // Aditi D7: a partner row goes with the repeats it pairs with, counted under the code that hid them.
+            String hiddenAs = hiddenCodes.contains(code) ? code : pairedHiddenBy((String) f.bucket, row.get("primaryId")?.toString(), hiddenRepeats)
+            if (hiddenAs) {
+                hidden.put(hiddenAs, (hidden.get(hiddenAs) ?: 0) + 1)
                 hiddenByBucket.put((String) f.bucket, (hiddenByBucket.get((String) f.bucket) ?: 0) + 1)
                 return null
             }
@@ -303,6 +317,36 @@ class RunConclusionSupport {
                 hidden: hidden, hiddenByBucket: hiddenByBucket] +
                 (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, answeredFromFacts: brain.answeredFromFacts,
                                  questions: brain.questions, warnings: brain.warnings]] : [:])
+    }
+
+    /**
+     * Aditi D7 (2026-11-28): per repeating side (DUPLICATE_IN_FILE_1 / _2), the keys a HIDE rule hid at least one repeat of,
+     * each with the code that hid it. A read-only pass over the repeated-key rows alone, before the rewrite, because a
+     * partner row may come before its repeats in the document.
+     */
+    private static Map<String, Map<String, String>> hiddenRepeatedKeys(File diffFile, Closure<Map> finding, Closure<Map> concludeRow,
+                                                                      Set<String> hiddenCodes) {
+        Map<String, Map<String, String>> bySide = [:]
+        DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+            String bucket = (String) finding(row).bucket
+            String key = row.get("primaryId")?.toString()
+            if (!key || !(bucket in ["DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2"])) return
+            String code = ((Map) concludeRow(row).conclusion).code?.toString()
+            if (hiddenCodes.contains(code)) bySide.computeIfAbsent(bucket) { [:] }.putIfAbsent(key, code)
+        }
+        return bySide
+    }
+
+    /**
+     * Aditi D7: a DUPLICATE_IN_FILE_y_PAIRED row is the other side's partner of a key repeated on side x (x != y). When a
+     * HIDE rule hid that key's repeats, the partner goes too: the code that hid them; null otherwise.
+     */
+    static String pairedHiddenBy(String bucket, String key, Map<String, Map<String, String>> hiddenRepeats) {
+        if (!key || !hiddenRepeats) return null
+        def paired = (bucket =~ /^DUPLICATE_IN_FILE_([12])_PAIRED$/)
+        if (!paired.matches()) return null
+        String repeatingSide = paired.group(1) == "1" ? "DUPLICATE_IN_FILE_2" : "DUPLICATE_IN_FILE_1"
+        return hiddenRepeats.get(repeatingSide)?.get(key)
     }
 
     /** DAR-BE-151: what BrainFactAdapter reads of a finding, and nothing else. */

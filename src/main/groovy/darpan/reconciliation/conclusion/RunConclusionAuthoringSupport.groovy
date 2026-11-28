@@ -21,7 +21,10 @@ class RunConclusionAuthoringSupport {
 
     static final String RULE = "darpan.rule.RuleSetConclusionRule"
     static final String CONDITION = "darpan.rule.RuleSetConclusionCondition"
-    static final List<String> BUCKETS = ["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "FINDING"].asImmutable()
+    /** Every bucket RunConclusionSupport.bucketOf concludes a row in, so a top-level rule can apply to any of them. */
+    static final List<String> BUCKETS = ["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "DUPLICATE_IN_FILE_1",
+                                         "DUPLICATE_IN_FILE_2", "DUPLICATE_IN_FILE_1_PAIRED", "DUPLICATE_IN_FILE_2_PAIRED",
+                                         "FINDING"].asImmutable()
     static final List<String> OPERATORS = ["IN", "NOT_IN", "STARTS_WITH_ANY", "NOT_STARTS_WITH_ANY", "GT", "LT", "GT_ZERO",
                                            "WITHIN_HOURS", "BLANK", "NOT_BLANK"].asImmutable()
     /** Operators that read a list of values from the condition (comma-joined in conditionValues, so none may hold a comma). */
@@ -169,7 +172,7 @@ class RunConclusionAuthoringSupport {
             if (label == null) { errors << "'${conclusion}' is not a conclusion.".toString(); break }
             String parent = normalize(n.parent)
             if (parent && !seqByKey.containsKey(parent)) { errors << "'${label}' names a parent that is not above it.".toString(); break }
-            int depth = parent ? depthByKey[parent] + 1 : 1
+            int depth = parent ? depthByKey.get(parent) + 1 : 1
             if (depth > MAX_DEPTH) { errors << "'${label}' is more than ${MAX_DEPTH} levels deep.".toString(); break }
             String bucket = normalize(n.bucket)?.toUpperCase()
             if (bucket && !(bucket in BUCKETS)) { errors << "'${label}' applies to ${BUCKETS.join(', ')} or any, not '${bucket}'.".toString(); break }
@@ -190,9 +193,9 @@ class RunConclusionAuthoringSupport {
             if (engine && engine != "BRAIN") { errors << "'${label}' has engine '${engine}'; it is BRAIN, or blank.".toString(); break }
             String suggestedFilterJson = n.containsKey("suggestedFilterJson") ? normalize(n.suggestedFilterJson) : (prior?.suggestedFilterJson as String)
             int seq = (nodes.size() + 1) * 10
-            seqByKey[key] = seq
-            depthByKey[key] = depth
-            nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey[parent] : null, conclusionEnumId: conclusion,
+            seqByKey.put(key, seq)
+            depthByKey.put(key, depth)
+            nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey.get(parent) : null, conclusionEnumId: conclusion,
                       appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, outcome: outcome ?: null,
                       engine: engine ?: null, suggestedFilterJson: suggestedFilterJson ?: null, conditions: conditions] as Map<String, Object>
         }

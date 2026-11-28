@@ -27,6 +27,21 @@ class RunConclusionAuthoringOperatorTests {
         assertEquals([], save([field: "omsOrderName", operator: "NOT_STARTS_WITH_ANY", values: ["EXC-"]]).errors)
     }
 
+    // DAR-OPS-029 S03a: the conclude pass puts a repeated-key row in DUPLICATE_IN_FILE_1/2 (RunConclusionSupport.bucketOf), and
+    // a rule may hide those rows (DAR-BE-337). The app refused that bucket, so a tree holding such a rule could not be saved again.
+    @Test
+    void aTopLevelRuleMayApplyToRepeatedKeyRows() {
+        // Aditi D7: and each side's partner row of a repeated key, DUPLICATE_IN_FILE_y_PAIRED.
+        ["DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2", "DUPLICATE_IN_FILE_1_PAIRED", "DUPLICATE_IN_FILE_2_PAIRED"].each { String bucket ->
+            assertTrue(bucket in RunConclusionAuthoringSupport.BUCKETS)
+            Map r = RunConclusionAuthoringSupport.toRows([[key: "10", conclusion: "CONC_X", bucket: bucket.toLowerCase(),
+                    conditions: [[subject: "FILE_2", presence: "KEPT", checkLabel: "Repeated in NetSuite"]]]], false,
+                    { String id -> "Split RMA" })
+            assertEquals([], r.errors)
+            assertEquals(bucket, r.rows[0].appliesToBucket)
+        }
+    }
+
     @Test
     void aPrefixOperatorNeedsPrefixesWithoutCommas() {
         Map none = save([field: "omsOrderName", operator: "STARTS_WITH_ANY", values: []])

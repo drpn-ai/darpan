@@ -1445,9 +1445,9 @@
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
                 <if condition="mapping != null">
-                    <set field="ignoreMappingName" from="mapping.set('mappingName', runNameValue)"/>
-                    <set field="ignoreMappingUpdatedDate" from="mapping.set('lastUpdatedDate', nowTs)"/>
-                    <set field="ignoreMappingUpdate" from="mapping.update()"/>
+                    <set field="mapping.mappingName" from="runNameValue"/>
+                    <set field="mapping.lastUpdatedDate" from="nowTs"/>
+                    <entity-update value-field="mapping"/>
                 </if>
                 <if condition="ruleSet != null">
                     <set field="ruleSet.ruleSetName" from="runNameValue"/>
@@ -1793,23 +1793,23 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="ignoreMappingName" from="mapping.set('mappingName', mappingNameValue)"/>
-                <set field="ignoreMappingUpdatedDate" from="mapping.set('lastUpdatedDate', nowTs)"/>
-                <set field="ignoreMappingUpdate" from="mapping.update()"/>
+                <set field="mapping.mappingName" from="mappingNameValue"/>
+                <set field="mapping.lastUpdatedDate" from="nowTs"/>
+                <entity-update value-field="mapping"/>
                 <set field="firstMember" from="existingMembers[0]"/>
                 <set field="secondMember" from="existingMembers[1]"/>
-                <set field="ignoreFirstSystem" from="firstMember.set('systemEnumId', schema1SystemEnumId)"/>
-                <set field="ignoreFirstFileType" from="firstMember.set('fileTypeEnumId', 'DftJson')"/>
-                <set field="ignoreFirstIdField" from="firstMember.set('idFieldExpression', schema1FieldPathValue)"/>
-                <set field="ignoreFirstSystemField" from="firstMember.set('systemFieldName', schema1FieldPathValue)"/>
-                <set field="ignoreFirstSchemaName" from="firstMember.set('schemaFileName', schema1.schemaName)"/>
-                <set field="ignoreFirstUpdate" from="firstMember.update()"/>
-                <set field="ignoreSecondSystem" from="secondMember.set('systemEnumId', schema2SystemEnumId)"/>
-                <set field="ignoreSecondFileType" from="secondMember.set('fileTypeEnumId', 'DftJson')"/>
-                <set field="ignoreSecondIdField" from="secondMember.set('idFieldExpression', schema2FieldPathValue)"/>
-                <set field="ignoreSecondSystemField" from="secondMember.set('systemFieldName', schema2FieldPathValue)"/>
-                <set field="ignoreSecondSchemaName" from="secondMember.set('schemaFileName', schema2.schemaName)"/>
-                <set field="ignoreSecondUpdate" from="secondMember.update()"/>
+                <set field="firstMember.systemEnumId" from="schema1SystemEnumId"/>
+                <set field="firstMember.fileTypeEnumId" from="'DftJson'"/>
+                <set field="firstMember.idFieldExpression" from="schema1FieldPathValue"/>
+                <set field="firstMember.systemFieldName" from="schema1FieldPathValue"/>
+                <set field="firstMember.schemaFileName" from="schema1.schemaName"/>
+                <entity-update value-field="firstMember"/>
+                <set field="secondMember.systemEnumId" from="schema2SystemEnumId"/>
+                <set field="secondMember.fileTypeEnumId" from="'DftJson'"/>
+                <set field="secondMember.idFieldExpression" from="schema2FieldPathValue"/>
+                <set field="secondMember.systemFieldName" from="schema2FieldPathValue"/>
+                <set field="secondMember.schemaFileName" from="schema2.schemaName"/>
+                <entity-update value-field="secondMember"/>
                 <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, companyUserGroupId: mapping.companyUserGroupId, createdByUserId: mapping.createdByUserId, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
                 <message>Saved run ${mappingNameValue}.</message>
             </if>

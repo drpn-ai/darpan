@@ -727,6 +727,52 @@ class SavedRunsFacadeSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("source data file") })
     }
 
+    /**
+     * DAR-OPS-029 S99-043 pin. save#Mapping rewrites the mapping's name and both members (system, JSON, key, schema);
+     * save#SavedRunName renames a mapping-backed run. Written before their writes moved from Groovy rec.set()/update()
+     * inside a set to XML actions; it must not move.
+     */
+    @Test
+    void savingAMappingRewritesItsNameAndBothMembersAndARenameRenamesIt() {
+        String id = "PIN_S99_043_MAP"
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.mapping.ReconciliationMapping",
+                [reconciliationMappingId: id, mappingName: "Before", companyUserGroupId: KREWE, createdByUserId: TEST_USER_ID])
+        ["A", "B"].each { String side ->
+            ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.mapping.ReconciliationMappingMember",
+                    [mappingMemberId: "${id}_${side}".toString(), reconciliationMappingId: id, systemEnumId: side == "A" ? "OMS" : "SHOPIFY",
+                     fileTypeEnumId: "DftCsv", schemaFileName: "before.json", idFieldExpression: "before_id"])
+        }
+        Closure<Map> call = { String service, Map params ->
+            ec.message.clearAll()
+            Map out = ec.service.sync().name("facade.ReconciliationFacadeServices.${service}".toString()).parameters(params).disableAuthz().call()
+            assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+            ec.message.clearAll()
+            return out
+        }
+        Closure<List> members = {
+            ec.entity.find("darpan.mapping.ReconciliationMappingMember").condition("reconciliationMappingId", id).orderBy("mappingMemberId")
+                    .disableAuthz().useCache(false).list().collect { [it.systemEnumId, it.fileTypeEnumId, it.idFieldExpression, it.systemFieldName, it.schemaFileName] }
+        }
+        Closure mapping = { ec.entity.find("darpan.mapping.ReconciliationMapping").condition("reconciliationMappingId", id).disableAuthz().useCache(false).one() }
+        String path = ReconciliationMappingSupport.normalizeEditableFieldPath("order_id")
+        try {
+            Map saved = call("save#Mapping", [reconciliationMappingId: id, mappingName: " Pinned map ", schema1Id: "TestShopifyOrderSchema",
+                                              schema2Id: "TestOmsOrderSchema", schema1FieldPath: "order_id", schema2FieldPath: "order_id"])
+            assertEquals([true, ["Saved run Pinned map."]], [saved.ok, saved.messages])
+            assertEquals("Pinned map", mapping().mappingName)
+            assertNotNull(mapping().lastUpdatedDate, "the save stamps the mapping")
+            assertEquals([[ReconciliationSavedRunSupport.canonicalSystemEnumId("SHOPIFY"), "DftJson", path, path, "test-shopify-order-id.schema.json"],
+                          [ReconciliationSavedRunSupport.canonicalSystemEnumId("OMS"), "DftJson", path, path, "test-oms-order-id.schema.json"]],
+                    members(), "member A takes schema 1, member B schema 2")
+
+            assertEquals(true, call("save#SavedRunName", [savedRunId: id, runName: " Renamed map "]).ok)
+            assertEquals("Renamed map", mapping().mappingName)
+        } finally {
+            ec.entity.find("darpan.mapping.ReconciliationMappingMember").condition("reconciliationMappingId", id).disableAuthz().deleteAll()
+            ec.entity.find("darpan.mapping.ReconciliationMapping").condition("reconciliationMappingId", id).disableAuthz().deleteAll()
+        }
+    }
+
     @Test
     void mappingsListOnlyReturnsActiveTenantRows() {
         seedCrossTenantMappingUsingReadableSchemas()

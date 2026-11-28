@@ -234,15 +234,30 @@ class CompareDatasetJsonFrameTests {
         // S01b I5 parity (S03a lead): one record anywhere with a decimal key makes Spark infer the whole column as a double,
         // so 7 rendered "7.0" and an 11-digit id "1.2345678901E10", while the conclude pass (ConclusionKeySupport, Groovy over
         // the parsed record) reads "7" and "12345678901": its evidence lookups missed. Both builders, the same records.
-        List<String> records = ['{"id":7,"n":1}', '{"id":7.5,"n":2}', '{"id":12345678901,"n":3}']
+        // 1234567890123456 has 16 digits: still exact in a double (below 2^53), so it must not read "1.234567890123456E15".
+        List<String> records = ['{"id":7,"n":1}', '{"id":7.5,"n":2}', '{"id":12345678901,"n":3}', '{"id":1234567890123456,"n":4}']
         List<String> spark = ids(CompareDatasetSupport.buildJsonIdDf(json(records as String[]), paths('$.id'), "File 1", [null], ['$.id']))
         List<String> groovy = records.collect { String r ->
             darpan.reconciliation.conclusion.ConclusionKeySupport.compareKey((Map) new groovy.json.JsonSlurper().parseText(r), ['$.id'], null)
         }.sort()
         assertEquals(groovy, spark)
-        assertEquals(["12345678901", "7", "7.5"], spark)
+        assertEquals(["12345678901", "1234567890123456", "7", "7.5"], spark)
         // An integer-only column was always read as a long: unchanged.
         assertEquals(["12345678901", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":7}', '{"id":12345678901}'), paths('$.id'), "File 1", [null], ['$.id'])))
+    }
+
+    @Test
+    void aCompositeFieldHoldingTheDelimiterFailsLoudlyRatherThanForgeAnotherKey() {
+        // S01b I6 (QA refute): "X<US>Y"+"Z" and "X"+"Y<US>Z" would compose the same key.
+        String us = ReconciliationServices.COMPOSITE_KEY_DELIMITER
+        Dataset raw = spark.createDataFrame([org.apache.spark.sql.RowFactory.create("X${us}Y".toString(), "Z"),
+                                             org.apache.spark.sql.RowFactory.create("X", "Y${us}Z".toString())],
+                new org.apache.spark.sql.types.StructType().add("a", "string").add("b", "string"))
+        def e = assertThrows(IllegalArgumentException) {
+            CompareDatasetSupport.buildJsonIdDf(raw, paths('$.a', '$.b'), "File 1", [null, null], ['$.a', '$.b'])
+        }
+        assertTrue(e.message.contains("must not contain the key delimiter"), e.message)
+        assertThrows(IllegalArgumentException) { CompareDatasetSupport.buildCsvFrames(raw, csvKeys("a", "b"), "File 1") }
     }
 
     @Test

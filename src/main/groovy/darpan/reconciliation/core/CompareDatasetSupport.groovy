@@ -48,8 +48,12 @@ class CompareDatasetSupport {
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
     }
 
-    /** Below 1e15 a double holds every integer exactly, so the long cast is lossless; larger or non-finite values keep Spark's text. */
-    private static final double EXACT_INTEGRAL_LIMIT = 1e15d
+    /**
+     * A double holds every integer up to 2^53 exactly, so below it the long cast is lossless (a 16-digit id stays itself).
+     * At or above it the value was already rounded when the JSON was read, so it keeps Spark's text rather than print a
+     * number the source never held; reading such ids exactly is DAR-BE-416.
+     */
+    private static final double EXACT_INTEGRAL_LIMIT = 9007199254740992d
 
     private static Column keyText(Column sourceCol, DataType sourceType) {
         if (!(sourceType instanceof DoubleType || sourceType instanceof FloatType)) return sourceCol.cast("string")
@@ -426,6 +430,15 @@ class CompareDatasetSupport {
         if (hasBlankRows) {
             throw new IllegalArgumentException(
                     "${pathLabel}: composite key fields [${fieldExpressions.join(', ')}] must all be present on every row, but at least one row has a null or blank value for one of them."
+            )
+        }
+        // A field holding the delimiter itself would forge another record's key ("X\u001FY" + "Z" == "X" + "Y\u001FZ").
+        Column anyDelimiter = normalizedFieldColumns.inject((Column) lit(false)) { Column acc, Column fieldCol ->
+            acc.or(coalesce(fieldCol.cast("string").contains(ReconciliationServices.COMPOSITE_KEY_DELIMITER), lit(false)))
+        } as Column
+        if (dfWithFieldCols.filter(anyDelimiter).limit(1).count() > 0) {
+            throw new IllegalArgumentException(
+                    "${pathLabel}: composite key fields [${fieldExpressions.join(', ')}] must not contain the key delimiter (U+001F), but at least one row does."
             )
         }
     }

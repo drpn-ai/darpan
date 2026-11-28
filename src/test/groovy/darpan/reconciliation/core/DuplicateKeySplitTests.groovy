@@ -39,7 +39,19 @@ class DuplicateKeySplitTests {
     }
 
     private static Map ingest(Dataset dataDf) {
-        return [dataDf: dataDf, idDf: dataDf.select("compare_id")]
+        // As ingestFile builds them: the id frame is the data frame's DISTINCT keys.
+        return [dataDf: dataDf, idDf: dataDf.select("compare_id").distinct()]
+    }
+
+    /** Whole records (key + data), so a frame that held one record twice and dropped its sibling cannot pass. */
+    private static List<String> records(Object df) {
+        return df == null ? [] : ((Dataset) df).select("compare_id", "data").toJSON().collectAsList().sort()
+    }
+
+    private static List<String> rowTypes(Map split, String side) {
+        Object df = split.duplicateDataBySide[side]
+        return df == null ? [] : CompareDatasetSupport.buildDuplicateRows((Dataset) df, "DUPLICATE_IN_${side}".toString(), side, "n")
+                .collectAsList().collect { Row r -> "${r.getAs('type')}|${r.getAs('id')}".toString() }.sort()
     }
 
     private static List<String> ids(Dataset df) {
@@ -113,7 +125,6 @@ class DuplicateKeySplitTests {
                              '{"compare_id":"K5","data":{"n":"c"}}', '{"compare_id":"K5","data":{"n":"d"}}')]
     }
 
-    private static List<String> idsOrEmpty(Object df) { return df == null ? [] : ids((Dataset) df) }
 
     @Test
     void everyKeyedRecordLandsInExactlyOnePlace() {
@@ -122,9 +133,9 @@ class DuplicateKeySplitTests {
         Map<String, Dataset> input = mixed()
         Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)])
         ["FILE_1", "FILE_2"].each { String side ->
-            List<String> kept = ids((Dataset) ((Map) split.ingestBySide)[side].dataDf)
-            List<String> underRepeatedKeys = idsOrEmpty(split.duplicateDataBySide[side])
-            assertEquals(ids(input[side]), (kept + underRepeatedKeys).sort(), "${side}: every record is in exactly one place")
+            List<String> kept = records(((Map) split.ingestBySide)[side].dataDf)
+            List<String> underRepeatedKeys = records(split.duplicateDataBySide[side])
+            assertEquals(records(input[side]), (kept + underRepeatedKeys).sort(), "${side}: every record is in exactly one place")
         }
     }
 
@@ -194,8 +205,13 @@ class DuplicateKeySplitTests {
         Map swapped = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_2), FILE_2: ingest(input.FILE_1)])
         assertEquals(ids((Dataset) forward.ingestBySide.FILE_1.dataDf), ids((Dataset) swapped.ingestBySide.FILE_2.dataDf))
         assertEquals(ids((Dataset) forward.ingestBySide.FILE_2.dataDf), ids((Dataset) swapped.ingestBySide.FILE_1.dataDf))
-        assertEquals(idsOrEmpty(forward.duplicateDataBySide.FILE_1), idsOrEmpty(swapped.duplicateDataBySide.FILE_2))
-        assertEquals(idsOrEmpty(forward.duplicateDataBySide.FILE_2), idsOrEmpty(swapped.duplicateDataBySide.FILE_1))
+        assertEquals(records(forward.duplicateDataBySide.FILE_1), records(swapped.duplicateDataBySide.FILE_2))
+        assertEquals(records(forward.duplicateDataBySide.FILE_2), records(swapped.duplicateDataBySide.FILE_1))
+        // Row types mirror too: FILE_1's partner row is FILE_2's after the swap.
+        assertEquals(rowTypes(forward, "FILE_1").collect { it.replace("FILE_1", "FILE_X") }, rowTypes(swapped, "FILE_2").collect { it.replace("FILE_2", "FILE_X") })
+        assertEquals(rowTypes(forward, "FILE_2").collect { it.replace("FILE_2", "FILE_X") }, rowTypes(swapped, "FILE_1").collect { it.replace("FILE_1", "FILE_X") })
+        assertEquals(forward.duplicateKeyCountBySide.FILE_1, swapped.duplicateKeyCountBySide.FILE_2)
+        assertEquals(forward.duplicateKeyCountBySide.FILE_2, swapped.duplicateKeyCountBySide.FILE_1)
     }
 
     @Test

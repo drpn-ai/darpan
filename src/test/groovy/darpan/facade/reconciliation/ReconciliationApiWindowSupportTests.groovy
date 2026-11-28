@@ -75,6 +75,24 @@ class ReconciliationApiWindowSupportTests {
     }
 
     @Test
+    void aMonthWhoseFirstDayEndsDaylightTimeKeepsBothBoundsAtLocalMidnight() {
+        // DST fall-back (New York, 2026-11-01 02:00): November 1 starts on daylight time and December 1 on standard
+        // time, so the two bounds sit at different UTC hours. A window read in UTC would lose or gain an hour.
+        Map<String, Object> window = ReconciliationApiWindowSupport.normalizeCalendarWindow(
+                timestamp("2026-11-01T00:00:00Z"),
+                timestamp("2026-12-01T00:00:00Z"),
+                "America/New_York",
+                "2026-11-01",
+                "2026-12-01"
+        )
+
+        assertEquals(timestamp("2026-11-01T04:00:00Z"), window.windowStartDate)
+        assertEquals(timestamp("2026-12-01T05:00:00Z"), window.windowEndDate)
+        assertEquals("2026-11-01", ReconciliationApiWindowSupport.calendarDateIn((Timestamp) window.windowStartDate, "America/New_York"))
+        assertEquals("2026-12-01", ReconciliationApiWindowSupport.calendarDateIn((Timestamp) window.windowEndDate, "America/New_York"))
+    }
+
+    @Test
     void tenantCalendarWindowDefinesSharedOrderApiPeriodBeforeSourceDispatch() {
         Map<String, Object> tenantWindow = ReconciliationApiWindowSupport.normalizeCalendarWindow(
                 timestamp("2026-05-04T00:00:00Z"),

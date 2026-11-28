@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -71,6 +72,17 @@ class AutomationFacadeSupportTests {
     void resolveNextFireTimeReturnsNullWithoutSchedule() {
         assertNull(AutomationFacadeSupport.resolveNextFireTime([:], ts("2026-05-01T10:00:00Z")))
         assertNull(AutomationFacadeSupport.resolveNextFireTime([scheduleExpr: "  "], ts("2026-05-01T10:00:00Z")))
+    }
+
+    @Test
+    void theNextFireSavedIsTheOneTheScannerComputesInTheAutomationsZone() {
+        // 10:00Z is 15:30 IST: the next 02:00 IST is May 2, 20:30Z on May 1. Read in UTC it would be 02:00Z May 2.
+        Timestamp now = ts("2026-05-01T10:00:00Z")
+        Map input = [scheduleExpr: "0 0 2 * * ?", windowTimeZone: "Asia/Kolkata"]
+        Timestamp saved = AutomationFacadeSupport.resolveNextFireTime(input, now)
+        assertEquals(ts("2026-05-01T20:30:00Z"), saved)
+        assertEquals(AutomationExecutionSupport.resolveNextScheduledFireTime(input, null, now), saved,
+                "save and the scanner must agree on the next fire")
     }
 
     // ─── source-type gate widening (AUT_SRC_DB, MACH database-source epic Task 2) ─────

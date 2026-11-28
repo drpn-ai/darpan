@@ -24,13 +24,21 @@ import static darpan.common.ValueSupport.readField
 class RunRetrySupport {
 
     private static final String WHY = "run retry: explicit companyUserGroupId condition applied"
-    /** What a rule-set run's extracts and compare are made of, below the RuleSet row itself (by compareScopeId). */
+    /**
+     * What a rule-set run's extracts and compare are made of, below the RuleSet row itself (by compareScopeId). The two
+     * conclusion tables belong here because their conditions pick the fields an extract asks for
+     * (ReconciliationSavedRunSupport.conclusionReadFieldsForSide): a conclusion added after the run started can name a
+     * field the reused extract never read. RunRetrySupportTests keeps this equal to every darpan.rule entity keyed by
+     * compareScopeId.
+     */
     static final List<String> COMPARE_SCOPE_ENTITIES = [
             DarpanEntityConstants.RULE_SET_COMPARE_SCOPE,
             "darpan.rule.RuleSetCompareSource",
             "darpan.rule.RuleSetCompareSourceKeyField",
             "darpan.rule.RuleSetCompareSourceFilter",
-    ]
+            "darpan.rule.RuleSetConclusionRule",
+            "darpan.rule.RuleSetConclusionCondition",
+    ].asImmutable()
 
     /**
      * [sourceRunResultId, windowStartDate, windowEndDate, windowTimeZone, sides: side -> landed file] for a retry of

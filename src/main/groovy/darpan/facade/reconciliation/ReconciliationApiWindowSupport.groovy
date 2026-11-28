@@ -81,8 +81,9 @@ class ReconciliationApiWindowSupport {
      * 2026-07-31T18:30Z, and every reader that truncated it in UTC got July 31 — the right number of
      * findings for the wrong day, reported under the right heading.
      *
-     * <p>A null zone falls back to the tenant default rather than to UTC. UTC looks neutral and is not:
-     * it is simply one more zone that disagrees with most tenants.
+     * <p>Pass the zone the bound was anchored in (the run's windowTimeZone). A null or unknown zone falls back to
+     * TenantAccessSupport.DEFAULT_TIME_ZONE, which is UTC: one more zone that disagrees with most tenants, so a caller
+     * that has the anchoring zone must never drop it.
      */
     static String calendarDateIn(Timestamp bound, Object rawTimeZone) {
         if (bound == null) return null

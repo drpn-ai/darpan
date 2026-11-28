@@ -69,6 +69,9 @@ class SyncPulseChatTests {
 
     @BeforeAll
     void setup() {
+        // DAR-BE-398: the pulse link's app address, named here. Without it the link came from webapp_allow_origins, which
+        // MoquiDevConf carries and CI's conf does not, so CI posted no link and the link assertions failed only there.
+        System.setProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY, "http://localhost:5173")
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "sync-pulse-chat")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SyncPulseSeedData.xml", "component://darpan/data/DarpanSystemSourceSeedData.xml",
@@ -94,6 +97,7 @@ class SyncPulseChatTests {
         SyncPulseSupport.resetHooks()
         AutomationExecutionSupport.setRunAdmission(null)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+        System.clearProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY)
     }
 
     @BeforeEach

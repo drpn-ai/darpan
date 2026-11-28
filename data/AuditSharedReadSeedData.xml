@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-320 (moved here by DAR-BE-398): the status of a read audit checks of one morning share. An internal status, not
+     audit-run JSON, so it stays out of AuditSeedData.xml (whose contract, AuditCatalogContractTests, pins the codes the
+     audit-run JSON emits). Already shipped by releases/3.5.3; AuditSharedRead.statusEnumId has no relationship, so no
+     test needs this file loaded to write a row. -->
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType enumTypeId="AuditSharedRead" description="Audit shared read status"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_READING" enumTypeId="AuditSharedRead" enumCode="reading" description="Being read"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_DONE" enumTypeId="AuditSharedRead" enumCode="done" description="Read"/>
+    <moqui.basic.Enumeration enumId="AUDSHR_FAILED" enumTypeId="AuditSharedRead" enumCode="failed" description="Failed"/>
+</entity-facade-xml>

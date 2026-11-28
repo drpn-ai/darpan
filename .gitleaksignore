@@ -3,3 +3,7 @@
 
 # A made-up test password: TenantConfigVersionSmokeTests asserts it never enters a config version (DAR-BE-160).
 7a9910a1828a42482477866539b613fd1f4300d7:src/test/groovy/darpan/config/TenantConfigVersionSmokeTests.groovy:generic-api-key:31
+
+# DAR-BE-398: made-up chat webhook tokens ("token=abcdef123456") the settings tests mask and list (DAR-BE-304).
+482fac7c93b8fe73e4cbde09405bef0b9efd6216:src/test/groovy/darpan/admin/SettingAdminServicesSmokeTests.groovy:generic-api-key:122
+abf8e8fd8c47df9f41eb46bfba7c6a3e3804b7a2:src/test/groovy/darpan/config/DarpanSettingsTests.groovy:generic-api-key:76

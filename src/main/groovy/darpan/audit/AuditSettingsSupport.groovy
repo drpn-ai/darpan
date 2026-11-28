@@ -228,7 +228,8 @@ class AuditSettingsSupport {
             checks.each { Map check ->
                 Map<String, Boolean> causes = new LinkedHashMap<>()   // conclusion -> expected, in rule order
                 Set<String> hidden = [] as Set
-                (nodesByRun[check.savedRunId as String] ?: []).each { Map node ->
+                // DAR-BE-398: get, not [x as String]: Groovy 5 reads a subscript on a null String as a property named null and throws.
+                (nodesByRun.get(check.savedRunId) ?: []).each { Map node ->
                     // Qualified: a bare static call from a closure nested in a closure fails with "argument type mismatch".
                     if (!AuditSettingsSupport.reaches(check.linkDiffTypes as String, node.bucket as String)) return
                     if (node.outcome == "HIDE") hidden.add(node.conclusion as String)

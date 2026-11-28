@@ -70,6 +70,14 @@ class AuditReasonsReachTests {
     }
 
     @Test
+    void "a check with no run yet reaches nothing and breaks nothing"() {
+        // DAR-BE-398: Groovy 5 read nodesByRun[null as String] as a property named null and threw, taking down every reader
+        // of the audit's settings (get#AgentAuditScope among them) while any of its checks had no run.
+        Map out = reasons([R2: [check(null, null), check("RS1", "MISSING_IN_FILE_2")]], [RS1: SHARED_TREE])
+        assertEquals(["PLACED_LAST_HOUR", "NOT_IN_HOTWAX"], codes(out.R2))
+    }
+
+    @Test
     void "a single-sided run's findings reach every check on it"() {
         Map out = reasons([R1: [check("RS9", "FINDING")], R4: [check("RS9", "MISSING_IN_FILE_1")]],
                 [RS9: [rule(10, "OPEN_ORDER", "FINDING")]])

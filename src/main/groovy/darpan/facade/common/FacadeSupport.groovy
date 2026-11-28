@@ -35,10 +35,10 @@ class FacadeSupport {
     static def findEnum(def ec, Object enumId) {
         String normalized = normalize(enumId)
         if (!normalized) return null
+        // DAR-OPS-029 S99-201: no respondsTo guards; every finder (and every test stub) has both methods.
         def finder = ec.entity.find("moqui.basic.Enumeration").condition("enumId", normalized)
-        // Guarded for test-stub compatibility – production EntityFind always provides both methods.
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(true)
+        finder.disableAuthz()
+        finder.useCache(true)
         return finder.one()
     }
 

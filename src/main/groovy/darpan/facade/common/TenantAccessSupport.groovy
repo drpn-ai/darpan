@@ -799,9 +799,9 @@ class TenantAccessSupport {
         def finder = ec?.entity?.find(TENANT_SETTING_ENTITY_NAME)
         if (finder == null) return [] as Set<String>
 
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
+        finder.disableAuthz()
         finder.condition("disabled", "Y")
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(true)
+        finder.useCache(true)
 
         def rows = finder.list()
         return (rows instanceof Collection ? rows : [])
@@ -810,16 +810,16 @@ class TenantAccessSupport {
     }
 
     /**
-     * Apply disableAuthz, conditionDate, and useCache(false) defensively for finders
-     * that may be partial stubs in tests. Each method is guarded so test stubs without
-     * a given method continue to function.
+     * Apply disableAuthz, the fromDate/thruDate filter and useCache(false). DAR-OPS-029 S99-201: only conditionDate stays
+     * guarded, because ReconciliationOutputSupportTests' and CliAuthSupportTests' finder stubs lack it (S99-200 moves them
+     * onto the shared FakeEntityFind first).
      */
     private static void applyFinderDefaults(def finder, def ec, boolean includeDateFilter = true) {
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
+        finder.disableAuthz()
         if (includeDateFilter && finder.metaClass.respondsTo(finder, "conditionDate", String, String, java.sql.Timestamp)) {
             finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
         }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(false)
+        finder.useCache(false)
     }
 
     protected static String extractString(def record, String fieldName) {

@@ -98,6 +98,53 @@ class DeriveRulesTests {
     }
 
     /**
+     * DAR-OPS-029 S15b, lens E3: derive is pure and deterministic. The Drools rule base writes exactly what the rows
+     * applied in order write, record for record, whatever order the records come in.
+     */
+    @Test
+    void droolsWritesWhatTheRowsAppliedInOrderWrite() {
+        List<Map> records = (0..<200).collect { int i ->
+            record([seq: i, invoiceNo: "I${i.intdiv(3)}".toString(), total: "${i % 7}.50".toString()],
+                    [lineNo: String.format('%02d', i % 4), qty: i % 5 == 0 ? "" : "${i % 5}".toString()], ["open", "done", null][i % 3])
+        }
+        List<Map> plain = records.collect { deepCopy(it) }
+        plain.each { Map r -> RULES.each { Map rule -> if (DeriveRules.matches(r, rule)) DeriveRules.apply(r, rule) } }
+        List<Map> shuffled = records.collect { deepCopy(it) }
+        Collections.shuffle(shuffled, new Random(7))
+        DeriveEngine engine = DeriveEngine.compile(RULES)
+        try {
+            engine.derive(shuffled, "parity")
+        } finally {
+            engine.close()
+        }
+        Closure<Integer> seq = { Map r -> (Integer) ((Map) r.invoice).seq }
+        assertEquals(plain.sort(false, seq), shuffled.sort(false, seq))
+    }
+
+    /**
+     * DAR-OPS-029 S15b, lens E (no silent false): a missing field is BLANK, on purpose and in every op. IN and MATCHES do not
+     * hold, NOT_IN does; a path through a list that reaches nothing is BLANK and NOT_IN anything. Numbers compare as numbers.
+     */
+    @Test
+    void aMissingFieldIsBlankInEveryCondition() {
+        Map r = [order: [lines: []]]
+        assertTrue(RecordConditions.matches(r, [field: "order.status", op: "BLANK"]))
+        assertFalse(RecordConditions.matches(r, [field: "order.status", op: "NOT_BLANK"]))
+        assertFalse(RecordConditions.matches(r, [field: "order.status", op: "IN", values: ["", "NONE"]]), "a missing value is in no list, not even of blanks")
+        assertTrue(RecordConditions.matches(r, [field: "order.status", op: "NOT_IN", values: ["NONE"]]))
+        assertFalse(RecordConditions.matches(r, [field: "order.status", op: "MATCHES", values: [".*"]]))
+        assertFalse(RecordConditions.matches(r, [field: "order.status", op: "AFTER_NOW"]))
+        assertTrue(RecordConditions.matches(r, [field: "order.lines[*].sku", op: "BLANK"]))
+        assertTrue(RecordConditions.matches(r, [field: "order.lines[*].sku", op: "NOT_IN", values: ["A"]]))
+        assertFalse(RecordConditions.matches(r, [field: "order.lines[*].sku", op: "IN", values: ["A"]]))
+        assertTrue(RecordConditions.matches([qty: 1], [field: "qty", op: "IN", values: ["1.0"]]), "1, \"1\" and 1.0 are one value")
+    }
+
+    private static Map deepCopy(Map m) {
+        return (Map) m.collectEntries { k, v -> [(k): v instanceof Map ? deepCopy((Map) v) : v] }
+    }
+
+    /**
      * The performance check (spec 4): a month of one tenant's unit records (~165k) through a realistic derive step, in
      * the runner's 1000-record batches. Runs only with DARPAN_PERF=1; prints its numbers.
      */
@@ -141,6 +188,7 @@ class DeriveRulesTests {
                 long p = System.nanoTime()
                 twin.each { Map r -> rules.each { Map rule -> if (DeriveRules.matches(r, rule)) DeriveRules.apply(r, rule) } }
                 plainNanos += System.nanoTime() - p
+                assertEquals(twin, batch, "Drools and the rows applied in order write the same records")
             }
         } finally {
             engine.close()

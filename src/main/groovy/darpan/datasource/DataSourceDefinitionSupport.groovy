@@ -61,7 +61,7 @@ class DataSourceDefinitionSupport {
     static final String LOOKUP_KEYS = "LOOKUP_KEYS"
 
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
-    private static final String PATH = /[A-Za-z_][A-Za-z0-9_]*(\[\*\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\*\])?){0,7}/
+    private static final String PATH = RecordConditions.FIELD
     private static final java.util.regex.Pattern PLACEHOLDER = ~/\{([A-Za-z][A-Za-z0-9_]*)\}/
     private static final Set<String> WINDOW_PLACEHOLDERS = ["from", "thru"] as Set<String>
     private static final Set<String> IDS_PLACEHOLDERS = ["ids", "keyField"] as Set<String>
@@ -212,9 +212,10 @@ class DataSourceDefinitionSupport {
         if (l.retryBackoffMillis != null && !inRange(l.retryBackoffMillis, 0, 60_000)) errors << "retryBackoffMillis is 0 to 60000."
         if (l.maxThrottleWaitSeconds != null && !inRange(l.maxThrottleWaitSeconds, 0, 3600)) errors << "maxThrottleWaitSeconds is 0 to 3600."
         if (l.maxRecordsInMemory != null && !inRange(l.maxRecordsInMemory, 1, 5_000_000)) errors << "maxRecordsInMemory is 1 to 5000000."
-        ["errorCodeAt"].each { if (l[it] != null && !(l[it] ==~ PATH)) errors << "${it} must be a response path.".toString() }
+        if (l.get("errorCodeAt") != null && !(l.get("errorCodeAt") ==~ PATH)) errors << "errorCodeAt must be a response path."
         ["throttledCodes", "costRefusedCodes"].each { String k ->
-            if (l[k] != null && !((l[k] instanceof List) && ((List) l[k]).every { it ==~ /[A-Za-z0-9_.-]{1,60}/ })) {
+            Object codes = l.get(k)
+            if (codes != null && !((codes instanceof List) && ((List) codes).every { it ==~ /[A-Za-z0-9_.-]{1,60}/ })) {
                 errors << "${k} must be a list of error codes.".toString()
             }
         }
@@ -223,7 +224,7 @@ class DataSourceDefinitionSupport {
         }
         if (l.costBucket != null) {
             Map b = l.costBucket instanceof Map ? (Map) l.costBucket : [:]
-            if (!(b.at ==~ PATH) || !["available", "maximum", "restoreRate"].every { b[it] ==~ NAME }) {
+            if (!(b.at ==~ PATH) || !["available", "maximum", "restoreRate"].every { b.get(it) ==~ NAME }) {
                 errors << "costBucket needs at (a response path) and the names of its available, maximum and restoreRate members."
             }
         }
@@ -285,7 +286,7 @@ class DataSourceDefinitionSupport {
             }
         }
         ["recordsAt", "hasNextAt", "cursorAt"].each { String k ->
-            if (!(s[k] ==~ PATH)) errors << "${where} needs ${k}, a path in the answer.".toString()
+            if (!(s.get(k) ==~ PATH)) errors << "${where} needs ${k}, a path in the answer.".toString()
         }
         Map bind = s.bind instanceof Map ? (Map) s.bind : [:]
         Map paging = s.paging instanceof Map ? (Map) s.paging : [:]
@@ -308,9 +309,10 @@ class DataSourceDefinitionSupport {
         }
         Map<String, Map> declared = (Map<String, Map>) (doc.variables ?: [:])
         ["window", "ids", "all"].each { String mode ->
-            if (!bind[mode]) return
-            if (!(bind[mode] instanceof Map)) { errors << "${where}: bind.${mode} must be an object.".toString(); return }
-            Map b = (Map) bind[mode]
+            Object bound = bind.get(mode)
+            if (!bound) return
+            if (!(bound instanceof Map)) { errors << "${where}: bind.${mode} must be an object.".toString(); return }
+            Map b = (Map) bound
             Map vars = b.variables instanceof Map ? (Map) b.variables : [:]
             // bind.all may fill nothing: an optional variable left out is null, as a sweep of everything sends it.
             if (!vars && mode != "all") errors << "${where}: bind.${mode} needs variables.".toString()
@@ -371,8 +373,8 @@ class DataSourceDefinitionSupport {
     private static List<String> checkRestRequest(String where, Map s) {
         List<String> errors = []
         REST_PAGE_FIELDS.each { String k, String v ->
-            if (s[k] == null) s[k] = v
-            else if (s[k] != v) errors << "${where}: a REST_JSON step's ${k} is ${v}.".toString()
+            if (s.get(k) == null) s.put(k, v)
+            else if (s.get(k) != v) errors << "${where}: a REST_JSON step's ${k} is ${v}.".toString()
         }
         if (s.selections != null) errors << "${where}: selections are for GRAPHQL steps.".toString()
         Object parsed = null
@@ -407,7 +409,8 @@ class DataSourceDefinitionSupport {
         Set<String> filled = [paging.firstVariable, paging.afterVariable].findAll { it != null }.collect { it.toString() } as Set<String>
         Map bind = s.bind instanceof Map ? (Map) s.bind : [:]
         ["window", "ids", "all"].each { String m ->
-            if (bind[m] instanceof Map && ((Map) bind[m]).variables instanceof Map) filled.addAll(((Map) ((Map) bind[m]).variables).keySet().collect { it.toString() })
+            Object bound = bind.get(m)
+            if (bound instanceof Map && ((Map) bound).variables instanceof Map) filled.addAll(((Map) ((Map) bound).variables).keySet().collect { it.toString() })
         }
         Set<String> used = [] as Set<String>
         java.util.regex.Matcher pm = REST_VARIABLE.matcher(path)
@@ -442,7 +445,7 @@ class DataSourceDefinitionSupport {
     }
 
     /** Every document the checks read: all selections on (first), none on, and each alone. */
-    static List<String> selectionDocuments(Map s) {
+    private static List<String> selectionDocuments(Map s) {
         String document = s.document.toString()
         List<Map> all = (List<Map>) (s.selections ?: [])
         return ([fillSlots(document, all), fillSlots(document, [])] + all.collect { fillSlots(document, [it]) }).unique()
@@ -523,10 +526,10 @@ class DataSourceDefinitionSupport {
                 break
             case "join":
                 ["into", "from"].each { String k ->
-                    if (!earlier.contains(s[k])) errors << "${where}: ${k} names an earlier step.".toString()
+                    if (!earlier.contains(s.get(k))) errors << "${where}: ${k} names an earlier step.".toString()
                 }
                 Closure<Boolean> pairs = { Object l, String a, String b ->
-                    l == null || ((l instanceof List) && ((List) l).every { it instanceof Map && isPath(((Map) it)[a]) && isPath(((Map) it)[b]) })
+                    l == null || ((l instanceof List) && ((List) l).every { it instanceof Map && isPath(((Map) it).get(a)) && isPath(((Map) it).get(b)) })
                 }
                 if (!pairs(s.on, "into", "from")) errors << "${where}: on is a list of {into, from} fields.".toString()
                 if (!pairs(s.atOn, "at", "from")) errors << "${where}: atOn is a list of {at, from} fields.".toString()
@@ -535,12 +538,11 @@ class DataSourceDefinitionSupport {
                 errors.addAll(RecordConditions.check(where, s.fromWhen))
                 if (s.last != null && !(s.last instanceof Boolean)) errors << "${where}: last is true or false.".toString()
                 if (!pairs(s.notOn, "into", "from")) errors << "${where}: notOn is a list of {into, from} fields.".toString()
-                if (s.sortBy != null && !((s.sortBy instanceof List) && ((List) s.sortBy).every { Object o ->
-                    isPath(o) || (o instanceof Map && isPath(((Map) o).path) && (((Map) o).as == null || ((Map) o).as in ["TEXT", "NATURAL"])) })) {
+                if (s.sortBy != null && !((s.sortBy instanceof List) && ((List) s.sortBy).every { isSortSpec(it) })) {
                     errors << "${where}: sortBy is a list of {path, as} (as: TEXT or NATURAL) or paths.".toString()
                 }
                 ["fields", "optionalFields"].each { String k ->
-                    if (s[k] != null && !((s[k] instanceof List) && ((List) s[k]).every { it ==~ NAME })) {
+                    if (s.get(k) != null && !((s.get(k) instanceof List) && ((List) s.get(k)).every { it ==~ NAME })) {
                         errors << "${where}: ${k} lists the line fields a many join keeps.".toString()
                     }
                 }
@@ -582,9 +584,7 @@ class DataSourceDefinitionSupport {
                 break
             case "number":
                 if (!(s.field ==~ NAME)) errors << "${where}: field is the name the number is written to.".toString()
-                boolean orderOk = s.orderBy == null || ((s.orderBy instanceof List) && ((List) s.orderBy).every { Object o ->
-                    isPath(o) || (o instanceof Map && isPath(((Map) o).path) && (((Map) o).as == null || ((Map) o).as in ["TEXT", "NATURAL"]))
-                })
+                boolean orderOk = s.orderBy == null || ((s.orderBy instanceof List) && ((List) s.orderBy).every { isSortSpec(it) })
                 if (!paths(s.partitionBy) || !orderOk) errors << "${where}: partitionBy and orderBy are lists of fields (orderBy may be {path, as: TEXT}).".toString()
                 if (s.sizeField != null && !(s.sizeField ==~ NAME)) errors << "${where}: sizeField is a field name.".toString()
                 if (s.on != null && !earlier.contains(s.on)) errors << "${where}: on names an earlier step.".toString()
@@ -633,7 +633,16 @@ class DataSourceDefinitionSupport {
         return errors
     }
 
-    static List<String> placeholders(String template) {
+    /** A sort key: a path, or {path, as} with as TEXT or NATURAL (a join's sortBy, a number step's orderBy). */
+    private static boolean isSortSpec(Object o) {
+        if (o instanceof Map) {
+            Map m = (Map) o
+            return m.path ==~ PATH && (m.as == null || m.as in ["TEXT", "NATURAL"])
+        }
+        return o ==~ PATH
+    }
+
+    private static List<String> placeholders(String template) {
         if (!template) return []
         List<String> out = []
         def m = PLACEHOLDER.matcher(template)

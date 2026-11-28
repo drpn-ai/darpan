@@ -263,6 +263,9 @@ class ReconciliationServices {
         validateStagedPayloadShape(path, type, label)
         boolean keep = KeepStepSupport.applies(sideKeep)
         if (keep && type != "JSON") throw new IllegalArgumentException("${label}: Keep runs on a JSON extract's records; this side is ${type}.")
+        // OC36 (S05): this pass takes every record, so what an earlier Keep pass left beside the extract goes back; otherwise the
+        // conclude pass and a sync pulse keep skipping records this compare took. A no-op beside an extract no Keep touched.
+        if (!keep && path && new File(path).isFile()) KeepStepSupport.forgetKeep(new File(path))
         Dataset asideIdDf = null
         Map keepSummary = null
         List<Dataset> persisted = []

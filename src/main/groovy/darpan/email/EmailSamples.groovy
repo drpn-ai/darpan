@@ -46,7 +46,7 @@ class EmailSamples {
     private static java.sql.Timestamp at(String instant) { java.sql.Timestamp.from(java.time.Instant.parse(instant)) }
 
     /** A day with one dead-lettered check, one check with no automation and one log error (made-up tenant and values). */
-    static Map errorDigest() {
+    private static Map errorDigest() {
         return [instance : "app.drpn.ai", since: at("2026-11-24T12:05:00Z"), now: at("2026-11-25T12:05:00Z"),
                 generatedAt: at("2026-11-25T12:05:09Z"), emptyStreakDays: 7,
                 counts   : [checks: 2, logErrors: 37],
@@ -78,7 +78,7 @@ class EmailSamples {
             TenantWelcome: [withUrl: { Map b -> b }, withoutUrl: { Map b -> b - [appBaseUrl: b.appBaseUrl] }],
     ].asImmutable()
 
-    static Map base(String screen) {
+    private static Map base(String screen) {
         Map found = SECURITY.get(screen) ?: OTHER.get(screen) ?: CHAT.get(screen)
         return found == null ? null : new LinkedHashMap(found)
     }

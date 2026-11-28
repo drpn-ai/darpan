@@ -26,15 +26,6 @@ class AuditEmailSamples {
     /** The writer's words: a headline and one fix sentence. */
     static Map runWords() { return [headline: "Mostly payments this morning.", fixes: [("R10|" + RMA): "Credit each return."]] }
 
-    /** A run with nothing open: no groups, every rule clean. */
-    static Map cleanRunFacts() {
-        Map facts = runFacts()
-        facts.totals = [open: 0, newToday: 0, fixedToday: 2]
-        facts.rules = facts.rules.collect { Map r -> r + [open: 0, newToday: 0, checksNotRun: []] }
-        facts.groups = []
-        return facts
-    }
-
     /** One morning's darpan.audit.report/v1, cut down to the keys the digest reads. */
     static Map digestReport() {
         return [report    : [audit: [id: "month-close", name: "Month close"], tenant: [id: "GORJANA"], date: "2026-10-22", period: "2026-10"],

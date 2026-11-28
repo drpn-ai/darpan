@@ -378,6 +378,11 @@ class EmailAdminServicesSmokeTests {
 
     @Test
     void everyAcceptedSubjectExpandsTheSameThroughTheEngineAndThePureSubstitution() {
+        // The body screen's name (an EmailSamples key) from the template row's location, as EmailAdminSupport.screenOf reads it.
+        Closure<String> screenFor = { String templateId ->
+            String location = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", templateId).useCache(false).one()?.getString("bodyScreenLocation") ?: ""
+            location.substring(location.lastIndexOf("/") + 1).replace(".xml", "")
+        }
         List<List> cases = []
         EmailCopy.seedSubjects(ec).each { String id, String subject -> cases << [id, subject] }
         cases << [WELCOME, "Welcome aboard, \${tenantLabel}! (It's 100% ready — really; a/b + c & d?)"] << [CHANGED, "Password changed – Darpan’s notice: ok."] <<
@@ -385,7 +390,7 @@ class EmailAdminServicesSmokeTests {
         cases.each { List c ->
             String id = c[0], subject = c[1]
             assertNull(EmailCopy.subjectProblem(ec, id, subject), subject)
-            Map params = EmailSamples.params(EmailCopy.screenFor(ec, id), null)
+            Map params = EmailSamples.params(screenFor(id), null)
             ec.context.push()
             try {
                 ec.context.putAll(params)

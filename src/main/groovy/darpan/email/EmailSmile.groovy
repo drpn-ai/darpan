@@ -34,6 +34,9 @@ class EmailSmile {
         String memo = MEMO + key
         if (shared.containsKey(memo)) return shared.get(memo) as String
         String out = fallback
+        // The writer's refusal is read from, and cleared off, ec.message: with errors already there it could not tell its own
+        // from the caller's and would clear the caller's, so the template's line goes.
+        if (ec.message.hasError()) return fallback
         try {
             if (ec.service.isServiceDefined(SERVICE)) {
                 Map result = AutomationExecutionSupport.dispatchInternalService(ec, SERVICE, [key: key, fallback: fallback])

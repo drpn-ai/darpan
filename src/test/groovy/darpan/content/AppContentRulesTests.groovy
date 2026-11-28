@@ -178,13 +178,18 @@ class AppContentRulesTests {
                 assertEquals(1, AppContentRules.bundledPatterns(source).size(), "${source} compiles under java.util.regex")
                 String sample = REGEX_SAMPLES[source]
                 assertNotNull(sample, "no sample for ${source}: add it here and in mascotSeed.spec.ts")
-                assertTrue(AppContentRules.bundledPatternAnswers(source, sample), "${source} matches '${sample}'")
+                assertTrue(answers(source, sample), "${source} matches '${sample}'")
             }
         }
         assertEquals(REGEX_SAMPLES.keySet().sort(), sources.sort())
-        assertFalse(AppContentRules.bundledPatternAnswers("^download .+\$", "zzz fresh label"))
-        assertFalse(AppContentRules.bundledPatternAnswers("", "anything"))
-        assertFalse(AppContentRules.bundledPatternAnswers("([unclosed", "anything"), "a source that does not compile is skipped")
+        assertFalse(answers("^download .+\$", "zzz fresh label"))
+        assertFalse(answers("", "anything"))
+        assertFalse(answers("([unclosed", "anything"), "a source that does not compile is skipped")
+    }
+
+    /** Whether a row's bundled regex matchers (its matchRegex) answer this label, as the shadow check reads them. */
+    private static boolean answers(String matchRegex, String label) {
+        return AppContentRules.bundledPatterns(matchRegex).any { it.matcher(label).find() }
     }
 
     @Test

@@ -55,7 +55,7 @@ class AppContentAdminSupport {
     // ---- where it is shown ------------------------------------------------------------------------------------
 
     /** The preview of a hint's place: its route, its condition and its position among the route's other served hints. */
-    static String hintWhereShown(def ec, String routeName, String conditionKind, String anchor, Integer sequence, String selfKey) {
+    private static String hintWhereShown(def ec, String routeName, String conditionKind, String anchor, Integer sequence, String selfKey) {
         def route = routeName ? AppContentRules.currentRoute(ec, routeName) : null
         String path = route != null ? route.routePath : routeName
         String when = conditionKind == AppContentRules.ANCHOR_PRESENT ? "when ${anchor} is on the page" : "always"
@@ -75,7 +75,7 @@ class AppContentAdminSupport {
         return near.isEmpty() ? s : s + " (" + near.join("; ") + ")"
     }
 
-    static String labelsWhereShown(String kind, List<String> aliases, String pattern) {
+    private static String labelsWhereShown(String kind, List<String> aliases, String pattern) {
         List<String> parts = new ArrayList<String>(aliases)
         if (pattern) parts << "pattern " + pattern
         return (kind == AppContentRules.ACTION ? "answers controls named " : "answers labels: ") + parts.join(", ")
@@ -115,9 +115,8 @@ class AppContentAdminSupport {
     static Map prepareUpdate(def ec, Map ctx) {
         String kind = str(ctx.kind)
         String key = str(ctx.key)
-        def found = ec.entity.find(ENTRY).condition("contentKind", kind).condition("contentKey", key).useCache(false).one()
-        if (found == null) return [error: "No entry ${kind} ${key}.".toString()]
-        Map row = found.getMap()
+        Map row = storedRow(ec, kind, key)
+        if (row == null) return [error: "No entry ${kind} ${key}.".toString()]
         boolean seed = str(row.source) == AppContentRules.SEED
         if (AppContentRules.retired(row, AppContentRules.currentSeedMark(ec))) {
             return [error: "${key} was dropped by a release; delete it.".toString()]
@@ -147,9 +146,8 @@ class AppContentAdminSupport {
     }
 
     static Map prepareReset(def ec, String kind, String key) {
-        def found = ec.entity.find(ENTRY).condition("contentKind", kind).condition("contentKey", key).useCache(false).one()
-        if (found == null) return [error: "No entry ${kind} ${key}.".toString()]
-        Map row = found.getMap()
+        Map row = storedRow(ec, kind, key)
+        if (row == null) return [error: "No entry ${kind} ${key}.".toString()]
         if (str(row.source) != AppContentRules.SEED) return [error: "${key} is an admin entry with no default; delete it instead.".toString()]
         Map fields = [:]
         ["title", "body", "aliases", "hidden"].each { String f -> if (row.get(f) != null) fields.put(f, null) }
@@ -158,15 +156,19 @@ class AppContentAdminSupport {
     }
 
     static Map prepareDelete(def ec, String kind, String key) {
-        def found = ec.entity.find(ENTRY).condition("contentKind", kind).condition("contentKey", key).useCache(false).one()
-        if (found == null) return [error: "No entry ${kind} ${key}.".toString()]
-        Map row = found.getMap()
+        Map row = storedRow(ec, kind, key)
+        if (row == null) return [error: "No entry ${kind} ${key}.".toString()]
         if (str(row.source) == AppContentRules.SEED && !AppContentRules.retired(row, AppContentRules.currentSeedMark(ec))) {
             return [error: "${key} is a seed entry: hide it instead (or reset it to its default).".toString()]
         }
         String detail = "deleted ${kind} ${key}: ".toString() + ["title", "body", "aliases", "matchPattern", "hidden", "routeName", "conditionKind", "anchorTestId", "sequence"]
                 .collect { String f -> "${f}: ${clip(row.get(f) != null ? row.get(f) : (f == 'title' ? row.defaultTitle : f == 'body' ? row.defaultBody : null))}".toString() }.join("; ")
         return [key: key, detail: detail]
+    }
+
+    /** The stored entry as a Map, or null. */
+    private static Map storedRow(def ec, String kind, String key) {
+        return ec.entity.find(ENTRY).condition("contentKind", kind).condition("contentKey", key).useCache(false).one()?.getMap()
     }
 
     // ---- list -------------------------------------------------------------------------------------------------
@@ -178,6 +180,9 @@ class AppContentAdminSupport {
         boolean editedOnly = ctx.editedOnly == true || str(ctx.editedOnly).toLowerCase() in ["y", "true"]
         String mark = AppContentRules.currentSeedMark(ec)
         List<Map> rows = ec.entity.find(ENTRY).list().collect { it.getMap() as Map }
+        // Every route the current release has, read once (not once per hint row).
+        Map<String, String> routePaths = ec.entity.find("darpan.content.AppRoute").list().findAll { AppContentRules.current(it, mark) }
+                .collectEntries { [(it.routeName as String): it.routePath as String] }
 
         // What each live SEED row already answers: its own labels, its aliases, and the bundle's regex matchers.
         List<Map> seedAnswers = []
@@ -219,11 +224,7 @@ class AppContentAdminSupport {
                 }?.key
             }
             Integer seq = (r.sequence != null ? r.sequence : r.defaultSequence) as Integer
-            String routePath = null
-            if (r.routeName) {
-                def route = ec.entity.find("darpan.content.AppRoute").condition("routeName", r.routeName).one()
-                if (route != null && AppContentRules.current(route, mark)) routePath = route.routePath
-            }
+            String routePath = r.routeName ? routePaths.get(r.routeName as String) : null
             out << ([kind: r.contentKind, key: r.contentKey, source: r.source, title: title ?: null, body: body ?: null,
                     defaultTitle: r.defaultTitle, defaultBody: r.defaultBody, aliases: r.aliases ? (str(r.aliases).split(/\|/) as List<String>).findAll { it } : [],
                     matchPattern: r.matchPattern, hidden: str(r.hidden) == "Y", routeName: r.routeName, routePath: routePath,

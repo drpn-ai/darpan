@@ -118,7 +118,7 @@ class AppContentRules {
     }
 
     /** Aliases arrive as a List or a `|`-joined String; empties are kept so an empty alias is refused, not dropped. */
-    static List<String> aliasList(def aliases) {
+    private static List<String> aliasList(def aliases) {
         if (aliases == null) return []
         if (aliases instanceof Collection) return (aliases as Collection).collect { it == null ? "" : it.toString() }
         String s = aliases.toString()
@@ -147,7 +147,7 @@ class AppContentRules {
         return aliasList(aliases).collect { normalize(it) }.findAll { it }.unique()
     }
 
-    static Set<String> tokens(String text) {
+    private static Set<String> tokens(String text) {
         Set<String> out = new LinkedHashSet<String>()
         if (text == null) return out
         Matcher m = TOKEN.matcher(text)
@@ -227,7 +227,7 @@ class AppContentRules {
     }
 
     /** Whether a route's anchor is one the current release still has. */
-    static boolean anchorKnown(def ec, String routeName, String anchor) {
+    private static boolean anchorKnown(def ec, String routeName, String anchor) {
         def a = ec.entity.find("darpan.content.AppRouteAnchor").condition("routeName", routeName).condition("anchorTestId", anchor).one()
         return a != null && current(a, currentSeedMark(ec))
     }
@@ -243,11 +243,6 @@ class AppContentRules {
             try { out << Pattern.compile(source) } catch (java.util.regex.PatternSyntaxException ignored) { }
         }
         return out
-    }
-
-    /** Whether the bundle's own regex matchers (the rows' matchRegex) answer this label. */
-    static boolean bundledPatternAnswers(def matchRegex, String label) {
-        return bundledPatterns(matchRegex).any { it.matcher(label).find() }
     }
 
     /** Whether a stored row still obeys the rules, so a row written around them is not served. No database. */

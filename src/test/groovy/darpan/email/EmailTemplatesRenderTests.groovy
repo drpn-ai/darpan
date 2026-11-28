@@ -156,8 +156,17 @@ class EmailTemplatesRenderTests {
     private static final Map<String, Map> AUDIT_RUN = [
             AuditRunFull         : [runFacts: AuditEmailSamples.runFacts(), runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
             AuditRunNoWordsNoLink: [runFacts: AuditEmailSamples.runFacts(), runWords: [:], runBase: null],
-            AuditRunClean        : [runFacts: AuditEmailSamples.cleanRunFacts(), runWords: [:], runBase: AuditEmailSamples.BASE],
+            AuditRunClean        : [runFacts: cleanRunFacts(), runWords: [:], runBase: AuditEmailSamples.BASE],
     ]
+
+    /** A run with nothing open: no groups, every rule clean. */
+    private static Map cleanRunFacts() {
+        Map facts = AuditEmailSamples.runFacts()
+        facts.totals = [open: 0, newToday: 0, fixedToday: 2]
+        facts.rules = facts.rules.collect { Map r -> r + [open: 0, newToday: 0, checksNotRun: []] }
+        facts.groups = []
+        return facts
+    }
 
     private static final String DIGEST_URL = "https://app.drpn.ai/audits/month-close?date=2026-10-22&tenantId=GORJANA"
 

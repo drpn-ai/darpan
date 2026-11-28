@@ -64,7 +64,7 @@ class EmailCopy {
     }
 
     /** The variables an edit of this block may use: its own default's (audit emails, subject blocks), else every one the template has. */
-    static Set<String> blockVariables(def ec, String emailTemplateId, String blockId) {
+    private static Set<String> blockVariables(def ec, String emailTemplateId, String blockId) {
         if (ownVariablesOnly(emailTemplateId, blockId)) {
             String defaultText = defaultOf(ec, row(ec, emailTemplateId, blockId), emailTemplateId, blockId)
             return new LinkedHashSet<String>(variables(defaultText))
@@ -197,12 +197,6 @@ class EmailCopy {
         return null
     }
 
-    /** The body screen's name for a template (EmailSamples key), from its seed-file EmailTemplate row's location in the database. */
-    static String screenFor(def ec, String emailTemplateId) {
-        String location = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()?.getString("bodyScreenLocation") ?: ""
-        return location.substring(location.lastIndexOf("/") + 1).replace(".xml", "")
-    }
-
     /** The subject as the preview shows it: the slots filled from vars by pure substitution, never the template engine. */
     static String previewSubject(def ec, String emailTemplateId, String text, Map vars) {
         return apply(text, vars, variables(defaultSubject(ec, emailTemplateId)))
@@ -251,7 +245,7 @@ class EmailCopy {
     /** Every ${variable} any block of the template uses: what an edit to any block of it may use. Rows and seed file. */
     static Set<String> templateVariables(def ec, String emailTemplateId) {
         Set<String> names = new LinkedHashSet<>()
-        seedDefaults(ec).each { String key, String text -> if (key.startsWith(emailTemplateId + "/") && !key.endsWith("/" + SUBJECT)) names.addAll(variables(text)) }
+        seedBlockDefaults(ec).each { String key, String text -> if (key.startsWith(emailTemplateId + "/") && !key.endsWith("/" + SUBJECT)) names.addAll(variables(text)) }
         try {
             unguarded(ec) { ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId).useCache(false).list() }
                     .each { if (it.getString("blockId") != SUBJECT) names.addAll(variables(it.getString("defaultText"))) }
@@ -353,7 +347,7 @@ class EmailCopy {
     private static String defaultOf(def ec, def row, String emailTemplateId, String blockId) {
         String fromRow = row?.getString("defaultText")
         if (fromRow != null) return fromRow
-        String fromFile = seedDefaults(ec).get(emailTemplateId + "/" + blockId)
+        String fromFile = seedBlockDefaults(ec).get(emailTemplateId + "/" + blockId)
         if (fromFile == null) logOnce(emailTemplateId, blockId, "no EmailCopyBlock row and no seed default")
         else logOnce(emailTemplateId, blockId, "no EmailCopyBlock row yet; the seed file's default goes")
         return fromFile
@@ -364,7 +358,8 @@ class EmailCopy {
     /** The seed files that hold EmailCopyBlock rows. DAR-BE-015: the run error notice (OpsNoticeSeedData) and the daily error email (OpsSeedData) ship their own. */
     private static final List<String> COPY_SEED_FILES = ["EmailCopySeedData", "OpsNoticeSeedData", "OpsSeedData"]
 
-    private static Map<String, String> seedDefaults(def ec) {
+    /** emailTemplateId/blockId -> shipped default text, every block the seed has. */
+    static Map<String, String> seedBlockDefaults(def ec) {
         Map<String, String> cached = seedDefaultsCache
         if (cached != null) return cached
         Map<String, String> found = new HashMap<>()
@@ -395,12 +390,10 @@ class EmailCopy {
 
     /** Test-only: drops the seed caches and the log-once memory so the next call re-reads. Idempotent, never throws. */
     static void resetForTests() {
-        try {
-            seedDefaultsCache = null
-            seedSubjectsCache = null
-            LOGGED.clear()
-            DRAFT.remove()
-        } catch (Throwable ignored) { }
+        seedDefaultsCache = null
+        seedSubjectsCache = null
+        LOGGED.clear()
+        DRAFT.remove()
     }
 
     /** emailTemplateId -> the subject its seed file ships. */
@@ -424,9 +417,6 @@ class EmailCopy {
         if (allParsed) seedSubjectsCache = found
         return found
     }
-
-    /** emailTemplateId/blockId -> shipped default text, every block the seed has. */
-    static Map<String, String> seedBlockDefaults(def ec) { return seedDefaults(ec) }
 
     /**
      * Email copy is Darpan's own configuration, read and applied for whoever sends: a password reset goes out with no one

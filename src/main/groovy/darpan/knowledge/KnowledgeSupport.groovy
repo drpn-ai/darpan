@@ -13,7 +13,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.sql.Date
-import java.sql.Timestamp
 import java.time.LocalDate
 import java.util.stream.Collectors
 import java.util.stream.Stream
@@ -208,7 +207,7 @@ class KnowledgeSupport {
         if (created) {
             ec.entity.makeValue(ENTRY_ENTITY).setAll(fields)
                     .set('knowledgeEntryId', TenantScopedFinder.mintId(ec, ENTRY_ENTITY, 'knowledgeEntryId', 'KE_'))
-                    .set('createdByUserId', ec.user.userId).set('createdDate', new Timestamp(System.currentTimeMillis())).create()
+                    .set('createdByUserId', ec.user.userId).set('createdDate', ec.user.nowTimestamp).create()
         } else {
             def row = TenantScopedFinder.findOneOwnedByTenant(ec, ENTRY_ENTITY, 'knowledgeEntryId', existing.knowledgeEntryId, tenant,
                     'knowledge store: the row this tenant already holds under the key')
@@ -352,7 +351,7 @@ class KnowledgeSupport {
     }
 
     /** The product repo's allow phrases: one per line, blank lines and # comments skipped. Absent or unreadable is none. */
-    static Set<String> allowPhrases(Path root) {
+    private static Set<String> allowPhrases(Path root) {
         Path file = root.resolve(ALLOW_PHRASES_FILE)
         Set<String> out = new LinkedHashSet<String>()
         if (!Files.isRegularFile(file)) return out
@@ -465,7 +464,7 @@ class KnowledgeSupport {
     }
 
     /** The lower-cased host of a URL (scheme optional); null for blank, unparseable or dot-less hosts such as localhost. */
-    static String hostOf(String url) {
+    private static String hostOf(String url) {
         String text = url?.trim()
         if (!text) return null
         String host
@@ -479,7 +478,7 @@ class KnowledgeSupport {
     }
 
     /** The shop handle of a Shopify host (kb-shop.myshopify.com -> kb-shop); null for any other host. */
-    static String shopHandle(String host) {
+    private static String shopHandle(String host) {
         if (!host?.endsWith('.myshopify.com')) return null
         String label = host.substring(0, host.indexOf('.'))
         return label ?: null
@@ -489,7 +488,7 @@ class KnowledgeSupport {
      * The NetSuite account id a host names (1234567-sb1.restlets.api.netsuite.com): the label as written, its
      * 1234567_SB1 form, and the numeric production account.
      */
-    static List<String> netsuiteAccounts(String host) {
+    private static List<String> netsuiteAccounts(String host) {
         if (!host?.endsWith('.netsuite.com')) return []
         String label = host.substring(0, host.indexOf('.'))
         if (!(label ==~ /\d{4,}(-[a-z]+\d*)?/)) return []

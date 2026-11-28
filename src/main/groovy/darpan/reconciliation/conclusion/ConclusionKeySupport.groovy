@@ -22,7 +22,7 @@ class ConclusionKeySupport {
             String field = plainField(expression) ?: CompareIdExpressionSupport.topLevelRecordField(expression) ?: (String) split.idExpr
             String normalizer = configured ?: CompareIdExpressionSupport.resolveIdNormalizer((String) split.normalizer)
             Object raw = field == null ? null : record.get(field)
-            String value = raw == null ? null : normalize(sparkTrim(raw.toString()), normalizer)
+            String value = raw == null ? null : normalize(sparkTrim(keyText(raw)), normalizer)
             if (!value) return null
             parts.add(value)
         }
@@ -45,6 +45,20 @@ class ConclusionKeySupport {
         if (compareKey == null) return null
         int at = compareKey.indexOf(ReconciliationServices.COMPOSITE_KEY_DELIMITER)
         return at < 0 ? compareKey : compareKey.substring(0, at)
+    }
+
+    /**
+     * A key value's text as the Spark compare writes it (S01b cf60f0e8): a decimal (a BigDecimal from a JSON literal, a Double
+     * or a Float) integral as a whole number, otherwise its shortest exact decimal (7.0 -> "7", 1.50 -> "1.5"); a string, an
+     * Integer and a Long exactly as they are.
+     */
+    private static String keyText(Object raw) {
+        if (!(raw instanceof BigDecimal || raw instanceof Double || raw instanceof Float)) return raw.toString()
+        try {
+            return new BigDecimal(raw.toString()).stripTrailingZeros().toPlainString()
+        } catch (NumberFormatException ignored) {
+            return raw.toString() // NaN or Infinity: no decimal to write
+        }
     }
 
     /** Spark's trim (CompareDatasetSupport.applyIdNormalizer): spaces only. String.trim() also takes tabs and line breaks. */

@@ -39,6 +39,19 @@ class ConclusionKeySupportTests {
         assertNull(ConclusionKeySupport.compareKey([o: "   "], ["o"], null))
     }
 
+    // DAR-OPS-029 (lens E4, with S01b's cf60f0e8): a numeric key reads the same in both passes. Spark writes a double key
+    // integral below 1e15 as a whole number and any other as its shortest decimal; a decimal parsed here (BigDecimal from a
+    // JSON literal, or a Double/Float) is written the same way. A string, an Integer and a Long stay exactly as they are.
+    @Test
+    void aDecimalKeyReadsAsSparkWritesIt() {
+        assertEquals("7", ConclusionKeySupport.compareKey([id: new BigDecimal("7.0")], ["id"], null))
+        assertEquals("1.5", ConclusionKeySupport.compareKey([id: new BigDecimal("1.50")], ["id"], null))
+        assertEquals("12345678901", ConclusionKeySupport.compareKey([id: 12345678901.0d], ["id"], null))
+        assertEquals("2.25", ConclusionKeySupport.compareKey([id: 2.25f], ["id"], null))
+        assertEquals("7.0", ConclusionKeySupport.compareKey([id: "7.0"], ["id"], null), "a string key is its text")
+        assertEquals("7\u001F12345678901", ConclusionKeySupport.compareKey([o: 7, u: 12345678901L], ["o", "u"], null))
+    }
+
     @Test
     void aBlankFieldHasNoKey() {
         assertNull(ConclusionKeySupport.compareKey([a: "x", b: " "], ["a", "b"], null))

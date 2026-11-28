@@ -77,6 +77,9 @@ class SyncPulseReader {
      * <p>DAR-BE-377: each record is dated and named by the fields the upstream endpoint's connector names
      * (SyncPulseSupport.pulseFieldsOf: orderDate / orderName for HotWax orders, createdAt / name for Shopify orders).</p>
      *
+     * <p>OC157: a read that saw a different number of records than the extract said it wrote (its records under another
+     * root, a cut file) fails.</p>
+     *
      * <p>OC89: a read that returned records but could key and date none of them fails. An empty OK would close every
      * open order in the window as "left the check".</p>
      *
@@ -91,8 +94,13 @@ class SyncPulseReader {
             Map fields = SyncPulseSupport.pulseFieldsOf(ec, normalize(readField(sides.upstream, "systemEnumId")))
             if (fields == null) throw new IllegalStateException(SyncPulseFacadeSupport.E_UPSTREAM)
             Map window = [childWindowStartDate: Timestamp.from(from), childWindowEndDate: Timestamp.from(thru)]
-            File file = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String, false).file
+            Map extracted = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String, false)
+            File file = extracted.file as File
             Map read = upstreamRecords(file, sides.upstreamKey as String, fields.createdField as String, fields.nameField as String)
+            // OC157: a drifted or mis-rooted extract reads as no records; the count the extract stated catches it
+            Integer stated = extracted.recordCount as Integer
+            long seen = (read.visitedCount as long) + setAsideRows(file)
+            if (stated != null && stated != seen) throw new IllegalStateException("The extract said ${stated} upstream records; the read saw ${seen}.".toString())
             if (!read.records && read.skippedCount) throw new IllegalStateException(("The upstream read had ${read.skippedCount} upstream records and none had " +
                     "a ${sides.upstreamKey} and a ${fields.createdField} that reads as a date and time.").toString())
             return [ok: true, records: read.records, undatedKeys: read.undatedKeys, errors: [], warnings: read.warnings]
@@ -131,14 +139,16 @@ class SyncPulseReader {
      * (none when blank), each key once (the first). A record with no key, or no createdField value that reads as an
      * instant, is skipped, each kind with one warning. No file: none.
      *
-     * @return [records, undatedKeys: the keys of records skipped for their date, skippedCount, warnings]
+     * @return [records, undatedKeys: the keys of records skipped for their date, skippedCount, visitedCount: every record
+     *         walked (repeats and skips included; not the Keep's set-aside rows), warnings]
      */
     static Map upstreamRecords(File file, String keyField, String createdField, String nameField) {
         List<Map> records = []
         Set<String> seen = new HashSet<String>()
         Set<String> undatedKeys = new LinkedHashSet<String>()
-        int noKey = 0, noDate = 0
+        int noKey = 0, noDate = 0, visited = 0
         if (file != null && file.exists()) forEachPresentRecord(file) { Map r ->
+            visited++
             String key = normalize(r.get(keyField))
             if (!key) { noKey++; return }
             Instant createdAt = createdAt(r.get(createdField))
@@ -149,7 +159,7 @@ class SyncPulseReader {
         List<String> warnings = []
         if (noKey) warnings << "${noKey} upstream record(s) skipped: no ${keyField}.".toString()
         if (noDate) warnings << "${noDate} upstream record(s) skipped: no ${createdField} that reads as a date and time.".toString()
-        return [records: records, undatedKeys: undatedKeys, skippedCount: noKey + noDate, warnings: warnings]
+        return [records: records, undatedKeys: undatedKeys, skippedCount: noKey + noDate, visitedCount: visited, warnings: warnings]
     }
 
     /**
@@ -342,7 +352,7 @@ class SyncPulseReader {
      * the read with the gate's message (Ruling 3b2b-25).</p>
      *
      * @return [file: the file it wrote or null, kept: the keyField values of the records Keep kept (every record's without a
-     *         Keep run), or null when no Keep ran or the key is not asked for]
+     *         Keep run), or null when no Keep ran or the key is not asked for, recordCount: the count the extract stated, or null]
      */
     private static Map extract(def ec, Map automation, def source, Map window, String location, List<String> lookupKeys,
                                String keyField, boolean wantKept) {
@@ -358,12 +368,22 @@ class SyncPulseReader {
         File file = RunVerificationSupport.resolveLocationFile(ec, normalize(result.fileLocation))
         if (file == null || !file.exists()) {
             if (((result.recordCount ?: 0) as int) > 0) throw new IllegalStateException("${readField(source, 'fileSide')}'s read wrote no file.")
-            return [file: null, kept: null]
+            return [file: null, kept: null, recordCount: result.recordCount]
         }
         // The plan the read was sent; a read served from a kept copy carries none, so it is worked out again, as the run does.
         Map sideKeep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, read, params, true)
         Set<String> kept = KeepStepSupport.applies(sideKeep) ? KeepStepSupport.keptValues(ec, file, sideKeep, keyField) : null
-        return [file: file, kept: wantKept ? kept : null]
+        return [file: file, kept: wantKept ? kept : null, recordCount: result.recordCount]
+    }
+
+    /** The rows the side's Keep set aside in file (its set-aside rows file, one row per line); none without a Keep. */
+    private static long setAsideRows(File file) {
+        if (file == null || !KeepArtifacts.keepFile(file).isFile()) return 0L
+        File rows = KeepArtifacts.rowsFile(file)
+        if (!rows.isFile()) return 0L
+        long count = 0L
+        rows.eachLine("UTF-8") { String line -> if (line.trim()) count++ }
+        return count
     }
 
     private static String folderLocation(def ec, Map pair, String what) {

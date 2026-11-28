@@ -307,6 +307,29 @@ class SyncPulseReaderSmokeTests {
         assertNoPulseFiles()
     }
 
+    /**
+     * DAR-OPS-029 S17a OC157. An extract whose records sit under another root (a drifted or mis-rooted file) read as no
+     * records at all: an empty OK, which drops every in-window open order as "left the check". The extract said how many
+     * records it wrote, so a read that saw a different number fails.
+     */
+    @Test
+    void aMisRootedExtractFailsInsteadOfReadingEmpty() {
+        SyncPulseReader.setLiveExtractor({ String service, Map params ->
+            calls << [service: service, params: new LinkedHashMap(params)]
+            List<Map> records = [[orderId: "O1", orderName: "#M1", orderDate: "2026-11-21T07:30:00Z"],
+                                 [orderId: "O2", orderName: "#M2", orderDate: "2026-11-21T07:40:00Z"]]
+            File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
+            new File(dir, "misrooted.json").setText(JsonOutput.toJson([metadata: [:], data: records]), "UTF-8")
+            return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, "misrooted.json"), fileName: "misrooted.json",
+                    recordCount : records.size()]
+        })
+        Map out = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)
+        assertEquals(false, out.ok, out.toString())
+        assertEquals([], out.records)
+        assertTrue(out.errors.any { (it as String).contains("The extract said 2 upstream records; the read saw 0.") }, out.errors.toString())
+        assertNoPulseFiles()
+    }
+
     @Test
     void outputFolderRemoved() {
         Map up = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)

@@ -50,14 +50,14 @@ class RunConclusionSupportTests {
     }
 
     /** Mirrors ReconciliationServices.writeDiffDatasetOutput's writer exactly. */
-    private File writeDiffDocument(List<Map> rows, Map summary = null) {
+    private File writeDiffDocument(List<Map> rows, Map summary = null, List warnings = null) {
         File file = new File(tempDir, "ruleset-diff-${System.nanoTime()}.json")
         file.withWriter("UTF-8") { writer ->
             writer << "{\n"
             writer << "\"metadata\":" + JsonOutput.toJson([file1Label: FILE1, file2Label: FILE2]) + ",\n"
             writer << "\"summary\":" + JsonOutput.toJson(summary ?: [totalDifferences: rows.size()]) + ",\n"
             writer << "\"validationErrors\":" + JsonOutput.toJson([]) + ",\n"
-            writer << "\"processingWarnings\":" + JsonOutput.toJson([]) + ",\n"
+            writer << "\"processingWarnings\":" + JsonOutput.toJson(warnings ?: []) + ",\n"
             writer << "\"differences\":["
             boolean first = true
             rows.each { Map r ->
@@ -674,6 +674,11 @@ class RunConclusionSupportTests {
             appliesToBucket: "DUPLICATE_IN_FILE_2",
             conditions: [cond(subject: "FILE_2", fieldExpression: "reason", operator: "IN", conditionValues: ["split"], checkLabel: "Split")]]]
 
+    /** The compare's repeated-key warning as RuleSetCompareScopeAdapter words it, and one unrelated warning. */
+    private static final String REPEATS_WARNING = "Compare scope 'Returns' FILE_2 (NetSuite) has 1 key(s) on more than one record; " +
+            darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+    private static final String OTHER_WARNING = "The NetSuite read stopped at its row cap."
+
     private static List<Map> repeatedOnFile2(String key, String reason) {
         return [repeatRow("DUPLICATE_IN_FILE_1_PAIRED", key, FILE1, [omsOrderId: key]),
                 repeatRow("DUPLICATE_IN_FILE_2", key, FILE2, [orderId: key, reason: reason, rma: "${key}-A".toString()]),
@@ -681,33 +686,34 @@ class RunConclusionSupportTests {
     }
 
     @Test
-    void hidingAKeysRepeatsHidesItsPartnerRowAndTheRunsWarning() {
-        String repeats = "Compare scope 'Returns' FILE_2 (NetSuite) has 1 key(s) on more than one record; " +
-                darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+    void hidingAKeysRepeatsHidesItsPartnerRowAndTheWarning() {
         // The partner row comes first: the repeats that decide it are read later in the document.
-        File doc = writeDiffDocument(repeatedOnFile2("K", "split"), [totalDifferences: 3])
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split"), [totalDifferences: 3], [REPEATS_WARNING, OTHER_WARNING])
         Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
         Map d = parse(doc)
         assertEquals([], d.differences)
+        // OC71: the document's own warnings agree with the run counts: the repeated-key one goes, the other stays.
+        assertEquals([OTHER_WARNING], d.processingWarnings)
         assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
         assertEquals(0, d.summary.totalDifferences)
         // The stored run counts (the compare's result, as the run paths hand them to applyHidden) carry the duplicate count
         // and the warning; both go once every repeat and its partner are hidden.
-        Map runCounts = [differenceCount: 3, duplicateDifferenceCount: 3, processingWarnings: [repeats]]
+        Map runCounts = [differenceCount: 3, duplicateDifferenceCount: 3, processingWarnings: [REPEATS_WARNING, OTHER_WARNING]]
         RunConclusionSupport.applyHidden(runCounts, (Map) out.hiddenByBucket)
-        assertEquals([differenceCount: 0, duplicateDifferenceCount: 0, processingWarnings: []], runCounts)
+        assertEquals([differenceCount: 0, duplicateDifferenceCount: 0, processingWarnings: [OTHER_WARNING]], runCounts)
         assertEquals([[code: "CONC_SPLIT_RMA", label: "One RMA per resolution", count: 3]], d.summary.conclusions.hidden)
     }
 
     @Test
     void aKeyWhoseRepeatsAreNotHiddenKeepsItsPartnerRow() {
-        File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"), [totalDifferences: 6])
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"), [totalDifferences: 6], [REPEATS_WARNING])
         Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
         Map d = parse(doc)
         assertEquals([["J", "DUPLICATE_IN_FILE_1_PAIRED"], ["J", "DUPLICATE_IN_FILE_2"], ["J", "DUPLICATE_IN_FILE_2"]],
                 ((List<Map>) d.differences).collect { [it.primaryId, it.diffType] })
         assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
         assertEquals(3, d.summary.totalDifferences)
+        assertEquals([REPEATS_WARNING], d.processingWarnings, "J's repeats are still shown: the warning stays")
     }
 
     // Aditi D7' (2026-11-28, "EVERY repeat hidden"): while any repeat of a key is still shown, its partner row stays with it.
@@ -716,9 +722,10 @@ class RunConclusionSupportTests {
         File doc = writeDiffDocument([repeatRow("DUPLICATE_IN_FILE_1_PAIRED", "K", FILE1, [omsOrderId: "K"]),
                                       repeatRow("DUPLICATE_IN_FILE_2", "K", FILE2, [orderId: "K", reason: "split", rma: "K-A"]),
                                       repeatRow("DUPLICATE_IN_FILE_2", "K", FILE2, [orderId: "K", reason: "other", rma: "K-B"])],
-                [totalDifferences: 3])
+                [totalDifferences: 3], [REPEATS_WARNING])
         Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
         Map d = parse(doc)
+        assertEquals([REPEATS_WARNING], d.processingWarnings, "one repeat is still shown")
         assertEquals([["DUPLICATE_IN_FILE_1_PAIRED", null], ["DUPLICATE_IN_FILE_2", "K-B"]],
                 ((List<Map>) d.differences).collect { [it.diffType, new JsonSlurper().parseText((String) it.data).rma] })
         assertEquals([DUPLICATE_IN_FILE_2: 1], out.hiddenByBucket, "only the repeat the rule explains is hidden")

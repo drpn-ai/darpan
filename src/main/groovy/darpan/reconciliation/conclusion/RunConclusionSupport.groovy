@@ -104,9 +104,14 @@ class RunConclusionSupport {
         int duplicates = (hiddenByBucket.findAll { k, v -> k?.toString()?.startsWith("DUPLICATE_IN_FILE_") }.values().sum(0) ?: 0) as int
         minus("duplicateDifferenceCount", duplicates)
         if (duplicates && counts.get("duplicateDifferenceCount") == 0 && counts.get("processingWarnings") instanceof List) {
-            counts.put("processingWarnings", ((List) counts.get("processingWarnings")).findAll {
-                !it?.toString()?.endsWith(darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL)
-            })
+            counts.put("processingWarnings", withoutRepeatedKeyWarning((List) counts.get("processingWarnings")))
+        }
+    }
+
+    /** The warnings without the compare's repeated-key one (it ends in RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL). */
+    static List withoutRepeatedKeyWarning(List warnings) {
+        return (warnings ?: []).findAll {
+            !it?.toString()?.endsWith(darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL)
         }
     }
 
@@ -276,6 +281,7 @@ class RunConclusionSupport {
             return [f: f, sides: sides, lookedUp: lookedUp, conclusion: conclusion]
         }
         Map<String, Map<String, String>> hiddenRepeats = hiddenCodes ? hiddenRepeatedKeys(diffFile, finding, concludeRow, hiddenCodes) : [:]
+        int repeatsShown = 0
 
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
             Map one = concludeRow(row)
@@ -291,6 +297,7 @@ class RunConclusionSupport {
                 hiddenByBucket.put((String) f.bucket, (hiddenByBucket.get((String) f.bucket) ?: 0) + 1)
                 return null
             }
+            if (((String) f.bucket)?.startsWith("DUPLICATE_IN_FILE_")) repeatsShown++
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
                 labels.put(code, conclusion.label?.toString() ?: code)
@@ -326,6 +333,11 @@ class RunConclusionSupport {
                                             }] + (hidden ? [hidden: hidden.collect { String code, Integer count ->
                                                 [code: code, label: labels.get(code), count: count]
                                             }] : [:])]
+        }, { List warnings ->
+            // OC71: the document's own warnings say what the run counts say (applyHidden): once every repeated-key row is
+            // hidden the compare's repeated-key warning goes with them; a repeat still shown keeps it.
+            int repeatsHidden = (hiddenByBucket.findAll { k, v -> k?.startsWith("DUPLICATE_IN_FILE_") }.values().sum(0) ?: 0) as int
+            return repeatsHidden && !repeatsShown ? withoutRepeatedKeyWarning(warnings) : warnings
         })
         return [ran: true, counts: counts.findAll { !hiddenCodes.contains(it.key) }, unknownSides: unknownSides,
                 hidden: hidden, hiddenByBucket: hiddenByBucket] +

@@ -123,6 +123,62 @@ class SftpAutomationServiceSmokeTests {
         assertTrue(uploadedDiff.contains("\"compareScopeDescription\":\"Smoke-test compare scope for product field mismatches.\""))
     }
 
+    /**
+     * OC116 (DAR-OPS-029 S07b). A side found while the other has not arrived stays where it is, so a later poll can still
+     * reconcile the pair. It used to be archived at once, and every retry then found nothing on that side.
+     */
+    @Test
+    void aSideFoundBeforeTheOtherArrivesIsLeftInPlaceSoTheNextPollReconcilesThePair() {
+        sftpEnvironment.putFile("shopify.test", 22, "/incoming/products-1.json", readFixtureText("data/test/test-products-1.json"), 2000L)
+        Map<String, Object> first = pollProducts("smoke-wait")
+        assertFalse(first.dataAvailable as Boolean)
+        assertTrue(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/products-1.json"), "the file found first stays in place")
+        assertFalse(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/archive/products-1.json"), "and is not archived")
+
+        sftpEnvironment.putFile("oms.test", 22, "/incoming/products-2.json", readFixtureText("data/test/test-products-2.json"), 1000L)
+        Map<String, Object> second = pollProducts("smoke-wait")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertTrue(second.dataAvailable as Boolean, "the next poll reconciles the pair")
+        assertEquals(4L, second.differenceCount)
+        assertTrue(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/archive/products-1.json"))
+        assertTrue(sftpEnvironment.hasFile("oms.test", 22, "/incoming/archive/products-2.json"))
+    }
+
+    /**
+     * OC116. Both sides are archived before anything is reconciled; one that cannot be archived fails the poll with nothing
+     * reconciled (no duplicate result next time), naming the file, its side, and the file already archived to move back.
+     */
+    @Test
+    void anArchiveFailureFailsThePollBeforeReconcilingAndSaysWhatToMoveBack() {
+        sftpEnvironment.putFile("shopify.test", 22, "/incoming/products-1.json", readFixtureText("data/test/test-products-1.json"), 2000L)
+        sftpEnvironment.putFile("oms.test", 22, "/incoming/products-2.json", readFixtureText("data/test/test-products-2.json"), 1000L)
+        sftpEnvironment.archiveFailsOn << "oms.test"
+        Map<String, Object> result = pollProducts("smoke-archive")
+        try {
+            assertTrue(ec.message.hasError(), "an archive failure is a failed poll")
+            String error = ec.message.errors.join("\n")
+            assertTrue(error.contains("/incoming/products-2.json") && error.contains("file2"), error)
+            assertTrue(error.contains("/incoming/archive/products-1.json") && error.contains("/incoming/products-1.json"),
+                    "it says which file was already archived, and where to move it back: ${error}")
+            assertFalse(result.dataAvailable as Boolean)
+            assertEquals(null, result.diffFileName, "nothing is reconciled")
+            assertTrue(sftpEnvironment.hasFile("oms.test", 22, "/incoming/products-2.json"), "the unarchived file stays in place")
+            assertFalse(sftpEnvironment.readFile("shopify.test", 22, "/incoming/products-1.json") != null, "file1 was archived first")
+        } finally {
+            ec.message.clearErrors()
+        }
+    }
+
+    private Map<String, Object> pollProducts(String folder) {
+        return ec.service.sync().name("reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile")
+                .parameters([ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS", file1SftpServerId: "SHOPIFY_TEST_SFTP", file2SftpServerId: "OMS_TEST_SFTP",
+                             file1RemotePath: "/incoming", file2RemotePath: "/incoming",
+                             stageLocation: "runtime://tmp/reconciliation/automation/input/${folder}".toString(),
+                             outputLocation: "runtime://tmp/reconciliation/automation/output/${folder}".toString(),
+                             sparkAppName: "SftpAutomationServiceSmokeTests"])
+                .disableAuthz().call() as Map<String, Object>
+    }
+
     /** DAR-BE-082: the first successful poll saves each server's key (trust on first use). */
     @Test
     void theFirstPollSavesEachServersKey() {
@@ -367,6 +423,10 @@ class SftpAutomationServiceSmokeTests {
 
     private static final class FakeSftpEnvironment {
         String hostKey(String host, int port) { return "SHA256:fake-${host}-${port}".toString() }
+        /** Hosts whose archive folder refuses writes (rename into it and put into it both fail). */
+        Set<String> archiveFailsOn = [] as Set<String>
+        /** Hosts that refuse any write outside the archive folder (the result upload). */
+        Set<String> uploadFailsOn = [] as Set<String>
 
         private final Map<String, Map<String, FakeSftpFile>> filesByServer = [:].withDefault { [:] }
 
@@ -415,6 +475,7 @@ class SftpAutomationServiceSmokeTests {
         }
 
         void rename(String host, int port, String fromPath, String toPath) {
+            if (host in archiveFailsOn && toPath.contains("/archive/")) throw new IOException("permission denied: ${toPath}")
             Map<String, FakeSftpFile> serverFiles = filesByServer[serverKey(host, port)]
             FakeSftpFile file = serverFiles.remove(normalizePath(fromPath))
             if (file == null) throw new FileNotFoundException(fromPath)
@@ -422,6 +483,9 @@ class SftpAutomationServiceSmokeTests {
         }
 
         void put(String host, int port, String remoteDir, String fileName, InputStream inputStream) {
+            boolean archive = remoteDir.endsWith("/archive") || remoteDir.contains("/archive/")
+            if (archive && host in archiveFailsOn) throw new IOException("permission denied: ${remoteDir}")
+            if (!archive && host in uploadFailsOn) throw new IOException("permission denied: ${remoteDir}")
             byte[] bytes = inputStream.bytes
             String normalizedDir = normalizePath(remoteDir)
             String targetPath = normalizedDir == "/" ? "/${fileName}" : "${normalizedDir}/${fileName}"

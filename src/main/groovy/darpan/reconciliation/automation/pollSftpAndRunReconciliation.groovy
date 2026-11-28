@@ -243,119 +243,89 @@ if (ruleSetIdValue) {
     logMsg("Starting SFTP poll for mapping ${mappingIdValue}")
 }
 
-def prepareFile = { String label, String systemEnumId, String sftpServerId, String overridePath ->
+/** A connected client for one server, held to its saved host key (DAR-BE-082). */
+def connectTo = { server, String host, int port ->
+    def client = SftpAutomationSupport.createClient(host, normalize(server.username), port)
+    String password = normalize(server.password)
+    if (password) client.password(password)
+    if (server.privateKey) client.privateKey((String) server.privateKey)
+    client.preserveAttributes(server.remoteAttributes == "Y")
+    SftpAutomationSupport.connectPinned(ec, client, server)
+    return client
+}
+
+/** Finds and stages one side's newest file. Nothing moves on the server: a side is archived only once both are staged. */
+def stageSide = { String label, String systemEnumId, String sftpServerId, String overridePath ->
     def server = SftpAutomationSupport.loadSftpServerForRun(ec, sftpServerId, sftpRunScope, label)
-
     def hostInfo = resolveHostAndPort(server.host, server.port, "Server ${sftpServerId}")
-    def cleanHost = hostInfo.host
-    def cleanPort = hostInfo.port
-    def hostBasePath = hostInfo.basePath
-    def cleanUser = normalize(server.username)
-    def cleanPass = normalize(server.password) // Assuming decrypted by Moqui entity engine if configured? Or we might need to decrypt explicitly if not handled automatically? Moqui usually handles encrypted fields automatically on get.
-    def overrideClean = normalizePath(overridePath)
-
-    if (!cleanHost || !cleanUser) {
+    if (!hostInfo.host || !normalize(server.username)) {
         throw new IllegalArgumentException("Host and Username required for ${label} (Server ${sftpServerId})")
     }
-
-    if (!cleanPass && !server.privateKey) {
+    if (!normalize(server.password) && !server.privateKey) {
         throw new IllegalArgumentException("Password or Private Key required for ${label} (Server ${sftpServerId})")
     }
+    String basePath = normalizePath(overridePath) ?: hostInfo.basePath ?: "/"
+    String source = "sftp://${hostInfo.host}:${hostInfo.port}${basePath}".toString()
+    logMsg("Connecting to SFTP: ${hostInfo.host}:${hostInfo.port} as ${normalize(server.username)} (path: ${basePath})")
 
-    def sftpTarget = overrideClean ?: hostBasePath ?: "/"
-
-    // Construct simplified SFTP config
-    def sftpConfig = [host: cleanHost, port: cleanPort, basePath: sftpTarget]
-
-    def sftpClient = SftpAutomationSupport.createClient((String) sftpConfig.host, (String) cleanUser, (int) sftpConfig.port)
-    if (cleanPass) sftpClient.password((String) cleanPass)
-    if (server.privateKey) sftpClient.privateKey((String) server.privateKey)
-
-    logMsg("Connecting to SFTP: ${sftpConfig.host}:${sftpConfig.port} as ${cleanUser} (path: ${sftpConfig.basePath})")
-    sftpClient.preserveAttributes(server.remoteAttributes == "Y")
-
-    def selection
-    def staged
+    def client = connectTo(server, (String) hostInfo.host, (int) hostInfo.port)
     try {
-        SftpAutomationSupport.connectPinned(ec, sftpClient, server)
-        selection = selectSftpCandidateFile(sftpClient, (String) sftpConfig.basePath, label, archiveSubdir)
+        def selection = selectSftpCandidateFile(client, basePath, label, archiveSubdir)
         if (!selection.refPath) {
-            String failMsg = "No file found at ${sftpConfig.basePath} matching criteria."
+            String failMsg = "No file found at ${basePath} matching criteria."
             logMsg(failMsg)
-            return [found: false, message: failMsg, source: "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}"]
+            return [found: false, message: failMsg, source: source]
         }
         logMsg("Found file: ${selection.name} (${selection.refPath})")
-        InputStream inputStream = sftpClient.openStream((String) selection.refPath)
+        def staged
+        InputStream inputStream = client.openStream((String) selection.refPath)
         try {
             staged = stageStream(inputStream, stageDirRef, label, selection.name, timestamp)
             logMsg("Staged file to: ${staged.location}")
         } finally {
             try { inputStream?.close() } catch (Exception ignored) {}
         }
+        return [found         : true, label: label, server: server, host: hostInfo.host, port: hostInfo.port, source: source,
+                refPath       : selection.refPath, selectedName: selection.name ?: selection.refPath, stagedLocation: staged.location,
+                systemLabel   : ReconciliationServices.resolveEnumLabel(ec, systemEnumId, label), basePathUsed: basePath]
+    } finally {
+        try { client.close() } catch (Exception ignored) {}
+    }
+}
 
-        // Audit H3.2 — Archive failure used to be logged-and-continued, silently letting the next
-        // scan re-select the same file (it was never moved out of the source directory) and produce
-        // a duplicate reconciliation result. Now archive failure is captured into archiveError on the
-        // staged map so the saved run is marked with an operator-actionable error rather than a
-        // silent success. The file remains in place for manual review/move.
-        Exception archiveFailure = null
+/** Moves one staged side's file into its archive folder (rename, else copy and remove); answers where it went, or throws. */
+def archiveSide = { Map prep ->
+    String refPath = prep.refPath as String
+    String baseDir = refPath.contains("/") ? refPath.substring(0, refPath.lastIndexOf("/")) : "/"
+    String archiveDir = (baseDir.endsWith("/") ? baseDir : baseDir + "/") + (archiveSubdir ?: "archive")
+    String fileName = refPath.tokenize("/")?.last() ?: refPath
+    String archiveDest = archiveDir + "/" + fileName
+    logMsg("Archiving remote file to ${archiveDest}")
+    def client = connectTo(prep.server, (String) prep.host, (int) prep.port)
+    try {
+        try { client.mkdirs(archiveDir) } catch (Exception ignored) { }   // an existing folder answers with an error on some servers
         try {
-            String baseDir = selection.refPath.contains("/") ? selection.refPath.substring(0, selection.refPath.lastIndexOf("/")) : "/"
-            String archiveDir = baseDir.endsWith("/") ? baseDir + (archiveSubdir ?: "archive") : baseDir + "/" + (archiveSubdir ?: "archive")
+            client.rename(refPath, archiveDest)
+        } catch (Exception renameFailed) {
+            InputStream srcStream = client.openStream(refPath)
             try {
-                sftpClient.mkdirs(archiveDir)
-            } catch (Exception ignored) { }
-            String archiveDest = archiveDir + "/" + (selection.name ?: selection.refPath.tokenize("/")?.last() ?: selection.refPath)
-            String archiveName = archiveDest.substring(archiveDest.lastIndexOf("/") + 1)
-            logMsg("Archiving remote file to ${archiveDest}")
-            try {
-                sftpClient.rename(selection.refPath, archiveDest)
-            } catch (Exception e) {
-                try {
-                    InputStream srcStream = sftpClient.openStream(selection.refPath)
-                    try {
-                        sftpClient.put(archiveDir, archiveName, srcStream)
-                        sftpClient.rm(selection.refPath)
-                    } finally {
-                        try { srcStream?.close() } catch (Exception ignored) {}
-                    }
-                } catch (Exception e2) {
-                    archiveFailure = e2
-                    logger.error("Unable to archive SFTP file ${selection.refPath} to ${archiveDest}: ${e2.message}", e2)
-                }
+                client.put(archiveDir, fileName, srcStream)
+            } finally {
+                try { srcStream?.close() } catch (Exception ignored) {}
             }
-        } catch (Exception e) {
-            archiveFailure = e
-            logger.error("Archive step failed for ${selection?.refPath ?: '(unknown)'}: ${e.message}", e)
-        }
-        if (archiveFailure != null && staged != null) {
-            // Record the archive failure on the staged result so the caller can surface it to the
-            // operator (saved run status, automation execution error). The file is still in the
-            // source directory; the next scan WILL re-select it unless the operator moves it. This
-            // is the trade-off vs. silently double-processing: better one loud error than a
-            // duplicate diff written under the same run id.
-            staged.archiveError = "Archive failed for ${selection.refPath}: ${archiveFailure.message}. Move the file to the archive directory manually before the next scan, or the next poll will re-process it.".toString()
+            client.rm(refPath)
         }
     } finally {
-        try { sftpClient.close() } catch (Exception ignored) {}
+        try { client.close() } catch (Exception ignored) {}
     }
-
-    return [
-            found          : true,
-            server         : server,
-            source         : "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}",
-            selectedName   : selection.name ?: selection.refPath,
-            stagedLocation : staged.location,
-            systemLabel    : ReconciliationServices.resolveEnumLabel(ec, systemEnumId, label),
-            basePathUsed   : sftpConfig.basePath
-    ]
+    return archiveDest
 }
 
 def file1Prep
 def file2Prep
 try {
-    file1Prep = prepareFile("file1", effectiveFile1SystemEnumId, file1SftpServerId, file1RemotePath)
-    file2Prep = prepareFile("file2", effectiveFile2SystemEnumId, file2SftpServerId, file2RemotePath)
+    file1Prep = stageSide("file1", effectiveFile1SystemEnumId, file1SftpServerId, file1RemotePath)
+    file2Prep = stageSide("file2", effectiveFile2SystemEnumId, file2SftpServerId, file2RemotePath)
 } catch (IllegalArgumentException e) {
     ec.message.addError(e.message)
     dataAvailable = false
@@ -368,15 +338,35 @@ file2Source = file2Prep.source
 file1SelectedName = file1Prep.selectedName
 file2SelectedName = file2Prep.selectedName
 def file1BasePathUsed = file1Prep.basePathUsed
-def file2BasePathUsed = file2Prep.basePathUsed
 
 if (!file1Prep.found || !file2Prep.found) {
+    // OC116: a side found while the other has not arrived stays where it is, so a later poll still reconciles the pair.
     dataAvailable = false
     def msg = (file1Prep.message ?: "") + (file1Prep.message && file2Prep.message ? "; " : "") + (file2Prep.message ?: "")
     if (!msg) msg = "No files found to reconcile"
     statusMessage = messages.toString() + "\nResult: " + msg
     logger.info("SFTP Poll finished: ${msg}")
     return
+}
+
+// OC116: both sides are archived before anything is reconciled. A side that cannot be archived would be read again by the
+// next poll and reconciled twice, so the poll fails here with nothing reconciled and says what to move back.
+List<Map> archivedSides = []
+for (Map prep in [file1Prep, file2Prep]) {
+    try {
+        archivedSides << [prep: prep, dest: archiveSide(prep)]
+    } catch (Exception e) {
+        logger.error("Unable to archive SFTP file ${prep.refPath} (${prep.source}): ${e.message}", e)
+        String msg = "Could not archive ${prep.label} ${prep.refPath} (${prep.source}): ${e.message}. Nothing was reconciled." +
+                (archivedSides ? archivedSides.collect { Map done ->
+                    " ${done.prep.label} ${done.prep.refPath} was already archived to ${done.dest}: move it back to " +
+                            "${done.prep.refPath} so the next poll reconciles the pair."
+                }.join("") : " The next poll reads it again once its archive folder takes the file.")
+        ec.message.addError(msg)
+        dataAvailable = false
+        statusMessage = messages.toString() + "\nResult: " + msg
+        return
+    }
 }
 
 file1StagedLocation = file1Prep.stagedLocation

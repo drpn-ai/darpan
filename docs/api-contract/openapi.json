@@ -795,9 +795,6 @@
                                         "$ref": "#/components/schemas/RunAutomationNowRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/RunGenericDiffRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/RunReconciliationRequest"
                                     },
                                     {
@@ -1298,7 +1295,6 @@
                                         "facade.ReconciliationFacadeServices.resume#Automation": "#/components/schemas/ResumeAutomationRequest",
                                         "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts": "#/components/schemas/RetryAutomationExecutionFromExtractsRequest",
                                         "facade.ReconciliationFacadeServices.run#AutomationNow": "#/components/schemas/RunAutomationNowRequest",
-                                        "facade.ReconciliationFacadeServices.run#GenericDiff": "#/components/schemas/RunGenericDiffRequest",
                                         "facade.ReconciliationFacadeServices.run#Reconciliation": "#/components/schemas/RunReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.run#SavedRunDiff": "#/components/schemas/RunSavedRunDiffRequest",
                                         "facade.ReconciliationFacadeServices.save#Automation": "#/components/schemas/SaveAutomationRequest",
@@ -2165,9 +2161,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/RunAutomationNowResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/RunGenericDiffResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RunReconciliationResponse"
@@ -32826,275 +32819,6 @@
                     "result"
                 ]
             },
-            "RunGenericDiffParams": {
-                "type": "object",
-                "properties": {
-                    "reconciliationMappingId": {
-                        "type": "string"
-                    },
-                    "file1Name": {
-                        "type": "string"
-                    },
-                    "file1Text": {
-                        "type": "string"
-                    },
-                    "file2Name": {
-                        "type": "string"
-                    },
-                    "file2Text": {
-                        "type": "string"
-                    },
-                    "file1SystemEnumId": {
-                        "type": "string"
-                    },
-                    "file2SystemEnumId": {
-                        "type": "string"
-                    },
-                    "hasHeader": {
-                        "type": "boolean"
-                    },
-                    "sparkMaster": {
-                        "type": "string"
-                    },
-                    "sparkAppName": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "reconciliationMappingId"
-                ],
-                "description": "Run the generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls."
-            },
-            "RunGenericDiffResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "runResult": {
-                        "type": "object",
-                        "properties": {
-                            "reconciliationMappingId": {
-                                "type": "string"
-                            },
-                            "mappingName": {
-                                "type": "string"
-                            },
-                            "reconciliationRunResultId": {
-                                "type": "string"
-                            },
-                            "file1Name": {
-                                "type": "string"
-                            },
-                            "file2Name": {
-                                "type": "string"
-                            },
-                            "file1SystemEnumId": {
-                                "type": "string"
-                            },
-                            "file1SystemLabel": {
-                                "type": "string"
-                            },
-                            "file2SystemEnumId": {
-                                "type": "string"
-                            },
-                            "file2SystemLabel": {
-                                "type": "string"
-                            },
-                            "validationErrors": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
-                            },
-                            "processingWarnings": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
-                            },
-                            "generatedOutput": {
-                                "type": "object",
-                                "properties": {
-                                    "fileName": {
-                                        "type": "string"
-                                    },
-                                    "reconciliationRunResultId": {
-                                        "type": "string"
-                                    },
-                                    "sourceFormat": {
-                                        "type": "string"
-                                    },
-                                    "availableFormats": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "preferredDownloadFormat": {
-                                        "type": "string"
-                                    },
-                                    "companyUserGroupId": {
-                                        "type": "string"
-                                    },
-                                    "reconciliationMappingId": {
-                                        "type": "string"
-                                    },
-                                    "mappingName": {
-                                        "type": "string"
-                                    },
-                                    "reconciliationType": {
-                                        "type": "string"
-                                    },
-                                    "file1Label": {
-                                        "type": "string"
-                                    },
-                                    "file2Label": {
-                                        "type": "string"
-                                    },
-                                    "totalDifferences": {
-                                        "type": "integer"
-                                    },
-                                    "onlyInFile1Count": {
-                                        "type": "integer"
-                                    },
-                                    "onlyInFile2Count": {
-                                        "type": "integer"
-                                    },
-                                    "createdDate": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string"
-                                            },
-                                            {
-                                                "type": "number"
-                                            }
-                                        ],
-                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                                    },
-                                    "sizeBytes": {
-                                        "type": "integer"
-                                    },
-                                    "statusEnumId": {
-                                        "type": "string"
-                                    },
-                                    "statusLabel": {
-                                        "type": "string"
-                                    },
-                                    "resultAvailable": {
-                                        "type": "boolean"
-                                    },
-                                    "startedDate": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string"
-                                            },
-                                            {
-                                                "type": "number"
-                                            }
-                                        ],
-                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                                    },
-                                    "completedDate": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string"
-                                            },
-                                            {
-                                                "type": "number"
-                                            }
-                                        ],
-                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                                    },
-                                    "lastUpdatedDate": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string"
-                                            },
-                                            {
-                                                "type": "number"
-                                            }
-                                        ],
-                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "RunGenericDiffRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.run#GenericDiff",
-                "x-darpan-method": "facade.ReconciliationFacadeServices.run#GenericDiff",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.ReconciliationFacadeServices.run#GenericDiff"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/RunGenericDiffParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "RunGenericDiffResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.run#GenericDiff. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/RunGenericDiffResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "RunReconciliationParams": {
                 "type": "object",
                 "properties": {
@@ -43688,7 +43412,6 @@
         "facade.ReconciliationFacadeServices.resume#Automation": "ResumeAutomation",
         "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts": "RetryAutomationExecutionFromExtracts",
         "facade.ReconciliationFacadeServices.run#AutomationNow": "RunAutomationNow",
-        "facade.ReconciliationFacadeServices.run#GenericDiff": "RunGenericDiff",
         "facade.ReconciliationFacadeServices.run#Reconciliation": "RunReconciliation",
         "facade.ReconciliationFacadeServices.run#SavedRunDiff": "RunSavedRunDiff",
         "facade.ReconciliationFacadeServices.save#Automation": "SaveAutomation",

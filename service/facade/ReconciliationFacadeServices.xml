@@ -1935,65 +1935,6 @@
         </actions>
     </service>
 
-    <service verb="run" noun="GenericDiff" type="script" transaction="ignore" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runGenericDiff.groovy">
-        <description>Run the generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls.</description>
-        <in-parameters>
-            <parameter name="reconciliationMappingId" required="true"/>
-            <parameter name="file1Name"/>
-            <parameter name="file1Text" allow-html="any"/>
-            <parameter name="file2Name"/>
-            <parameter name="file2Text" allow-html="any"/>
-            <parameter name="file1SystemEnumId"/>
-            <parameter name="file2SystemEnumId"/>
-            <parameter name="hasHeader" type="Boolean" default-value="true"/>
-            <parameter name="sparkMaster"/>
-            <parameter name="sparkAppName"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="runResult" type="Map">
-                <parameter name="reconciliationMappingId"/>
-                <parameter name="mappingName"/>
-                <parameter name="reconciliationRunResultId"/>
-                <parameter name="file1Name"/>
-                <parameter name="file2Name"/>
-                <parameter name="file1SystemEnumId"/>
-                <parameter name="file1SystemLabel"/>
-                <parameter name="file2SystemEnumId"/>
-                <parameter name="file2SystemLabel"/>
-                <parameter name="validationErrors" type="List"><parameter name="validationError"/></parameter>
-                <parameter name="processingWarnings" type="List"><parameter name="processingWarning"/></parameter>
-                <parameter name="generatedOutput" type="Map">
-                    <parameter name="fileName"/>
-                    <parameter name="reconciliationRunResultId"/>
-                    <parameter name="sourceFormat"/>
-                    <parameter name="availableFormats" type="List"><parameter name="format"/></parameter>
-                    <parameter name="preferredDownloadFormat"/>
-                    <parameter name="companyUserGroupId"/>
-                    <parameter name="reconciliationMappingId"/>
-                    <parameter name="mappingName"/>
-                    <parameter name="reconciliationType"/>
-                    <parameter name="file1Label"/>
-                    <parameter name="file2Label"/>
-                    <parameter name="totalDifferences" type="Long"/>
-                    <parameter name="onlyInFile1Count" type="Long"/>
-                    <parameter name="onlyInFile2Count" type="Long"/>
-                    <parameter name="createdDate" type="Timestamp"/>
-                    <parameter name="sizeBytes" type="Long"/>
-                    <parameter name="statusEnumId"/>
-                    <parameter name="statusLabel"/>
-                    <parameter name="resultAvailable" type="Boolean"/>
-                    <parameter name="startedDate" type="Timestamp"/>
-                    <parameter name="completedDate" type="Timestamp"/>
-                    <parameter name="lastUpdatedDate" type="Timestamp"/>
-                </parameter>
-            </parameter>
-        </out-parameters>
-    </service>
-
     <service verb="run" noun="SavedRunDiff" type="script" transaction="ignore" allow-remote="true" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy">
         <description>Run a saved reconciliation flow backed by either a legacy mapping or a RuleSet compare scope.</description>

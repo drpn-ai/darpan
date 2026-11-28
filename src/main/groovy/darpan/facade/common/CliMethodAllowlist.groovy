@@ -96,7 +96,6 @@ class CliMethodAllowlist {
             "facade.ReconciliationFacadeServices.list#Reconciliations",
             "facade.ReconciliationFacadeServices.list#SavedRuns",
             "facade.ReconciliationFacadeServices.run#AutomationNow",
-            "facade.ReconciliationFacadeServices.run#GenericDiff",
             "facade.ReconciliationFacadeServices.run#Reconciliation",
             "facade.ReconciliationFacadeServices.run#SavedRunDiff",
             // DAR-CLI-007 (Aditi 2026-11-21): re-derive an automation's sources and filters from its run; the service

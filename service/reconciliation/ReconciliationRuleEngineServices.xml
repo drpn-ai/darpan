@@ -17,11 +17,8 @@
         </out-parameters>
         <actions>
             <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
-            <set field="useCacheText" from="((useCache)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
-            <set field="forceRebuildText" from="((forceRebuild)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
-            <set field="useCacheValue" from="useCache instanceof Boolean ? useCache : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(useCacheText)"/>
-            <set field="forceRebuildValue" from="forceRebuild == null ? true : (forceRebuild instanceof Boolean ? forceRebuild : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(forceRebuildText))"/>
-            <set field="compileResult" from="reconciliation.rule.RuleEngineSupport.compileRuleSet(ec, ruleSetIdValue, useCacheValue, forceRebuildValue)"/>
+            <!-- useCache / forceRebuild arrive as Boolean: Moqui applies default-value and converts type="Boolean" first. -->
+            <set field="compileResult" from="reconciliation.rule.RuleEngineSupport.compileRuleSet(ec, ruleSetIdValue, useCache, forceRebuild)"/>
             <set field="kieContainer" from="compileResult.kieContainer"/>
             <set field="ruleCount" from="compileResult.ruleCount"/>
             <set field="drlText" from="compileResult.drlText"/>
@@ -56,8 +53,6 @@
         <actions>
             <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
             <set field="dataListValue" from="dataList instanceof List ? dataList : []"/>
-            <set field="returnAllFactsText" from="((returnAllFacts)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
-            <set field="returnAllFactsValue" from="returnAllFacts instanceof Boolean ? returnAllFacts : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(returnAllFactsText)"/>
             <if condition="!dataListValue">
                 <set field="results" from="[]"/>
                 <set field="matchedResults" from="[]"/>
@@ -67,7 +62,7 @@
                 <set field="error" from="null"/>
             </if>
             <if condition="dataListValue">
-                <set field="executionResult" from="reconciliation.rule.RuleEngineSupport.executeRuleSetFacts(ec, ruleSetIdValue, dataListValue, returnAllFactsValue)"/>
+                <set field="executionResult" from="reconciliation.rule.RuleEngineSupport.executeRuleSetFacts(ec, ruleSetIdValue, dataListValue, returnAllFacts)"/>
                 <set field="results" from="executionResult.results"/>
                 <set field="matchedResults" from="executionResult.matchedResults"/>
                 <set field="firedRuleCount" from="executionResult.firedRuleCount"/>
@@ -208,7 +203,8 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetId" from="ruleSetIdValue"/>
-                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).disableAuthz().useCache(false).one()"/>
+                <!-- DAR-OPS-029 S02: only the active tenant's rule set. Another tenant's answers exactly as a missing one. -->
+                <set field="existingRuleSet" from="darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', ruleSetId)"/>
                 <if condition="!existingRuleSet">
                     <message error="true">RuleSet ${ruleSetId} not found</message>
                 </if>
@@ -222,9 +218,7 @@
                 <set field="expressionValue" from="((expression)?.toString()?.trim())"/>
                 <set field="severityValue" from="((severity)?.toString()?.trim())"/>
                 <set field="enabledText" from="((enabled)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
-                <set field="validateOnSaveText" from="((validateOnSave)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
                 <set field="enabledValue" from="enabled == null ? 'Y' : ((enabled instanceof Boolean ? enabled : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(enabledText)) ? 'Y' : 'N')"/>
-                <set field="validateOnSaveValue" from="validateOnSave instanceof Boolean ? validateOnSave : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(validateOnSaveText)"/>
                 <set field="sequenceNumText" from="((sequenceNum)?.toString()?.trim())"/>
                 <set field="requestedSeqValue" from="sequenceNum instanceof Number ? sequenceNum.longValue() : (sequenceNumText?.matches('-?\\d+') ? Long.valueOf(sequenceNumText) : null)"/>
 
@@ -285,7 +279,7 @@
                 <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
             </if>
 
-            <if condition="!ec.message.hasError() &amp;&amp; validateOnSaveValue &amp;&amp; enabledValue == 'Y'">
+            <if condition="!ec.message.hasError() &amp;&amp; validateOnSave &amp;&amp; enabledValue == 'Y'">
                 <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
                         disable-authz="true"
                         in-map="[ruleSetId: ruleSetId, useCache: false, forceRebuild: true]"
@@ -321,7 +315,11 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ruleId" from="ruleIdValue"/>
-                <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', ruleId).useCache(false).one()"/>
+                <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', ruleId).disableAuthz().useCache(false).one()"/>
+                <!-- DAR-OPS-029 S02: a rule of another tenant's rule set answers exactly as a missing one. -->
+                <if condition="existingRule &amp;&amp; !darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', existingRule.ruleSetId)">
+                    <set field="existingRule" from="null"/>
+                </if>
                 <if condition="!existingRule">
                     <message error="true">Rule ${ruleId} not found</message>
                 </if>
@@ -358,7 +356,8 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetId" from="ruleSetIdValue"/>
-                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one()"/>
+                <!-- DAR-OPS-029 S02: only the active tenant's rule set; the entity filter is skipped under disable-authz. -->
+                <set field="existingRuleSet" from="darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', ruleSetId)"/>
                 <if condition="!existingRuleSet">
                     <message error="true">RuleSet ${ruleSetId} not found</message>
                 </if>
@@ -384,34 +383,13 @@
         </actions>
     </service>
 
-    <service verb="clear" noun="RuleSetCache">
-        <description>Clear Rule Engine cache for one RuleSet or for all cached RuleSets.</description>
-        <in-parameters>
-            <parameter name="ruleSetId"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="cacheCleared" type="Boolean"/>
-            <parameter name="ruleSetId"/>
-        </out-parameters>
-        <actions>
-            <set field="ruleSetId" from="((ruleSetId)?.toString()?.trim())"/>
-            <set field="cacheCleared" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
-            <if condition="ruleSetId">
-                <message>Cleared cache for RuleSet ${ruleSetId}.</message>
-            </if>
-            <if condition="!ruleSetId">
-                <message>Cleared Rule Engine cache for all RuleSets.</message>
-            </if>
-        </actions>
-    </service>
-
     <service verb="sweep" noun="RuleChildTenantStamps" authenticate="false">
-        <description>Backfill the denormalized companyUserGroupId stamp on Rule / RuleSetCompareScope /
-            RuleSetCompareSource / RuleSetCompareSourceFilter / RuleSetCompareSourceKeyField from the parent
-            RuleSet (MACH P1 defense-in-depth; the filter and key-field rows since DAR-BE-076, because both are under
-            the active-tenant entity filter, which hides unstamped rows). New rows are stamped
-            at create/save time; this system sweep heals pre-existing rows and is an idempotent no-op
-            afterwards. Scheduled via ServiceJob sweep_RuleChildTenantStamps_hourly.</description>
+        <description>The body of the RULE_TENANT_STAMPS migration: a one-time backfill, run through darpan-admin
+            migrations, of the denormalized companyUserGroupId stamp on Rule / RuleSetCompareScope / RuleSetCompareSource /
+            RuleSetCompareSourceFilter / RuleSetCompareSourceKeyField from the parent RuleSet (MACH P1 defense-in-depth; the
+            filter and key-field rows since DAR-BE-076, because the active-tenant entity filter hides unstamped rows). New
+            rows are stamped on create by entity/RuleChildTenant.eecas.xml. Idempotent: a second run stamps nothing. The
+            hourly ServiceJob sweep_RuleChildTenantStamps_hourly is retired and paused (Aditi D13).</description>
         <out-parameters>
             <parameter name="stampedCount" type="Integer"/>
         </out-parameters>

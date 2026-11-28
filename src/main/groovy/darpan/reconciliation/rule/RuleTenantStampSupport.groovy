@@ -8,14 +8,14 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
 
 /**
- * Backfill sweep for the denormalized {@code companyUserGroupId} stamp on Rule /
- * RuleSetCompareScope / RuleSetCompareSource / RuleSetCompareSourceFilter (MACH P1 defense-in-depth;
- * the filter rows since DAR-BE-076).
+ * The RULE_TENANT_STAMPS migration's body: a one-time backfill, run through darpan-admin migrations, of the
+ * denormalized {@code companyUserGroupId} stamp on Rule / RuleSetCompareScope / RuleSetCompareSource /
+ * RuleSetCompareSourceFilter / RuleSetCompareSourceKeyField from the parent RuleSet (MACH P1 defense-in-depth; the
+ * filter and key-field rows since DAR-BE-076).
  *
- * <p>New rows are stamped at create/save time from the parent RuleSet; this sweep heals rows
- * created before the stamp existed (and any row that slipped through a non-facade write path).
- * It is idempotent and cheap after the first pass — the NULL-stamp query walks the new
- * tenant index and finds nothing.</p>
+ * <p>New rows are stamped on create by entity/RuleChildTenant.eecas.xml, so this only heals rows created before that.
+ * It is idempotent: a second run stamps nothing. It still reads every RuleSet and RuleSetCompareScope to map
+ * children to tenants, so it is not cheap; the hourly job that ran it is retired and paused (Aditi D13).</p>
  */
 class RuleTenantStampSupport {
 

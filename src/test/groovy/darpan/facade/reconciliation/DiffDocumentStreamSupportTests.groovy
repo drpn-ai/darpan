@@ -26,11 +26,15 @@ class DiffDocumentStreamSupportTests {
 
     /** Mirrors ReconciliationServices.writeDiffDatasetOutput's writer exactly. */
     private File writeDiffDocument(List<Map> rows) {
+        return writeDiffDocument(rows, [file1Label: "OMS", file2Label: "NS"], [totalDifferences: rows.size()])
+    }
+
+    private File writeDiffDocument(List<Map> rows, Map metadata, Map summary) {
         File file = new File(tempDir, "ruleset-diff-${System.nanoTime()}.json")
         file.withWriter("UTF-8") { writer ->
             writer << "{\n"
-            writer << "\"metadata\":" + JsonOutput.toJson([file1Label: "OMS", file2Label: "NS"]) + ",\n"
-            writer << "\"summary\":" + JsonOutput.toJson([totalDifferences: rows.size()]) + ",\n"
+            writer << "\"metadata\":" + JsonOutput.toJson(metadata) + ",\n"
+            writer << "\"summary\":" + JsonOutput.toJson(summary) + ",\n"
             writer << "\"validationErrors\":" + JsonOutput.toJson([]) + ",\n"
             writer << "\"processingWarnings\":" + JsonOutput.toJson(["compare warning"]) + ",\n"
             writer << "\"differences\":["
@@ -255,5 +259,68 @@ class DiffDocumentStreamSupportTests {
         DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
         assertEquals(["2"], parse(f).differences*.primaryId)
         assertEquals([f.name] as Set, tempDir.list() as Set)
+    }
+    // S20 HANDOFF R1: the verify passes attribute a missing row to a side by its missingIn LABEL, which cannot tell two
+    // sides of one system apart. A row's side comes from its diffType first (MISSING_IN_FILE_n), the label only when the
+    // two labels differ, and is never guessed.
+    private static Map missing(String id, String diffType, String missingIn) {
+        return [diffType: diffType, primaryId: id, missingIn: missingIn, presentIn: "other", data: "{}"]
+    }
+
+    private Map<String, String> sidesOf(File f) {
+        Map<String, String> sides = [:]
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachMissingRowBySide(f, new JsonSlurper()) { Map r, String side ->
+            sides.put("${r.primaryId}/${r.diffType}".toString(), side)
+        }
+        assertTrue(scan.complete, scan.toString())
+        return sides
+    }
+
+    @Test
+    void aMissingRowsSideComesFromItsDiffTypeEvenWhenBothSidesShareALabel() {
+        File f = writeDiffDocument([missing("1", "MISSING_IN_FILE_1", "NetSuite"), missing("2", "MISSING_IN_FILE_2", "NetSuite")],
+                [file1Label: "NetSuite", file2Label: "NetSuite"], [totalDifferences: 2])
+        assertEquals(["1/MISSING_IN_FILE_1": "FILE_1", "2/MISSING_IN_FILE_2": "FILE_2"], sidesOf(f))
+    }
+
+    @Test
+    void aMissingRowsSideFallsBackToItsLabelWhenTheLabelsDiffer() {
+        File f = writeDiffDocument([missing("1", "missing_in_NS", "NS"), missing("2", "missing_in_OMS", "OMS")],
+                [file1Label: "OMS", file2Label: "NS"], [totalDifferences: 2])
+        assertEquals(["1/missing_in_NS": "FILE_2", "2/missing_in_OMS": "FILE_1"], sidesOf(f))
+    }
+
+    @Test
+    void aMissingRowsSideIsLeftNullWhenNothingCanTellTheSidesApart() {
+        File f = writeDiffDocument([missing("1", "missing_in_netsuite", "NetSuite")],
+                [file1Label: "NetSuite", file2Label: "NetSuite"], [totalDifferences: 1])
+        assertEquals(["1/missing_in_netsuite": null], sidesOf(f))
+    }
+
+    @Test
+    void removeMissingRowsBySideRemovesOnlyThatSidesRowsAndReturnsWhatItDropped() {
+        // Both sides share a label; id 1 is missing from each side, and id 2 twice from side 2 (a repeated id).
+        File f = writeDiffDocument([missing("1", "MISSING_IN_FILE_1", "NetSuite"), missing("1", "MISSING_IN_FILE_2", "NetSuite"),
+                                    missing("2", "MISSING_IN_FILE_2", "NetSuite"), missing("2", "MISSING_IN_FILE_2", "NetSuite")],
+                [file1Label: "NetSuite", file2Label: "NetSuite"],
+                [totalDifferences: 4, onlyInFile1Count: 3, onlyInFile2Count: 1, missingObjectDifferenceCount: 4])
+        Map<String, Integer> dropped = DiffDocumentStreamSupport.removeMissingRowsBySide(f, ".verify-tmp",
+                [FILE_2: ["1", "2"] as Set], "3 rows were found on a second look")
+        assertEquals([FILE_1: 0, FILE_2: 3], dropped)
+        Map doc = parse(f)
+        assertEquals(["1/MISSING_IN_FILE_1"], doc.differences.collect { "${it.primaryId}/${it.diffType}".toString() })
+        // Missing from side 2 = only in side 1, so onlyInFile1Count drops by the side-2 rows removed: the real number, 3.
+        assertEquals([totalDifferences: 1L, onlyInFile1Count: 0L, onlyInFile2Count: 1L, missingObjectDifferenceCount: 1L],
+                ((Map) doc.summary).collectEntries { k, v -> [(k): (v as long)] })
+        assertEquals(["compare warning", "3 rows were found on a second look"], doc.processingWarnings)
+        assertEquals([f.name] as Set, tempDir.list() as Set)
+    }
+
+    @Test
+    void removeMissingRowsBySideRefusesACutOffFile() {
+        File f = cutMidRows()
+        assertRefusedUntouched(f, "ends before") {
+            DiffDocumentStreamSupport.removeMissingRowsBySide(f, ".verify-tmp", [FILE_2: ["1"] as Set], null)
+        }
     }
 }

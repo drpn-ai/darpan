@@ -3,8 +3,13 @@ package darpan.facade.reconciliation
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
+import darpan.facade.common.TenantAccessSupport
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.notification.TenantNotificationSupport
+
+import java.sql.Timestamp
 
 import static darpan.common.ValueSupport.hasField
 import static darpan.common.ValueSupport.readField
@@ -110,6 +115,60 @@ class RunVerificationSupport {
         return serviceResult
     }
 
+    // --- OC97 (errors-warnings-to-alerts-room-only): a pass that breaks tells Darpan, not the run ---------
+
+    /** OC97 test seam: posts one error card; null posts through ErrorChatSupport.postErrorCard. */
+    static Closure errorCardPoster = null
+
+    /** Test-only: restores the card poster. */
+    static void resetForTests() {
+        errorCardPoster = null
+    }
+
+    static final String VERIFY_FAILED_KIND = "VERIFICATION_FAILED", VERIFY_CARD_TRIGGER = "verify"
+
+    /**
+     * OC97: a verify pass that broke posts its reason, raw, to Darpan's alerts room (ErrorChatSupport claims one card per
+     * tenant, pass and day), because processingWarnings reach the result document and the client's notification and must
+     * carry only a neutral line. Never throws: the compare has finished and its outcome stands. No tenant, no card.
+     */
+    private static void alertVerificationFailure(def ec, Map args, String pass, String reason) {
+        try {
+            String tenantId = normalize(args?.get("runOwnerUserGroupId"))
+            if (!tenantId) {
+                try { tenantId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec)) } catch (Throwable ignored) { }
+            }
+            if (!tenantId) return
+            String tenantName = null
+            String zoneId = null
+            try {
+                tenantName = TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId)
+                zoneId = TenantNotificationSupport.resolveTenantZone(ec, tenantId)?.id
+            } catch (Throwable ignored) {
+                // a card that names the tenant by id, on the server's day, is still the card
+            }
+            String scope = normalize(args?.get("compareScopeId"))
+            Map card = [tenantId      : tenantId,
+                        tenantName    : tenantName ?: tenantId,
+                        subjectKey    : "verify:${pass}${scope ? ':' + scope : ''}".toString(),
+                        automationName: "Verification · ${pass}".toString(),
+                        kind          : VERIFY_FAILED_KIND,
+                        errorFirstLine: reason,
+                        scheduled     : false,
+                        trigger       : VERIFY_CARD_TRIGGER,
+                        completedDate : new Timestamp(System.currentTimeMillis()),
+                        zoneId        : zoneId]
+            Closure poster = errorCardPoster ?: { def postEc, Map event -> ErrorChatSupport.postErrorCard(postEc, event) }
+            poster.call(ec, card)
+        } catch (Throwable t) {
+            try { ec?.logger?.warn("Verification failure card for ${pass} failed: ${t.getClass().name}") } catch (Throwable ignored) { }
+        }
+    }
+
+    private static String reasonOf(Throwable t) {
+        return normalize(t?.message) ?: t?.getClass()?.simpleName
+    }
+
     // --- the missing-diff pass, as ONE implementation both entry points call --------------------
 
     /** Verification is switched off for this deployment. Gates every pass, so it is reported once. */
@@ -159,8 +218,8 @@ class RunVerificationSupport {
             Object diffFileArg = args.get("diffFile")
             diffFile = diffFileArg instanceof Closure ? (File) ((Closure) diffFileArg).call() : (File) diffFileArg
         } catch (Throwable t) {
-            return skipped(SKIP_NO_DIFF_FILE,
-                    "the compare's diff document could not be located: ${normalize(t.message) ?: t.class.simpleName}".toString())
+            alertVerificationFailure(args.get("ec"), args, "missing-diff", "The compare's diff document could not be located: ${reasonOf(t)}".toString())
+            return skipped(SKIP_NO_DIFF_FILE, "the compare's diff document could not be located")
         }
         if (diffFile == null || !diffFile.isFile()) {
             return skipped(SKIP_NO_DIFF_FILE, "the compare's diff document could not be read back")
@@ -248,7 +307,8 @@ class RunVerificationSupport {
         } catch (Throwable t) {
             // Preparing reads the connector registry and the source row; a shape this code cannot
             // read must degrade to an unverified run with a visible reason, never a failed one.
-            prepared = skipped(SKIP_NO_LOOKUP, "it could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString())
+            alertVerificationFailure(ec, args, "missing-diff", "The missing-diff pass could not be prepared: ${reasonOf(t)}".toString())
+            prepared = skipped(SKIP_NO_LOOKUP, "it could not be prepared")
             if (ec?.message?.hasError()) ec.message.clearErrors()
         }
         if (prepared.get("applies") != true) {
@@ -264,13 +324,16 @@ class RunVerificationSupport {
         try {
             verification = (Map) ((Closure) prepared.get("run")).call()
         } catch (Throwable t) {
+            alertVerificationFailure(ec, args, "missing-diff", "The missing-diff pass failed: ${reasonOf(t)}".toString())
             verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
-                            warnings : ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+                            warnings : ["Verification pass could not finish; the differences are left as reported."]] as Map
         }
         // The lookup dispatch is best-effort after a complete compare: demote any service-level error
         // it raised (auth config, transport) to a warning so it cannot fail the run.
         if (ec?.message?.hasError()) {
-            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+            alertVerificationFailure(ec, args, "missing-diff",
+                    "A verification lookup reported: ${((ec.message.getErrors() ?: []) as List).join('; ')}".toString())
+            verification.warnings = ((verification.warnings ?: []) as List) + ["A verification lookup reported an error; the differences it covered are left as reported."]
             verification.lookupFailed = true
             ec.message.clearErrors()
         }
@@ -583,9 +646,10 @@ class RunVerificationSupport {
             applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
             return verification.performed == true
         } catch (Throwable t) {
+            alertVerificationFailure(ec, args, "rebuilt-return-pairing", "Rebuilt return pairing failed: ${reasonOf(t)}".toString())
             if (serviceResult != null) {
                 applyVerificationOutcome(serviceResult, [performed: false, rewritten: false,
-                        warnings: ["Rebuilt return pairing failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map, 0L, 0L)
+                        warnings: ["Rebuilt return pairing could not run; the differences are left as reported."]] as Map, 0L, 0L)
             }
             return false
         } finally {

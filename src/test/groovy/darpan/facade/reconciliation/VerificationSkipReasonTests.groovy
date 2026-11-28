@@ -177,4 +177,53 @@ class VerificationSkipReasonTests {
         assertEquals(1, warnings.size(), "exactly one warning, got: ${warnings}")
         assertTrue(((String) warnings.first()).contains("verifyMissingDiffs"))
     }
+    // ---- OC97 (errors-warnings-to-alerts-room-only) ----------------------------------------------
+
+    /**
+     * A verify pass that breaks posts its reason to Darpan's alerts room; the run keeps only a neutral line, because
+     * processingWarnings reach the result document and the client's notification. The raw text here stands in for an
+     * exception carrying a connector's request details.
+     */
+    @Test
+    void aDiffDocumentThatCannotBeLocatedPostsItsReasonToTheAlertsRoomNotTheRun() {
+        List<Map> cards = []
+        RunVerificationSupport.errorCardPoster = { def ec, Map card -> cards.add(card) }
+        try {
+            Map serviceResult = serviceResultWithMissingRows()
+            RunVerificationSupport.runMissingDiffPass([
+                    ec: new FakeEc(), runResultId: "RUN_OC97_1", stepCtx: [:], enabled: true, serviceResult: serviceResult,
+                    runOwnerUserGroupId: "KREWE", diffFile: { throw new IllegalStateException("GET /orders?token=s3cr3t refused") }])
+
+            List warnings = (serviceResult.processingWarnings ?: []) as List
+            assertEquals(1, warnings.size(), "${warnings}")
+            assertFalse(warnings.any { it.toString().contains("s3cr3t") }, "raw text must not reach the run: ${warnings}")
+            assertTrue(((String) warnings.first()).contains("not verified"))
+            assertEquals(1, cards.size())
+            assertEquals("KREWE", cards[0].tenantId)
+            assertTrue(((String) cards[0].errorFirstLine).contains("s3cr3t"), "the alerts room gets the reason: ${cards[0]}")
+        } finally {
+            RunVerificationSupport.errorCardPoster = null
+        }
+    }
+
+    @Test
+    void aRebuiltPairingThatBreaksPostsItsReasonToTheAlertsRoomNotTheRun() {
+        List<Map> cards = []
+        RunVerificationSupport.errorCardPoster = { def ec, Map card -> cards.add(card) }
+        try {
+            Map serviceResult = serviceResultWithMissingRows()
+            boolean ran = RunVerificationSupport.pairRebuiltReturns([
+                    ec: new FakeEc(), serviceResult: serviceResult, runOwnerUserGroupId: "KREWE",
+                    diffFile: { throw new IllegalStateException("token=s3cr3t") }])
+
+            assertFalse(ran)
+            List warnings = (serviceResult.processingWarnings ?: []) as List
+            assertFalse(warnings.any { it.toString().contains("s3cr3t") }, "${warnings}")
+            assertTrue(warnings.any { it.toString().contains("Rebuilt return pairing") }, "${warnings}")
+            assertEquals(1, cards.size())
+            assertTrue(((String) cards[0].errorFirstLine).contains("s3cr3t"))
+        } finally {
+            RunVerificationSupport.errorCardPoster = null
+        }
+    }
 }

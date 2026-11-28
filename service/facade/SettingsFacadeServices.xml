@@ -117,12 +117,6 @@
                 <parameter name="slackChannelName"/><parameter name="deliveryMode"/>
                 <parameter name="webhookConfigured" type="Boolean"/>
                 <parameter name="webhookUrl"/>
-                <!-- googleChat* are the pre-Slack names, kept one release. They deliberately mirror the
-                     RESOLVED values rather than the legacy column: a browser still running an older UI
-                     bundle reads only these two, and mirroring means such a bundle shows a Slack space as
-                     configured (mislabelled) instead of as broken. -->
-                <parameter name="googleChatConfigured" type="Boolean"/>
-                <parameter name="googleChatWebhookUrl"/>
                 <parameter name="isActive"/><parameter name="inUse" type="Boolean"/>
                 <parameter name="createdByUserId"/>
                 <parameter name="createdDate" type="Timestamp"/><parameter name="lastUpdatedDate" type="Timestamp"/>
@@ -152,9 +146,6 @@
             <parameter name="slackChannelId"/>
             <parameter name="slackChannelName"/>
             <parameter name="webhookUrl" allow-html="true"/>
-            <!-- Pre-Slack parameter name, accepted one release as an alias for webhookUrl so an older
-                 UI bundle can still save a Google Chat space. -->
-            <parameter name="googleChatWebhookUrl" allow-html="true"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
@@ -213,8 +204,7 @@
                 <if condition="slackError"><message error="true">${slackError}</message></if>
                 <set field="usesSlackBot" from="!ec.message.hasError() &amp;&amp; slackInstallIdToSave &amp;&amp; slackChannelIdToSave"/>
 
-                <!-- webhookUrl is the field; googleChatWebhookUrl is the one-release input alias. -->
-                <set field="webhookUrlValue" from="((webhookUrl)?.toString()?.trim()) ?: ((googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="webhookUrlValue" from="((webhookUrl)?.toString()?.trim())"/>
                 <set field="webhookUrlToSave" from="webhookUrlValue ?: darpan.reconciliation.notification.TenantNotificationSupport.resolveWebhookUrl(existingSpace)"/>
                 <if condition="!usesSlackBot">
                     <if condition="!webhookUrlToSave"><message error="true">Webhook URL is required.</message></if>

@@ -88,7 +88,7 @@ class RunNotificationSubscriptionSmokeTests {
         String runId = seedRun("AUT_STAT_RUNNING")
 
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Notify space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Notify space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
 
@@ -211,7 +211,7 @@ class RunNotificationSubscriptionSmokeTests {
         String runId = seedRun("AUT_STAT_RUNNING")
 
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Completion space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Completion space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
 
@@ -565,7 +565,7 @@ class RunNotificationSubscriptionSmokeTests {
     /** Saves a chat space and makes it the caller's notification default, so subscribe# can succeed. Returns its id. */
     private String seedDefaultChatSpace(String spaceName) {
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: spaceName, googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: spaceName, webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         def saveDefault = callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault",
                 [chatSpaceId: save.chatSpace.chatSpaceId])

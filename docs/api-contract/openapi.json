@@ -37843,12 +37843,6 @@
                                 "webhookUrl": {
                                     "type": "string"
                                 },
-                                "googleChatConfigured": {
-                                    "type": "boolean"
-                                },
-                                "googleChatWebhookUrl": {
-                                    "type": "string"
-                                },
                                 "isActive": {
                                     "type": "string"
                                 },
@@ -38429,9 +38423,6 @@
                         "type": "string"
                     },
                     "webhookUrl": {
-                        "type": "string"
-                    },
-                    "googleChatWebhookUrl": {
                         "type": "string"
                     },
                     "isActive": {

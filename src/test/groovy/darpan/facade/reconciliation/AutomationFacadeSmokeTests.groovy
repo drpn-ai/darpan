@@ -309,7 +309,7 @@ class AutomationFacadeSmokeTests {
     void saveAutomationPersistsChatSpace() {
         Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 spaceName           : "Automation Notify Space",
-                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                webhookUrl: CHAT_SPACE_WEBHOOK,
                 isActive            : true,
         ])
         assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())
@@ -346,7 +346,7 @@ class AutomationFacadeSmokeTests {
         ec.message.clearErrors()
         Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 spaceName           : "Soon Inactive Space",
-                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                webhookUrl: CHAT_SPACE_WEBHOOK,
                 isActive            : true,
         ])
         assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())
@@ -373,7 +373,7 @@ class AutomationFacadeSmokeTests {
     void saveAutomationWithoutChatSpaceClearsIt() {
         Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 spaceName           : "Clearable Space",
-                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                webhookUrl: CHAT_SPACE_WEBHOOK,
                 isActive            : true,
         ])
         assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())

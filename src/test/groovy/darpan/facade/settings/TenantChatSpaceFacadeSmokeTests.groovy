@@ -49,16 +49,16 @@ class TenantChatSpaceFacadeSmokeTests {
     @Test
     void saveListDeleteLifecycle() {
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Finance space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Finance space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
         assertEquals("Finance space", save.chatSpace.spaceName)
-        assertTrue(save.chatSpace.googleChatConfigured as boolean)
+        assertTrue(save.chatSpace.webhookConfigured as boolean)
         // Inverted 2026-08-14: masking removed, so save echoes the webhook URL back verbatim.
-        assertEquals(WEBHOOK, save.chatSpace.googleChatWebhookUrl as String)
+        assertEquals(WEBHOOK, save.chatSpace.webhookUrl as String)
 
         def dup = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "finance SPACE", googleChatWebhookUrl: WEBHOOK])
+                [spaceName: "finance SPACE", webhookUrl: WEBHOOK])
         assertFalse(dup.ok as boolean)   // case-insensitive per-tenant name uniqueness
 
         // ServiceCallSyncImpl.ignorePreviousError defaults to false, so a prior-call error blocks the
@@ -78,7 +78,7 @@ class TenantChatSpaceFacadeSmokeTests {
     @Test
     void deleteBlockedWhenReferencedByAutomation() {
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Ops space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Ops space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
 
@@ -114,7 +114,7 @@ class TenantChatSpaceFacadeSmokeTests {
         ec.message.clearErrors()
 
         def resave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [chatSpaceId: chatSpaceId, spaceName: "Ops space renamed", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [chatSpaceId: chatSpaceId, spaceName: "Ops space renamed", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(resave.ok as boolean)
         assertTrue(resave.chatSpace.inUse as boolean)
     }
@@ -126,7 +126,7 @@ class TenantChatSpaceFacadeSmokeTests {
     @Test
     void clearUndecryptableWebhooksNullsUnreadableValuesAndKeepsValidOnes() {
         def good = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Readable space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Readable space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(good.ok as boolean)
         String goodId = good.chatSpace.chatSpaceId
 
@@ -210,7 +210,6 @@ class TenantChatSpaceFacadeSmokeTests {
                 actAs(role)
                 Map row = listedSpace(chatSpaceId)
                 assertNull(row.webhookUrl, "${role} must not receive the webhook URL")
-                assertNull(row.googleChatWebhookUrl, "${role} must not receive it under the old name either")
                 assertTrue(row.webhookConfigured as boolean, "${role} still sees that the space is set up")
             }
         } finally {

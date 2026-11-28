@@ -87,10 +87,9 @@ class SettingsFacadeTenantFilteringSmokeTests {
         Map<String, Object> chatSpaceResult = getFacade("facade.SettingsFacadeServices.list#TenantChatSpaces")
         List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
         assertEquals(["KREWE_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
-        assertTrue(chatSpaces.first().googleChatConfigured as boolean)
+        assertTrue(chatSpaces.first().webhookConfigured as boolean)
         // OC122: this user is view-only, so the URL (which lets anyone post into the space) is not sent; it is set, though.
         assertNull(chatSpaces.first().webhookUrl)
-        assertNull(chatSpaces.first().googleChatWebhookUrl)
         assertNoRawCredentialFields(chatSpaces)
 
         ec.message.clearErrors()
@@ -166,7 +165,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
         Map<String, Object> chatSpaceResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 chatSpaceId         : "KREWE_SPACE",
                 spaceName           : "Krewe space renamed",
-                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/KREWE_NEW/messages?key=blocked&token=blocked",
+                webhookUrl          : "https://chat.googleapis.com/v1/spaces/KREWE_NEW/messages?key=blocked&token=blocked",
                 isActive            : "Y",
         ])
         assertFalse((Boolean) chatSpaceResult.ok)
@@ -248,15 +247,15 @@ class SettingsFacadeTenantFilteringSmokeTests {
 
         Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 spaceName           : "Gorjana new space",
-                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
+                webhookUrl          : "https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
                 isActive            : "Y",
         ])
         assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
         Map<String, Object> chatSpace = (Map<String, Object>) saveResult.chatSpace
         assertEquals("Gorjana new space", chatSpace.spaceName)
-        assertEquals(true, chatSpace.googleChatConfigured)
+        assertEquals(true, chatSpace.webhookConfigured)
         assertEquals("https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
-                chatSpace.googleChatWebhookUrl as String)
+                chatSpace.webhookUrl as String)
         assertNoRawCredentialFields(chatSpace)
 
         String chatSpaceId = chatSpace.chatSpaceId as String
@@ -281,7 +280,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
         Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
                 chatSpaceId         : "GORJANA_SPACE",
                 spaceName           : "Gorjana space",
-                googleChatWebhookUrl: "http://chat.googleapis.com/v1/spaces/GORJANA_BAD/messages?key=bad&token=bad",
+                webhookUrl          : "http://chat.googleapis.com/v1/spaces/GORJANA_BAD/messages?key=bad&token=bad",
                 isActive            : "Y",
         ])
 
@@ -321,7 +320,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
         assertEquals([tenantId == KREWE ? "KREWE_SPACE" : "GORJANA_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
-        assertTrue(chatSpaces.first().googleChatConfigured as boolean)
+        assertTrue(chatSpaces.first().webhookConfigured as boolean)
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = getFacade("facade.SettingsFacadeServices.get#TenantSettings")

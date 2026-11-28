@@ -88,13 +88,7 @@ class ChatSpaceFacadeSupport {
     /**
      * The wire shape of one chat space.
      *
-     * <p>googleChatConfigured / googleChatWebhookUrl are the pre-Slack names, kept one release and
-     * deliberately mirroring the RESOLVED provider-agnostic values rather than the legacy column. A
-     * browser still running an older UI bundle reads only those two: mirroring makes it show a Slack
-     * space as configured-but-mislabelled, where reading the legacy column would show every Slack
-     * space as "Not configured" and invite an admin to "fix" it by pasting the URL again.</p>
-     *
-     * <p>OC122: withWebhookUrl false leaves both URL fields null (webhookConfigured still says whether one is set). A
+     * <p>OC122: withWebhookUrl false leaves webhookUrl null (webhookConfigured still says whether one is set). A
      * webhook URL lets anyone post into the space, so only someone who may edit the space reads it.</p>
      */
     static Map<String, Object> toChatSpaceMap(def ec, def spaceRow, boolean inUse, boolean withWebhookUrl = true) {
@@ -122,8 +116,6 @@ class ChatSpaceFacadeSupport {
                         TenantNotificationSupport.DELIVERY_WEBHOOK,
                 webhookConfigured   : configured,
                 webhookUrl          : withWebhookUrl ? resolvedWebhookUrl : null,
-                googleChatConfigured: configured,
-                googleChatWebhookUrl: withWebhookUrl ? resolvedWebhookUrl : null,
                 isActive            : ((spaceRow.isActive)?.toString()?.trim()) ?: "Y",
                 inUse               : inUse,
                 createdByUserId     : spaceRow.createdByUserId,

@@ -4084,8 +4084,6 @@ SERVICE list TenantChatSpaces
     chatSpaces.createdByUserId : String
     chatSpaces.createdDate : Timestamp
     chatSpaces.deliveryMode : String
-    chatSpaces.googleChatConfigured : Boolean
-    chatSpaces.googleChatWebhookUrl : String
     chatSpaces.inUse : Boolean
     chatSpaces.isActive : String
     chatSpaces.lastUpdatedDate : Timestamp
@@ -4225,7 +4223,6 @@ SERVICE save TenantChatSpace
   IN:
     chatProviderEnumId : String
     chatSpaceId : String
-    googleChatWebhookUrl : String
     isActive : Boolean
     slackChannelId : String
     slackChannelName : String

@@ -9,7 +9,6 @@ import org.kie.api.builder.Message
 import org.kie.api.builder.ReleaseId
 import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
-import org.moqui.entity.EntityValue
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -215,15 +214,13 @@ class RuleEngineSupport {
 
     static Map<String, Object> executeRuleSetFacts(def ec, String ruleSetId, List rows, boolean returnAllFacts) {
         try {
-            Map compiled = getOrBuildContainer(ec, ruleSetId, true, false)
-            KieContainer container = compiled.container as KieContainer
+            Map<String, Object> run = fireRuleSet(ec, ruleSetId, rows)
+            if (run.error) return [error: run.error]
+            Map compiled = (Map) run.compiled
+            List<Map> facts = (List<Map>) run.facts
+            int fired = run.fired as int
+            List matchedResults = (List) run.matchedResults
             List warnings = ((compiled.warnings ?: []) as List).collect { it?.toString() }
-
-            List<Map> facts = toFacts(rows)
-            Map<String, Object> fireResult = fireFactsInNewSession(container, ruleSetId, facts)
-            if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
-            int fired = fireResult.fired as int
-            List matchedResults = (List) fireResult.matchedResults
             List output = returnAllFacts ? facts : matchedResults
 
             logger.info("Executed ruleSet={} facts={} fired={} returnAllFacts={}", ruleSetId, facts.size(), fired, returnAllFacts)
@@ -243,21 +240,20 @@ class RuleEngineSupport {
 
     static Map<String, Object> executeMatchedPairFacts(def ec, String ruleSetId, List rows) {
         try {
-            Map compiled = getOrBuildContainer(ec, ruleSetId, true, false)
-            KieContainer container = compiled.container as KieContainer
+            Map<String, Object> run = fireRuleSet(ec, ruleSetId, rows)
+            if (run.error) return [error: run.error]
+            Map compiled = (Map) run.compiled
+            List<Map> facts = (List<Map>) run.facts
+            int fired = run.fired as int
+            List matchedResults = (List) run.matchedResults
             List<String> warnings = ((compiled.warnings ?: []) as List).collect { it?.toString() }.findAll { it }
-
-            List<Map> facts = toFacts(rows)
-            Map<String, Object> fireResult = fireFactsInNewSession(container, ruleSetId, facts)
-            if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
-            int fired = fireResult.fired as int
-            List matchedResults = (List) fireResult.matchedResults
+            Map<String, Integer> rulePosition = rulePositions((String) compiled.drlText)
 
             List<Map> diffResults = []
             facts.each { Map fact ->
                 List<Map> normalizedDiffs = RuleDiffSupport.extractNormalizedDiffs(fact)
                 if (normalizedDiffs) {
-                    diffResults.addAll(normalizedDiffs)
+                    diffResults.addAll(inRuleOrder(normalizedDiffs, rulePosition))
                     return
                 }
 
@@ -285,11 +281,51 @@ class RuleEngineSupport {
         }
     }
 
-    /** Each row as its own mutable fact Map; a non-Map row is wrapped as [value: row]. */
+    /**
+     * Compiles (or takes from the cache) the rule set and fires a copy of each row as its own fact. Answers
+     * [compiled, facts, fired, matchedResults], or [error] when the evaluation was halted (partial results are discarded).
+     */
+    private static Map<String, Object> fireRuleSet(def ec, String ruleSetId, List rows) {
+        Map compiled = getOrBuildContainer(ec, ruleSetId, true, false)
+        List<Map> facts = toFacts(rows)
+        Map<String, Object> fireResult = fireFactsInNewSession(compiled.container as KieContainer, ruleSetId, facts)
+        if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
+        return [compiled: compiled, facts: facts, fired: fireResult.fired, matchedResults: fireResult.matchedResults]
+    }
+
+    /** Keys the rules write onto a fact. A row from an earlier run may still carry them. */
+    private static final List<String> ENGINE_FACT_KEYS = ["_matchedRuleIds", "_generatedDiffs"].asImmutable()
+
+    /**
+     * Each row as its own mutable fact Map; a non-Map row is wrapped as [value: row]. DAR-OPS-029 S02 (idempotence): the
+     * engine's own keys are dropped, so a replayed row brings no stale diff or match in, and the copy never shares the
+     * caller's lists (a shallow copy did: the rules appended to the caller's _generatedDiffs).
+     */
     private static List<Map> toFacts(List rows) {
         return rows.collect { Object row ->
-            (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
+            if (!(row instanceof Map)) return [value: row]
+            Map fact = new LinkedHashMap((Map) row)
+            ENGINE_FACT_KEYS.each { fact.remove(it) }
+            return fact
         }
+    }
+
+    /** Each DRL rule name to its place in the rule set (sequenceNum, ruleId: the order the DRL declares them). */
+    private static Map<String, Integer> rulePositions(String drlText) {
+        Map<String, Integer> position = [:]
+        RuleDiffSupport.drlRuleNames(drlText).eachWithIndex { String name, int i -> position.putIfAbsent(name, i) }
+        return position
+    }
+
+    /**
+     * DAR-OPS-029 S02 (determinism): generated rules all carry the default salience, so only Drools' agenda decides which
+     * fires first. A fact's diffs are put back in the rule set's own order; the sort is stable, so one rule's diffs keep
+     * theirs. (Drools fires equal-salience rules in declaration order today, so this changes no output; it stops the
+     * result depending on that.)
+     */
+    private static List<Map> inRuleOrder(List<Map> diffs, Map<String, Integer> position) {
+        if (diffs.size() < 2) return diffs
+        return diffs.toSorted { Map d -> position.getOrDefault(normalize(d.ruleId), Integer.MAX_VALUE) }
     }
 
     /**
@@ -318,7 +354,8 @@ class RuleEngineSupport {
         if (!ruleSetId) throw new IllegalArgumentException("ruleSetId is required")
 
         // P0 #4 step 2 — gate RuleSet by active tenant; fail closed on foreign/missing.
-        EntityValue ruleSet = TenantScopedFinder.findTenantScopedById(
+        // Map, not EntityValue (which is one): the rule engine reads it as a map, and a test can hand it one.
+        Map ruleSet = (Map) TenantScopedFinder.findTenantScopedById(
                 ec, DarpanEntityConstants.RULE_SET, "ruleSetId", ruleSetId)
         if (!ruleSet) throw new IllegalArgumentException("RuleSet ${ruleSetId} not found or access denied")
 
@@ -421,7 +458,7 @@ class RuleEngineSupport {
                 .list() ?: []) as List
     }
 
-    private static String makeRuleSignature(EntityValue ruleSet, List rules) {
+    private static String makeRuleSignature(Map ruleSet, List rules) {
         String ruleSetStamp = [
                 normalize(ruleSet?.ruleSetId),
                 normalize(ruleSet?.ruleSetName),
@@ -555,6 +592,9 @@ class RuleEngineSupport {
 
     private static String buildRuleBlock(String ruleName, String condition, int salience) {
         String safeRuleName = sanitizeRuleName(ruleName)
+        // DAR-OPS-029 S02 (conservation): a fact joins results once, on its first match. Its _matchedRuleIds list is made
+        // then, and toFacts strips any earlier one. results.contains($m) compared Maps by value, so two equal rows
+        // collapsed into one result (and cost O(n²)).
         return """
 rule "${safeRuleName}"
     salience ${salience}
@@ -565,9 +605,9 @@ then
     if (_matchedRuleIds == null) {
         _matchedRuleIds = new ArrayList();
         \$m.put("_matchedRuleIds", _matchedRuleIds);
+        results.add(\$m);
     }
     if (!_matchedRuleIds.contains("${safeRuleName}")) _matchedRuleIds.add("${safeRuleName}");
-    if (!results.contains(\$m)) results.add(\$m);
 end
 """
     }
@@ -592,7 +632,7 @@ end
         return cleaned
     }
 
-    private static String resolveTenantToken(EntityValue ruleSet) {
+    private static String resolveTenantToken(Map ruleSet) {
         String tenantId = normalize(ruleSet?.companyUserGroupId)
         return sanitizeIdToken(tenantId ?: "DEFAULT", "TENANT")
     }

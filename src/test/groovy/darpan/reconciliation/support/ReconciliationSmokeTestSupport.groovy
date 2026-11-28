@@ -810,14 +810,14 @@ class ReconciliationSmokeTestSupport {
                 description     : "Krewe",
                 groupTypeEnumId : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
         ])
-        upsertEntityValue(ec, "moqui.security.UserAccount", [userId: TEST_COMPANY_USER_ID], [
+        upsertEntity(ec, "moqui.security.UserAccount", [userId: TEST_COMPANY_USER_ID], [
                 userId        : TEST_COMPANY_USER_ID,
                 username      : TEST_COMPANY_USERNAME,
                 userFullName  : "Smoke Test Customer",
                 currentPassword: "",
                 disabled      : "N"
         ])
-        upsertEntityValue(ec, "moqui.security.UserGroupMember", [
+        upsertEntity(ec, "moqui.security.UserGroupMember", [
                 userGroupId: TEST_COMPANY_USER_GROUP_ID,
                 userId     : TEST_COMPANY_USER_ID,
                 fromDate   : TEST_FROM_DATE
@@ -826,7 +826,7 @@ class ReconciliationSmokeTestSupport {
                 userId     : TEST_COMPANY_USER_ID,
                 fromDate   : TEST_FROM_DATE
         ])
-        upsertEntityValue(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+        upsertEntity(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
                 tenantUserGroupId    : TEST_COMPANY_USER_GROUP_ID,
                 userId               : TEST_COMPANY_USER_ID,
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID,
@@ -869,7 +869,7 @@ class ReconciliationSmokeTestSupport {
                 description     : "Gorjana",
                 groupTypeEnumId : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHOPIFY_TEST_SFTP"], [
+        upsertEntity(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHOPIFY_TEST_SFTP"], [
                 sftpServerId     : "SHOPIFY_TEST_SFTP",
                 description      : "Smoke-test Shopify SFTP server",
                 scopeEnumId      : "DARPAN_SFTP_TENANT",
@@ -881,7 +881,7 @@ class ReconciliationSmokeTestSupport {
                 password         : "shopify-pass",
                 remoteAttributes : "N"
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "OMS_TEST_SFTP"], [
+        upsertEntity(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "OMS_TEST_SFTP"], [
                 sftpServerId     : "OMS_TEST_SFTP",
                 description      : "Smoke-test OMS SFTP server",
                 scopeEnumId      : "DARPAN_SFTP_TENANT",
@@ -893,7 +893,7 @@ class ReconciliationSmokeTestSupport {
                 password         : "oms-pass",
                 remoteAttributes : "N"
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_TEST_SFTP"], [
+        upsertEntity(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_TEST_SFTP"], [
                 sftpServerId     : "GORJANA_TEST_SFTP",
                 description      : "Smoke-test Gorjana SFTP server",
                 scopeEnumId      : "DARPAN_SFTP_TENANT",
@@ -905,7 +905,7 @@ class ReconciliationSmokeTestSupport {
                 password         : "gorjana-pass",
                 remoteAttributes : "N"
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "ADMIN_TEST_SFTP"], [
+        upsertEntity(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "ADMIN_TEST_SFTP"], [
                 sftpServerId     : "ADMIN_TEST_SFTP",
                 description      : "Smoke-test admin SFTP server",
                 scopeEnumId      : "DARPAN_SFTP_ADMIN",
@@ -915,7 +915,7 @@ class ReconciliationSmokeTestSupport {
                 password         : "admin-pass",
                 remoteAttributes : "N"
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHARED_TEST_SFTP"], [
+        upsertEntity(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHARED_TEST_SFTP"], [
                 sftpServerId     : "SHARED_TEST_SFTP",
                 description      : "Smoke-test shared tenant-group SFTP server",
                 scopeEnumId      : "DARPAN_SFTP_TENANT_GROUP",
@@ -925,7 +925,7 @@ class ReconciliationSmokeTestSupport {
                 password         : "shared-pass",
                 remoteAttributes : "N"
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.SftpServerTenantAccess", [
+        upsertEntity(ec, "darpan.reconciliation.SftpServerTenantAccess", [
                 sftpServerId      : "SHARED_TEST_SFTP",
                 tenantUserGroupId : TEST_COMPANY_USER_GROUP_ID
         ], [
@@ -1031,30 +1031,6 @@ class ReconciliationSmokeTestSupport {
         boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
         ArtifactExecutionInfo aei = ec.artifactExecution.push(
                 "seedEntity",
-                ArtifactExecutionInfo.AT_OTHER,
-                ArtifactExecutionInfo.AUTHZA_ALL,
-                false
-        )
-        ec.artifactExecution.setAnonymousAuthorizedAll()
-        try {
-            def existing = ec.entity.find(entityName)
-                    .condition(pkFields)
-                    .disableAuthz()
-                    .useCache(false)
-                    .one()
-            if (existing == null) {
-                insertEntityDirect(ec, entityName, fields)
-            }
-        } finally {
-            ec.artifactExecution.pop(aei)
-            if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private static void upsertEntityValue(ExecutionContext ec, String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
-        boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
-        ArtifactExecutionInfo aei = ec.artifactExecution.push(
-                "seedEntityValue",
                 ArtifactExecutionInfo.AT_OTHER,
                 ArtifactExecutionInfo.AUTHZA_ALL,
                 false

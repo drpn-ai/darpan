@@ -120,7 +120,7 @@ class FieldComparisonRuleLogicGenerator {
                 'end'
     }
 
-    static Map parseExpression(String expressionJson) {
+    private static Map parseExpression(String expressionJson) {
         String raw = normalize(expressionJson)
         if (!raw) return null
         try {
@@ -132,7 +132,7 @@ class FieldComparisonRuleLogicGenerator {
     }
 
     /** DAR-BE-192. A tolerance is a plain non-negative decimal (at most 9 digits, 6 after the point), else none. */
-    static String normalizeTolerance(Object raw) {
+    private static String normalizeTolerance(Object raw) {
         String t = normalize(raw?.toString())
         if (!t || !(t ==~ /\d{1,9}(\.\d{1,6})?/)) return null
         return new BigDecimal(t).signum() > 0 ? t : null
@@ -199,7 +199,7 @@ class FieldComparisonRuleLogicGenerator {
     }
 
     // Mirror of darpan-ui normalizeReconciliationFieldPath.
-    static String normalizeReconciliationFieldPath(String fieldPath) {
+    private static String normalizeReconciliationFieldPath(String fieldPath) {
         String trimmed = fieldPath?.trim()
         if (!trimmed) return ""
         String expression = trimmed.split(/\|/, 2)[0] ?: ""
@@ -232,7 +232,7 @@ class FieldComparisonRuleLogicGenerator {
     }
 
     // Mirror of darpan-ui formatReconciliationFieldKey: returns the last meaningful path segment.
-    static String formatFieldKey(String fieldPath) {
+    private static String formatFieldKey(String fieldPath) {
         String normalized = normalizeReconciliationFieldPath(fieldPath)
         if (!normalized) return "Field pending"
         List<String> segments = stripRootPrefix(normalized)

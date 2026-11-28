@@ -38,36 +38,6 @@ class RuleDiffSupport {
         return ValueSupport.valuesDiffer(file1Value, file2Value)
     }
 
-    static Object valueAtPath(Object source, String path) {
-        if (source == null) return null
-        String normalizedPath = normalize(path)
-        if (!normalizedPath || normalizedPath == "\$") return source
-
-        String cleanedPath = normalizedPath
-                .replaceFirst(/^\$\./, "")
-                .replaceFirst(/^\$/, "")
-                .replaceAll(/\[['"]?([^'"\]]+)['"]?\]/, '.$1')
-                .replaceAll(/\[(\d+)\]/, '.$1')
-                .replaceAll(/\[\*\]/, "")
-        if (cleanedPath.startsWith(".")) cleanedPath = cleanedPath.substring(1)
-        if (!cleanedPath) return source
-
-        Object current = source
-        for (String segment : cleanedPath.split(/\./).findAll { it }) {
-            if (current == null) return null
-            if (current instanceof Map) {
-                current = ((Map) current).get(segment)
-            } else if (current instanceof List && segment ==~ /\d+/) {
-                int index = Integer.parseInt(segment)
-                List list = (List) current
-                current = index >= 0 && index < list.size() ? list[index] : null
-            } else {
-                return null
-            }
-        }
-        return current
-    }
-
     static boolean matchesOperator(Object file1Value, Object file2Value, String operator) {
         String normalizedOperator = normalize(operator) ?: "="
         switch (normalizedOperator) {
@@ -101,14 +71,14 @@ class RuleDiffSupport {
     }
 
     /** A list, or comma-joined text, as its trimmed non-blank values. */
-    static Set<String> valueList(Object value) {
+    private static Set<String> valueList(Object value) {
         if (value == null) return [] as Set
         Collection parts = value instanceof Collection ? (Collection) value : value.toString().split(",") as List
         return parts.collect { normalize(it) }.findAll { it } as Set
     }
 
     /** Y or true, any case. N, blank, null and anything else are not. */
-    static boolean isTrue(Object value) {
+    private static boolean isTrue(Object value) {
         if (value instanceof Boolean) return (Boolean) value
         String text = normalize(value)?.toUpperCase(Locale.ROOT)
         return text == "Y" || text == "TRUE"
@@ -149,7 +119,7 @@ class RuleDiffSupport {
         }
     }
 
-    static Object applyPreAction(Object value, String preAction) {
+    private static Object applyPreAction(Object value, String preAction) {
         switch (normalize(preAction)?.toUpperCase()) {
             case "STRING_TO_INT":
                 return toLong(value)
@@ -160,7 +130,7 @@ class RuleDiffSupport {
         }
     }
 
-    static boolean equalValues(Object left, Object right) {
+    private static boolean equalValues(Object left, Object right) {
         if (left == null || right == null) return Objects.equals(left, right)
 
         BigDecimal leftNumber = toBigDecimal(left)
@@ -170,7 +140,7 @@ class RuleDiffSupport {
         return Objects.equals(left, right) || stringify(left) == stringify(right)
     }
 
-    static int compareValues(Object left, Object right) {
+    private static int compareValues(Object left, Object right) {
         if (left == null || right == null) return left == right ? 0 : (left == null ? -1 : 1)
 
         BigDecimal leftNumber = toBigDecimal(left)
@@ -194,7 +164,7 @@ class RuleDiffSupport {
         }
     }
 
-    static BigDecimal toBigDecimal(Object value) {
+    private static BigDecimal toBigDecimal(Object value) {
         if (value instanceof BigDecimal) return (BigDecimal) value
         if (value instanceof Number) return new BigDecimal(value.toString())
 
@@ -221,16 +191,7 @@ class RuleDiffSupport {
         ])
     }
 
-    static void addBusinessRuleDiff(Map fact, String ruleId, String diffType, String message, String severity = null) {
-        addDiff(fact, [
-                diffType: normalize(diffType) ?: "BUSINESS_RULE_DIFF",
-                ruleId  : normalize(ruleId),
-                severity: normalize(severity),
-                message : normalize(message)
-        ])
-    }
-
-    static void addDiff(Map fact, Map rawDiff) {
+    private static void addDiff(Map fact, Map rawDiff) {
         if (fact == null) return
         Map diff = rawDiff instanceof Map ? new LinkedHashMap(rawDiff) : [:]
         List<Map> generatedDiffs = ensureGeneratedDiffList(fact)
@@ -304,26 +265,31 @@ class RuleDiffSupport {
 
     private static final java.util.regex.Pattern DRL_RULE_NAME = ~/(?m)^\s*rule\s+"((?:[^"\\]|\\.)*)"/
 
+    /** The rule names a DRL text declares, in declaration order, with their string escapes undone. */
+    static List<String> drlRuleNames(String drl) {
+        List<String> names = []
+        if (!drl) return names
+        java.util.regex.Matcher m = DRL_RULE_NAME.matcher(drl)
+        while (m.find()) {
+            String drlName = normalize(m.group(1)?.replace('\\"', '"')?.replace('\\\\', '\\'))
+            if (drlName) names.add(drlName)
+        }
+        return names
+    }
+
     /** ruleId and every DRL rule name a Rule's ruleLogic declares, each to its Rule row. */
     static Map<String, Object> ruleLookup(List rules) {
         Map<String, Object> byKey = [:]
         (rules ?: []).each { Object rule ->
             if (rule == null) return
             String ruleId = normalize(rule.ruleId)
-            String logic = normalize(rule.ruleLogic)
-            if (logic) {
-                java.util.regex.Matcher m = DRL_RULE_NAME.matcher(logic)
-                while (m.find()) {
-                    String drlName = normalize(m.group(1)?.replace('\\"', '"')?.replace('\\\\', '\\'))
-                    if (drlName && !byKey.containsKey(drlName)) byKey.put(drlName, rule)
-                }
-            }
+            drlRuleNames(normalize(rule.ruleLogic)).each { String drlName -> byKey.putIfAbsent(drlName, rule) }
             if (ruleId) byKey.put(ruleId, rule)
         }
         return byKey
     }
 
-    static List<Map> ensureGeneratedDiffList(Map fact) {
+    private static List<Map> ensureGeneratedDiffList(Map fact) {
         Object existing = fact.get("_generatedDiffs")
         if (existing instanceof List) {
             return (List<Map>) existing
@@ -333,7 +299,7 @@ class RuleDiffSupport {
         return generatedDiffs
     }
 
-    static Map normalizeDiff(Map fact, Map rawDiff) {
+    private static Map normalizeDiff(Map fact, Map rawDiff) {
         Map diff = rawDiff instanceof Map ? rawDiff : [:]
         return [
                 diffType      : normalize(diff.diffType) ?: "BUSINESS_RULE_DIFF",

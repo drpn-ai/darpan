@@ -1201,6 +1201,50 @@ class AutomationFacadeSmokeTests {
      * scheduler's sweep — archive#Automation leaves isActive alone, so a sweep that reads only isActive kept firing
      * the "deleted" automation on schedule. Restore brings it back to the list.
      */
+    /**
+     * DAR-OPS-029 S99-040/S99-019 pin. A row's executionCount counts logical runs (a window's retries once, every
+     * windowless run) and its lastExecution is the newest run, the same on list, get, pause and resume. Another
+     * automation's runs never count. Written before the row loader stopped reading every execution row; it must not move.
+     */
+    @Test
+    void anAutomationRowCountsLogicalRunsAndShowsTheNewest() {
+        String automationId = createSyncFixtureAutomation("Row Pin").automationId as String
+        String otherId = createSyncFixtureAutomation("Row Pin Other").automationId as String
+        Closure insert = { String id, String automation, String completed, String windowStart, String windowEnd ->
+            ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationAutomationExecution",
+                    [automationExecutionId: id, automationId: automation, companyUserGroupId: KREWE, statusEnumId: "AUT_STAT_SUCCESS",
+                     completedDate: Timestamp.valueOf(completed),
+                     childWindowStartDate: windowStart ? Timestamp.valueOf(windowStart) : null,
+                     childWindowEndDate: windowEnd ? Timestamp.valueOf(windowEnd) : null])
+        }
+        try {
+            insert("PIN_E1", automationId, "2026-05-01 10:00:00", null, null)
+            insert("PIN_E2", automationId, "2026-05-02 10:00:00", "2026-04-01 00:00:00", "2026-04-02 00:00:00")
+            insert("PIN_E3", automationId, "2026-05-03 10:00:00", "2026-04-01 00:00:00", "2026-04-02 00:00:00")
+            insert("PIN_E4", automationId, "2026-04-30 10:00:00", "2026-04-02 00:00:00", "2026-04-03 00:00:00")
+            insert("PIN_E5", automationId, "2026-04-29 10:00:00", null, null)
+            insert("PIN_O1", otherId, "2026-05-09 10:00:00", null, null)
+            Closure<List> shape = { Map row -> [row.executionCount, (row.lastExecution as Map)?.automationExecutionId] }
+            List expected = [4, "PIN_E3"]
+
+            Map listed = ((List<Map>) callFacade("facade.ReconciliationFacadeServices.list#Automations",
+                    [query: "Row Pin", pageIndex: 0, pageSize: 10]).automations).find { it.automationId == automationId }
+            assertEquals(expected, shape(listed), "list#Automations")
+            assertEquals(expected, shape(callFacade("facade.ReconciliationFacadeServices.get#Automation",
+                    [automationId: automationId]).automation as Map), "get#Automation")
+            assertEquals(expected, shape(callFacade("facade.ReconciliationFacadeServices.pause#Automation",
+                    [automationId: automationId]).automation as Map), "pause#Automation")
+            assertEquals(expected, shape(callFacade("facade.ReconciliationFacadeServices.resume#Automation",
+                    [automationId: automationId]).automation as Map), "resume#Automation")
+            Map other = ((List<Map>) callFacade("facade.ReconciliationFacadeServices.list#Automations",
+                    [query: "Row Pin Other", pageIndex: 0, pageSize: 10]).automations).find { it.automationId == otherId }
+            assertEquals([1, "PIN_O1"], shape(other), "another automation's runs stay its own")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+            deleteSyncFixtureAutomation(otherId)
+        }
+    }
+
     @Test
     void archivedAutomationLeavesTheListAndStopsBeingScheduled() {
         Map<String, Object> automation = createSyncFixtureAutomation("Archive Me")

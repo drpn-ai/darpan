@@ -22,11 +22,62 @@ import static darpan.facade.reconciliation.AutomationFacadeSupport.sftpServerLab
  */
 class AutomationRowSupport {
 
-    static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources, List sources, List executions,
+    static final String EXECUTION = "darpan.reconciliation.ReconciliationAutomationExecution"
+    static final String SOURCE = "darpan.reconciliation.ReconciliationAutomationSource"
+    /** The history's order: newest first. collapseExecutionHistory keeps a window's first row in this order. */
+    static final String EXECUTION_ORDER = "-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId"
+
+    /**
+     * DAR-OPS-029 S99-040. One automation's row with its sources, as get/save/pause/resume/run#Automation return it.
+     * Sources are read here unless the caller already holds them (get#Automation reuses its own for the sync status).
+     */
+    static Map<String, Object> loadAutomationRow(def ec, def automation, List sources = null) {
+        String automationId = readString(automation, "automationId")
+        List sourceRows = sources != null ? sources : (TenantScopedFinder.findTenantScoped(ec, SOURCE)
+                .condition("automationId", automationId).orderBy("fileSide").useCache(false).list() ?: [])
+        return buildAutomationRow(ec, automation, true, sourceRows, executionSummaries(ec, [automationId]).get(automationId))
+    }
+
+    /**
+     * DAR-OPS-029 S99-019. Each automation's runs as its row shows them, {automationId: [count, latest]}, without loading
+     * every execution row (their result paths, metadata and error detail): one read of the sort and window columns in the
+     * history's order, then the newest row of each in full. count is the logical runs collapseExecutionHistory keeps
+     * (a window's retries once, every windowless run); latest the newest execution. An automation with no runs is absent.
+     */
+    static Map<String, Map<String, Object>> executionSummaries(def ec, Collection automationIds) {
+        List<String> ids = (automationIds ?: []).collect { it?.toString()?.trim() }.findAll { it }.unique() as List<String>
+        if (!ids) return [:]
+        Map<String, Map<String, Object>> out = [:]
+        Map<String, Set<String>> windowsSeen = [:]
+        (TenantScopedFinder.findTenantScoped(ec, EXECUTION).condition("automationId", "in", ids)
+                .selectField("automationExecutionId,automationId,childWindowStartDate,childWindowEndDate")
+                .orderBy("automationId," + EXECUTION_ORDER).useCache(false).list() ?: []).each { execution ->
+            String automationId = readString(execution, "automationId")
+            Map<String, Object> summary = out.get(automationId)
+            if (summary == null) {
+                summary = [count: 0, latestId: readString(execution, "automationExecutionId")] as Map<String, Object>
+                out.put(automationId, summary)
+                windowsSeen.put(automationId, [] as Set<String>)
+            }
+            String window = logicalExecutionWindowKey(execution)
+            if (window && !windowsSeen.get(automationId).add(window)) return
+            summary.count = (summary.count as int) + 1
+        }
+        if (!out) return out
+        Map<String, Object> latestById = (TenantScopedFinder.findTenantScoped(ec, EXECUTION)
+                .condition("automationExecutionId", "in", out.values()*.latestId).useCache(false).list() ?: [])
+                .collectEntries { [(readString(it, "automationExecutionId")): it] }
+        return out.collectEntries { String automationId, Map<String, Object> summary ->
+            [(automationId): [count: summary.count, latest: latestById.get(summary.latestId as String)] as Map<String, Object>]
+        } as Map<String, Map<String, Object>>
+    }
+
+    /** runs: one automation's executionSummaries entry ([count, latest]), or null when it has none. */
+    static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources, List sources, Map runs,
                                                   Map<String, Object> peakTick = null) {
         String automationId = readString(automation, "automationId")
         List sourceRows = sources ?: []
-        List executionRows = executions ?: []
+        def latestRun = runs?.latest
         Map<String, Object> savedRun = resolveSavedRunSummary(ec, automation)
         String inputModeEnumId = readString(automation, "inputModeEnumId")
         String isActive = readString(automation, "isActive") ?: "Y"
@@ -72,8 +123,8 @@ class AutomationRowSupport {
                 chatSpaceId           : chatSpaceSummary.chatSpaceId,
                 chatSpaceName         : chatSpaceSummary.chatSpaceName,
                 chatSpaceActive       : chatSpaceSummary.chatSpaceActive,
-                lastExecution         : executionRows ? buildExecutionRow(ec, executionRows.first()) : null,
-                executionCount        : executionRows.size(),
+                lastExecution         : latestRun != null ? buildExecutionRow(ec, latestRun) : null,
+                executionCount        : (runs?.count ?: 0) as int,
                 audit                 : audit ? [code: audit.auditCode, name: audit.auditName] : null,
                 permissions           : buildPermissions(ec, isActive, audit != null),
                 createdDate           : readField(automation, "createdDate"),

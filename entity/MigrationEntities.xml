@@ -12,8 +12,8 @@
 
     <entity entity-name="DarpanMigration" package="darpan.migration" use="configuration" cache="true">
         <description>Registry of one-time data migrations. Seed data: adding a migration is one row.
-            Explicit registration rather than a naming-convention scan because the six existing
-            migrations use three different verbs (migrate#, sweep#, clear#) while sweep# also names a
+            Explicit registration rather than a naming-convention scan because the registered
+            migrations use several different verbs (migrate#, sweep#, clear#) while sweep# also names a
             recurring watchdog that must never run as part of an upgrade.</description>
         <field name="migrationId" type="id" is-pk="true"/>
         <field name="componentName" type="text-short" not-null="true">

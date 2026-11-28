@@ -5,8 +5,8 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="record" noun="RunErrorNotice" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
-        <description>Claims the (tenantId, subjectKey, runDay) card slot. isNew is false when the day already has a card (nothing
-            is written). Otherwise the row is created and priorDays lists the subject's earlier scheduled card days within 60 days, newest
+        <description>Claims the (tenantId, subjectKey, runDay, triggerType) card slot. isNew is false when that slot already has a
+            card (nothing is written). Otherwise the row is created and priorDays lists the subject's earlier scheduled card days within 60 days, newest
             first, so the caller can count a streak.</description>
         <in-parameters>
             <parameter name="tenantId" required="true"/>

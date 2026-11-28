@@ -21,7 +21,6 @@ class NavigationSearchSupport {
     static final String TYPE_SCHEMA = "schema"
     static final String TYPE_SFTP_SERVER = "sftp-server"
     static final String TYPE_NETSUITE_AUTH = "netsuite-auth"
-    static final String TYPE_NETSUITE_ENDPOINT = "netsuite-endpoint"
     static final String TYPE_SAVED_RUN = "saved-run"
     static final String TYPE_RUN_RESULT = "run-result"
     static final List<String> DEFAULT_TYPES = [
@@ -29,7 +28,6 @@ class NavigationSearchSupport {
             TYPE_SAVED_RUN,
             TYPE_SFTP_SERVER,
             TYPE_NETSUITE_AUTH,
-            TYPE_NETSUITE_ENDPOINT,
             TYPE_SCHEMA,
     ]
     static final int MAX_PAGE_SIZE = 50
@@ -37,7 +35,7 @@ class NavigationSearchSupport {
             "ask", "darpan", "open", "show", "view", "go", "to", "find", "search", "for", "the",
             "a", "an", "edit", "editing", "manage", "launch", "start", "data", "record", "records",
             "sftp", "server", "servers", "file", "files", "netsuite", "net", "suite", "auth",
-            "authentication", "endpoint", "endpoints", "restlet", "config", "configuration",
+            "authentication", "endpoint", "endpoints", "config", "configuration",
             "schema", "schemas", "run", "runs", "result", "results", "diff", "history", "saved"
     ] as Set<String>
 
@@ -61,7 +59,6 @@ class NavigationSearchSupport {
 
         if (selectedTypes.contains(TYPE_SFTP_SERVER)) candidates.addAll(collectSftpServerTargets(ec))
         if (selectedTypes.contains(TYPE_NETSUITE_AUTH)) candidates.addAll(collectNetSuiteAuthTargets(ec))
-        if (selectedTypes.contains(TYPE_NETSUITE_ENDPOINT)) candidates.addAll(collectNetSuiteEndpointTargets(ec))
         if (selectedTypes.contains(TYPE_SCHEMA)) candidates.addAll(collectSchemaTargets(ec))
         if (selectedTypes.contains(TYPE_SAVED_RUN)) candidates.addAll(collectSavedRunTargets(ec))
         if (selectedTypes.contains(TYPE_RUN_RESULT)) candidates.addAll(collectGeneratedOutputTargets(ec))
@@ -187,71 +184,6 @@ class NavigationSearchSupport {
         }
     }
 
-    protected static List<Map<String, Object>> collectNetSuiteEndpointTargets(def ec) {
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return []
-
-        Map<String, Map<String, Object>> authById = (ec.entity.find(DarpanEntityConstants.NS_AUTH_CONFIG)
-                .condition("companyUserGroupId", activeTenantUserGroupId)
-                .useCache(false)
-                .list() ?: []).collectEntries { auth ->
-            [(normalize(auth.nsAuthConfigId)): [
-                    description: normalize(auth.description),
-                    authType   : normalize(auth.authType) ?: "NONE",
-            ]]
-        } as Map<String, Map<String, Object>>
-
-        List rows = ec.entity.find(DarpanEntityConstants.NS_RESTLET_CONFIG)
-                .condition("companyUserGroupId", activeTenantUserGroupId)
-                .orderBy("description,nsRestletConfigId")
-                .useCache(false)
-                .list() ?: []
-
-        return rows.collect { item ->
-            String id = normalize(item.nsRestletConfigId)
-            String authId = normalize(item.nsAuthConfigId)
-            Map<String, Object> authMeta = authById[authId] ?: [:]
-            String label = normalize(item.description) ?: id
-            String method = normalize(item.httpMethod) ?: "POST"
-            target(
-                    "data:netsuite-endpoint:${id}",
-                    TYPE_NETSUITE_ENDPOINT,
-                    "Edit NetSuite Endpoint: ${label}",
-                    "${method} ${normalize(item.endpointUrl) ?: "NetSuite endpoint"}",
-                    "settings-netsuite-endpoints-edit",
-                    "/settings/netsuite/endpoints/edit/${encodePathSegment(id)}",
-                    [nsRestletConfigId: id],
-                    [:],
-                    id,
-                    DarpanEntityConstants.NS_RESTLET_CONFIG,
-                    [
-                            label,
-                            id,
-                            item.description,
-                            item.endpointUrl,
-                            method,
-                            authId,
-                            authMeta.description,
-                            authMeta.authType,
-                            "netsuite",
-                            "net suite",
-                            "netsuite endpoint",
-                            "restlet",
-                            "edit netsuite endpoint",
-                    ],
-                    [
-                            id,
-                            item.description,
-                            item.endpointUrl,
-                            method,
-                            authId,
-                            authMeta.description,
-                            authMeta.authType,
-                    ]
-            )
-        }
-    }
-
     protected static List<Map<String, Object>> collectSchemaTargets(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
@@ -302,7 +234,10 @@ class NavigationSearchSupport {
     }
 
     protected static List<Map<String, Object>> collectSavedRunTargets(def ec) {
-        return ReconciliationSavedRunSupport.collectSavedRunRows(ec).collect { Map<String, Object> row ->
+        // OC193 (OC21): a legacy mapping is no longer a saved run, as list#SavedRuns has it; collectSavedRunRows keeps them for SFTP.
+        return ReconciliationSavedRunSupport.collectSavedRunRows(ec)
+                .findAll { Map<String, Object> row -> row.runType != ReconciliationSavedRunSupport.RUN_TYPE_MAPPING }
+                .collect { Map<String, Object> row ->
             String id = normalize(row.savedRunId)
             String label = normalize(row.runName) ?: id
             List systemLabels = row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []
@@ -318,7 +253,7 @@ class NavigationSearchSupport {
                     [savedRunId: id],
                     [:],
                     id,
-                    row.runType == ReconciliationSavedRunSupport.RUN_TYPE_RULESET ? DarpanEntityConstants.RULE_SET : DarpanEntityConstants.RECONCILIATION_MAPPING,
+                    DarpanEntityConstants.RULE_SET,
                     [
                             label,
                             id,
@@ -533,11 +468,6 @@ class NavigationSearchSupport {
             case "ns-auth":
             case "netsuite-auth-config":
                 return TYPE_NETSUITE_AUTH
-            case TYPE_NETSUITE_ENDPOINT:
-            case "ns-endpoint":
-            case "netsuite-restlet":
-            case "restlet":
-                return TYPE_NETSUITE_ENDPOINT
             case TYPE_SAVED_RUN:
             case "run":
             case "saved-runs":

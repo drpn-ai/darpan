@@ -19,6 +19,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -67,11 +68,10 @@ class NavigationSearchFacadeSmokeTests {
         assertEquals("schemas-editor", schemaTarget.routeName)
         assertEquals("KreweSearchShopifySchema", ((Map) schemaTarget.routeParams).jsonSchemaId)
 
+        // OC193 (OC21): a legacy mapping is no longer a saved run, so Cmd+K does not offer it (list#SavedRuns lists none
+        // either); its old result files stay searchable below.
         Map<String, Object> savedRunResult = search("order id saved run")
-        Map<String, Object> savedRunTarget = firstTarget(savedRunResult, "saved-run", "OrderIdSchemaMap")
-        assertNotNull(savedRunTarget)
-        assertEquals("reconciliation-run-history", savedRunTarget.routeName)
-        assertEquals("/reconciliation/run-history/OrderIdSchemaMap", savedRunTarget.routePath)
+        assertNull(firstTarget(savedRunResult, "saved-run", "OrderIdSchemaMap"), "a mapping must not be offered as a saved run")
 
         Map<String, Object> outputResult = search("csv order compare result")
         Map<String, Object> outputTarget = firstTarget(outputResult, "run-result", "search-csv-order-compare-result.json")

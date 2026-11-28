@@ -5,6 +5,7 @@ import darpan.peak.PeakReadPolicy
 import darpan.peak.ReadLimits
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationScheduler
 import darpan.reconciliation.automation.ExtractReplaySupport
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -380,7 +381,7 @@ class AuditSettingsSmokeTests {
         List<Runnable> started = Collections.synchronizedList([] as List<Runnable>)
         RunAdmission admission = new RunAdmission(8, 1, 85, { -> null }, { Runnable r -> started << r } as Executor)
         List<Map> seen = Collections.synchronizedList([] as List<Map>)
-        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationScheduler.setRunAdmission(admission)
         AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
             seen << [automationId: automation.automationId, user: runEc.user.username,
                      tenant: TenantAccessSupport.currentActiveTenantUserGroupId(runEc)]
@@ -405,7 +406,7 @@ class AuditSettingsSmokeTests {
                 assertEquals(MINE, probe.tenant, "it runs in the audit's tenant")
             }
         } finally {
-            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationScheduler.setRunAdmission(null)
             AutomationExecutionSupport.resetExecutionHooks()
         }
     }
@@ -445,7 +446,7 @@ class AuditSettingsSmokeTests {
             thread.start()
             reachedRead.await(30L, java.util.concurrent.TimeUnit.SECONDS)
         } as Executor)
-        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationScheduler.setRunAdmission(admission)
         AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
             seen << [automationId: automation.automationId]
             reachedRead.countDown()
@@ -461,7 +462,7 @@ class AuditSettingsSmokeTests {
             assertEquals([made], played.runs*.automationId, "the play submits the automation it made")
             assertTrue(seen*.automationId.contains(made), "the run reached its read instead of 'Automation ${made} not found': ${seen}")
         } finally {
-            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationScheduler.setRunAdmission(null)
             AutomationExecutionSupport.resetExecutionHooks()
         }
     }
@@ -815,7 +816,7 @@ class AuditSettingsSmokeTests {
     void aPlayOfNamedChecksRunsOnlyTheirAutomations() {
         List<Runnable> started = Collections.synchronizedList([] as List<Runnable>)
         RunAdmission admission = new RunAdmission(8, 8, 85, { -> null }, { Runnable r -> started << r } as Executor)
-        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationScheduler.setRunAdmission(admission)
         AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
             throw new IllegalStateException("probe: stop before reading")
         })
@@ -839,7 +840,7 @@ class AuditSettingsSmokeTests {
             assertEquals(["TSET_RS2"], shared.runs*.savedRunId)
             new ArrayList<Runnable>(started).each { runOnItsOwnThread(it) }
         } finally {
-            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationScheduler.setRunAdmission(null)
             AutomationExecutionSupport.resetExecutionHooks()
         }
     }

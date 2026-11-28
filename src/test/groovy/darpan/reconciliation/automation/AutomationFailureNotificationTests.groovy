@@ -146,7 +146,7 @@ class AutomationFailureNotificationTests {
         Timestamp now = Timestamp.valueOf("2026-06-03 10:00:00")
         seedExhaustedRetryExecution(Timestamp.valueOf("2026-06-03 09:00:00"))
 
-        AutomationExecutionSupport.reprocessDueRetries(ec, now, 100, [:])
+        AutomationScheduler.reprocessDueRetries(ec, now, 100, [:])
 
         assertEquals(0, deliveries.size(), "DAR-BE-378: a dead letter goes to Darpan's error space, never the tenant's chat space")
     }

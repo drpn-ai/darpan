@@ -921,7 +921,7 @@ class AutomationExecutionSupportTests {
 
             // Scanner pass 1: under the cap, so it claims and re-drives — attempt 2 runs for real and
             // mints its own row, and the operator clicks "Notify me" on it.
-            AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T11:00:00Z"), 100, [:])
+            AutomationScheduler.reprocessDueRetries(ec, timestamp("2026-05-01T11:00:00Z"), 100, [:])
             // DAR-BE-002: the re-drive is submitted, not joined — wait for attempt 2 to actually finish
             // before asserting on what it left behind.
             ec.service.awaitAsyncCompletion()
@@ -934,7 +934,7 @@ class AutomationExecutionSupportTests {
             assertTrue(deliveries.isEmpty(), "nothing is terminal yet")
 
             // Scanner pass 2: retries exhausted → DEAD_LETTER, and the give-up alert goes out.
-            AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T12:00:00Z"), 100, [:])
+            AutomationScheduler.reprocessDueRetries(ec, timestamp("2026-05-01T12:00:00Z"), 100, [:])
             ec.service.awaitAsyncCompletion()
 
             assertEquals(AutomationExecutionSupport.STATUS_DEAD_LETTER, execution.statusEnumId)
@@ -1080,7 +1080,7 @@ class AutomationExecutionSupportTests {
             assertNotNull(firstRunResult.notifiedDate, "attempt 1's FAILED alert claims that row's notifiedDate")
 
             // Operator re-drive. Note what it does NOT do: clear reconciliationRunResultId.
-            Map requeue = AutomationExecutionSupport.reprocessAutomationExecution(ec,
+            Map requeue = AutomationScheduler.reprocessAutomationExecution(ec,
                     [automationExecutionId: execution.automationExecutionId])
             assertEquals(true, requeue.requeued)
             assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
@@ -2493,7 +2493,7 @@ class AutomationExecutionSupportTests {
             [executedCount: 1, automationId: call.params.automationId]
         }
 
-        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [
+        Map result = AutomationScheduler.scanDueAutomations(ec, [
                 nowTimestamp: NOW,
                 limit       : 100,
         ])
@@ -2540,7 +2540,7 @@ class AutomationExecutionSupportTests {
             [executedCount: 1, automationId: call.params.automationId]
         }
 
-        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [
+        Map result = AutomationScheduler.scanDueAutomations(ec, [
                 nowTimestamp: timestamp("2026-05-01T10:05:00Z"),
                 limit       : 100,
         ])
@@ -2578,7 +2578,7 @@ class AutomationExecutionSupportTests {
         // Watchdog so a regression to joining FAILS on the assertion below instead of hanging the suite.
         startLatchWatchdog(releaseExecution, 3000L)
 
-        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+        Map result = AutomationScheduler.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
 
         assertFalse(executionFinished.get(),
                 "scan#DueAutomations must return without waiting for the execution it submitted")
@@ -2603,7 +2603,7 @@ class AutomationExecutionSupportTests {
         // the scan counts RUNNING executions and defers rather than stampeding the driver.
         FakeEc ec = fakeEc()
         addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
-        (1..AutomationExecutionSupport.maxConcurrentExecutions()).each { int index ->
+        (1..AutomationScheduler.maxConcurrentExecutions()).each { int index ->
             ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
                     automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
                     automationId         : "AUTO_OTHER_${index}".toString(),
@@ -2614,7 +2614,7 @@ class AutomationExecutionSupportTests {
         }
         ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
 
-        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+        Map result = AutomationScheduler.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
 
         assertTrue(ec.service.calls.isEmpty(),
                 "no execution may be submitted while the in-flight cap is full. Submitted: ${ec.service.calls*.serviceName}")
@@ -2638,16 +2638,16 @@ class AutomationExecutionSupportTests {
         RunAdmission admission = new RunAdmission(8, 1, 85, { -> null }, { Runnable r -> } as java.util.concurrent.Executor)
         admission.submit("TENANT_A", "TENANT_A's audit check", { -> } as Runnable)
         ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
-        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationScheduler.setRunAdmission(admission)
         try {
-            Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+            Map result = AutomationScheduler.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
 
             assertEquals(["AUTO_B"], ec.service.calls*.params.automationId)
             assertEquals(["AUTO_A"], result.deferredResults*.automationId)
             FakeValue deferred = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_A" }
             assertNull(deferred.lastScheduledFireTime, "a deferred automation stays due")
         } finally {
-            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationScheduler.setRunAdmission(null)
         }
     }
 
@@ -2657,7 +2657,7 @@ class AutomationExecutionSupportTests {
         // next 5-minute tick picks the same window up.
         FakeEc ec = fakeEc()
         addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
-        List<FakeValue> inFlight = (1..AutomationExecutionSupport.maxConcurrentExecutions()).collect { int index ->
+        List<FakeValue> inFlight = (1..AutomationScheduler.maxConcurrentExecutions()).collect { int index ->
             ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
                     automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
                     automationId         : "AUTO_OTHER_${index}".toString(),
@@ -2669,9 +2669,9 @@ class AutomationExecutionSupportTests {
         }
         ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
 
-        AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+        AutomationScheduler.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
         inFlight.each { FakeValue row -> row.statusEnumId = AutomationExecutionSupport.STATUS_SUCCEEDED }
-        Map secondTick = AutomationExecutionSupport.scanDueAutomations(ec, [
+        Map secondTick = AutomationScheduler.scanDueAutomations(ec, [
                 nowTimestamp: timestamp("2026-05-01T10:05:00Z"),
                 limit       : 100,
         ])
@@ -2711,7 +2711,7 @@ class AutomationExecutionSupportTests {
         }
         startLatchWatchdog(releaseExecution, 3000L)
 
-        List results = AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+        List results = AutomationScheduler.reprocessDueRetries(ec, NOW, 100, [:])
 
         assertFalse(executionFinished.get(),
                 "the retry sweep must submit the re-drive and return, not join it")
@@ -2861,7 +2861,7 @@ class AutomationExecutionSupportTests {
                 nextRetryDate        : timestamp("2026-04-30T00:00:00Z"),
         ])
 
-        AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+        AutomationScheduler.reprocessDueRetries(ec, NOW, 100, [:])
 
         FakeValue row = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find {
             it.automationExecutionId == "EXEC_DL"
@@ -2897,7 +2897,7 @@ class AutomationExecutionSupportTests {
             return [:]
         }
 
-        AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+        AutomationScheduler.reprocessDueRetries(ec, NOW, 100, [:])
 
         FakeValue row = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find {
             it.automationExecutionId == "EXEC_RETRY"
@@ -2922,7 +2922,7 @@ class AutomationExecutionSupportTests {
                 errorMessage         : "boom",
         ])
 
-        Map result = AutomationExecutionSupport.reprocessAutomationExecution(ec, [automationExecutionId: "EXEC_FAIL"])
+        Map result = AutomationScheduler.reprocessAutomationExecution(ec, [automationExecutionId: "EXEC_FAIL"])
 
         assertTrue((boolean) result.requeued)
         FakeValue row = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find {
@@ -2943,7 +2943,7 @@ class AutomationExecutionSupportTests {
                 statusEnumId         : AutomationExecutionSupport.STATUS_RUNNING,
         ])
 
-        Map result = AutomationExecutionSupport.reprocessAutomationExecution(ec, [automationExecutionId: "EXEC_RUN"])
+        Map result = AutomationScheduler.reprocessAutomationExecution(ec, [automationExecutionId: "EXEC_RUN"])
 
         assertFalse((boolean) result.requeued)
         assertNotNull(result.error)
@@ -3957,7 +3957,7 @@ class AutomationExecutionSupportTests {
         List<Map> cards = captureErrorCards()
         List<Map> deliveries = captureDeliveries()
         try {
-            AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+            AutomationScheduler.reprocessDueRetries(ec, NOW, 100, [:])
 
             assertEquals(1, cards.size(), "one card for the dead letter")
             assertEquals("DEAD_LETTER", cards[0].kind)
@@ -4300,7 +4300,7 @@ class AutomationExecutionSupportTests {
             [FILE_1: [fileName: "f1.json", recordCount: 3], FILE_2: [fileName: "f2.json", recordCount: 3]]
         }
         try {
-            Map out = AutomationExecutionSupport.retryFromExtracts(ec, [automationExecutionId: "EX_OLD"])
+            Map out = AutomationScheduler.retryFromExtracts(ec, [automationExecutionId: "EX_OLD"])
             assertFalse(out.submitted as boolean)
             assertTrue((out.error as String).contains("later run"), "the operator is told why: ${out.error}")
             assertEquals([["TENANT_A", ["CHK_1"], NOW, "EX_OLD"]], asked)

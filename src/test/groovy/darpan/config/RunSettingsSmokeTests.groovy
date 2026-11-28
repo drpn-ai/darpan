@@ -2,6 +2,7 @@ package darpan.config
 
 import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationScheduler
 import darpan.reconciliation.automation.AutomationRetryPolicy
 import darpan.reconciliation.automation.AutomationWindows
 import darpan.reconciliation.automation.RunAdmission
@@ -61,11 +62,11 @@ class RunSettingsSmokeTests {
 
     @Test
     void aRowChangesTheCapAtOnce() {
-        assertEquals(8, AutomationExecutionSupport.maxConcurrentExecutions())
+        assertEquals(8, AutomationScheduler.maxConcurrentExecutions())
         saveRow(CAP, "3")
-        assertEquals(3, AutomationExecutionSupport.maxConcurrentExecutions())
+        assertEquals(3, AutomationScheduler.maxConcurrentExecutions())
         assertEquals(3, RunAdmission.SHARED.snapshot().cap)
-        assertEquals(3, AutomationExecutionSupport.remainingSubmissionBudget(0))
+        assertEquals(3, AutomationScheduler.remainingSubmissionBudget(0))
     }
 
     @Test

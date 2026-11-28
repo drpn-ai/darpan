@@ -239,7 +239,7 @@ class PeakScheduleScanTests {
     }
 
     private static Map scan(FakeEc ec, Timestamp now) {
-        return AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: now, limit: 100])
+        return AutomationScheduler.scanDueAutomations(ec, [nowTimestamp: now, limit: 100])
     }
 
     private static List<Map> executed(FakeEc ec) { ec.service.calls.findAll { it.name == EXECUTE }*.params }

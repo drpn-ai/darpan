@@ -14,6 +14,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -335,5 +336,42 @@ class RunSideOptionsSmokeTests {
         ec.message.clearErrors()
         assertEquals(true, captured.onlyCancelledReturns)
         assertEquals("gorjana_prod", captured.omsRestSourceConfigId, "an option never displaces the config id")
+    }
+    /**
+     * OC158 (S14, security): the manual run tells the ID index when its read BEGAN. Without it the index fell back to the
+     * extract file's modified time, when the write ended, so a fetch straddling a connection drop could re-index erased data.
+     */
+    @Test
+    void theManualRunTellsTheIdIndexWhenItsReadBegan() {
+        Map created = create([file2SystemEnumId: "OMS_GQL", file2PrimaryIdExpression: '$.records[*].externalId'])
+        assertFalse(created.hadError as boolean, created.errorText as String)
+        Map api = new LinkedHashMap(source(created, "FILE_2").getMap() + [sourceConfigId: "gorjana_prod", sourceConfigType: "HOTWAX_OMS_GQL"])
+        File extract = File.createTempFile("run-side-options-oc158", ".json")
+        extract.text = '{"records":[]}'
+        List handed = []
+        Timestamp fetchBegan = null
+        darpan.idindex.IdIndexRunHook.metaClass.static.afterLiveRead = { def hookEc, String tenantId, String systemEnumId,
+                                                                        String connectionId, String fileLocation,
+                                                                        Timestamp readStartedAt = null ->
+            handed << [fileLocation, readStartedAt]
+        }
+        try {
+            RunExtractSupport.extractApiSource(ec, api, "FILE_2", "File 2", [location: "dbresource://tmp/run-side-options", runToken: "t"],
+                    [windowStartDate: Timestamp.valueOf("2026-11-10 08:00:00"), windowEndDate: Timestamp.valueOf("2026-11-11 08:00:00")],
+                    null, { String service, Map params ->
+                        fetchBegan = new Timestamp(System.currentTimeMillis())
+                        Thread.sleep(5)
+                        [fileLocation: extract.absolutePath, fileName: extract.name, recordCount: 0]
+                    }, null,
+                    RunExtractSupport.sideKeep(ec, api, "FILE_2", RunExtractSupport.resolveExtractConnector(ec, api)))
+            ec.message.clearErrors()
+            assertEquals(1, handed.size(), "the live read is handed to the ID index once: ${handed}")
+            Timestamp readStartedAt = (Timestamp) handed[0][1]
+            assertNotNull(readStartedAt, "the hook must be told when the read began")
+            assertTrue(!readStartedAt.after(fetchBegan), "readStartedAt (${readStartedAt}) is before the fetch began (${fetchBegan})")
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(darpan.idindex.IdIndexRunHook)
+            extract.delete()
+        }
     }
 }

@@ -281,6 +281,10 @@ class RunExtractSupport {
         }
         logger.info("${label} reads live, not from a kept copy: ${served.reason}")
 
+        // OC158 (S14): when the read BEGAN, taken before the fetch. The ID index judges a connection drop against it; the
+        // extract file's modified time marks when the write ENDED, which would let a fetch that straddles a drop re-index
+        // data the drop erased.
+        Timestamp readStartedAt = new Timestamp(System.currentTimeMillis())
         Map extraction = (serviceCaller.call(extractServiceName, extractParams) ?: [:]) as Map
         ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
         if (ec.message.hasError()) return [:]
@@ -292,7 +296,7 @@ class RunExtractSupport {
         }
         // DAR-BE-374: what this run read feeds the ID index, in the background
         IdIndexRunHook.afterLiveRead(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                normalize(connector?.systemEnumId), configId, extractedLocation)
+                normalize(connector?.systemEnumId), configId, extractedLocation, readStartedAt)
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
     }

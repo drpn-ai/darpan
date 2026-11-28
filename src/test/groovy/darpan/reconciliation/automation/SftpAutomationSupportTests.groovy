@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.reconciliation.notification.TenantNotificationSupport
+import darpan.reconciliation.support.FakeTransactionFacade
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -1327,12 +1328,6 @@ class SftpAutomationSupportTests {
                 service.onPollCall?.call()
             }
             return service.nextResult
-        }
-    }
-
-    private static class FakeTransactionFacade {
-        Object runUseOrBegin(Integer timeout, String message, Closure work) {
-            return work.call()
         }
     }
 

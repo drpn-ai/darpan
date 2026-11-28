@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.peak.AllowanceSpec
 import darpan.peak.PeakWindow
 import darpan.peak.RunTimeMove
+import darpan.reconciliation.support.FakeTransactionFacade
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
@@ -435,7 +436,7 @@ class PeakScheduleScanTests {
     private static class FakeEc {
         FakeEntity entity = new FakeEntity()
         FakeService service = new FakeService()
-        Object transaction = null
+        FakeTransactionFacade transaction = new FakeTransactionFacade()
         Map user = [userId: "tester"]
 
         FakeRow add(String entityName, Map fields) {

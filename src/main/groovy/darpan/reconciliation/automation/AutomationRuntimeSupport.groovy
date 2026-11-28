@@ -89,10 +89,7 @@ class AutomationRuntimeSupport {
     }
 
     static Object runInTransaction(def ec, String message, Closure work) {
-        if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runUseOrBegin", Integer, String, Closure)) {
-            return ec.transaction.runUseOrBegin(30, message, work)
-        }
-        return work.call()
+        return ec.transaction.runUseOrBegin(30, message, work)
     }
 
     /**
@@ -115,10 +112,7 @@ class AutomationRuntimeSupport {
      * unconditionally, not just when there is no ambient transaction.
      */
     static Object runInNewTransaction(def ec, String message, Closure work) {
-        if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runRequireNew", Integer, String, Closure)) {
-            return ec.transaction.runRequireNew(30, message, work)
-        }
-        return work.call()
+        return ec.transaction.runRequireNew(30, message, work)
     }
 
     static String normalizeDataManagerPath(def ec, Object rawPath) {

@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.support.FakeTransactionFacade
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -51,7 +52,6 @@ class VerificationSkipReasonTests {
         FakeVal makeValue(String n) { def x = new FakeVal(n); ec.store << x; x }
         FakeFind find(String n) { new FakeFind(n, ec) }
     }
-    static class FakeTx { def runUseOrBegin(int t, String m, Closure work) { work.call() } }
     static class FakeUser { Timestamp nowTimestamp = new Timestamp(1_700_000_000_000L) }
     static class FakeMessage {
         boolean hasError() { false }
@@ -62,7 +62,7 @@ class VerificationSkipReasonTests {
         static int seq = 0
         List<FakeVal> store = []
         FakeEntity entity = new FakeEntity(this)
-        FakeTx transaction = new FakeTx()
+        FakeTransactionFacade transaction = new FakeTransactionFacade()
         FakeUser user = new FakeUser()
         FakeMessage message = new FakeMessage()
     }

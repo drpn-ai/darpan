@@ -68,15 +68,20 @@ class RestJsonTransport {
                 JsonPathValues.values(answer, (String) request.recordsAt).findAll { it instanceof Map }
         if (records == null) throw new DataSourceCallException("NO_RECORDS", "The answer has no ${rootOf((String) request.recordsAt)}.".toString())
         List<Map> page = (List<Map>) records
+        // OC182: every element the page held, records or not, so an offset moves past all of them.
+        String recordsAt = (String) request.recordsAt
+        int held = JsonPathValues.values(answer, recordsAt.contains("[*]") ? recordsAt.substring(0, recordsAt.lastIndexOf("[*]") + 3) : recordsAt).size()
         String next = null
         boolean hasNext
         switch (paging.mode) {
             case "OFFSET":
                 // OC133 (reverses DAR-BE-234's stop on a short page): a server may cap its page below what was asked, so a
                 // short page is not the last one. Only an empty page ends the read: one more call, never a truncated read.
+                // OC182: it moves by every element held, not the records kept, so a null among them cannot make the next page
+                // read a record again.
                 long offset = (variables?.get(paging.offsetVariable) ?: 0) as long
-                hasNext = !page.isEmpty()
-                next = hasNext ? (offset + page.size()).toString() : null
+                hasNext = held > 0
+                next = hasNext ? (offset + held).toString() : null
                 break
             default:
                 next = JsonPathValues.value(answer, (String) paging.nextAt)?.toString()?.trim() ?: null
@@ -106,7 +111,7 @@ class RestJsonTransport {
         if (!check.ok) throw new DataSourceCallException("BLOCKED", "The source URL is blocked by the outbound policy: ${check.error}".toString())
         for (int attempt = 0; ; attempt++) {
             long wait = governor.sleepMillisFor(reservation)
-            if (wait > 0L) sleeper.call(wait)
+            if (wait > 0L) GraphQlTransport.sleepOrGiveBack(governor, reservation, sleeper, wait)
             int n = calls.incrementAndGet()
             long started = System.currentTimeMillis()
             Map parsed = null

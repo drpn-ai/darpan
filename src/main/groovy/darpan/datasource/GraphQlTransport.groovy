@@ -79,7 +79,7 @@ class GraphQlTransport {
         int transientFailures = 0
         for (int attempt = 0; ; attempt++) {
             long wait = governor.sleepMillisFor(reservation)
-            if (wait > 0L) sleeper.call(wait)
+            if (wait > 0L) sleepOrGiveBack(governor, reservation, sleeper, wait)
             int n = calls.incrementAndGet()
             long started = System.currentTimeMillis()
             Map body = null
@@ -185,6 +185,16 @@ class GraphQlTransport {
      * Takes a call slot; an interrupt while waiting for one gives the reservation back, since no answer will settle it.
      * Without that, an interrupted read left its reservation outstanding on the shared bucket for the JVM's life.
      */
+    /** The pacing sleep before a call; an interrupt during it gives the reservation back, as acquireOrGiveBack does. */
+    static void sleepOrGiveBack(CostBucketGovernor governor, int reservation, Closure sleeper, long wait) {
+        try {
+            sleeper.call(wait)
+        } catch (InterruptedException e) {
+            governor.settle(reservation, null, null)
+            throw e
+        }
+    }
+
     static void acquireOrGiveBack(CostBucketGovernor governor, int reservation) {
         try {
             governor.acquireCall()

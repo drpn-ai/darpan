@@ -209,4 +209,18 @@ class RestJsonTransportTests {
         assertTrue(DataSourceDefinitionSupport.check("REST_JSON", d + [steps: [((List<Map>) d.steps)[0] + [document: "not json"]]])
                 .any { it.contains("the request as a JSON object") })
     }
+
+    /**
+     * OC182 (DAR-OPS-029 S15a). The offset moves by what the page held, not by the records kept: a page with a null or a
+     * plain value among its records used to move the offset short, so the next page read a record again.
+     */
+    @Test
+    void anOffsetMovesByEveryElementThePageHeldSoNothingIsReadTwice() {
+        Map request = cursorRequest() + [query: [size: '$first', from: '$after'], paging: [mode: "OFFSET", sizeVariable: "first", offsetVariable: "after"]]
+        List<Object> all = [order("B1"), null, order("B3"), order("B4")]
+        def t = new RestJsonTransport(definition(request), CONNECTION, { String m, String url, Map h, String b ->
+            [statusCode: 200, body: JsonOutput.toJson([data: all.drop((query(url).from ?: "0") as int).take(query(url).size as int)])]
+        })
+        assertEquals(["B1", "B3", "B4"], run(definition(request), t))
+    }
 }

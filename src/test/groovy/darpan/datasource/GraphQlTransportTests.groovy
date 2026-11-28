@@ -165,4 +165,15 @@ class GraphQlTransportTests {
         }
         assertEquals(0L, governor.@outstanding, "the reservation went back")
     }
+
+    @Test
+    void anInterruptedPacingSleepGivesItsReservationBack() {
+        // DAR-OPS-029 S15a: the reservation is taken, then the call sleeps for the bucket; an interrupt during that sleep (a
+        // cancelled parallel read, most likely when the bucket is drained) left the reservation outstanding for good.
+        GraphQlTransport t = transport([[json: [data: [n: 1]]]], [])
+        t.governor.settle(0, [left: 0, max: 100, perSecond: 1], [available: "left", maximum: "max", restoreRate: "perSecond"])
+        t.sleeper = { long ms -> throw new InterruptedException("cancelled") }
+        assertThrows(InterruptedException) { t.execute("query Q { n }", [:], 10) }
+        assertEquals(0L, t.governor.@outstanding, "the reservation went back")
+    }
 }

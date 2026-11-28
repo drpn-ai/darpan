@@ -120,7 +120,7 @@
             <parameter name="publicError"><description>Why there is no page, in words a caller may see.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="result" from="darpan.audit.AuditReportAssembler.findingsPage(ec, companyUserGroupId, searchTerms,
+            <set field="result" from="darpan.audit.AuditFindingsPage.findingsPage(ec, companyUserGroupId, searchTerms,
                     sortKey, reverse, first, after)"/>
             <set field="publicError" from="result.publicError"/>
             <if condition="publicError"><return/></if>

@@ -290,19 +290,19 @@ class AuditFacadeSmokeTests {
         assertTrue(units("P0").every { it.priority == "P0" })
 
         // The paged query takes the same filter as a search term, resolving before it pages.
-        Map page = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+        Map page = AuditFindingsPage.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
                 [key: "priority", comparator: "eq", values: ["P0"]]], "FIRST_FOUND", false, 50, null)
         assertEquals(50, (page.page.edges as List).size())
         assertTrue(page.page.pageInfo.hasNextPage as boolean)
         assertTrue((page.page.edges as List).every { it.node.priority == "P0" })
-        Map next = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+        Map next = AuditFindingsPage.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
                 [key: "priority", comparator: "in", values: ["P0"]]], "FIRST_FOUND", false, 50, page.page.pageInfo.endCursor as String)
         assertEquals(10, (next.page.edges as List).size())
         assertFalse(next.page.pageInfo.hasNextPage as boolean)
-        Map low = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+        Map low = AuditFindingsPage.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
                 [key: "priority", comparator: "eq", values: ["P2"]]], "STATEMENT", false, 100, null)
         assertEquals(5, (low.page.edges as List).size())
-        assertTrue(AuditReportAssembler.findingsPage(ec, MINE, [[key: "priority", comparator: "eq", values: ["URGENT"]]],
+        assertTrue(AuditFindingsPage.findingsPage(ec, MINE, [[key: "priority", comparator: "eq", values: ["URGENT"]]],
                 "FIRST_FOUND", false, 10, null).publicError.toString().contains("priority must be one of"))
     }
 

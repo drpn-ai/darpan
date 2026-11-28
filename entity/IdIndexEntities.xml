@@ -86,7 +86,8 @@
             read before droppedAt, so an erase stays erased; a later read (the same store installed again) indexes. Never deleted.</description>
         <field name="companyUserGroupId" type="id" is-pk="true"/>
         <field name="connectionId" type="id" is-pk="true"/>
-        <field name="droppedAt" type="date-time" not-null="true"/>
-        <relationship type="one" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
+        <field name="droppedAt" type="date-time"><description>Empty until a drop: the run path creates the row before its first
+            batch (OC158), so every batch locks a row that exists and a drop waits on it.</description></field>
+        <relationship type="one-nofk" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
     </entity>
 </entities>

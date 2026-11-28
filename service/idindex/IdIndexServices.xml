@@ -11,12 +11,14 @@
             <parameter name="systemEnumId" required="true"/>
             <parameter name="connectionId" required="true"/>
             <parameter name="fileLocation" required="true"/>
+            <parameter name="readStartedAt" type="Timestamp"><description>OC158: when the run began reading (before the fetch); decides
+                over the file's modified time whether a drop of the connection's kept data came after the read.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="records" type="Integer"/><parameter name="rows" type="Integer"/></out-parameters>
         <actions>
             <script>
                 try {
-                    Map out = darpan.idindex.IdIndexRunHook.indexExtract(ec, tenantId, systemEnumId, connectionId, fileLocation)
+                    Map out = darpan.idindex.IdIndexRunHook.indexExtract(ec, tenantId, systemEnumId, connectionId, fileLocation, readStartedAt)
                     if (out.error) ec.logger.warn("ID index of ${systemEnumId} extract ${fileLocation}: ${out.error}")
                     records = out.records; rows = out.rows
                 } catch (Throwable t) {

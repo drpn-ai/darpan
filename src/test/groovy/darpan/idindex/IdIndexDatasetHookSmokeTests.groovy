@@ -271,6 +271,48 @@ class IdIndexDatasetHookSmokeTests {
                 .condition("connectionId", "Q_SHARED").disableAuthz().useCache(false).count() as int)
     }
 
+    /**
+     * OC158 (security review of OC104): the run path must lock a marker row that exists. With none, a batch's check locked
+     * nothing, so a drop could mark and delete between the check and the batch's inserts, and the rows survived. A drop that
+     * starts while a batch holds the connection's marker now waits for it, then deletes what it wrote.
+     */
+    @Test
+    void "OC158: a drop that starts while a run's index batch is writing waits for it, then deletes what it wrote"() {
+        File extract = extractOf("Q_RACE", 300, System.currentTimeMillis() - 60_000L)
+        int batches = 0
+        Map dropState = [:]
+        Thread dropThread = null
+        IdIndexer.afterLiveCheckHook = { String tenant, String connection ->
+            if (connection != "Q_RACE" || ++batches != 1) return
+            dropThread = new Thread({ dropState.failure = drop(A, "Q_RACE") } as Runnable, "oc156-drop")
+            dropThread.start()
+            Thread.sleep(1500)
+            dropState.finishedWhileTheBatchHeldItsLock = !dropThread.isAlive()
+        }
+        try {
+            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_RACE", extract.absolutePath)
+        } finally {
+            IdIndexer.resetForTests()
+            extract.delete()
+            dropThread?.join(60_000L)
+        }
+        assertNull(dropState.failure, "the drop itself: ${dropState.failure}")
+        assertFalse(dropState.finishedWhileTheBatchHeldItsLock as boolean, "the drop waits for the batch holding the connection's marker")
+        assertEquals([], rows("Q_RACE"), "then deletes the batch's rows, and the next batch writes nothing")
+    }
+
+    @Test
+    void "OC158: a run's start time, when given, decides over the extract file's time"() {
+        assertNull(drop(A, "Q_START"))
+        File extract = extractOf("Q_START", 3, System.currentTimeMillis() + 60_000L)   // the write ended after the drop
+        try {
+            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_START", extract.absolutePath, new Timestamp(System.currentTimeMillis() - 60_000L))
+        } finally {
+            extract.delete()
+        }
+        assertEquals([], rows("Q_START"), "the run began reading before the drop: nothing is written")
+    }
+
     /** drop#ConnectionKeptData for one tenant connection, committed on a thread of its own; its failure, or null. */
     private Throwable drop(String tenant, String connection) {
         return onOwnThread {

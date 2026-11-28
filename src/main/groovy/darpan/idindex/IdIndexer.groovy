@@ -31,8 +31,11 @@ class IdIndexer {
 
     /** Test seam (OC92): called with (tenantId, connectionId) at the start of each batch's transaction, before anything is read. */
     static Closure beforeBatchHook = null
+    /** Test seam (OC158): called with (tenantId, connectionId) inside each batch's transaction right after its live check passed,
+     *  while the lock that check took is held. */
+    static Closure afterLiveCheckHook = null
 
-    static void resetForTests() { beforeBatchHook = null }
+    static void resetForTests() { beforeBatchHook = null; afterLiveCheckHook = null }
 
     /**
      * A dataset read's file (records under one JSON document's "records", or a bare array) as one record per line, in a temp
@@ -151,6 +154,7 @@ class IdIndexer {
                     // OC92: inside this batch's transaction and under the row lock a drop takes, so a drop that committed
                     // first is seen here, and one that comes after waits and deletes what this batch wrote.
                     if (live != null && !live.call()) { stopped = true; return }
+                    if (afterLiveCheckHook != null) afterLiveCheckHook.call(tenantId, connectionId)
                     Timestamp now = ec.user.nowTimestamp
                     Set<String> existing = ec.entity.find(ENTITY).condition("rowKey", EntityCondition.IN, keys).selectField("rowKey")
                             .useCache(false).list()*.rowKey as Set<String>

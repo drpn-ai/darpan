@@ -231,6 +231,60 @@ class AutomationExecutionServiceSmokeTests {
         ec.message.clearErrors()
     }
 
+    // DAR-OPS-029 F-E2: two executions that reach the same queued (PENDING) window at once: the first claims it under a row
+    // lock while its transaction is still open, the second waits on that lock, reads RUNNING and skips. Exactly one re-drives it.
+    @Test
+    void twoExecutionsReachingOneQueuedWindowRunItOnce() {
+        seedApiAutomation()
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "AUTO_API_ARTIFACT")
+                .disableAuthz().useCache(false).one()
+        Timestamp fire = Timestamp.valueOf("2026-03-02 06:00:00")
+        Map window = [windowStartDate: Timestamp.valueOf("2026-03-01 00:00:00"), windowEndDate: Timestamp.valueOf("2026-03-02 00:00:00"),
+                      childWindowStartDate: Timestamp.valueOf("2026-03-01 00:00:00"), childWindowEndDate: Timestamp.valueOf("2026-03-02 00:00:00")]
+        def queued = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution").setAll([automationId: "AUTO_API_ARTIFACT",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, statusEnumId: AutomationExecutionSupport.STATUS_PENDING, scheduledDate: fire,
+                windowStartDate: window.windowStartDate, windowEndDate: window.windowEndDate, childWindowStartDate: window.childWindowStartDate,
+                childWindowEndDate: window.childWindowEndDate, retryCount: 1, createdDate: ec.user.nowTimestamp, lastUpdatedDate: ec.user.nowTimestamp])
+        queued.setSequencedIdPrimary()
+        ec.artifactExecution.disableAuthz()
+        try { queued.create() } finally { ec.artifactExecution.enableAuthz() }
+        java.util.concurrent.CountDownLatch firstClaimed = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch releaseFirst = new java.util.concurrent.CountDownLatch(1)
+        List<Boolean> reused = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Closure caller = { boolean holdOpen ->
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                boolean began = tec.transaction.begin(60)
+                try {
+                    reused << (AutomationExecutionSupport.findOrCreateExecution(tec, automation, fire, window, 1).reused as boolean)
+                    if (holdOpen) {
+                        firstClaimed.countDown()
+                        releaseFirst.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                } finally {
+                    tec.transaction.commit(began)
+                }
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        Thread first = Thread.start { caller.call(true) }
+        assertTrue(firstClaimed.await(30, java.util.concurrent.TimeUnit.SECONDS), "the first claim must land")
+        Thread second = Thread.start { caller.call(false) }
+        second.join(500L)
+        releaseFirst.countDown()
+        first.join(30_000L)
+        second.join(30_000L)
+
+        assertTrue(failures.isEmpty(), "no claim may throw: ${failures*.toString()}")
+        assertEquals(2, reused.size(), "both callers answered: ${reused}")
+        assertEquals(1, reused.count { it }, "exactly one execution re-drives the queued window: ${reused}")
+    }
+
     private void seedApiAutomation(String automationId = "AUTO_API_ARTIFACT") {
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId], [
                 automationId            : automationId,

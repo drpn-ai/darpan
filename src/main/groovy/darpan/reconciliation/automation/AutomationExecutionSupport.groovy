@@ -1087,6 +1087,10 @@ class AutomationExecutionSupport {
                 // envelope — the scanner log and run#AutomationNow's response would report a run that
                 // simply did not happen, which is the shape of the bug this whole plan started from.
                 cancelledCount        : statusCounts[STATUS_CANCELLED] ?: 0,
+                // DAR-OPS-029 F-E1 (conservation): a window queued for retry (PENDING) is a bucket too, and the buckets add up to
+                // windowCount, so a requeued window never reads as a run that did not happen.
+                retryQueuedCount      : statusCounts[STATUS_PENDING] ?: 0,
+                windowCount           : windows.size(),
                 executionResults      : executionResults,
         ]
     }
@@ -1468,6 +1472,14 @@ class AutomationExecutionSupport {
         String automationId = normalize(readField(execution, "automationId"))
         def automation = loadAutomation(ec, automationId)
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        // DAR-OPS-029 OC34 (S11, Aditi D8): an audit's replay of an older read never overwrites what a later run of its checks
+        // recorded; refused here, in words, rather than run and silently writing nothing.
+        List<Map> auditChecks = AuditAutomationSupport.checksFor(ec, automation)
+        if (auditChecks && AuditAutomationSupport.laterRunRecorded(ec, tenantId, auditChecks.collect { (String) it.checkId },
+                AuditAutomationSupport.replayReadStamp(ec, tenantId, executionId), executionId)) {
+            return [submitted: false, error: ("Not retried: a later run of this audit's checks is already recorded, and replaying " +
+                    "this older read would overwrite it. Run the check again instead.").toString()]
+        }
         Map<String, Map<String, Object>> files
         try {
             files = ExtractReplaySupport.replayResults(ec, tenantId, executionId, !isEvaluateScope(ec, automation))
@@ -1479,7 +1491,7 @@ class AutomationExecutionSupport {
         Timestamp end = toTimestamp(readField(execution, "childWindowEndDate") ?: readField(execution, "windowEndDate"))
         if (start == null || end == null) return [submitted: false, error: "Execution ${executionId} recorded no window to replay.".toString()]
         Map<String, Object> executeParams = [automationId: automationId, scheduledFireTime: nowTimestamp(ec), replayFromExecutionId: executionId]
-        if (AuditAutomationSupport.checksFor(ec, automation)) {
+        if (auditChecks) {
             // The audit's own days in the zone its windows are cut in (AuditAutomationSupport.zoneOf), end exclusive:
             // [Oct 1 00:00, Oct 28 00:00) is Oct 1 to 27.
             ZoneId zone
@@ -1887,6 +1899,27 @@ class AutomationExecutionSupport {
     }
 
     /**
+     * DAR-OPS-029 F-E2. Claims a queued (PENDING) execution for this caller: the row is read FOR UPDATE inside a transaction (the
+     * caller's, else its own), so a second claimer waits on the first's lock and then reads it RUNNING. True for exactly one caller.
+     */
+    protected static boolean claimQueuedExecution(def ec, def execution) {
+        String executionId = normalize(readField(execution, "automationExecutionId"))
+        return (boolean) runInTransaction(ec, "Error claiming a queued automation execution", {
+            def row = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                            "claim a queued automation execution by id, read for update so one caller wins")
+                    .condition("automationExecutionId", executionId).useCache(false).forUpdate(true).one()
+            if (row == null || !REUSABLE_EXECUTION_STATUSES.contains(normalize(readField(row, "statusEnumId")))) return false
+            Timestamp claimedAt = nowTimestamp(ec)
+            row.set("statusEnumId", STATUS_RUNNING)
+            row.set("lastUpdatedDate", claimedAt)
+            row.update()
+            // the caller's copy of the row reads as what it now is
+            execution.set("statusEnumId", STATUS_RUNNING)
+            return true
+        })
+    }
+
+    /**
      * Fail-closed tenant assertion for system/cron write paths (MACH P0: the cron write path must
      * explicitly assert tenant identity instead of silently stamping under disableAuthz).
      *
@@ -1947,12 +1980,10 @@ class AutomationExecutionSupport {
                 .useCache(false)
                 .one()
         if (existing) {
-            String statusEnumId = normalize(readField(existing, "statusEnumId"))
-            return [
-                    execution: existing,
-                    duplicate: !REUSABLE_EXECUTION_STATUSES.contains(statusEnumId),
-                    reused   : REUSABLE_EXECUTION_STATUSES.contains(statusEnumId),
-            ]
+            // DAR-OPS-029 F-E2: a queued row is RE-USED only by the caller that claims it; any other caller skips it as a duplicate.
+            boolean claimed = REUSABLE_EXECUTION_STATUSES.contains(normalize(readField(existing, "statusEnumId"))) &&
+                    claimQueuedExecution(ec, existing)
+            return [execution: existing, duplicate: !claimed, reused: claimed]
         }
 
         String assertedTenantId = assertSystemWriteTenant(ec, automation)
@@ -1962,7 +1993,9 @@ class AutomationExecutionSupport {
             execution.set("automationId", automationId)
             execution.set("companyUserGroupId", assertedTenantId)
             execution.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
-            execution.set("statusEnumId", STATUS_PENDING)
+            // DAR-OPS-029 F-E2: created claimed by its creator (RUNNING), never left PENDING for another caller to claim first. A crash
+            // before the run starts leaves a RUNNING row the stuck-run reaper ends, not an orphan PENDING one nothing re-drives.
+            execution.set("statusEnumId", STATUS_RUNNING)
             execution.set("scheduledDate", scheduledFireTime)
             // DAR-BE-015: kept across retries (a re-drive reuses this row), so a dead letter knows what started it.
             execution.set("triggerType", triggerType ?: TRIGGER_SCHEDULED)
@@ -3205,11 +3238,12 @@ class AutomationExecutionSupport {
                     onlyInFile1Count       : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_1)),
                     onlyInFile2Count       : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_2)),
             ].each { key, value -> if (value != null) runResultValue.set(key as String, value) }
-            // Explicit terminal status: the row was minted RUNNING, and on the create path the entity
-            // default (AUT_STAT_SUCCESS) already produced this value — so this is the same end state,
-            // just no longer left to a default. A ruleExecutionFailed run keeps recording SUCCESS here,
-            // as it always has; only the execution row and the alert report FAILED for that case.
-            runResultValue.set("statusEnumId", STATUS_SUCCEEDED)
+            // Explicit terminal status (the row was minted RUNNING). DAR-OPS-029 F-E4 (Aditi 2026-11-28): a run whose rules did not
+            // fully evaluate ends FAILED here too, as its execution row and the interactive path do, so run history never shows a
+            // success; the rule's reason is the row's error (text-medium, 255).
+            boolean rulesFailed = reconcileResult?.ruleExecutionFailed == true
+            runResultValue.set("statusEnumId", rulesFailed ? STATUS_FAILED : STATUS_SUCCEEDED)
+            if (rulesFailed) runResultValue.set("errorMessage", truncate(ruleFailureReason(reconcileResult) ?: "A rule failed to build or evaluate.", 255))
             runResultValue.set("completedDate", completedTimestamp)
             runResultValue.set("lastHeartbeatDate", completedTimestamp)
             runResultValue.set("lastUpdatedDate", completedTimestamp)

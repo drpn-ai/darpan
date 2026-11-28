@@ -153,6 +153,12 @@
             <parameter name="cancelledCount" type="Integer">
                 <description>Windows an operator stopped via cancel#ReconciliationRun; they end AUT_STAT_CANCELLED, not failed.</description>
             </parameter>
+            <parameter name="retryQueuedCount" type="Integer">
+                <description>Windows that failed transiently and were queued for retry (AUT_STAT_PENDING with a nextRetryDate); the scanner re-drives them (DAR-OPS-029 F-E1).</description>
+            </parameter>
+            <parameter name="windowCount" type="Integer">
+                <description>Windows this execution resolved; executed + noData + failed + skippedDuplicate + cancelled + retryQueued add up to it (DAR-OPS-029 F-E1).</description>
+            </parameter>
             <parameter name="executionResults" type="List"/>
         </out-parameters>
         <actions>

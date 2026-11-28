@@ -290,39 +290,16 @@ class AutomationExecutionSupportTests {
         }
     }
 
+    // DAR-OPS-029 F-A4: no connector reads by status any more (HotWax REST retired), so a state-based window is refused, loudly
+    // and for good, rather than read as some date window the automation never asked for.
     @Test
-    void stateWindowModeYieldsExactlyOneSegmentForTheScheduledDay() {
-        def automation = [
-                automationId            : "AUT_TO_DAILY",
-                relativeWindowTypeEnumId: "AUT_WIN_STATE",
-                windowTimeZone          : "UTC",
-        ]
-        Timestamp scheduled = timestamp("2026-08-05T06:00:00Z")
-
-        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(
-                automation, [scheduledFireTime: scheduled])
-
-        assertEquals(1, windows.size())
-        assertEquals(timestamp("2026-08-05T00:00:00Z"), windows[0].childWindowStartDate)
-        assertEquals(timestamp("2026-08-06T00:00:00Z"), windows[0].childWindowEndDate)
-        assertEquals(1, windows[0].sequenceNum)
-    }
-
-    @Test
-    void stateWindowModeDoesNotSplitAcrossMonths() {
-        def automation = [
-                automationId            : "AUT_TO_DAILY",
-                relativeWindowTypeEnumId: "AUT_WIN_STATE",
-                relativeWindowCount     : 400,
-                windowTimeZone          : "UTC",
-        ]
-
-        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(
-                automation, [scheduledFireTime: timestamp("2026-08-05T06:00:00Z")])
-
-        // relativeWindowCount is meaningless in state mode and must not widen or split the window:
-        // splitting a status-defined population by calendar month yields N identical diffs.
-        assertEquals(1, windows.size())
+    void aStateBasedWindowIsRefusedNotReadAsADateWindow() {
+        def automation = [automationId: "AUT_TO_DAILY", relativeWindowTypeEnumId: "AUT_WIN_STATE", relativeWindowCount: 400, windowTimeZone: "UTC"]
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
+            AutomationWindows.resolveWindows(automation, [scheduledFireTime: timestamp("2026-08-05T06:00:00Z")])
+        }
+        assertTrue(refused.message.contains("retired"), refused.message)
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(refused), "a retry cannot fix it: FAILED at once, never requeued")
     }
 
     @Test
@@ -4218,6 +4195,119 @@ class AutomationExecutionSupportTests {
             assertFalse(stored.contains("eyJhbGciOiJIUzI1NiJ9.c2VjcmV0.c2ln"), "no bearer token in the stored error: ${stored}")
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(darpan.reconciliation.flowchart.RunFlowchartSupport)
+        }
+    }
+
+    // DAR-OPS-029 F-E4 (Aditi 2026-11-28): a run whose rules did not fully evaluate ends FAILED on its run result too, as the
+    // interactive path does, so run history never shows it as a success.
+    @Test
+    void aRulesFailedRunEndsItsRunResultFailedToo() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String ruleError = "Rule 'price-matches' failed: NullPointerException at RuleSet RS_ORDER"
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName: "${call.params.fileSide}.json".toString(), recordCount: 5]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [reconciliationType: "ORDER", diffLocation: "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName: "result.json", differenceCount: 4, ruleExecutionFailed: true, ruleErrors: [ruleError]]
+            }
+            return [:]
+        }
+        captureErrorCards()
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+            Map runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"].last()
+            assertEquals(AutomationExecutionSupport.STATUS_FAILED, runResult.statusEnumId, "the run result says FAILED, as the execution row does")
+            assertEquals(ruleError, runResult.errorMessage)
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    // DAR-OPS-029 F-E2: a queued (PENDING) execution is claimed by exactly one caller, and a new one is claimed by its creator, so
+    // two executions reaching the same window never both run it.
+    @Test
+    void aQueuedExecutionIsClaimedByOneCallerOnly() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+        Map window = [windowStartDate: timestamp("2026-04-30T00:00:00Z"), windowEndDate: timestamp("2026-05-01T00:00:00Z"),
+                      childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")]
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "EX_Q", automationId: "AUTO_API",
+                companyUserGroupId: "TENANT_A", statusEnumId: AutomationExecutionSupport.STATUS_PENDING, scheduledDate: NOW,
+                childWindowStartDate: window.childWindowStartDate, childWindowEndDate: window.childWindowEndDate, retryCount: 1])
+
+        Map first = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW, window, 1)
+        Map second = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW, window, 1)
+
+        assertEquals([true, false], [first.reused, second.reused], "one claimer re-drives the queued window")
+        assertEquals([false, true], [first.duplicate, second.duplicate], "the other skips it as a duplicate")
+        assertEquals(AutomationExecutionSupport.STATUS_RUNNING,
+                ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find { it.automationExecutionId == "EX_Q" }.statusEnumId)
+
+        Map fresh = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW,
+                window + [childWindowStartDate: timestamp("2026-05-01T00:00:00Z"), childWindowEndDate: timestamp("2026-05-02T00:00:00Z")], 2)
+        assertEquals(AutomationExecutionSupport.STATUS_RUNNING, readFieldOf(fresh.execution, "statusEnumId"),
+                "a new execution is created claimed by its creator, never left PENDING for another caller to claim")
+    }
+
+    private static Object readFieldOf(def row, String field) { return row instanceof Map ? ((Map) row).get(field) : row."${field}" }
+
+    // DAR-OPS-029 F-E1 (conservation): every window ends in exactly one bucket of the envelope, a window queued for retry included.
+    @Test
+    void theEnvelopeCountsEveryWindowIncludingOneQueuedForRetry() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) throw new java.net.SocketTimeoutException("Read timed out")
+            return [:]
+        }
+        darpan.config.DarpanSettings.rowLoader = { -> ["darpan.reconciliation.automation.maxRetryCount": [settingValue: "3"]] }
+        darpan.config.DarpanSettings.expire()
+        captureErrorCards()
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+            assertEquals(1, result.windowCount)
+            assertEquals(1, result.retryQueuedCount, "a transient failure is queued for retry, and says so")
+            assertEquals(result.windowCount, ["executedCount", "noDataCount", "failedCount", "skippedDuplicateCount", "cancelledCount",
+                                               "retryQueuedCount"].sum { String bucket -> result[bucket] as int },
+                    "the buckets add up to the windows: ${result}")
+        } finally {
+            resetRunErrorSeams()
+            darpan.config.DarpanSettings.resetForTests()
+        }
+    }
+
+    // DAR-OPS-029 OC34 (S11, Aditi D8): a retry from the last extract over a window a later run of its checks already recorded is
+    // refused up front, in words, instead of silently writing nothing.
+    @Test
+    void aReplayOverALaterRecordedRunIsRefusedUpFront() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "EX_OLD", automationId: "AUTO_API",
+                companyUserGroupId: "TENANT_A", statusEnumId: AutomationExecutionSupport.STATUS_FAILED, scheduledDate: NOW,
+                childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")])
+        List asked = []
+        darpan.audit.AuditAutomationSupport.metaClass.static.checksFor = { def e, def a -> [[checkId: "CHK_1"]] }
+        darpan.audit.AuditAutomationSupport.metaClass.static.replayReadStamp = { def e, String tenant, String exec -> NOW }
+        darpan.audit.AuditAutomationSupport.metaClass.static.laterRunRecorded = { def e, String tenant, List ids, Timestamp at, String exec ->
+            asked << [tenant, ids, at, exec]; return true
+        }
+        ExtractReplaySupport.metaClass.static.replayResults = { def e, String tenant, String exec, boolean twoSided ->
+            [FILE_1: [fileName: "f1.json", recordCount: 3], FILE_2: [fileName: "f2.json", recordCount: 3]]
+        }
+        try {
+            Map out = AutomationExecutionSupport.retryFromExtracts(ec, [automationExecutionId: "EX_OLD"])
+            assertFalse(out.submitted as boolean)
+            assertTrue((out.error as String).contains("later run"), "the operator is told why: ${out.error}")
+            assertEquals([["TENANT_A", ["CHK_1"], NOW, "EX_OLD"]], asked)
+            assertFalse(ec.service.calls.any { it.serviceName?.contains("execute#Automation") }, "nothing is submitted")
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(darpan.audit.AuditAutomationSupport)
+            GroovySystem.metaClassRegistry.removeMetaClass(ExtractReplaySupport)
         }
     }
 

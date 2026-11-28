@@ -73,20 +73,10 @@ class AutomationWindows {
         int windowCount = normalizeInt(readField(automation, "relativeWindowCount")) ?: 1
 
         if (WINDOW_STATE == windowType) {
-            // Exactly one segment, always. The bounds are the scheduled day in the automation's zone:
-            // a real, valid, non-empty window that satisfies every downstream consumer, and that the
-            // extractor never sees because state-mode dispatch omits the date parameters entirely.
-            ZonedDateTime stateStart = scheduledLocal.toLocalDate().atStartOfDay(zone)
-            ZonedDateTime stateEnd = stateStart.plusDays(1)
-            Timestamp stateStartTimestamp = Timestamp.from(stateStart.toInstant())
-            Timestamp stateEndTimestamp = Timestamp.from(stateEnd.toInstant())
-            return [[
-                    sequenceNum         : 1,
-                    windowStartDate     : stateStartTimestamp,
-                    windowEndDate       : stateEndTimestamp,
-                    childWindowStartDate: stateStartTimestamp,
-                    childWindowEndDate  : stateEndTimestamp,
-            ]] as List<Map<String, Object>>
+            // DAR-OPS-029 F-A4: no connector reads by status any more (the REST OMS_TRANSFER_ORDERS extractor was retired with HotWax
+            // REST), so a state-based window is refused, permanently, rather than read as a date window it never asked for.
+            throw new IllegalArgumentException("Automation ${normalize(readField(automation, 'automationId'))} uses a state-based window, " +
+                    "which is retired; give it a date window.")
         }
 
         ZonedDateTime windowStart

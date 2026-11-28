@@ -72,6 +72,14 @@ class RunConclusionStep {
                 fetchLookup(e, l, i, t, w, lookupsDir)
             }
             String kind = brainKind(scope?.conclusionBrain)
+            // The HotWax connection a brain's default questions read: resolved at the first question and kept for the pass (it
+            // was resolved again for every question, in both closures below). A failed resolve is not kept, so the next asks again.
+            Map hotwaxMemo = [:]
+            Closure<String> brainHotwaxConfigId = { ->
+                if (!hotwaxMemo.containsKey("id")) hotwaxMemo.put("id", hotwaxSourceConfigId(args.get("file1Source"),
+                        RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
+                return hotwaxMemo.get("id") as String
+            }
             // Ruling P2-27: with its own fetcher (a replay) the brain neither reads nor writes the answers live runs share.
             Map brain = kind ? [kind: kind, tenantId: tenantId, shareAnswers: sharesBrainAnswers(args), readAtMillis: documentLabels.readAtMillis,
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
@@ -79,16 +87,14 @@ class RunConclusionStep {
                     captureServed: lookupsDir == null ? null : { String question, Map<String, Map> served ->
                         // A capture is evidence, never part of the verdict: nothing here may end the conclusion step.
                         try {
-                            Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
-                                    RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
+                            Map lookup = questionLookup(question, lookups, brainHotwaxConfigId.call())
                             if (lookup != null) captureServed(lookupsDir, lookup, served, lookupWarnings)
                         } catch (Throwable t) {
                             lookupWarnings.add("Question ${question}${NOT_CAPTURED}${normalize(t.message) ?: t.class.simpleName}".toString())
                         }
                     },
                     fetchQuestion: { String question, List<String> ids ->
-                        Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
-                                RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
+                        Map lookup = questionLookup(question, lookups, brainHotwaxConfigId.call())
                         if (lookup == null) throw new IllegalStateException("the scope has no lookup to ask ${question} of")
                         int before = lookupWarnings.size()
                         Map found = (Map) lookupFetcher.call(ec, lookup, ids, tenantId, lookupWarnings)
@@ -312,7 +318,6 @@ class RunConclusionStep {
         }
     }
 
-    /** DAR-BE-151: the lookup a brain question is answered through: the scope's own of that name, else its default. */
     /**
      * DAR-BE-151: the HotWax connection a brain's default question reads, from the run's FILE_1 source. A scheduled or
      * audit run passes its ReconciliationAutomationSource row, which keeps the id in safeMetadataJson.parameters under the
@@ -323,6 +328,7 @@ class RunConclusionStep {
         return RunVerificationSupport.resolveSourceConfigId(file1Source, connector)
     }
 
+    /** DAR-BE-151: the lookup a brain question is answered through: the scope's own of that name, else its default. */
     static Map questionLookup(String question, List<Map> lookups, String hotwaxSourceConfigId) {
         return (lookups ?: []).find { it.name == darpan.conclusion.brain.BrainQuestions.lookupNameFor(question) } ?:
                 darpan.conclusion.brain.BrainQuestions.defaultLookup(question, hotwaxSourceConfigId)
@@ -429,13 +435,6 @@ class RunConclusionStep {
                 evidence    : parseJson(connector?.evidenceFieldsJson) ?: [:]]
     }
 
-    /**
-     * How the compare keyed a side, per RuleSetCompareScopeAdapter: composite key fields each carry
-     * their own inline normalizer and ignore the source's idValueNormalizer; a legacy primaryIdExpression
-     * takes idValueNormalizer ?: its inline one. keyReliable is false when the key cannot be rebuilt from
-     * an extract's top-level `records` fields (a nested path, or a record root other than records), so
-     * the side reads UNKNOWN rather than being keyed differently and reported "Not found".
-     */
     /** keySpec of one side of a compare scope, read from its RuleSetCompareSource and key field rows. */
     static Map keySpecFor(def ec, String compareScopeId, String fileSide) {
         List keyFieldRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
@@ -448,6 +447,13 @@ class RunConclusionStep {
                 normalize(sourceRow?.idValueNormalizer), normalize(sourceRow?.recordRootExpression))
     }
 
+    /**
+     * How the compare keyed a side, per RuleSetCompareScopeAdapter: composite key fields each carry
+     * their own inline normalizer and ignore the source's idValueNormalizer; a legacy primaryIdExpression
+     * takes idValueNormalizer ?: its inline one. keyReliable is false when the key cannot be rebuilt from
+     * an extract's top-level `records` fields (a nested path, or a record root other than records), so
+     * the side reads UNKNOWN rather than being keyed differently and reported "Not found".
+     */
     static Map keySpec(List<String> keyFieldExpressions, String primaryIdExpression, String idValueNormalizer,
                        String recordRootExpression) {
         List<String> composite = (keyFieldExpressions ?: []).collect { normalize(it) }.findAll { it }

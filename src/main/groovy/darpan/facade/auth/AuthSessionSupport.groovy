@@ -259,6 +259,30 @@ class AuthSessionSupport {
         return slid.time > nowMillis
     }
 
+    /**
+     * OC209: when the request's own sign-in began, as enforceWebSignInLifetime judges it: the first of the person's login
+     * keys the request carries (CliAuthSupport.requestLoginKeyHashes) was issued then, else its servlet session started
+     * then. Null with no web request. approve#CliLogin records it, and poll#CliLogin issues nothing when the approver's
+     * sign-ins were ended after it.
+     */
+    static Timestamp requestSignInStartedAt(def ec) {
+        String userId = ec?.user?.userId?.toString()?.trim()
+        def request = ec?.web?.request
+        if (request == null || !userId) return null
+        for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
+            def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
+                            "self-scoped auth: when the request's own login key was issued")
+                    .condition("loginKey", hash).useCache(false).one()
+            if (key != null && key.userId == userId) return (Timestamp) key.fromDate
+        }
+        try {
+            def session = request.getSession(false)
+            return session != null ? new Timestamp(session.creationTime as long) : null
+        } catch (IllegalStateException ignored) {
+            return null // already invalidated
+        }
+    }
+
     private static boolean sessionCreatedBefore(def request, long millis) {
         try {
             def session = request.getSession(false)

@@ -21,6 +21,10 @@
         <field name="statusId" type="id">
             <description>PENDING, APPROVED, DENIED or CLAIMED (approved and the key handed out).</description></field>
         <field name="approvedByUserId" type="id"/>
+        <field name="approvedSignInDate" type="date-time">
+            <description>OC209: when the sign-in that approved began (its login key's fromDate, else its session's start). A poll
+                issues nothing when the approver's sign-ins were ended after it (UserAccount.sessionsEndedDate), so an approval
+                that raced a password change or a two-factor turn-on, and landed after its deny step, is refused too.</description></field>
         <field name="issuedLoginKeyHash" type="id-long">
             <description>Hash of the login key issued at claim (moqui.security.UserLoginKey.loginKey).</description></field>
         <field name="requestIp" type="text-short">

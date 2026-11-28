@@ -503,6 +503,49 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("OC209: an approval whose sign-in began before the approver's sign-ins were ended issues nothing, even when it lands after the ending's deny step")
+    void anApprovalRacingAnEndingIssuesNothing() {
+        long signedInBefore = System.currentTimeMillis() - 60_000L
+        Map racing = anon("start#CliLogin", [hostLabel: HOST]).out
+        Map later = anon("start#CliLogin", [hostLabel: HOST]).out
+        // The ending runs while the request is still PENDING, so its deny step finds no approved row to deny.
+        assertEquals([], signedInAuth(APPROVER_USERNAME, "logout#AllSessions", [:]).errors)
+        Timestamp stamp = account(APPROVER_ID).sessionsEndedDate as Timestamp
+        assertNotNull(stamp)
+        // The approve that passed its checks on the old sign-in commits after it, as a late transaction would.
+        Closure approveAs = { String userCode, long signInBegan ->
+            ec.entity.find("darpan.auth.CliDeviceCode").condition("userCode", userCode).disableAuthz()
+                    .updateAll([statusId: "APPROVED", approvedByUserId: APPROVER_ID, approvedSignInDate: new Timestamp(signInBegan)])
+        }
+        approveAs(racing.userCode as String, signedInBefore)
+        Map polled = anon("poll#CliLogin", [deviceCode: racing.deviceCode])
+        assertEquals("DENIED", polled.out.status, "an approval by a sign-in the ending ended must not mint a key")
+        assertNull(polled.out.authToken)
+        assertEquals(0L, ec.entity.find("darpan.auth.CliSession").condition("userId", APPROVER_ID).disableAuthz().count())
+
+        // Control: an approval by a sign-in that began after the ending still issues its key.
+        approveAs(later.userCode as String, stamp.time + 1_000L)
+        assertEquals("APPROVED", anon("poll#CliLogin", [deviceCode: later.deviceCode]).out.status)
+    }
+
+    @Test
+    @DisplayName("OC209: the sign-in an approval records began when its own login key was issued, else when its session started")
+    void anApprovalRecordsWhenItsSignInBegan() {
+        String raw = webKey(APPROVER_USERNAME)
+        def key = ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", AuthSessionSupport.hashLoginKey(ec, raw))
+                .useCache(false).disableAuthz().one()
+        long sessionStarted = System.currentTimeMillis() - 3_600_000L
+        Closure startedAt = { Map headers ->
+            def request = new WebRequestStub(headers: headers, session: new WebSessionStub(creationTime: sessionStarted))
+            def webEc = new Expando(web: new Expando(request: request, secureRequestParameters: [:]),
+                    user: new Expando(userId: APPROVER_ID), entity: ec.entity, factory: ec.factory, context: new ContextStack())
+            return AuthSessionSupport.requestSignInStartedAt(webEc)
+        }
+        assertEquals(key.fromDate, startedAt([login_key: raw]), "a request carrying the person's key began when the key was issued")
+        assertEquals(new Timestamp(sessionStarted), startedAt([:]), "a cookie session began when the session started")
+    }
+
+    @Test
     @DisplayName("OC39/OC86: a password change, an expired-password change, a reset and sign-out-everywhere each deny an approved, uncollected CLI sign-in, revoke live CLI sessions, and end every web session, for good")
     void everySignOutDeniesAnApprovedUncollectedCliSignIn() {
         Closure originalSendResetCode = PasswordResetSupport.sendResetCode

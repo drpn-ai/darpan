@@ -149,7 +149,7 @@ class DatasetSupport {
             logger.warn("The kept-fields union call ${serviceName} for ${connector.systemEnumId} failed; the copy keeps whole records", t)
             return null
         } finally {
-            ec.message.clearErrors()
+            takeErrors(ec)
         }
     }
 
@@ -158,6 +158,23 @@ class DatasetSupport {
         String configName = normalize(connector?.configParameterName) ?: "sourceConfigId"
         if (normalize(parameters?.get(configName)) != sourceConfigId) return false
         return optionsHash(KeptCopySupport.optionsKey(connector, (Map<String, Object>) parameters)) == datasetHash
+    }
+
+    /**
+     * DAR-OPS-029 S16a. The errors on the message facade, taken off it without a trace, the caller's messages left as they
+     * were: clearErrors would turn each into a danger message that rides out in the caller's reply (a table name, an address).
+     */
+    static List<String> takeErrors(def ec) {
+        List<String> errors = ((ec.message.getErrors() ?: []) as List).collect { it.toString() }
+        if (!errors && !ec.message.getValidationErrors()) return errors
+        List infos = new ArrayList(ec.message.getMessageInfos())
+        List publics = new ArrayList(ec.message.getPublicMessageInfos())
+        ec.message.clearAll()
+        infos.each { mi ->
+            if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+            else ec.message.addMessage(mi.message, mi.type)
+        }
+        return errors
     }
 
     /** SHA-256 hex (64 characters) of the options as canonical JSON: map keys sorted at every depth. */

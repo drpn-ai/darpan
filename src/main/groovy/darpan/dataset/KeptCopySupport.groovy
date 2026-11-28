@@ -128,7 +128,7 @@ class KeptCopySupport {
      * @param connector the connector map the dispatcher resolved (SourceSystemConnectorSupport)
      * @param params the extractor parameters, complete, as they would be sent
      * @param run tenantId (the run's owner), windowStart and windowEnd (Timestamps: the instants the run covers),
-     *        stateMode (an automation read by status with no window), outputRunId (the folder name an extractor uses
+     *        outputRunId (the folder name an extractor uses
      *        when params carry no outputLocation), sideKeep (optional: the side's Keep plan, KeepPlanSupport.effectiveSideKeep; when it
      *        places Keep in SPARK, Spark Keep runs at ingest, so the slice leaves the filters to it and keeps the Keep fields.
      *        Absent or any other placement: the slice filters as it always has. A caller passes it only where Spark Keep runs.)
@@ -161,8 +161,7 @@ class KeptCopySupport {
         String dateToName = normalize(connector?.dateToParameterName)
 
         String liveOnly = null
-        if (run?.stateMode) liveOnly = "the side reads by status, with no window"
-        else if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
+        if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
         else if (statusName && present(p.get(statusName))) liveOnly = "the side reads by status"
         // a connector without a projection service projects in code out of reach here (a data definition keeps its keepWith
         // companions), and its readFields change what it reads: such a side is never served copy records
@@ -328,10 +327,8 @@ class KeptCopySupport {
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId}: could not queue its rebuild", t)
         } finally {
-            if (ec.message.hasError()) {
-                logger.warn("Dataset ${dataset?.datasetId}: queuing its rebuild failed: ${ec.message.getErrors()}")
-                ec.message.clearErrors()
-            }
+            List<String> errors = DatasetSupport.takeErrors(ec)
+            if (errors) logger.warn("Dataset ${dataset?.datasetId}: queuing its rebuild failed: ${errors}")
         }
     }
 
@@ -371,11 +368,8 @@ class KeptCopySupport {
     private static Map findServing(def ec, Map side) {
         Map out = (ec.service.sync().name(FIND_SERVICE).parameters([systemEnumId: side.systemEnumId,
                 sourceConfigId: side.sourceConfigId, options: side.options]).call() ?: [:]) as Map
-        List added = new ArrayList((ec.message.getErrors() ?: []) as List)
-        if (added) {
-            ec.message.clearErrors()
-            throw new IllegalStateException(added.join("; "))
-        }
+        List<String> added = DatasetSupport.takeErrors(ec)
+        if (added) throw new IllegalStateException(added.join("; "))
         return out.dataset instanceof Map ? (Map) out.dataset : null
     }
 
@@ -408,11 +402,8 @@ class KeptCopySupport {
             logger.warn("Projection service ${serviceName} failed for ${side.systemEnumId}", t)
             out = [servingProblem: "the connector's projection service failed: ${t.message ?: t}".toString()]
         }
-        if (ec.message.hasError()) {
-            String errors = ec.message.getErrors().join("; ")
-            ec.message.clearErrors()
-            return [servingProblem: "the connector's projection service failed: ${errors}".toString()]
-        }
+        List<String> errors = DatasetSupport.takeErrors(ec)
+        if (errors) return [servingProblem: "the connector's projection service failed: ${errors.join('; ')}".toString()]
         return out
     }
 

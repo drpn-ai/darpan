@@ -51,7 +51,7 @@ class DatasetRefreshSupport {
      * that declares no windowFieldName. Moqui drops an undeclared parameter, so such a service would silently window on
      * its own default field (createdAt) and every daily read would miss changes to older records.
      */
-    static Map<String, Object> datasetConnector(def ec, String systemEnumId) {
+    private static Map<String, Object> datasetConnector(def ec, String systemEnumId) {
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, systemEnumId)
         String serviceName = connector?.extractServiceName
         if (!serviceName) throw new IllegalStateException("No source connector reads ${systemEnumId}".toString())
@@ -79,7 +79,7 @@ class DatasetRefreshSupport {
     }
 
     /** Where one read's extract lands, in the data-manager location form the extractors take: .../datasets/T/D/reads/N. */
-    static String readLocation(def ec, String tenantId, String datasetId, String readSeqId) {
+    private static String readLocation(def ec, String tenantId, String datasetId, String readSeqId) {
         String base = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec), "datasets")
         base = DataManagerSupport.childLocation(base, DataManagerSupport.safeToken(tenantId, "tenant"))
         base = DataManagerSupport.childLocation(base, DataManagerSupport.safeToken(datasetId, "dataset"))
@@ -131,11 +131,8 @@ class DatasetRefreshSupport {
             result = [error: t.message ?: t.toString()]
         }
         // an error a service left on the message facade fails the read, and must not stop the row and unlock calls after it
-        List leftover = ((ec.message.getErrors() ?: []) as List).collect { it.toString() }
-        if (leftover) {
-            ec.message.clearErrors()
-            if (!result.error) result = [error: leftover.join("; ")]
-        }
+        List<String> leftover = DatasetSupport.takeErrors(ec)
+        if (leftover && !result.error) result = [error: leftover.join("; ")]
         return result + [readKindEnumId: kind, fromStamp: fromStamp]
     }
 
@@ -175,7 +172,7 @@ class DatasetRefreshSupport {
      * whole horizon back from {@code now}: coveredFrom at or before now minus horizonDays. False for a manifest that
      * records no coverage.
      */
-    static boolean copyCovers(Map dataset, Map manifest, Timestamp now) {
+    private static boolean copyCovers(Map dataset, Map manifest, Timestamp now) {
         Timestamp coveredFrom = manifest?.coveredFrom as Timestamp
         if (coveredFrom == null || !sameSettings(dataset, manifest)) return false
         return coveredFrom.time <= now.time - horizonDays(dataset) * DAY
@@ -186,7 +183,7 @@ class DatasetRefreshSupport {
         return (dataset.horizonDays ?: (isRolling(dataset) ? ROLLING_HORIZON_DAYS : 62)) as long
     }
 
-    static boolean isRolling(Map dataset) {
+    private static boolean isRolling(Map dataset) {
         return dataset?.readRuleEnumId == ROLLING
     }
 
@@ -196,7 +193,7 @@ class DatasetRefreshSupport {
      * two projections), and only through a connector that takes keep fields and names a projection service a slice trims
      * with (ruling P3b1-9).
      */
-    static Map<String, List<String>> fieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
+    private static Map<String, List<String>> fieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
         if (!isRolling(dataset) || !connector?.keepFieldsParameterName || !connector?.servingProjectionServiceName) {
             return null
         }
@@ -236,14 +233,13 @@ class DatasetRefreshSupport {
             return (Map) TenantAccessSupport.withSystemTenant(tenantId) {
                 Map out = ec.service.sync().name("dataset.DatasetServices.refresh#Dataset")
                         .parameters([datasetId: datasetId, extractor: extractor]).call()
-                List errors = ((ec.message.getErrors() ?: []) as List).collect { it.toString() }
-                ec.message.clearErrors()
+                List<String> errors = DatasetSupport.takeErrors(ec)
                 return errors ? [error: errors.join("; ")] : [readKindEnumId: out?.readKindEnumId, readSeqId: out?.readSeqId,
                                                               missCount: out?.missCount]
             }
         } catch (Throwable t) {
             logger.warn("Dataset ${datasetId} refresh failed in the scan", t)
-            ec.message.clearErrors()
+            DatasetSupport.takeErrors(ec)
             return [error: t.message ?: t.toString()]
         }
     }
@@ -254,7 +250,7 @@ class DatasetRefreshSupport {
      * lock was taken over (it ran past the six-hour stale mark) therefore never swaps the copy or prunes, and holding the
      * row lock across the action means a takeover cannot slip in between the check and the swap.
      */
-    static Closure ownerGuard(def ec, String datasetId, String tenantId, Timestamp token) {
+    private static Closure ownerGuard(def ec, String datasetId, String tenantId, Timestamp token) {
         return { Closure action ->
             return ec.transaction.runRequireNew(null, "Dataset ${datasetId} lock check failed".toString()) {
                 // list(), not one(): one() drops a non-PK condition beside the full PK, and with it the tenant pin
@@ -294,7 +290,7 @@ class DatasetRefreshSupport {
     }
 
     /** The day after {@code from}, at {@code hour} o'clock, in {@code zoneId}. */
-    static Timestamp nextReadAt(Timestamp from, String zoneId, Integer hour) {
+    private static Timestamp nextReadAt(Timestamp from, String zoneId, Integer hour) {
         ZoneId zone = ZoneId.of(zoneId ?: "UTC")
         ZonedDateTime next = from.toInstant().atZone(zone).toLocalDate().plusDays(1)
                 .atTime(hour == null ? 4 : hour, 0).atZone(zone)
@@ -390,7 +386,7 @@ class DatasetRefreshSupport {
     }
 
     /** The files a read wrote beside its records file, in the read's own folder, by name (work files left out). */
-    static Map<String, File> sideFilesOf(File readFile) {
+    private static Map<String, File> sideFilesOf(File readFile) {
         Map<String, File> files = new TreeMap<String, File>()
         readFile.parentFile?.listFiles()?.each { File f ->
             if (f.isFile() && f.name != readFile.name && !f.name.endsWith(".partial")) files.put(f.name, f)
@@ -491,7 +487,7 @@ class DatasetRefreshSupport {
      * filters, and the dataset's options as a run passes its stored ones. {@code keepFields} (plan 3b-1): the dataset's
      * kept-fields union, sent under the connector's keep-fields parameter; null sends none (whole records).
      */
-    static Map<String, Object> extractParams(Map<String, Object> connector, Map dataset, String location, String readSeqId,
+    private static Map<String, Object> extractParams(Map<String, Object> connector, Map dataset, String location, String readSeqId,
                                              String windowFieldName, Timestamp fromStamp, Timestamp readThru, String timeZone,
                                              List<String> keepFields = null) {
         Map<String, Object> params = RunExtractSupport.buildExtractParams(connector, ReconciliationSavedRunSupport.FILE_SIDE_1,
@@ -533,7 +529,7 @@ class DatasetRefreshSupport {
             Map result = (ec.service.sync().name(serviceName).parameters(params.findAll { it.value != null }).call() ?: [:]) as Map
             List added = ((ec.message.getErrors() ?: []) as List).drop(errorsBefore)
             if (added) {
-                ec.message.clearErrors()
+                DatasetSupport.takeErrors(ec)
                 throw new IllegalStateException(added.collect { it.toString() }.join("; "))
             }
             return result

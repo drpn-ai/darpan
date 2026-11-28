@@ -15,13 +15,13 @@
         <field name="optionsJson" type="text-long"><description>The read's options as canonical JSON (sorted keys).</description></field>
         <field name="optionsHash" type="text-medium" not-null="true"><description>SHA-256 hex of optionsJson (64 characters).</description></field>
         <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetStatus: DST_ACTIVE serves runs, DST_PAUSED does not.</description></field>
-        <field name="readRuleEnumId" type="id" not-null="true"><description>Enumeration of type DatasetReadRule: DRR_CHANGED_SINCE (3a); DRR_ROLLING is declared for plan 3b.</description></field>
+        <field name="readRuleEnumId" type="id" not-null="true"><description>Enumeration of type DatasetReadRule: DRR_CHANGED_SINCE (reads what changed since readThru) or DRR_ROLLING (re-reads its whole window every day, plan 3b-1).</description></field>
         <field name="idField" type="text-medium" not-null="true"/>
         <field name="stampField" type="text-medium" not-null="true"/>
         <field name="windowField" type="text-medium" not-null="true"/>
         <field name="marginDays" type="number-integer"><description>Default 2.</description></field>
         <field name="fullReadDays" type="number-integer"><description>Default 7.</description></field>
-        <field name="horizonDays" type="number-integer"><description>Default 62.</description></field>
+        <field name="horizonDays" type="number-integer"><description>Default 62 (changed-since) or 60 (rolling).</description></field>
         <field name="readHourLocal" type="number-integer"><description>Hour of day in the tenant's timezone the daily read starts. Default 4.</description></field>
         <field name="currentVersion" type="text-short"/>
         <field name="readThru" type="date-time"/>
@@ -64,7 +64,7 @@
         <field name="addedCount" type="number-integer"/>
         <field name="removedCount" type="number-integer"/>
         <field name="missCount" type="number-integer"/>
-        <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetReadStatus: DRS_DONE or DRS_FAILED.</description></field>
+        <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetReadStatus: DRS_RUNNING while the read holds the lock, then DRS_DONE or DRS_FAILED.</description></field>
         <field name="errorText" type="text-long"/>
         <relationship type="one" related="darpan.dataset.Dataset" fk-name="DSREAD_DATASET">
             <key-map field-name="datasetId"/>

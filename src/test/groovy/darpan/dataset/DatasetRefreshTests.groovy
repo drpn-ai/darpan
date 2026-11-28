@@ -143,6 +143,20 @@ class DatasetRefreshTests {
         assertEquals(readThru, read.readThru)
     }
 
+    // DAR-OPS-029 S16a: an error a service leaves on the facade during a read fails the read, and its text (a table, an
+    // address) goes only to the read's own error, never back out as a message in the caller's reply.
+    @Test
+    void aFailedReadsServiceErrorNeverRidesOutAsAMessage() {
+        String id = dataset("leak")
+        Closure leaky = { String svc, Map p ->
+            ec.message.addError("SECRET_TABLE refused the read for ops@example.com")
+            return [:]
+        }
+        Map res = refresh(id, leaky)
+        assertFalse(res.errors.isEmpty(), "the read fails")
+        assertFalse(res.messages.any { it.contains("SECRET_TABLE") || it.contains("ops@example.com") }, res.messages.toString())
+    }
+
     @Test
     void aNextDayRefreshIsIncrementalFromReadThruMinusTwoDays() {
         String id = dataset("incremental")
@@ -1043,8 +1057,10 @@ class DatasetRefreshTests {
         }
         List<String> errors = ec.message.errors.collect { it.toString() } +
                 ec.message.validationErrors.collect { it.message?.toString() }
+        // what the caller's reply would carry as messages (a cleared error turns into a danger message)
+        List<String> messages = ec.message.messages.collect { it.toString() }
         ec.message.clearAll()
-        return [out: out, errors: errors]
+        return [out: out, errors: errors, messages: messages]
     }
 
     private void actAs(String username, String tenant) {

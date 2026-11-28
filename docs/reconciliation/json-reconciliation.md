@@ -294,7 +294,6 @@ For the pilot PWA flow, the backend facade keeps this JSON file as the stored so
 Test files are located in `data/test/`:
 - `test-orders-1.json`: Sample orders (3 orders)
 - `test-orders-2.json`: Sample orders (3 orders, 1 overlapping)
-- `test-json-reconciliation.groovy`: Test script
 
 Schema: `runtime://schemas/json/test-orders.schema.json`
 

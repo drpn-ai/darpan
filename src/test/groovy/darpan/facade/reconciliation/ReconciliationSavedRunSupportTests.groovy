@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -339,5 +340,64 @@ class ReconciliationSavedRunSupportTests {
         assertFalse((code =~ /warnings[^\n]*getErrors\(\)/).find(), "ec.message errors folded into warnings")
         assertFalse((code =~ /warnings[^\n]*\bt\.message\b|check failed: \$\{/).find(), "exception text folded into warnings")
         assertEquals(2, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "both checks send their raw errors to Darpan's alerts room")
+    }
+
+    // ─── OC19: a manual run that compared nothing closes as the scheduled path does (DAR-BE-390/393) ──────────────
+
+    @Test
+    void bothSidesReadNothingIsAQuietDay() {
+        Map close = ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: 0], [recordCount: 0], null, false)
+        assertNotNull(close, "a run that read nothing closes as no data")
+        assertNull(close.finding, "both sides empty is a quiet day, not a run error")
+    }
+
+    @Test
+    void oneSideReadNothingIsARunErrorNotASuccess() {
+        Map close = ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: 0], [recordCount: 412], null, false)
+        assertNotNull(close, "one empty side closes the run before the compare, as the scheduled path does")
+        assertEquals("ONE_SIDE_EMPTY", close.finding.kind)
+        assertEquals("The hotwax side read no records.", close.finding.reason)
+    }
+
+    @Test
+    void twoSidesWithRecordsCompare() {
+        assertNull(ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: 3], [recordCount: 5], null, false))
+        assertNull(ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: null], [recordCount: 5], null, false),
+                "an unknown count is not an empty side")
+    }
+
+    @Test
+    void aSideWhoseKeepKeptNothingClosesAfterTheCompare() {
+        Map compare = [keepSummaryBySide: [file1: [keptCount: 3, setAsideCount: 0], file2: [keptCount: 0, setAsideCount: 7]]]
+        Map close = ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: 3], [recordCount: 7], compare, false)
+        assertNotNull(close)
+        assertEquals("KEPT_NOTHING", close.finding.kind)
+        assertEquals("The shopify side kept 0 of 7 records.", close.finding.reason)
+        assertNull(ReconciliationSavedRunSupport.manualNoDataClose("hotwax", "shopify", [recordCount: 3], [recordCount: 7],
+                [keepSummaryBySide: [file1: [keptCount: 3], file2: [keptCount: 2, setAsideCount: 5]]], false), "both sides kept records")
+    }
+
+    @Test
+    void anEvaluateRunJudgesItsOneSide() {
+        Map empty = ReconciliationSavedRunSupport.manualNoDataClose("hotwax", null, [recordCount: 0], null, null, true)
+        assertNotNull(empty)
+        assertNull(empty.finding, "an evaluate that read nothing is a quiet day")
+        Map keptNothing = ReconciliationSavedRunSupport.manualNoDataClose("hotwax", null, [recordCount: 4], null,
+                [keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 4]]], true)
+        assertEquals("KEPT_NOTHING", keptNothing.finding.kind)
+        assertNull(ReconciliationSavedRunSupport.manualNoDataClose("hotwax", null, [recordCount: 4], null, null, true))
+    }
+
+    /** A no-data manual run is closed NO_DATA before anyone is told, and is told by notifySavedRunNoData, never the completion message. */
+    @Test
+    void runSavedRunDiffClosesNoDataBeforeItNotifies() {
+        String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
+                .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
+        int complete = code.indexOf("RunObservability.STATUS_NO_DATA")
+        int notify = code.indexOf("AutomationExecutionSupport.notifySavedRunNoData(")
+        assertTrue(complete > 0 && notify > complete, "completeRun(NO_DATA) comes before notifySavedRunNoData")
+        assertTrue((code =~ /ReconciliationSavedRunSupport\.manualNoDataClose\(/).size() >= 2, "the API and evaluate branches both ask the judge")
+        assertTrue(code.contains("!obsNoData || obsNoDataRulesFailed"), "the completion notify skips a no-data run whose rules did not fail")
     }
 }

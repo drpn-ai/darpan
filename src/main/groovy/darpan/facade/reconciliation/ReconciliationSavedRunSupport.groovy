@@ -1335,6 +1335,39 @@ class ReconciliationSavedRunSupport {
         if (text) ErrorChatSupport.postAlertText(ec, text)
     }
 
+    /**
+     * DAR-OPS-029 OC19 (DAR-BE-390/393, parity with AutomationExecutionSupport's closeAsNoData). Whether a manual run closes
+     * as NO_DATA, and why. Before the compare (compareResult null): a side (an evaluate: its one side) that read 0 records. After
+     * it: a side whose Spark Keep kept 0 (keepSummaryBySide). Null when the run compares on. Otherwise [finding, file1, file2]:
+     * the AutomationNoDataJudge finding (null for a quiet day, ONE_SIDE_EMPTY / KEPT_NOTHING for a run error) and each side as
+     * the judge reads it (readCount = what was read, recordCount = what was kept). A manual run has no prior run to excuse a
+     * first kept-nothing day, so priorKept is null. An unknown count (null) is never an empty side.
+     */
+    static Map<String, Object> manualNoDataClose(String label1, String label2, Map file1Result, Map file2Result, Map compareResult,
+                                                 boolean evaluateMode) {
+        Map keep = compareResult?.keepSummaryBySide instanceof Map ? (Map) compareResult.keepSummaryBySide : null
+        Closure<Map> judged = { Map result, String sideKey ->
+            if (result == null) return null
+            Map side = new LinkedHashMap(result)
+            if (side.readCount == null) side.readCount = result.recordCount
+            Object kept = keep?.get(sideKey) instanceof Map ? ((Map) keep.get(sideKey)).get("keptCount") : null
+            if (kept instanceof Number) side.recordCount = ((Number) kept).intValue()
+            return side
+        }
+        Map side1 = judged(file1Result, "file1")
+        Map side2 = evaluateMode ? null : judged(file2Result, "file2")
+        Closure<Boolean> empty = { Map side, Map raw, String sideKey ->
+            if (side == null) return false
+            if (compareResult == null) return raw?.recordCount != null && (raw.recordCount as Integer) == 0
+            return keep?.get(sideKey) instanceof Map && (side.recordCount as Integer) == 0
+        }
+        boolean close = empty(side1, file1Result, "file1") || (!evaluateMode && empty(side2, file2Result, "file2"))
+        if (!close) return null
+        Map<String, String> finding = darpan.reconciliation.automation.AutomationNoDataJudge.closeFinding(
+                false, label1, label2, side1, side2, compareResult, evaluateMode, null)
+        return [finding: finding, file1: side1, file2: side2]
+    }
+
     protected static boolean savedRunMatches(Map<String, Object> row, String search) {
         return [
                 row.savedRunId,

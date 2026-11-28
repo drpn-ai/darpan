@@ -82,8 +82,6 @@ String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
 boolean hasHeaderValue = normalizeBool(hasHeader, true)
 String windowStartLocalDateValue = normalize(windowStartLocalDate)
 String windowEndLocalDateValue = normalize(windowEndLocalDate)
-Timestamp requestedWindowStartDateValue = null
-Timestamp requestedWindowEndDateValue = null
 Timestamp windowStartDateValue = null
 Timestamp windowEndDateValue = null
 // The zone the window was anchored in. normalizeCalendarWindow has always returned it and the
@@ -92,10 +90,8 @@ Timestamp windowEndDateValue = null
 String windowTimeZoneValue = null
 
 try {
-    requestedWindowStartDateValue = toTimestampValue(windowStartDate)
-    requestedWindowEndDateValue = toTimestampValue(windowEndDate)
-    windowStartDateValue = requestedWindowStartDateValue
-    windowEndDateValue = requestedWindowEndDateValue
+    windowStartDateValue = toTimestampValue(windowStartDate)
+    windowEndDateValue = toTimestampValue(windowEndDate)
     if (windowStartDateValue && windowEndDateValue) {
         Map<String, Object> normalizedApiWindow = ReconciliationApiWindowSupport.normalizeSavedRunApiWindow(
                 ec,
@@ -169,6 +165,13 @@ def obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObs
 String obsStage = RunObservability.STAGE_RESOLVE
 boolean obsRuleExecutionFailed = false
 boolean obsNoData = false
+// OC19: why a manual run closed NO_DATA (manualNoDataClose: finding + each side as judged) and the sources it read, for its notice.
+Map noDataClose = null
+Map noDataSources = null
+// The system key a no-data finding names a side by, as the scheduled path names it.
+def noDataLabel = { Object source ->
+    darpan.audit.AuditReportAssembler.systemKey(darpan.audit.AuditAutomationSupport.rootSystem(normalize(source?.systemEnumId)))
+}
 // DAR-BE-362: the saved run's name as soon as the run resolves, so a run that fails before a runResult exists is still named
 // on Darpan's card and in its subscribers' line. Read again only when the run failed before resolving.
 String runNameValue = null
@@ -708,7 +711,9 @@ try {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                                 RunObservability.recordSourceArtifact(ec, obsRunId, "file1", file1Result.fileName, file1Result.dataManagerPath)
                                 obsStep = null
-                                obsNoData = file1Result.recordCount == 0
+                                noDataClose = ReconciliationSavedRunSupport.manualNoDataClose(noDataLabel(file1Source), null, file1Result, null, null, true)
+                                obsNoData = noDataClose != null
+                                noDataSources = [file1: file1Source, file2: null, evaluate: true]
                             }
                             if (!ec.message.hasError()) {
                                 RunObservability.checkpointCancel(ec, obsRunId)
@@ -732,7 +737,10 @@ try {
                                 ])
                                 evaluatePersistedSources = (serviceResult.persistedSources ?: []) as List
                                 // DAR-BE-318: with Spark Keep the extract holds set-aside records too; no data means nothing was kept.
-                                if (serviceResult.keepSummaryBySide) obsNoData = sideRecordCount(serviceResult, "file1", file1Result) == 0
+                                if (serviceResult.keepSummaryBySide) {
+                                    noDataClose = ReconciliationSavedRunSupport.manualNoDataClose(noDataLabel(file1Source), null, file1Result, null, serviceResult, true)
+                                    obsNoData = noDataClose != null
+                                }
                                 if (!ec.message.hasError()) {
                                     // Same writer as a diff: the finding rows carry buildMissingDiffRows'
                                     // exact schema, so the document and everything reading it are unchanged.
@@ -872,10 +880,14 @@ try {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                                 RunObservability.recordSourceArtifact(ec, obsRunId, "file2", file2Result.fileName, file2Result.dataManagerPath)
                                 obsStep = null
-                                obsNoData = file1Result.recordCount == 0 && file2Result.recordCount == 0
+                                // OC19: a side that read nothing closes the run before the compare, as the scheduled path does.
+                                noDataSources = [file1: file1Source, file2: file2Source, evaluate: false]
+                                noDataClose = ReconciliationSavedRunSupport.manualNoDataClose(noDataLabel(file1Source), noDataLabel(file2Source),
+                                        file1Result, file2Result, null, false)
+                                obsNoData = noDataClose != null
                             }
 
-                            if (!ec.message.hasError()) {
+                            if (!ec.message.hasError() && !obsNoData) {
                                 RunObservability.checkpointCancel(ec, obsRunId)
                                 obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
                                 obsStage = RunObservability.STAGE_COMPARE
@@ -903,8 +915,9 @@ try {
                                 ruleSetPersistedSources = (serviceResult.persistedSources ?: []) as List
                                 // DAR-BE-318: with Spark Keep the extracts hold set-aside records too; no data means nothing was kept.
                                 if (serviceResult.keepSummaryBySide) {
-                                    obsNoData = sideRecordCount(serviceResult, "file1", file1Result) == 0 &&
-                                            sideRecordCount(serviceResult, "file2", file2Result) == 0
+                                    noDataClose = ReconciliationSavedRunSupport.manualNoDataClose(noDataLabel(file1Source), noDataLabel(file2Source),
+                                            file1Result, file2Result, serviceResult, false)
+                                    obsNoData = noDataClose != null
                                 }
                                 if (!ec.message.hasError()) {
                                     obsRuleExecutionFailed = serviceResult.ruleExecutionFailed == true
@@ -998,6 +1011,35 @@ try {
                                         generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
                                     ]
                                 }
+                            } else if (!ec.message.hasError()) {
+                                // OC19: nothing to compare. The run closes NO_DATA with its sides recorded and no diff document.
+                                reconciliationRunResultId = persistRunResult([
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    file1Name                : file1Result.fileName,
+                                    file1DataManagerPath     : file1Result.dataManagerPath,
+                                    file2Name                : file2Result.fileName,
+                                    file2DataManagerPath     : file2Result.dataManagerPath,
+                                    completedDate            : ec.user.nowTimestamp,
+                                ])
+                                runResult = [
+                                    savedRunId               : savedRun.savedRunId,
+                                    runName                  : savedRun.runName,
+                                    runType                  : savedRun.runType,
+                                    reconciliationMappingId  : null,
+                                    companyUserGroupId       : savedRun.companyUserGroupId,
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    ruleSetId                : savedRun.ruleSetId,
+                                    compareScopeId           : savedRun.compareScopeId,
+                                    compareScopeDescription  : savedRun.compareScopeDescription,
+                                    file1Name                : file1Result.fileName,
+                                    file2Name                : file2Result.fileName,
+                                    file1SystemEnumId        : resolvedFile1SystemEnumId,
+                                    file1SystemLabel         : file1Label,
+                                    file2SystemEnumId        : resolvedFile2SystemEnumId,
+                                    file2SystemLabel         : file2Label,
+                                    validationErrors         : [],
+                                    processingWarnings       : [],
+                                ]
                             }
                         } catch (Throwable t) {
                             persistRunResult([
@@ -1125,7 +1167,10 @@ try {
         }
     }
 
-    if (!ec.message.hasError() && runResult?.reconciliationRunResultId) {
+    // OC19: a no-data run is told by notifySavedRunNoData once it is closed NO_DATA (below), unless its rules failed: then the
+    // error path here tells it, as any rules-failed run.
+    boolean obsNoDataRulesFailed = obsNoData && (obsRuleExecutionFailed || RunObservability.STATUS_FAILED == readObsRowStatus())
+    if (!ec.message.hasError() && runResult?.reconciliationRunResultId && (!obsNoData || obsNoDataRulesFailed)) {
         // Observability: NOTIFY is best-effort and must never fail the run — a notification
         // failure is contained here (step FAILED + warn) and the run still ends SUCCESS/NO_DATA.
         obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_NOTIFY) : null
@@ -1168,6 +1213,19 @@ try {
             } else {
                 RunObservability.completeRun(ec, obsRunId,
                         obsNoData ? RunObservability.STATUS_NO_DATA : RunObservability.STATUS_SUCCESS, [:])
+                // OC19 (DAR-BE-390/393): closed NO_DATA first, then told like the scheduled path: a quiet day's line, or a run error
+                // (card to Darpan, neutral line to subscribers) for an empty side or a side that kept nothing. Never throws.
+                if (obsNoData) {
+                    AutomationExecutionSupport.notifySavedRunNoData(ec, [
+                            reconciliationRunResultId: obsRunId,
+                            companyUserGroupId       : normalize(runResult?.companyUserGroupId) ?: normalize(obsCtx?.companyUserGroupId),
+                            savedRunId               : normalize(runResult?.savedRunId) ?: savedRunIdValue,
+                            runName                  : savedRunNoticeName(),
+                            resultDataManagerPath    : normalize(runResult?.resultDataManagerPath),
+                    ], (Map<String, String>) noDataClose?.finding, noDataSources?.file1, noDataSources?.file2,
+                            (Map) noDataClose?.file1, (Map) noDataClose?.file2, noDataSources?.evaluate == true,
+                            windowStartDateValue, windowEndDateValue, windowTimeZoneValue)
+                }
             }
         }
     }

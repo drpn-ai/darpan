@@ -63,7 +63,7 @@ class SystemLoadReader {
         }
     }
 
-    static Integer processCpuPercent() {
+    private static Integer processCpuPercent() {
         try {
             def os = ManagementFactory.operatingSystemMXBean
             if (!(os instanceof com.sun.management.OperatingSystemMXBean)) return null

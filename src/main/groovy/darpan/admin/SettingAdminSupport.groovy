@@ -115,7 +115,7 @@ class SettingAdminSupport {
     }
 
     /** Why the generic editor will not touch this key, or null when it may: a managed key is edited only where its guard lives. */
-    static String managedRefusal(String settingKey) {
+    private static String managedRefusal(String settingKey) {
         String owner = DarpanSettings.catalog().get(settingKey)?.managedBy
         if (owner == null) return null
         return "${settingKey} is managed by ${owner}: set it on the Schedule page (Retention), where a shorter period needs a fresh preview.".toString()

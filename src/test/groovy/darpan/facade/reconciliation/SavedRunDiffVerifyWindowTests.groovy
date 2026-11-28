@@ -47,6 +47,27 @@ class SavedRunDiffVerifyWindowTests {
                 "${SCRIPT}: the raw parameters are read only by toTimestampValue")
     }
 
+    /**
+     * F22 (S19 QA): a retry runs over the failed run's own window, anchored in the zone stored on that run. A side the retry
+     * reads again must be sent that window in THAT zone. Read in today's tenant zone, a date-only connector asks for the
+     * wrong day: the bound for Aug 1 anchored in IST is 2026-07-31 in Los Angeles.
+     */
+    @Test
+    void aDateOnlySideReadsTheDayInTheZoneItsWindowWasAnchoredIn() {
+        java.sql.Timestamp aug1Ist = java.sql.Timestamp.from(java.time.LocalDate.of(2026, 8, 1)
+                .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
+        assertEquals("2026-08-01", ReconciliationApiWindowSupport.calendarDateIn(aug1Ist, "Asia/Kolkata"))
+        assertEquals("2026-07-31", ReconciliationApiWindowSupport.calendarDateIn(aug1Ist, "America/Los_Angeles"),
+                "the wrong day a re-read side was sent when its window's zone was dropped")
+    }
+
+    @Test
+    void theExtractWindowCarriesTheRunsOwnZone() {
+        String code = codeOf(SCRIPT)
+        assertTrue((code =~ /preserveExactWindow\([^)]*windowTimeZoneValue\s*\?:\s*TenantAccessSupport\.resolveActiveTenantTimeZone\(ec\)/).find(),
+                "${SCRIPT}: resolveTenantApiWindow sends the run's window zone (a retry's stored one), the tenant's only when the run has none")
+    }
+
     private static String codeOf(String relativePath) {
         Path root = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/src/main/groovy/darpan")
         Path p = root.resolve(relativePath)

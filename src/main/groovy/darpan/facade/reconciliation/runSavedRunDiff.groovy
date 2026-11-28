@@ -391,11 +391,13 @@ def stageTextInput = { Object source, String fileSide, String inputName, String 
 }
 def formatApiWindow = { Timestamp timestamp -> RunExtractSupport.formatApiWindow(timestamp) }
 Map<String, Object> tenantApiWindow = null
+// F22: the zone the window was anchored in (normalizeSavedRunApiWindow's, or a retry's stored one), so a date-only connector
+// reads the day the window means; the tenant's current zone only when the run has none (a window passed as exact instants).
 def resolveTenantApiWindow = {
     ReconciliationApiWindowSupport.preserveExactWindow(
             windowStartDateValue,
             windowEndDateValue,
-            TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+            windowTimeZoneValue ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
     )
 }
 // Registry-driven dispatch (MACH P1): the SourceSystemConnector row supplies the extract

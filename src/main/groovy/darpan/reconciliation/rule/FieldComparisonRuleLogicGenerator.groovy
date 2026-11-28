@@ -55,6 +55,7 @@ class FieldComparisonRuleLogicGenerator {
     static boolean isGeneratedRuleLogic(String ruleLogic) {
         String text = ruleLogic?.replace("\r\n", "\n")?.trim()
         if (!text || text.contains('\\u')) return false
+        if (!literalSlotsAreGenerated(text)) return false
         String shape = DRL_STRING_LITERAL.matcher(text).replaceAll('"S"')
         if (shape.contains('@')) return false
         shape = shape.replace('$m.get("S")', '@A')
@@ -65,6 +66,28 @@ class FieldComparisonRuleLogicGenerator {
         }
         shape = PRE_ACTION_CALL.matcher(shape).replaceAll('@V').replace('@A', '@V')
         return GENERATED_SHAPE.matcher(shape).matches()
+    }
+
+    private static final String FACT_GUARD_LINE = '    $m : Map(this["file1"] != null, this["file2"] != null)'
+    private static final Pattern LAST_LITERAL = ~/"([^"\\]*)"\)\)\s*$/
+
+    /**
+     * DAR-OPS-029 S02 (QA refute): the literals whose value carries meaning hold only what generate() can put there.
+     * The shape alone let any literal stand in any slot, so a stored differsByAtLeast(a, b, "0") flagged every pair.
+     * The fact guard names file1 and file2; the eval line's last literal is a tolerance generate() accepts
+     * (differsByAtLeast) or one of its operators (violatesOperator). Severity, labels and path segments stay free text.
+     */
+    private static boolean literalSlotsAreGenerated(String text) {
+        List<String> lines = text.split("\n", -1) as List<String>
+        if (lines.size() < 4 || lines[2] != FACT_GUARD_LINE) return false
+        String evalLine = lines[3]
+        boolean tolerance = evalLine.startsWith('    eval(reconciliation.rule.RuleDiffSupport.differsByAtLeast(')
+        boolean operator = evalLine.startsWith('    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(')
+        if (!tolerance && !operator) return true
+        java.util.regex.Matcher last = LAST_LITERAL.matcher(evalLine)
+        if (!last.find()) return false
+        String value = last.group(1)
+        return tolerance ? normalizeTolerance(value) == value : VALID_OPERATORS.contains(value)
     }
 
     /**

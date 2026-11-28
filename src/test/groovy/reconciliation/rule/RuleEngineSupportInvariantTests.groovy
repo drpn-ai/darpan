@@ -73,7 +73,11 @@ class RuleEngineSupportInvariantTests {
         assertEquals(["SKU_RULE:SKU12:OTHER", "PRICE_RULE:12.00:12.50"], diffsByKey(first.diffResults as List)["K12"])
     }
 
-    /** Invariant 3: every generated rule has the same (default) salience; the tie resolves by the rule sequence, explicitly. */
+    /**
+     * Invariant 3, end to end: every generated rule has the same (default) salience, and a fact's diffs follow the rule
+     * sequence. Drools already fires equal-salience rules in declaration order, so this pins today's output; the next test
+     * proves the explicit ordering that keeps it when the agenda does not.
+     */
     @Test
     void withinAFactDiffsFollowTheRuleSequenceNotTheAgenda() {
         List<Map> facts = [pairs()[11]]
@@ -83,7 +87,23 @@ class RuleEngineSupportInvariantTests {
         assertEquals(["PRICE_RULE", "SKU_RULE"], (priceFirst.diffResults as List<Map>)*.ruleId)
     }
 
-    /** Invariant 1 (conservation): two equal rows are two facts, each matched once; neither collapses into the other. */
+    /** Invariant 3: inRuleOrder restores the rule set's order whatever order the diffs fired in; ties keep theirs. */
+    @Test
+    void diffsArePutBackInRuleOrderWhateverOrderTheyFiredIn() {
+        String drl = RuleEngineSupport.buildRuleSetDrl("RS_POS", "reconciliation.rules.t.rs_pos",
+                [rule("SKU_RULE", 10, "sku", "sku"), rule("PRICE_RULE", 20, "price", "price")], [])
+        Map<String, Integer> position = RuleEngineSupport.rulePositions(drl)
+        assertEquals([SKU_RULE: 0, PRICE_RULE: 1], position)
+        List<Map> firedBackwards = [[ruleId: "PRICE_RULE", n: 1], [ruleId: "UNKNOWN", n: 2], [ruleId: "SKU_RULE", n: 3],
+                                    [ruleId: "PRICE_RULE", n: 4]]
+        assertEquals([3, 1, 4, 2], RuleEngineSupport.inRuleOrder(firedBackwards, position)*.n,
+                "rule order first, a rule's own diffs in firing order, an unknown rule last")
+    }
+
+    /**
+     * Invariant 1 (conservation) for ruleText rules: two equal rows are two facts, each matched once; neither collapses into
+     * the other. Generated FIELD_COMPARISON rules never join matchedResults: a pair they flag is counted by its diffs.
+     */
     @Test
     void identicalRowsAreEachCountedOnce() {
         Map ruleSet = [ruleSetId: "RS_TEXT", companyUserGroupId: TENANT, ruleSetName: "RS_TEXT"]
@@ -96,15 +116,19 @@ class RuleEngineSupportInvariantTests {
         assertEquals([["PENDING", "ANY"], ["PENDING", "ANY"], ["ANY"]], (out.matchedResults as List<Map>)*._matchedRuleIds)
     }
 
-    /** Invariant 8 (idempotence): a replayed row brings no stale diffs in, and the caller's row is never written to. */
+    /**
+     * Invariant 8 (idempotence): a replayed row brings no stale diffs in, and the caller's row is never written to. The
+     * pair mismatches, so the rule does fire and append: before the fix it appended to the caller's own list.
+     */
     @Test
     void aReplayedRowCarriesNoStaleDiffsAndIsNotMutated() {
         List<Map> callerDiffs = [[diffType: "STALE", primaryId: "K1"]]
-        Map replayed = [compareScopeId: "S", primaryId: "K1", file1: [id: "K1", sku: "A"], file2: [id: "K1", sku: "A"],
+        Map replayed = [compareScopeId: "S", primaryId: "K1", file1: [id: "K1", sku: "A"], file2: [id: "K1", sku: "B"],
                         _generatedDiffs: callerDiffs, _matchedRuleIds: ["OLD_RULE"]]
         Map out = runPairs("RS_REPLAY", [rule("SKU_RULE", 10, "sku", "sku")], [replayed])
-        assertEquals([], out.diffResults, "a clean pair reported a diff it did not raise")
-        assertEquals(1, callerDiffs.size(), "the caller's diff list was appended to")
+        assertEquals(["SKU_RULE:A:B"], (out.diffResults as List<Map>).collect { "${it.ruleId}:${it.file1Value}:${it.file2Value}".toString() },
+                "only this run's diff, no stale one")
+        assertEquals([[diffType: "STALE", primaryId: "K1"]], callerDiffs, "the caller's diff list was written to")
         assertEquals(["OLD_RULE"], replayed._matchedRuleIds)
     }
 

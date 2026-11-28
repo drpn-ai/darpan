@@ -311,7 +311,7 @@ class RuleEngineSupport {
     }
 
     /** Each DRL rule name to its place in the rule set (sequenceNum, ruleId: the order the DRL declares them). */
-    private static Map<String, Integer> rulePositions(String drlText) {
+    static Map<String, Integer> rulePositions(String drlText) {
         Map<String, Integer> position = [:]
         RuleDiffSupport.drlRuleNames(drlText).eachWithIndex { String name, int i -> position.putIfAbsent(name, i) }
         return position
@@ -323,7 +323,8 @@ class RuleEngineSupport {
      * theirs. (Drools fires equal-salience rules in declaration order today, so this changes no output; it stops the
      * result depending on that.)
      */
-    private static List<Map> inRuleOrder(List<Map> diffs, Map<String, Integer> position) {
+    // Package-visible so RuleEngineSupportInvariantTests can prove the order without relying on the agenda.
+    static List<Map> inRuleOrder(List<Map> diffs, Map<String, Integer> position) {
         if (diffs.size() < 2) return diffs
         return diffs.toSorted { Map d -> position.getOrDefault(normalize(d.ruleId), Integer.MAX_VALUE) }
     }

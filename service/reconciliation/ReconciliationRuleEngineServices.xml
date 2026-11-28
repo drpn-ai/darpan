@@ -141,11 +141,24 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetId" from="requestedRuleSetIdValue"/>
-                <set field="existingRuleSet" from="ruleSetId ? ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one() : null"/>
+                <!-- DAR-OPS-029 S02 (QA): an id that exists answers only for the active tenant's rule set; another tenant's is
+                     refused as missing, never overwritten (the entity filter is skipped under disable-authz). A new rule set
+                     is the active tenant's: unstamped, it could never compile (canAccessTenantRecord refuses it). -->
+                <set field="anyRuleSet" from="ruleSetId ? ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).disableAuthz().useCache(false).one() : null"/>
+                <set field="existingRuleSet" from="anyRuleSet ? darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', ruleSetId) : null"/>
+                <set field="activeTenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <if condition="anyRuleSet &amp;&amp; !existingRuleSet">
+                    <message error="true">RuleSet ${ruleSetId} not found</message>
+                </if>
+                <if condition="!anyRuleSet &amp;&amp; !activeTenantId">
+                    <message error="true">An active tenant is required for tenant-scoped data.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
                 <set field="created" from="existingRuleSet == null"/>
                 <set field="updated" from="existingRuleSet != null"/>
-                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, companyUserGroupId: existingRuleSet?.companyUserGroupId ?: activeTenantId, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
                 <if condition="created">
                     <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" out-map="createdRuleSet"/>
                     <set field="ruleSetId" from="createdRuleSet.ruleSetId"/>

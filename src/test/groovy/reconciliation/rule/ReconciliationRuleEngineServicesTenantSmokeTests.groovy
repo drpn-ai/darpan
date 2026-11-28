@@ -73,6 +73,11 @@ class ReconciliationRuleEngineServicesTenantSmokeTests {
     void deleteRuleOfAnotherTenantAnswersNotFoundAndDeletesNothing() {
         assertEquals(["Rule GORJANA_RULE not found"], call("delete#Rule", [ruleId: "GORJANA_RULE"]))
         assertNotNull(ec.entity.find("darpan.rule.Rule").condition("ruleId", "GORJANA_RULE").disableAuthz().useCache(false).one())
+        // Positive control: the active tenant's own rule still deletes.
+        Map own = ec.service.sync().name("reconciliation.ReconciliationRuleEngineServices.save#Rule")
+                .parameters([ruleSetId: "DARPAN_TEST_COMPARE_RS", ruleText: "status is Held"]).disableAuthz().call()
+        assertEquals([], call("delete#Rule", [ruleId: own.ruleId]))
+        assertEquals(null, ec.entity.find("darpan.rule.Rule").condition("ruleId", own.ruleId).disableAuthz().useCache(false).one())
     }
 
     @Test
@@ -80,6 +85,23 @@ class ReconciliationRuleEngineServicesTenantSmokeTests {
         assertEquals(["RuleSet RS_GORJANA_ONLY not found"], call("delete#RuleSet", [ruleSetId: "RS_GORJANA_ONLY", forceDeleteRules: true]))
         assertNotNull(ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "RS_GORJANA_ONLY").disableAuthz().useCache(false).one())
         assertEquals(1L, rulesOf("RS_GORJANA_ONLY"))
+        // Positive control: the active tenant's own rule set still deletes.
+        Map own = ec.service.sync().name("reconciliation.ReconciliationRuleEngineServices.save#RuleSet")
+                .parameters([ruleSetName: "Own run"]).disableAuthz().call()
+        assertEquals([], call("delete#RuleSet", [ruleSetId: own.ruleSetId, forceDeleteRules: true]))
+        assertEquals(null, ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", own.ruleSetId).disableAuthz().useCache(false).one())
         assertFalse(ec.message.hasError())
+    }
+
+    /** QA refute: save#RuleSet relied on the entity filter too, and stamped no tenant on a new rule set. */
+    @Test
+    void saveRuleSetStampsTheActiveTenantAndNeverOverwritesAnotherTenants() {
+        assertEquals(["RuleSet RS_GORJANA_ONLY not found"], call("save#RuleSet", [ruleSetId: "RS_GORJANA_ONLY", ruleSetName: "Hijacked"]))
+        assertEquals("Gorjana run", ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "RS_GORJANA_ONLY")
+                .disableAuthz().useCache(false).one().ruleSetName)
+        Map created = ec.service.sync().name("reconciliation.ReconciliationRuleEngineServices.save#RuleSet")
+                .parameters([ruleSetName: "Stamped run"]).disableAuthz().call()
+        assertEquals("KREWE", ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", created.ruleSetId)
+                .disableAuthz().useCache(false).one().companyUserGroupId)
     }
 }

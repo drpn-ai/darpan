@@ -126,6 +126,23 @@ end'''
     }
 
     @Test
+    void aLiteralSlotHoldsOnlyWhatTheGeneratorCanPutThere() {
+        // QA refute: the shape alone took any literal in any slot; differsByAtLeast(a, b, "0") flags every numeric pair.
+        String tolerant = generated("=", "", ',"tolerance":"1.00"')
+        String ordered = generated(">=")
+        assertNull(RuleEngineSupport.compileGateViolation("R1", tolerant))
+        assertNull(RuleEngineSupport.compileGateViolation("R1", ordered))
+        [tolerant.replace('"1.00"))', '"0"))'), tolerant.replace('"1.00"))', '"-1"))'),
+         tolerant.replace('"1.00"))', '"1e9"))'), tolerant.replace('"1.00"))', '""))'),
+         ordered.replace('">="))', '"matches"))'), ordered.replace('">="))', '""))'),
+         ordered.replace('this["file1"] != null', 'this["nope"] != null')
+        ].eachWithIndex { String t, int i ->
+            assertTrue(t != tolerant && t != ordered, "mutation ${i} did not change the fixture")
+            assertNotNull(RuleEngineSupport.compileGateViolation("R1", t), "mutation ${i} passed the gate:\n${t}")
+        }
+    }
+
+    @Test
     void theRefusalNamesTheRuleAndQuotesNoneOfItsLogic() {
         // A run's error reaches notifications: it names the rule, never the stored text (not even the validator's fragment).
         System.setProperty(ALLOW_RAW_DRL_PROP, "true")

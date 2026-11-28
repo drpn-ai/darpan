@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
+import groovy.transform.PackageScope
 import darpan.facade.reconciliation.RunHealth
 import darpan.facade.reconciliation.RunObservability
 import darpan.peak.PeakReadPolicy
@@ -41,7 +42,6 @@ import static darpan.common.ValueSupport.normalize
  */
 class AuditSettingsSupport {
 
-    static final String DEFAULT_TIME = "06:00"
     private static final String WHY = "audit settings, active tenant: explicit companyUserGroupId condition applied"
 
     /** The tenant's audit by its code, or by its id when no audit has that code (an agent holds the id it was given). */
@@ -346,327 +346,18 @@ class AuditSettingsSupport {
         return "${code} is not a priority: P0, P1, P2 or KNOWN.".toString()
     }
 
-    /** DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. */
-    static Map scheduleOf(def ec, Map audit) {
-        return [time    : normalize(audit.scheduleTime) ?: DEFAULT_TIME,
-                timeZone: normalize(audit.scheduleTimeZone) ?: tenantZone(ec),
-                active  : audit.scheduleActive == "Y"]
-    }
-
-    /** True when the automation does not run at the audit's time, in its zone, on or off as the audit is. */
-    static boolean offSchedule(Map automation, Map schedule) {
-        return timeOf(automation.scheduleExpr as String) != schedule.time || automation.windowTimeZone != schedule.timeZone ||
-                (automation.isActive == "Y") != schedule.active
-    }
-
-    /** Writes the audit's schedule onto every automation its checks run through. */
-    static void applySchedule(def ec, String tenantId, Map audit, Timestamp now) {
-        Map schedule = scheduleOf(ec, audit)
-        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
-        automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).each { automation ->
-            setSchedule(automation, schedule, now)
-            automation.set("lastUpdatedDate", now)
-            automation.update()
-        }
-    }
-
-    private static void setSchedule(def automation, Map schedule, Timestamp now) {
-        automation.set("scheduleExpr", cronOf(schedule.time as String))
-        automation.set("windowTimeZone", schedule.timeZone)
-        automation.set("isActive", schedule.active ? "Y" : "N")
-        automation.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(automation, now, now))
-    }
-
-    /**
-     * DAR-BE-199. The audit whose checks run through this automation ({auditCode, auditName}), or null. A check that is no
-     * longer on any of an audit's statements does not count: its automation is free again.
-     */
-    static Map auditOfAutomation(def ec, String tenantId, String automationId) {
-        if (!tenantId || !normalize(automationId)) return null
-        List checkIds = rows(ec, "darpan.audit.AuditCheck", tenantId).condition("automationId", normalize(automationId)).list()*.checkId
-        if (!checkIds) return null
-        List statementIds = rows(ec, "darpan.audit.AuditStatementCheck", tenantId)
-                .condition("checkId", EntityCondition.IN, checkIds).list()*.statementId.unique()
-        List auditIds = statementIds ? rows(ec, "darpan.audit.AuditStatement", tenantId)
-                .condition("statementId", EntityCondition.IN, statementIds).list()*.auditId.unique() : []
-        def audit = auditIds ? rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", EntityCondition.IN, auditIds)
-                .orderBy("auditCode").list().find() : null
-        return audit ? [auditCode: audit.auditCode, auditName: audit.auditName] : null
-    }
-
-    /** Why this automation cannot be scheduled, paused or resumed by itself, or null when it can. */
-    static String ownScheduleRefusal(def ec, def automation) {
-        Map audit = auditOfAutomation(ec, automation?.companyUserGroupId as String, automation?.automationId as String)
-        return audit ? ("Automation ${automation.automationId} runs audit ${audit.auditName}'s checks, so it runs on the " +
-                "audit's schedule: change it in the audit's settings.").toString() : null
-    }
-
-    /**
-     * The earliest day play can record this morning: the first day of the period just ended (DAR-BE-178: on Nov 2 a
-     * monthly audit plays October), or (DAR-BE-145) the tenant's go-live day when that is later. The run page offers
-     * nothing before it.
-     */
-    static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) {
-        LocalDate from = AuditReportAssembler.recordableFrom(today, AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String])
-        Timestamp goLive = AuditAutomationSupport.goLive(ec, tenantId)
-        LocalDate goLiveDay = goLive != null ? AuditAutomationSupport.goLiveDay(goLive, zone) : null
-        return (from != null && goLiveDay != null && goLiveDay > from ? goLiveDay : from)?.toString()
-    }
-
-    /**
-     * Play: every check of the audit over [from, thru], days inclusive in the tenant's zone, or (DAR-BE-373) only the
-     * checks named by code: then only their automations run, so a one-off read of one check does not read every system
-     * again. An automation records every check it feeds. Refused before anything runs when the days cannot be recorded
-     * (in the future, backwards, or in a period that ended before the one just ended) or a named check is not the audit's.
-     * Answers the automations submitted.
-     */
-    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead,
-                         List<String> checkCodes = null) {
-        ZoneId zone = ZoneId.of(tenantZone(ec))
-        try {
-            AuditAutomationSupport.pickedWindows(ec, audit, zone, LocalDate.now(zone), from, thru)
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            ec.message.addError(e.message)
-            return []
-        }
-        Set<String> picked = (checkCodes ?: []).collect { normalize(it as String) }.findAll { it } as Set<String>
-        if (picked) {
-            Set<String> known = (checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
-                    *.checkCode.collect { it as String }) as Set<String>
-            List<String> unknown = picked.findAll { !known.contains(it) }.sort()
-            if (unknown) {
-                ec.message.addError("Audit ${audit.auditCode} has no check ${unknown.join(', ')}.".toString())
-                return []
-            }
-        }
-        // DAR-BE-172: the automations a first play makes commit in their OWN transaction before a run is handed to
-        // RunAdmission, whose pool starts it on another thread at once. Made in the request's transaction, that thread
-        // could not see its automation yet ("Automation ... not found", in the log only) and the play did nothing. The
-        // rows are read in that transaction too: on MySQL the request's own snapshot would still hide them.
-        List<Map> automations = (List<Map>) AutomationRuntimeSupport.runInNewTransaction(ec,
-                "Could not make audit ${audit.auditCode}'s automations".toString()) { ->
-            ensureAutomations(ec, tenantId, audit)
-            List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
-            if (picked) checks = checks.findAll { picked.contains(it.checkCode as String) }
-            return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>)
-                    .collect { [automationId: it.automationId, savedRunId: it.savedRunId] }
-        }
-        Timestamp now = ec.user.nowTimestamp
-        return automations.collect { Map automation ->
-            Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: automation.automationId,
-                    scheduledFireTime: now, auditWindowFromDate: Date.valueOf(from), auditWindowThruDate: Date.valueOf(thru),
-                    auditFullRead: fullRead], tenantId)
-            [automationId: automation.automationId, savedRunId: automation.savedRunId, submitted: submitted.submitted == true,
-             queued: submitted.queued == true, error: submitted.error]
-        }
-    }
-
-    /**
-     * DAR-UI-085. What a play (or the morning run) is doing right now, for the audit page's Run health: one entry per
-     * automation of the audit with an execution RUNNING or PENDING, naming the checks it feeds, its stage and progress,
-     * and its health (RunHealth). The ledger row a check writes lands only when its window ends, so without this the
-     * report reads every check as "not run" until then.
-     *
-     * Answers {checks: configured checks, activeChecks, active: [{run, checks: [codes], state: running | queued,
-     * attempt, stage, progressPercent, elapsedMs, usualDurationMs, health, healthReason, retryAt, steps}]}; steps as
-     * steps() below.
-     */
-    static Map progress(def ec, String tenantId, Map audit, Timestamp now) {
-        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
-                .unique { it.checkId } as List<Map>
-        Map<String, List<Map>> checksByAutomation = checks.findAll { it.automationId }.groupBy { it.automationId as String }
-        List<Map> active = []
-        if (checksByAutomation) {
-            Map<String, Map> automations = automationsOf(ec, tenantId, checks).collectEntries { [(it.automationId): it] }
-            Map<String, String> names = runNames(ec, tenantId, automations.values()*.savedRunId.findAll { it }.unique() as List<String>)
-            rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
-                    .condition("automationId", EntityCondition.IN, checksByAutomation.keySet() as List)
-                    .condition("statusEnumId", EntityCondition.IN, [AutomationExecutionSupport.STATUS_RUNNING, AutomationExecutionSupport.STATUS_PENDING])
-                    .list()*.getMap().groupBy { it.automationId as String }.each { String automationId, List<Map> executions ->
-                Map execution = executions.find { it.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING } ?:
-                        executions.max { (it.createdDate as Timestamp)?.time ?: 0L }
-                boolean running = execution.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING
-                Map automation = automations[automationId] ?: [:]
-                Map run = running && execution.reconciliationRunResultId ? rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId)
-                        .condition("reconciliationRunResultId", execution.reconciliationRunResultId).list().find()?.getMap() : null
-                Map entry = [run         : names[automation.savedRunId as String] ?: automation.automationName ?: automationId,
-                             checks      : checksByAutomation[automationId]*.checkCode.sort(),
-                             state       : running ? "running" : "queued",
-                             attempt     : ((execution.retryCount ?: 0) as Integer) + 1,
-                             retryAt     : running ? null : execution.nextRetryDate,
-                             stage       : run?.currentStage,
-                             progressPercent: run?.progressPercent]
-                if (run) {
-                    Timestamp started = (run.startedDate ?: execution.startedDate) as Timestamp
-                    Long usual = RunHealth.usualDurationMs(rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId),
-                            tenantId, run.savedRunId as String, run.windowStartDate, run.windowEndDate)
-                    Map health = RunHealth.of(run + [startedDate: started, usualDurationMs: usual], now)
-                    // DAR-BE-350. This automation's own last success is the reads' baseline (another automation on the
-                    // same saved run, or a manual run, reads with other filters).
-                    String previousRunResultId = rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
-                            .condition("automationId", automationId).condition("statusEnumId", AutomationExecutionSupport.STATUS_SUCCEEDED)
-                            .condition("reconciliationRunResultId", EntityCondition.NOT_EQUAL, null)
-                            .orderBy("-completedDate").limit(1).list().find()?.get("reconciliationRunResultId") as String
-                    entry += [elapsedMs: started ? now.time - started.time : null, usualDurationMs: usual,
-                              health: health.health, healthReason: health.reason,
-                              steps: steps(ec, tenantId, run.reconciliationRunResultId as String, automationId, previousRunResultId)]
-                    // DAR-BE-350. A peak period's read limits, so a run slowed on purpose says why.
-                    ReadLimits limits = PeakReadPolicy.limitsFor(ec, tenantId)
-                    if (limits != null && (limits.hotwaxSharePct != null || limits.netsuiteSerial)) {
-                        entry.limits = [hotwaxSharePct: limits.hotwaxSharePct, netsuiteSerial: limits.netsuiteSerial]
-                    }
-                }
-                active << entry
-            }
-        }
-        // Running before queued, then by run name.
-        return [checks      : checks.size(),
-                asOf        : now,
-                activeChecks: (active.sum { it.checks.size() } ?: 0) as int,
-                active      : active.sort { a, b -> (b.state <=> a.state) ?: (a.run <=> b.run) }]
-    }
-
-    /**
-     * DAR-UI-086. "Retry from last read" on one check of one morning: the execution that morning's run of the check
-     * recorded (AuditCheckRun.automationExecutionId) is retried from its extracts (DAR-BE-142), so nothing is read again.
-     * Refused in words when the check is not this audit's, ran already, has no run that morning, or cannot be replayed.
-     * Answers what retryFromExtracts submitted.
-     */
-    static Map retryCheck(def ec, String tenantId, Map audit, String checkCode, Date reportDate, String period) {
-        Map check = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
-                .find { it.checkCode == normalize(checkCode) } as Map
-        if (!check) return [submitted: false, error: "Check ${checkCode} is not part of audit ${audit.auditCode}.".toString()]
-        def run = rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", check.checkId)
-                .condition("reportDate", reportDate).condition("period", period).list().find()
-        if (run == null || !normalize(run.get("automationExecutionId"))) {
-            return [submitted: false, error: "Check ${checkCode} has no run on ${reportDate} to retry from; play the audit instead.".toString()]
-        }
-        if (run.get("statusEnumId") == "AUDCS_RAN") return [submitted: false, error: "Check ${checkCode} already ran on ${reportDate}.".toString()]
-        String executionId = normalize(run.get("automationExecutionId"))
-        if (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationExecutionId", executionId).list().isEmpty()) {
-            return [submitted: false, error: "Check ${checkCode}'s run ${executionId} was not found.".toString()]
-        }
-        return AutomationExecutionSupport.retryFromExtracts(ec, [automationExecutionId: executionId])
-    }
-
-    /**
-     * DAR-BE-123. Re-checks one finding's record now through its check's automation, the record read by key on both sides
-     * (auditVerifyKeys). Answers whether it was submitted; refuses in words a finding whose check has no automation yet.
-     */
-    static boolean verifyFinding(def ec, String tenantId, String findingId) {
-        def finding = rows(ec, "darpan.audit.AuditFinding", tenantId).condition("findingId", findingId).list().find()
-        def check = rows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkId", finding.checkId).list().find()
-        if (!check?.automationId) {
-            ec.message.addError("Finding ${findingId} cannot be re-checked: its check has no automation yet (play the audit once).")
-            return false
-        }
-        Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: check.automationId,
-                scheduledFireTime: ec.user.nowTimestamp, auditVerifyKeys: [finding.recordKey as String]], tenantId)
-        if (submitted.error) ec.message.addError("Finding ${findingId} could not be re-checked: ${submitted.error}")
-        return submitted.submitted == true
-    }
-
-    /**
-     * Every check of the audit runs through an automation: a check without one takes the automation another check of the
-     * same run in this audit already has, or a new paused one for that run. Answers the ids made.
-     */
-    static List<String> ensureAutomations(def ec, String tenantId, Map audit) {
-        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
-                .unique { it.checkId } as List<Map>
-        List<String> made = []
-        checks.findAll { !it.automationId && it.savedRunId }.groupBy { it.savedRunId as String }.each { String runId, List<Map> waiting ->
-            String automationId = checks.find { it.savedRunId == runId && it.automationId }?.automationId as String
-            if (!automationId) {
-                automationId = createAutomation(ec, tenantId, audit, runId)
-                if (!automationId) return
-                made << automationId
-            }
-            waiting.each { Map check ->
-                def row = rows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkId", check.checkId).list().find()
-                row.set("automationId", automationId); row.update()
-            }
-        }
-        return made
-    }
-
-    private static String createAutomation(def ec, String tenantId, Map audit, String ruleSetId) {
-        def ruleSet = rows(ec, "darpan.rule.RuleSet", tenantId).condition("ruleSetId", ruleSetId).list().find()
-        def scope = rows(ec, "darpan.rule.RuleSetCompareScope", tenantId).condition("ruleSetId", ruleSetId).list().find()
-        List sources = scope ? rows(ec, "darpan.rule.RuleSetCompareSource", tenantId)
-                .condition("compareScopeId", scope.compareScopeId).orderBy("fileSide").list() : []
-        if (!ruleSet || !scope || !sources) {
-            ec.message.addError("Run ${ruleSetId} has no compare scope with sources, so it cannot be scheduled.")
-            return null
-        }
-        Timestamp now = ec.user.nowTimestamp
-        String userId = TenantAccessSupport.currentUserId(ec)
-        String automationId = ec.entity.sequencedIdPrimary("darpan.reconciliation.ReconciliationAutomation", null, null)
-        def automation = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([
-                automationId    : automationId,
-                automationName  : "${audit.auditName}: ${ruleSet.ruleSetName ?: ruleSetId}".toString().take(255),
-                description     : "DAR-UI-063. Runs audit ${audit.auditCode}'s checks on run ${ruleSetId}.".toString(),
-                companyUserGroupId: tenantId, createdByUserId: userId,
-                inputModeEnumId : AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
-                savedRunId      : ruleSetId, savedRunType: "ruleset", ruleSetId: ruleSetId, compareScopeId: scope.compareScopeId,
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
-                isArchived      : "N", createdDate: now, lastUpdatedDate: now])
-        setSchedule(automation, scheduleOf(ec, audit), now)   // DAR-BE-199: a new check runs when the audit runs
-        automation.create()
-        sources.each { source ->
-            // The config this side reads (a NetSuite query, an OMS or Shopify config), under the connector's own parameter:
-            // without it the extract falls back to "the tenant's single active config", which a tenant with several has none of.
-            Map connector = SourceSystemConnectorSupport.resolve(ec, source.systemEnumId as String)
-            String configParameter = normalize(connector?.configParameterName)
-            // DAR-UI-064's per-side extract options (R8 includeReturnsWithoutShopifyRef, R16 onlyCancelledReturns), under the
-            // config id: a stored option never displaces it.
-            Map parameters = new LinkedHashMap(SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)) ?: [:])
-            if (configParameter && normalize(source.sourceConfigId)) parameters[configParameter] = normalize(source.sourceConfigId)
-            Map metadata = parameters ? [parameters: parameters] : [:]
-            ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([
-                    automationId: automationId, fileSide: source.fileSide, companyUserGroupId: tenantId, createdByUserId: userId,
-                    sourceTypeEnumId: source.sourceTypeEnumId ?: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
-                    systemEnumId: source.systemEnumId, fileTypeEnumId: source.fileTypeEnumId, schemaFileName: source.schemaFileName,
-                    recordRootExpression: source.recordRootExpression, primaryIdExpression: source.primaryIdExpression,
-                    idValueNormalizer: source.idValueNormalizer, createdDate: now, lastUpdatedDate: now,
-                    safeMetadataJson: metadata ? AutomationRuntimeSupport.safeMetadataJson(metadata) : null]).create()
-            // DAR-UI-063 (found in DAR-UI-064's walk): the run's source filters too. An automation reads its OWN filter rows
-            // (loadAutomationSourceFilters), so without this copy every run that filters its source (R1 "completed units
-            // only", R15 "EXC- orders, not WH") ran unfiltered and raised findings for records it never meant to read.
-            darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet(ec, scope.compareScopeId as String, source.fileSide as String)
-                    .eachWithIndex { Map filter, int i ->
-                        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSourceFilter").setAll([
-                                automationId: automationId, fileSide: source.fileSide, sequenceNum: i + 1,
-                                fieldExpression: filter.fieldExpression, operator: filter.operator, filterValues: filter.filterValues,
-                                companyUserGroupId: tenantId, createdByUserId: userId, createdDate: now, lastUpdatedDate: now]).create()
-                    }
-        }
-        return automationId
-    }
-
-    /** "0 30 6 * * ?" for 06:30: the Quartz form the automation scheduler reads. */
-    private static String cronOf(String time) {
-        List<String> hm = (time ?: DEFAULT_TIME).split(":") as List<String>
-        return "0 ${hm[1] as int} ${hm[0] as int} * * ?".toString()
-    }
-
-    /** "06:30" from "0 30 6 * * ?", or null for any other form. */
-    static String timeOf(String cron) {
-        def m = (cron ?: "") =~ /^0 (\d{1,2}) (\d{1,2}) \* \* \?$/
-        return m.matches() ? String.format("%02d:%02d", m.group(2) as int, m.group(1) as int) : null
-    }
-
-    private static String tenantZone(def ec) {
+    @PackageScope static String tenantZone(def ec) {
         return TenantAccessSupport.resolveActiveTenantTimeZone(ec) ?: "UTC"
     }
 
     /** The audit's statements in report order; activeOnly drops those turned off (they run nothing). */
-    private static List<Map> statementsOf(def ec, String tenantId, Map audit, boolean activeOnly = false) {
+    @PackageScope static List<Map> statementsOf(def ec, String tenantId, Map audit, boolean activeOnly = false) {
         List<Map> all = rows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", audit.auditId)
                 .orderBy(["sequenceNum", "statementCode"]).list()*.getMap()
         return activeOnly ? all.findAll { (it.isActive ?: "Y") != "N" } : all
     }
 
-    private static Map<String, List<Map>> checksByStatement(def ec, String tenantId, List<Map> statements) {
+    @PackageScope static Map<String, List<Map>> checksByStatement(def ec, String tenantId, List<Map> statements) {
         Map<String, List<Map>> out = statements.collectEntries { [(it.statementId as String): []] }
         if (!statements) return out
         List<Map> links = rows(ec, "darpan.audit.AuditStatementCheck", tenantId)
@@ -688,72 +379,45 @@ class AuditSettingsSupport {
         return automationsOf(ec, tenantId, checks)
     }
 
-    /**
-     * DAR-BE-173. A running run's steps in run order, for the audit page to say what it is doing: [{stage, status: running
-     * | done | failed (any other status lower-cased), records (so far, while running: the extract's page heartbeat), startedDate, completedDate,
-     * system (an extract's system, from the automation's source on that side)}]. Both extracts run at once when the
-     * sides are read in parallel, each with its own count.
-     */
-    static List<Map> steps(def ec, String tenantId, String runResultId, String automationId, String previousRunResultId = null) {
-        if (!runResultId) return []
-        Map<String, String> systemBySide = rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
-                .condition("automationId", automationId).list().collectEntries { source ->
-            [(source.fileSide as String): ReconciliationServices.resolveEnumLabel(ec, source.systemEnumId as String, source.systemEnumId as String)]
-        }
-        Map<String, String> sideOfStage = [(RunObservability.STAGE_EXTRACT_FILE1): "FILE_1", (RunObservability.STAGE_EXTRACT_FILE2): "FILE_2"]
-        // DAR-BE-350. Each read's page count on the previous success (metricsJson.readCount, kept by endStep; recordCount is
-        // the connector's own count, in other units): today's estimate. A read that never heartbeated has none.
-        Map<String, Object> expectedByStage = previousRunResultId ? rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
-                .condition("reconciliationRunResultId", previousRunResultId)
-                .condition("stageCode", EntityCondition.IN, sideOfStage.keySet() as List)
-                .condition("statusEnumId", RunObservability.STATUS_SUCCESS).orderBy("startedDate").list()
-                // DAR-BE-394: qualified, and no inline cast. Groovy 5.0.3 fails a bare static call from a closure with an
-                // inline-cast null ("argument type mismatch"); a read that never heartbeats keeps no metricsJson, which took
-                // down get#AuditProgress and, through idle(), send#AuditRunUpdate whenever such an automation was mid-run.
-                .collectEntries { [(it.stageCode as String): AuditSettingsSupport.readCountOf(it.metricsJson)] }.findAll { it.value != null } : [:]
-        return rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
-                .condition("reconciliationRunResultId", runResultId).orderBy(["stageSequence", "startedDate"]).list().collect { step ->
-            String stage = step.stageCode as String
-            Map out = [stage        : stage,
-                       status       : STEP_STATUS[step.statusEnumId as String] ?: (step.statusEnumId as String)?.toLowerCase(),
-                       records      : step.recordCount,
-                       startedDate  : step.startedDate,
-                       completedDate: step.completedDate,
-                       // DAR-BE-350. When its last page landed; none for a step that never heartbeats (Shopify bulk).
-                       movedDate    : step.heartbeatDate]
-            String side = sideOfStage[stage]
-            if (side) out.system = systemBySide[side]
-            if (side && expectedByStage[stage] != null) out.expectedRecords = expectedByStage[stage]
-            return out
-        }
-    }
-
-    private static Long readCountOf(Object metricsJson) {
-        String text = metricsJson?.toString()
-        if (!text?.contains("readCount")) return null
-        try { return (new groovy.json.JsonSlurper().parseText(text) as Map)?.readCount as Long }
-        catch (Exception ignored) { return null }
-    }
-
-    private static final Map<String, String> STEP_STATUS =[(RunObservability.STATUS_RUNNING): "running",
-            (RunObservability.STATUS_SUCCESS): "done", (RunObservability.STATUS_FAILED): "failed"].asImmutable()
-
-    private static List<Map> automationsOf(def ec, String tenantId, List<Map> checks) {
+    @PackageScope static List<Map> automationsOf(def ec, String tenantId, List<Map> checks) {
         return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>)*.getMap()
     }
 
-    private static List automationRows(def ec, String tenantId, List<String> ids) {
+    @PackageScope static List automationRows(def ec, String tenantId, List<String> ids) {
         return ids ? rows(ec, "darpan.reconciliation.ReconciliationAutomation", tenantId)
                 .condition("automationId", EntityCondition.IN, ids).orderBy("automationId").list() : []
     }
 
-    private static Map<String, String> runNames(def ec, String tenantId, List<String> ids) {
+    @PackageScope static Map<String, String> runNames(def ec, String tenantId, List<String> ids) {
         return ids ? rows(ec, "darpan.rule.RuleSet", tenantId).condition("ruleSetId", EntityCondition.IN, ids).list()
                 .collectEntries { [(it.ruleSetId): it.ruleSetName] } : [:]
     }
 
-    private static def rows(def ec, String entityName, String tenantId) {
+    @PackageScope static def rows(def ec, String entityName, String tenantId) {
         return darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false)
     }
+
+    // DAR-OPS-029 S12: moved by responsibility; these delegates keep the callers (AuditFacadeServices.xml, AuditAutomationSupport,
+    // the agent pipeline, the migrations and tests) working until S99 repoints them.
+    static final String DEFAULT_TIME = AuditSchedule.DEFAULT_TIME
+    static Map scheduleOf(def ec, Map audit) { AuditSchedule.scheduleOf(ec, audit) }
+    static boolean offSchedule(Map automation, Map schedule) { AuditSchedule.offSchedule(automation, schedule) }
+    static void applySchedule(def ec, String tenantId, Map audit, Timestamp now) { AuditSchedule.applySchedule(ec, tenantId, audit, now) }
+    static Map auditOfAutomation(def ec, String tenantId, String automationId) { AuditSchedule.auditOfAutomation(ec, tenantId, automationId) }
+    static String ownScheduleRefusal(def ec, def automation) { AuditSchedule.ownScheduleRefusal(ec, automation) }
+    static String timeOf(String cron) { AuditSchedule.timeOf(cron) }
+    static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) { AuditPlay.playableFrom(ec, tenantId, audit, today, zone) }
+    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead, List<String> checkCodes = null) {
+        AuditPlay.run(ec, tenantId, audit, from, thru, fullRead, checkCodes)
+    }
+    static Map retryCheck(def ec, String tenantId, Map audit, String checkCode, Date reportDate, String period) {
+        AuditPlay.retryCheck(ec, tenantId, audit, checkCode, reportDate, period)
+    }
+    static boolean verifyFinding(def ec, String tenantId, String findingId) { AuditPlay.verifyFinding(ec, tenantId, findingId) }
+    static Map progress(def ec, String tenantId, Map audit, Timestamp now) { AuditProgress.progress(ec, tenantId, audit, now) }
+    static List<Map> steps(def ec, String tenantId, String runResultId, String automationId, String previousRunResultId = null) {
+        AuditProgress.steps(ec, tenantId, runResultId, automationId, previousRunResultId)
+    }
+    static List<String> ensureAutomations(def ec, String tenantId, Map audit) { AuditCheckAutomation.ensureAutomations(ec, tenantId, audit) }
 }

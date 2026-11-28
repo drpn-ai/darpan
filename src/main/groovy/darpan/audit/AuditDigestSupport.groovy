@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.common.DarpanEntityConstants
+import darpan.common.ValueSupport
 import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -314,8 +315,7 @@ class AuditDigestSupport {
     static ZoneId tenantZone(def ec, String tenantId) {
         def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false).one()
-        try { return setting?.timeZone ? ZoneId.of(setting.timeZone as String) : ZoneId.of("UTC") }
-        catch (Exception ignored) { return ZoneId.of("UTC") }
+        return ValueSupport.zoneOrUtc(setting?.timeZone)
     }
 
     private static String dayLabel(String date) {

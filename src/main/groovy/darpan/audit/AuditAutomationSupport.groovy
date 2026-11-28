@@ -19,6 +19,7 @@ import java.time.ZoneId
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
+import static darpan.common.ValueSupport.zoneOrUtc
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorDetail
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorMessage
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeText
@@ -1058,8 +1059,7 @@ class AuditAutomationSupport {
     }
 
     private static ZoneId zoneOf(def automation) {
-        String zone = normalize(readField(automation, "windowTimeZone"))
-        try { return ZoneId.of(zone ?: "UTC") } catch (Exception ignored) { return ZoneId.of("UTC") }
+        return zoneOrUtc(readField(automation, "windowTimeZone"))
     }
 
     private static def tenantRows(def ec, String entityName, String tenantId) {

@@ -1,11 +1,33 @@
 package darpan.common
 
+import java.time.DateTimeException
+import java.time.ZoneId
 import java.util.Locale
 import java.util.Objects
 
 class ValueSupport {
     static String normalize(Object value) {
         return value?.toString()?.trim()
+    }
+
+    /**
+     * S99-068: a stored zone id (TenantSetting.timeZone, a request's timeZone, an email's zone), trimmed; a blank or
+     * unknown id reads as {@code fallback}. For an automation's own zone use AutomationWindows (a null automation zone
+     * is the tenant's zone, not UTC).
+     */
+    static ZoneId zoneOr(Object rawZoneId, ZoneId fallback) {
+        String id = normalize(rawZoneId)
+        if (!id) return fallback
+        try {
+            return ZoneId.of(id)
+        } catch (DateTimeException ignored) {
+            return fallback
+        }
+    }
+
+    /** S99-068: {@link #zoneOr} with UTC as the fallback. */
+    static ZoneId zoneOrUtc(Object rawZoneId) {
+        return zoneOr(rawZoneId, ZoneId.of("UTC"))
     }
 
     static String normalizeBlankToNull(Object value) {

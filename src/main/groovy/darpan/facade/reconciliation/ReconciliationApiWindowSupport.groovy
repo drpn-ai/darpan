@@ -6,7 +6,6 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
-import java.time.DateTimeException
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
@@ -14,6 +13,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.zoneOrUtc
 
 class ReconciliationApiWindowSupport {
     private static final Logger logger = LoggerFactory.getLogger(ReconciliationApiWindowSupport.class)
@@ -31,7 +31,7 @@ class ReconciliationApiWindowSupport {
 
     static Map<String, Object> normalizeCalendarWindow(Timestamp windowStartDate, Timestamp windowEndDate, Object rawTimeZone,
             Object rawStartLocalDate, Object rawEndLocalDate) {
-        ZoneId zone = resolveZoneId(rawTimeZone)
+        ZoneId zone = zoneOrUtc(rawTimeZone)
         Map<String, Object> result = [
                 windowStartDate       : windowStartDate,
                 windowEndDate         : windowEndDate,
@@ -63,7 +63,7 @@ class ReconciliationApiWindowSupport {
     }
 
     static Map<String, Object> preserveExactWindow(Timestamp windowStartDate, Timestamp windowEndDate, Object rawTimeZone) {
-        ZoneId zone = resolveZoneId(rawTimeZone)
+        ZoneId zone = zoneOrUtc(rawTimeZone)
         return [
                 windowStartDate       : windowStartDate,
                 windowEndDate         : windowEndDate,
@@ -87,16 +87,7 @@ class ReconciliationApiWindowSupport {
      */
     static String calendarDateIn(Timestamp bound, Object rawTimeZone) {
         if (bound == null) return null
-        return bound.toInstant().atZone(resolveZoneId(rawTimeZone)).toLocalDate().toString()
-    }
-
-    private static ZoneId resolveZoneId(Object rawTimeZone) {
-        String timeZone = normalize(rawTimeZone) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
-        try {
-            return ZoneId.of(timeZone)
-        } catch (DateTimeException ignored) {
-            return ZoneId.of(TenantAccessSupport.DEFAULT_TIME_ZONE)
-        }
+        return bound.toInstant().atZone(zoneOrUtc(rawTimeZone)).toLocalDate().toString()
     }
 
     private static LocalDate parseLocalDate(Object rawDate, ZoneId zone) {

@@ -1,7 +1,7 @@
 package darpan.email
 
+import darpan.common.ValueSupport
 import java.sql.Timestamp
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
@@ -128,9 +128,7 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
      */
     static String when(Timestamp at, String zoneId) {
         if (at == null) return ""
-        ZoneId zone
-        try { zone = zoneId?.trim() ? ZoneId.of(zoneId.trim()) : ZoneId.of("UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
-        return WHEN.format(at.toInstant().atZone(zone))
+        return WHEN.format(at.toInstant().atZone(ValueSupport.zoneOrUtc(zoneId)))
     }
 
     static String esc(String value) {

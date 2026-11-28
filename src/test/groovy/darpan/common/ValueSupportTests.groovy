@@ -2,12 +2,31 @@ package darpan.common
 
 import org.junit.jupiter.api.Test
 
+import java.time.ZoneId
+import java.time.ZoneOffset
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class ValueSupportTests {
+    /** S99-068: one reading of a stored zone id: trimmed, and a blank or unknown id is UTC (or the caller's fallback). */
+    @Test
+    void zoneOrUtcReadsAStoredZoneIdAndFallsBackToUtc() {
+        assertEquals(ZoneId.of("Asia/Kolkata"), ValueSupport.zoneOrUtc(" Asia/Kolkata "))
+        assertEquals(ZoneId.of("UTC"), ValueSupport.zoneOrUtc(null))
+        assertEquals(ZoneId.of("UTC"), ValueSupport.zoneOrUtc("   "))
+        assertEquals(ZoneId.of("UTC"), ValueSupport.zoneOrUtc("Mars/Olympus_Mons"))
+        assertEquals(ZoneId.of("UTC"), ValueSupport.zoneOrUtc("+99:00"))
+        assertEquals(ZoneOffset.ofHours(-5), ValueSupport.zoneOrUtc("-05:00"))
+        ZoneId fallback = ZoneId.of("America/New_York")
+        assertEquals(fallback, ValueSupport.zoneOr("not a zone", fallback))
+        assertEquals(fallback, ValueSupport.zoneOr("", fallback))
+        assertNull(ValueSupport.zoneOr(null, null))
+        assertEquals(ZoneId.of("Europe/London"), ValueSupport.zoneOr("Europe/London", fallback))
+    }
+
     @Test
     void normalizeTrimsValuesAndPreservesNullOrBlank() {
         assertEquals("KREWE_SHOPIFY", ValueSupport.normalize(" KREWE_SHOPIFY "))

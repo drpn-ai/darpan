@@ -1435,9 +1435,7 @@ class ConfigTransferImporter {
         automationsByAudit.each { String auditCode, List<String> automationIds ->
             def row = scoped(ctx, "darpan.audit.Audit").condition("auditCode", auditCode).list().find()
             if (row == null) return
-            Map audit = new LinkedHashMap(row.getMap())
-            // An audit never scheduled here runs in ITS tenant's zone, never the importing admin's active tenant's.
-            if (!text(audit.scheduleTimeZone)) audit.scheduleTimeZone = TenantAccessSupport.tenantTimeZoneFor(ec, tenantId).id
+            Map audit = row.getMap()
             Map schedule = AuditSchedule.scheduleOf(ec, audit)
             boolean off = scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationId", "in", automationIds).list()
                     .any { AuditSchedule.offSchedule(it.getMap(), schedule) }

@@ -28,10 +28,15 @@ class AuditSchedule {
 
     static final String DEFAULT_TIME = "06:00"
 
-    /** DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. */
+    /**
+     * DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. OC105
+     * (DAR-OPS-029 S29): an unscheduled audit's zone is ITS tenant's, never the signed-in user's active tenant's (a super
+     * admin importing into one tenant while "in" another); the active tenant answers only for a map that names no tenant.
+     */
     static Map scheduleOf(def ec, Map audit) {
+        String tenantId = normalize(audit.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         return [time    : normalize(audit.scheduleTime) ?: DEFAULT_TIME,
-                timeZone: normalize(audit.scheduleTimeZone) ?: AuditSettingsSupport.tenantZone(ec),
+                timeZone: normalize(audit.scheduleTimeZone) ?: TenantAccessSupport.tenantTimeZoneFor(ec, tenantId).id,
                 active  : audit.scheduleActive == "Y"]
     }
 

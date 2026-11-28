@@ -1564,6 +1564,30 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    /**
+     * OC105 (S29 F5): an audit never scheduled runs at the default time in ITS tenant's zone. The super admin importing is
+     * "in" OTHER, whose zone must never leak onto DST's audit.
+     */
+    @Test
+    void anUnscheduledAuditsAutomationRunsInItsOwnTenantsZoneNotTheAdminsActiveTenants() {
+        withAutomation {
+            linkChecks("XFER_AUTO")
+            upsert("darpan.auth.TenantSetting", [companyUserGroupId: OTHER, timeZone: "America/New_York"])
+            upsert("darpan.auth.TenantSetting", [companyUserGroupId: DST, timeZone: "Asia/Kolkata"])
+            try {
+                Map applied = applyPlan(DST, exportWhole(), [(AUTH_REF): "CREATE"])
+                assertNoErrors(applied)
+                def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", applied.result.idMap[AUTO_REF])
+                        .disableAuthz().useCache(false).one()
+                assertEquals(["N", "0 0 6 * * ?", "Asia/Kolkata"], [automation.isActive, automation.scheduleExpr, automation.windowTimeZone],
+                        "a new audit is off, at 06:00 in DST's own zone")
+            } finally {
+                linkChecks(null)
+                ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", "in", [OTHER, DST]).disableAuthz().deleteAll()
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     /** Points SRC's two checks at an automation (null unlinks them), as the audit schedule does. */

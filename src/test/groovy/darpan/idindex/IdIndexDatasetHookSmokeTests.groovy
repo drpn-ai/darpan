@@ -248,7 +248,7 @@ class IdIndexDatasetHookSmokeTests {
             if (connection != "conn-idx-drop" || ++batches != 2) return
             dropFailure = onOwnThread {
                 it.service.sync().name("${SERVICES}.drop#ConnectionKeptData".toString())
-                        .parameters([companyUserGroupId: A, sourceConfigIds: ["conn-idx-drop"]]).disableAuthz().call()
+                        .parameters([companyUserGroupId: A, sourceConfigIds: ["conn-idx-drop"], systemEnumIds: ["KC_ISO"]]).disableAuthz().call()
             }
         }
         Map out
@@ -361,7 +361,7 @@ class IdIndexDatasetHookSmokeTests {
     private Throwable drop(String tenant, String connection) {
         return onOwnThread {
             it.service.sync().name("${SERVICES}.drop#ConnectionKeptData".toString())
-                    .parameters([companyUserGroupId: tenant, sourceConfigIds: [connection]]).disableAuthz().call()
+                    .parameters([companyUserGroupId: tenant, sourceConfigIds: [connection], systemEnumIds: ["KC_ISO"]]).disableAuthz().call()
         }
     }
 

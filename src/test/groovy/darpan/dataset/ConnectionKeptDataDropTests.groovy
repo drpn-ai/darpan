@@ -49,7 +49,7 @@ class ConnectionKeptDataDropTests {
     @BeforeEach
     void seed() {
         ec.message.clearAll()
-        List<String> mine = ["DROP_A1", "DROP_A2", "DROP_B1"]
+        List<String> mine = ["DROP_A1", "DROP_A2", "DROP_B1", "DROP_A3"]
         ec.entity.find("darpan.idindex.RecordIdIndex").condition("rowKey", "like", "rk-%-DROP_%").deleteAll()
         ec.entity.find("darpan.idindex.RecordIdIndexDrop").condition("companyUserGroupId", "in", [A, B])
                 .condition("connectionId", "in", ["conn-1", "conn-2"]).deleteAll()
@@ -119,28 +119,42 @@ class ConnectionKeptDataDropTests {
         }
     }
 
+    /**
+     * Security review of OC232: config ids are per-entity sequences, so a NetSuite connection can carry the same id as a Shopify
+     * one. A drop names its systems and takes only theirs: the same tenant's same-id connection of another system keeps its copy.
+     */
+    @Test
+    void anotherSystemsConnectionWithTheSameIdKeepsItsData() {
+        keptCopy(A, "DROP_A3", "conn-1", "NETSUITE_SUITEQL")
+        Map out = drop(A, ["conn-1"])
+        assertEquals([], ec.message.errors)
+        assertEquals(1, out.datasetsDropped)
+        assertFalse(present(A, "DROP_A1"), "the Shopify copy goes")
+        assertTrue(present(A, "DROP_A3", "NETSUITE_SUITEQL"), "the NetSuite copy under the same connection id stays")
+    }
+
     // ---- helpers -------------------------------------------------------------------------------
 
     private def marker(String tenant, String connection) {
         return ec.entity.find("darpan.idindex.RecordIdIndexDrop").condition([companyUserGroupId: tenant, connectionId: connection]).useCache(false).one()
     }
 
-    private Map drop(String tenant, List<String> connections) {
-        return (Map) ec.service.sync().name(SERVICE).parameters([companyUserGroupId: tenant, sourceConfigIds: connections])
+    private Map drop(String tenant, List<String> connections, List<String> systems = ["SHOPIFY"]) {
+        return (Map) ec.service.sync().name(SERVICE).parameters([companyUserGroupId: tenant, sourceConfigIds: connections, systemEnumIds: systems])
                 .disableAuthz().call()
     }
 
-    private void keptCopy(String tenant, String datasetId, String connection) {
+    private void keptCopy(String tenant, String datasetId, String connection, String system = "SHOPIFY") {
         Timestamp now = ec.user.nowTimestamp
-        ec.entity.makeValue("darpan.dataset.Dataset").setAll([datasetId: datasetId, companyUserGroupId: tenant, systemEnumId: "SHOPIFY",
+        ec.entity.makeValue("darpan.dataset.Dataset").setAll([datasetId: datasetId, companyUserGroupId: tenant, systemEnumId: system,
                 sourceConfigId: connection, optionsHash: "h-${datasetId}".toString(), statusId: "DST_ACTIVE",
                 readRuleEnumId: "DRR_CHANGED_SINCE", idField: "id", stampField: "updatedAt", windowField: "createdAt"]).create()
         ec.entity.makeValue("darpan.dataset.DatasetRead").setAll([datasetId: datasetId, readSeqId: "000001", companyUserGroupId: tenant,
                 readKindEnumId: "DRK_FULL", statusId: "DRS_DONE", readAt: now]).create()
         ec.entity.makeValue("darpan.idindex.RecordIdIndexCursor").setAll([companyUserGroupId: tenant, datasetId: datasetId,
-                systemEnumId: "SHOPIFY", connectionId: connection, lastIndexedAt: now]).create()
+                systemEnumId: system, connectionId: connection, lastIndexedAt: now]).create()
         ec.entity.makeValue("darpan.idindex.RecordIdIndex").setAll([rowKey: "rk-${tenant}-${datasetId}".toString(), companyUserGroupId: tenant,
-                idNorm: "1001", idRaw: "1001", systemCode: "SHOPIFY", systemEnumId: "SHOPIFY", connectionId: connection, recordKind: "ORDER",
+                idNorm: "1001", idRaw: "1001", systemCode: system, systemEnumId: system, connectionId: connection, recordKind: "ORDER",
                 recordKey: "1001", fieldPath: "id", role: "OWN", lastSeenAt: now]).create()
         File dir = DatasetRefreshSupport.datasetDir(ec, tenant, datasetId)
         dir.mkdirs()
@@ -148,10 +162,10 @@ class ConnectionKeptDataDropTests {
     }
 
     /** True when ANY trace of the copy is left; asserted false only after a drop, so a partial drop fails too. */
-    private boolean present(String tenant, String datasetId) {
+    private boolean present(String tenant, String datasetId, String system = "SHOPIFY") {
         boolean dataset = ec.entity.find("darpan.dataset.Dataset").condition([companyUserGroupId: tenant, datasetId: datasetId]).useCache(false).count() > 0
         boolean reads = ec.entity.find("darpan.dataset.DatasetRead").condition([companyUserGroupId: tenant, datasetId: datasetId]).useCache(false).count() > 0
-        boolean cursor = ec.entity.find("darpan.idindex.RecordIdIndexCursor").condition([companyUserGroupId: tenant, datasetId: datasetId]).useCache(false).count() > 0
+        boolean cursor = ec.entity.find("darpan.idindex.RecordIdIndexCursor").condition([companyUserGroupId: tenant, datasetId: datasetId, systemEnumId: system]).useCache(false).count() > 0
         boolean index = ec.entity.find("darpan.idindex.RecordIdIndex").condition("rowKey", "rk-${tenant}-${datasetId}".toString()).useCache(false).count() > 0
         boolean folder = DatasetRefreshSupport.datasetDir(ec, tenant, datasetId).exists()
         boolean all = dataset && reads && cursor && index && folder

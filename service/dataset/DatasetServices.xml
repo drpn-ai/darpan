@@ -465,6 +465,11 @@
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="sourceConfigIds" type="List"><description>The connections (config ids) whose data goes. Empty does
                 nothing.</description></parameter>
+            <parameter name="systemEnumIds" type="List" required="true"><description>The connections' systems (the endpoints a
+                Dataset and an ID-index row record). Required: config ids come from per-entity sequences, so another system's
+                connection can carry the same id, and only these systems' kept data goes (security review of OC232). The
+                OC104 marker below is per connection id, so a same-id connection of another system skips indexing what it read
+                before the drop until its next read.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="datasetsDropped" type="Integer"/>
@@ -478,6 +483,7 @@
             <entity-find entity-name="darpan.dataset.Dataset" list="dropList" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="sourceConfigId" operator="in" from="sourceConfigIds"/>
+                <econdition field-name="systemEnumId" operator="in" from="systemEnumIds"/>
             </entity-find>
             <set field="busySince" from="ec.user.nowTimestamp.time - 6 * 3600000L"/>
             <set field="busy" from="dropList.find { it.refreshingSince != null &amp;&amp; it.refreshingSince.time &gt; busySince }"/>
@@ -502,14 +508,17 @@
             <entity-find-count entity-name="darpan.idindex.RecordIdIndex" count-field="indexRowsDropped">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+                <econdition field-name="systemEnumId" operator="in" from="systemEnumIds"/>
             </entity-find-count>
             <entity-delete-by-condition entity-name="darpan.idindex.RecordIdIndex">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+                <econdition field-name="systemEnumId" operator="in" from="systemEnumIds"/>
             </entity-delete-by-condition>
             <entity-delete-by-condition entity-name="darpan.idindex.RecordIdIndexCursor">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+                <econdition field-name="systemEnumId" operator="in" from="systemEnumIds"/>
             </entity-delete-by-condition>
 
             <set field="datasetIds" from="dropList*.datasetId"/>

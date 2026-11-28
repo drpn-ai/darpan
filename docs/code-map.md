@@ -162,7 +162,6 @@ client and the loop live in the optional `darpan-agent` component (`drpn-ai/darp
   migration is tenant-scope-filtered when a normal user context is active, so running it as a
   regular authenticated user silently creates nothing. It is idempotent: tenants that already have
   any `TenantChatSpace` row are skipped, so it is safe to invoke more than once.
-- Theme library (legacy backend screens only; see `docs/theme-library.md`): `theme-library/css/tokens.css`, `theme-library/css/components.css`, `theme-library/js/theme-runtime.js`, `theme-library/html/blocks.html`
 - Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark and Drools
   8.44.0.Final pins, `sparkJava21Opens` JVM flags, `unitTest`/`smokeTest`/`testAll`/`mysqlTest`
   pools, `generateApiContract`, `verifyOrganization`) — see `docs/runtime-baseline.md`

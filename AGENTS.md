@@ -16,7 +16,7 @@ they win where this file is silent.
 ## Scope and ownership
 - Keep changes in `runtime/component/darpan/**` unless the task names another component. Custom UI
   belongs in `darpan-ui` (tenant app) or `darpan-admin-ui` (operator app), never in backend
-  `screen/**`, `template/**` or `theme-library/**`.
+  `screen/**` or `template/**`.
 - Use generic, system-neutral names for entities, services and config.
 
 ## Services and XML

@@ -4,7 +4,6 @@ Welcome to the darpan wiki!
 
 - [code-map](code-map.md)
 - [runtime-baseline](runtime-baseline.md) — JDK 21 / Moqui 4 / Bitronix / Spark JVM flags
-- [theme-library](theme-library.md)
 - [repository-boundary](repository-boundary.md)
 - [tenancy-model](tenancy-model.md) — tenant scoping, entity filters, `TenantScopedFinder`
 - [crypt-key-rotation](crypt-key-rotation.md) — rotating `entity_ds_crypt_pass`

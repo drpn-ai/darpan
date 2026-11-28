@@ -36,7 +36,7 @@ description: Guide coding and verifying changes inside the Darpan Moqui componen
   `darpan-docker-config` entrypoints.
 - No secrets in logs, responses, commits or test fixtures.
 - Sanitize file names to `[A-Za-z0-9._-]`.
-- No new custom UI under backend `screen/**`, `template/**` or `theme-library/**`.
+- No new custom UI under backend `screen/**` or `template/**`.
 
 ## Failure handling
 - Test failure: find the root cause before changing code; do not weaken the test.

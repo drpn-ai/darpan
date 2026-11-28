@@ -1,5 +1,7 @@
 package darpan.facade.auth
 
+import darpan.reconciliation.support.FakeEntityFacade
+import darpan.reconciliation.support.FakeEntityFind
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.moqui.util.ContextStack
@@ -141,7 +143,7 @@ class CliAuthSupportTests {
         def first = ec(new RequestStub(headers: [login_key: CLI_KEY], session: session))
         assertNull(CliAuthSupport.revalidateCliWebSession(first))
 
-        first.entity.rows["darpan.auth.CliSession"][0].revokedDate = new Timestamp(System.currentTimeMillis() - 1000L)
+        first.entity.rows("darpan.auth.CliSession")[0].revokedDate = new Timestamp(System.currentTimeMillis() - 1000L)
         def later = ec(new RequestStub(session: session), [:], first.entity)   // JSESSIONID only, no key
         assertNotNull(CliAuthSupport.revalidateCliWebSession(later))
         assertTrue(session.invalidated, "the web session must be invalidated")
@@ -152,7 +154,7 @@ class CliAuthSupportTests {
     @DisplayName("revalidate: an expired key's marked session is refused")
     void revalidateExpiredKeyIsRefused() {
         def entity = new EntityStub()
-        entity.rows["moqui.security.UserLoginKey"][0].thruDate = new Timestamp(System.currentTimeMillis() - 1000L)
+        entity.rows("moqui.security.UserLoginKey")[0].thruDate = new Timestamp(System.currentTimeMillis() - 1000L)
         def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
         def stubEc = ec(new RequestStub(session: session), [:], entity)
         assertNotNull(CliAuthSupport.revalidateCliWebSession(stubEc))
@@ -163,7 +165,7 @@ class CliAuthSupportTests {
     @DisplayName("revalidate: a disabled user's marked session is refused")
     void revalidateDisabledUserIsRefused() {
         def entity = new EntityStub()
-        entity.rows["moqui.security.UserAccount"][0].disabled = "Y"
+        entity.rows("moqui.security.UserAccount")[0].disabled = "Y"
         def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
         def stubEc = ec(new RequestStub(session: session), [:], entity)
         assertNotNull(CliAuthSupport.revalidateCliWebSession(stubEc))
@@ -174,7 +176,7 @@ class CliAuthSupportTests {
     @DisplayName("DAR-BE-195: revalidate refuses a CLI session whose user is not a Darpan admin")
     void revalidateNonAdminIsRefused() {
         def entity = new EntityStub()
-        entity.rows["moqui.security.UserGroupMember"][0].userGroupId = "DARPAN_USER"
+        entity.rows("moqui.security.UserGroupMember")[0].userGroupId = "DARPAN_USER"
         def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
         def stubEc = ec(new RequestStub(session: session), [:], entity)
         assertEquals(CliAuthSupport.CLI_ACCESS_REFUSED, CliAuthSupport.revalidateCliWebSession(stubEc))
@@ -187,7 +189,7 @@ class CliAuthSupportTests {
         long now = System.currentTimeMillis()
         def entity = new EntityStub()
         def stubEc = ec(new RequestStub(), [:], entity)
-        Map member = entity.rows["moqui.security.UserGroupMember"][0]
+        Map member = entity.rows("moqui.security.UserGroupMember")[0]
         assertTrue(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"))
         member.thruDate = new Timestamp(now - 1000L)
         assertFalse(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"), "an ended membership")
@@ -241,30 +243,26 @@ class CliAuthSupportTests {
         void logoutLocal() { loggedOutLocal = true; userId = null }
     }
 
-    /** One live CLI session for CLI_KEY: unrevoked, key valid for a day, account enabled. */
-    static class EntityStub {
+    /** One live CLI session for CLI_KEY: unrevoked, key valid for a day, account enabled. Counts every find(). */
+    static class EntityStub extends FakeEntityFacade {
         int lookups = 0
-        Map<String, List<Map>> rows = [
-                "darpan.auth.CliSession"     : [[loginKeyHash: "hash:${CLI_KEY}".toString(), userId: "CLI_USER", revokedDate: null]],
-                "moqui.security.UserLoginKey": [[loginKey: "hash:${CLI_KEY}".toString(), userId: "CLI_USER",
-                                                 thruDate: new Timestamp(System.currentTimeMillis() + 86_400_000L)]],
-                "moqui.security.UserAccount" : [[userId: "CLI_USER", username: "cli.user", disabled: "N"]],
-                "moqui.security.UserGroupMember": [[userId: "CLI_USER", userGroupId: "DARPAN_ADMIN",
-                                                    fromDate: new Timestamp(System.currentTimeMillis() - 86_400_000L), thruDate: null]],
-        ]
-        FinderStub find(String entityName) { lookups++; new FinderStub(rows: rows[entityName] ?: []) }
-    }
 
-    static class FinderStub {
-        List<Map> rows = []
-        Map<String, Object> conditions = [:]
-        FinderStub disableAuthz() { this }
-        FinderStub useCache(boolean ignored) { this }
-        FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        private List<Map> matches() { rows.findAll { Map row -> conditions.every { k, v -> row[k]?.toString() == v?.toString() } } }
-        long count() { matches().size() }
-        Map one() { matches() ? matches()[0] : null }
-        List<Map> list() { matches() }
+        EntityStub() {
+            setTables([
+                    "darpan.auth.CliSession"     : [[loginKeyHash: "hash:${CLI_KEY}".toString(), userId: "CLI_USER", revokedDate: null] as Map],
+                    "moqui.security.UserLoginKey": [[loginKey: "hash:${CLI_KEY}".toString(), userId: "CLI_USER",
+                                                     thruDate: new Timestamp(System.currentTimeMillis() + 86_400_000L)] as Map],
+                    "moqui.security.UserAccount" : [[userId: "CLI_USER", username: "cli.user", disabled: "N"] as Map],
+                    "moqui.security.UserGroupMember": [[userId: "CLI_USER", userGroupId: "DARPAN_ADMIN",
+                                                        fromDate: new Timestamp(System.currentTimeMillis() - 86_400_000L), thruDate: null] as Map],
+            ])
+        }
+
+        @Override
+        FakeEntityFind find(String entityName) {
+            lookups++
+            return super.find(entityName)
+        }
     }
 
     static class RequestStub {

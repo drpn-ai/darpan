@@ -73,8 +73,11 @@ class DataDefinedExtract {
         File outputDirectory = DataManagerSupport.resolveDirectoryFile(ec, outputBaseLocation, true)
         File workFile = outputDirectory != null ? File.createTempFile("data-defined-extract-", ".partial", outputDirectory)
                 : File.createTempFile("data-defined-extract-", ".partial")
-        DataSourceRunner runner = new DataSourceRunner(definition, transportFor(prepared))
+        DataSourceRunner runner = null
         try {
+            // OC184: built inside the try, so a connection that cannot be built (no host, no credentials) is a read failure:
+            // the work file goes, and the errors/dataAvailable contract holds.
+            runner = new DataSourceRunner(definition, transportFor(prepared))
             Map result
             int written = 0
             workFile.withWriter("UTF-8") { Writer w ->
@@ -117,7 +120,7 @@ class DataDefinedExtract {
         } finally {
             if (workFile.exists()) workFile.delete()
             // The excluded-records spill holds customer records: gone whether the sidecar was written or not.
-            ExcludedRecordsSidecar.discard(runner.excludedCollector)
+            if (runner != null) ExcludedRecordsSidecar.discard(runner.excludedCollector)
         }
     }
 
@@ -133,9 +136,10 @@ class DataDefinedExtract {
         Map definition = (Map) prepared.definition
         Map request = (Map) prepared.request
         if (request.mode != "ids") { context.put("errors", ["An in-memory read is by lookup keys only."]); return }
-        DataSourceRunner runner = new DataSourceRunner(definition, transportFor(prepared))
+        DataSourceRunner runner = null
         List<Map> collected = []
         try {
+            runner = new DataSourceRunner(definition, transportFor(prepared))
             Map result = runner.run(request, { List<Map> batch ->
                 if (collected.size() + batch.size() > IN_MEMORY_MAX_RECORDS) {
                     throw new DataSourceCallException("TOO_MANY_RECORDS", "An in-memory read holds at most ${IN_MEMORY_MAX_RECORDS} records.".toString())
@@ -155,7 +159,7 @@ class DataDefinedExtract {
             context.put("records", [])
         } finally {
             // The excluded-records spill holds customer records: gone whether or not anything read it.
-            ExcludedRecordsSidecar.discard(runner.excludedCollector)
+            if (runner != null) ExcludedRecordsSidecar.discard(runner.excludedCollector)
         }
     }
 

@@ -415,4 +415,25 @@ class AgentReadFacadeSmokeTests {
         assertTrue(out.hits instanceof List)
         assertTrue((out.hits as List).size() <= 3)
     }
+
+    /**
+     * OC184 (DAR-OPS-029 S15a). The transport is built inside the read's own handling: a connection that cannot be built (no
+     * host, no credentials) is a read failure reported as a code, never an exception whose text reaches the caller.
+     */
+    @Test
+    void "a connection that cannot be built is a read failure reported as a code"() {
+        def previous = darpan.datasource.DataDefinedExtract.transportFactory
+        darpan.datasource.DataDefinedExtract.transportFactory = { Map d, Map conn ->
+            throw new IllegalArgumentException("The connection has no baseUrl for ann@example.com")
+        }
+        try {
+            Map out = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D1"])
+            String text = out.errorText as String
+            assertTrue(out.hadError as boolean)
+            assertTrue(text.contains("read failed"), text)
+            assertFalse(text.contains("ann@example.com"), text)
+        } finally {
+            darpan.datasource.DataDefinedExtract.transportFactory = previous
+        }
+    }
 }

@@ -111,33 +111,14 @@ class DatasetServicesTests {
     void tenantBCannotSeeOrServeTenantAsDataset() {
         Map opts = [kind: "tenant-case"]
         String idA = call("store#Dataset", base("shared-conn", opts)).out.datasetId
-        insert("darpan.dataset.DatasetRead", [datasetId: idA, readSeqId: "1", companyUserGroupId: A, readKindEnumId: "DRK_FULL", statusId: "DRS_DONE", recordsRead: 3])
-        Map own = call("get#Dataset", [datasetId: idA])
-        assertEquals([], own.errors)
-        assertEquals(idA, own.out.dataset.datasetId)
-        assertEquals(1, (own.out.reads as List).size())
+        assertEquals(idA, call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "shared-conn", options: opts]).out.dataset.datasetId)
 
         actAs(EDITOR_USERNAME, B)
-        assertTrue(call("get#Dataset", [datasetId: idA]).errors.any { it.contains("Dataset ${idA} does not exist") })
         assertNull(call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "shared-conn", options: opts]).out.dataset)
         String idB = call("store#Dataset", base("shared-conn", opts)).out.datasetId
         assertNotEquals(idA, idB)
         assertEquals(B, find("darpan.dataset.Dataset", [datasetId: idB]).companyUserGroupId)
         assertEquals(idB, call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "shared-conn", options: opts]).out.dataset.datasetId)
-        assertEquals([], call("get#Dataset", [datasetId: idB]).out.reads)
-    }
-
-    @Test
-    void getReturnsOnlyTheLastTenReads() {
-        String id = call("store#Dataset", base("conn-5", [kind: "reads"])).out.datasetId
-        (1..12).each { int n ->
-            insert("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: String.format("%03d", n), companyUserGroupId: A,
-                    readKindEnumId: "DRK_INCREMENTAL", statusId: "DRS_DONE", recordsRead: n])
-        }
-        List reads = call("get#Dataset", [datasetId: id]).out.reads as List
-        assertEquals(10, reads.size())
-        assertEquals("012", reads[0].readSeqId)
-        assertEquals("003", reads[9].readSeqId)
     }
 
     /**

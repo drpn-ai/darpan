@@ -120,33 +120,6 @@
         </actions>
     </service>
 
-    <service verb="get" noun="Dataset" allow-remote="false">
-        <description>One of the active tenant's datasets and its last ten reads, newest first. Another tenant's datasetId does not exist.</description>
-        <in-parameters>
-            <parameter name="datasetId" required="true"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="dataset" type="Map"/>
-            <parameter name="reads" type="List"/>
-        </out-parameters>
-        <actions>
-            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
-            <entity-find entity-name="darpan.dataset.Dataset" list="datasetList">
-                <econdition field-name="datasetId" from="datasetId"/>
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-            </entity-find>
-            <if condition="!tenantId || !datasetList">
-                <return error="true" message="Dataset ${datasetId} does not exist"/></if>
-            <set field="dataset" from="datasetList[0].getMap()"/>
-            <entity-find entity-name="darpan.dataset.DatasetRead" list="readList" limit="10">
-                <econdition field-name="datasetId" from="datasetId"/>
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-                <order-by field-name="-readSeqId"/>
-            </entity-find>
-            <set field="reads" from="readList.collect { it.getMap() }"/>
-        </actions>
-    </service>
-
     <service verb="find" noun="ServingDataset" allow-remote="false">
         <description>The active tenant's ACTIVE dataset for (system, connection, options), or null: a paused dataset, or one of
             another tenant, does not serve. The active tenant is the user's, or on a scheduled run (no user) the tenant

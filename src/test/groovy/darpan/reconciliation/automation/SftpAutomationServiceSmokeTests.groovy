@@ -1,6 +1,8 @@
 package darpan.reconciliation.automation
 
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -107,6 +109,7 @@ class SftpAutomationServiceSmokeTests {
         assertEquals(1, diffDocument.summary.onlyInFile2Count)
         assertEquals(2, diffDocument.summary.missingObjectDifferenceCount)
         assertEquals(2, diffDocument.summary.ruleDifferenceCount)
+        assertEquals(0, diffDocument.summary.duplicateDifferenceCount, "OC118: the summary carries the duplicate count, so the total is checkable")
 
         List<Map<String, Object>> differences = ((List) diffDocument.differences).collect { it as Map<String, Object> }
         assertTrue(differences.any { Map<String, Object> row -> row.diffType == "MISSING_IN_FILE_2" && row.primaryId == "P300" })
@@ -166,6 +169,30 @@ class SftpAutomationServiceSmokeTests {
             assertFalse(sftpEnvironment.readFile("shopify.test", 22, "/incoming/products-1.json") != null, "file1 was archived first")
         } finally {
             ec.message.clearErrors()
+        }
+    }
+
+    /** OC119 (DAR-OPS-029 S07b). A result that cannot be uploaded says so in Darpan's alerts room; the run still ran. */
+    @Test
+    void aFailedResultUploadPostsOneAlertLineAndTheRunStillReadsComplete() {
+        sftpEnvironment.putFile("shopify.test", 22, "/incoming/products-1.json", readFixtureText("data/test/test-products-1.json"), 2000L)
+        sftpEnvironment.putFile("oms.test", 22, "/incoming/products-2.json", readFixtureText("data/test/test-products-2.json"), 1000L)
+        sftpEnvironment.uploadFailsOn << "shopify.test"
+        List<String> alerts = []
+        DarpanSettings.resetForTests()
+        DarpanSettings.rowLoader = { -> [(ErrorChatSupport.WEBHOOK_SETTING): [settingValue: "https://chat.googleapis.com/v1/spaces/ALERTS/messages"]] as Map<String, Map> }
+        ErrorChatSupport.postHook = { String url, Map payload -> alerts << (payload.text as String); return [ok: true, statusCode: 200] }
+        try {
+            Map<String, Object> result = pollProducts("smoke-upload")
+            assertFalse(ec.message.hasError(), ec.message.errorsString)
+            assertTrue(result.dataAvailable as Boolean, "the reconciliation ran")
+            assertNotNull(result.diffFileName)
+            assertEquals(1, alerts.size(), "one alerts-room line: ${alerts}")
+            assertTrue(alerts[0].contains(result.diffFileName as String) && alerts[0].contains("shopify.test"), alerts[0])
+            assertFalse(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/${result.diffFileName}"))
+        } finally {
+            DarpanSettings.resetForTests()
+            ErrorChatSupport.resetForTests()
         }
     }
 
@@ -341,11 +368,7 @@ class SftpAutomationServiceSmokeTests {
         def server = findSftpServer("GORJANA_TEST_SFTP")
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException) {
-            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                    runScopeEnumId      : "DARPAN_SFTP_TENANT",
-                    runTenantUserGroupId: "KREWE",
-                    allowAdminSftp      : false
-            ], "file1")
+            SftpAutomationSupport.requireSftpServerAccess(ec, server, [runTenantUserGroupId: "KREWE"], "file1")
         }
 
         assertTrue(error.message.contains("GORJANA_TEST_SFTP"), error.message)
@@ -357,11 +380,7 @@ class SftpAutomationServiceSmokeTests {
         def server = findSftpServer("ADMIN_TEST_SFTP")
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException) {
-            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                    runScopeEnumId      : "DARPAN_SFTP_TENANT",
-                    runTenantUserGroupId: "KREWE",
-                    allowAdminSftp      : false
-            ], "file1")
+            SftpAutomationSupport.requireSftpServerAccess(ec, server, [runTenantUserGroupId: "KREWE"], "file1")
         }
 
         assertTrue(error.message.contains("Admin SFTP Server ADMIN_TEST_SFTP"), error.message)
@@ -372,33 +391,7 @@ class SftpAutomationServiceSmokeTests {
     void tenantScopedAutomationAllowsTenantGroupSftpServer() {
         def server = findSftpServer("SHARED_TEST_SFTP")
 
-        SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                runScopeEnumId      : "DARPAN_SFTP_TENANT",
-                runTenantUserGroupId: "KREWE",
-                allowAdminSftp      : false
-        ], "file1")
-
-        assertFalse(ec.message.hasError(), ec.message.errorsString)
-    }
-
-    @Test
-    void adminScopedAutomationRequiresExplicitAdminSftpOptIn() {
-        def server = findSftpServer("ADMIN_TEST_SFTP")
-
-        IllegalArgumentException missingOptIn = assertThrows(IllegalArgumentException) {
-            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                    runScopeEnumId      : "DARPAN_SFTP_ADMIN",
-                    runTenantUserGroupId: null,
-                    allowAdminSftp      : false
-            ], "file1")
-        }
-        assertTrue(missingOptIn.message.contains("allowAdminSftp must be true"), missingOptIn.message)
-
-        SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                runScopeEnumId      : "DARPAN_SFTP_ADMIN",
-                runTenantUserGroupId: null,
-                allowAdminSftp      : true
-        ], "file1")
+        SftpAutomationSupport.requireSftpServerAccess(ec, server, [runTenantUserGroupId: "KREWE"], "file1")
 
         assertFalse(ec.message.hasError(), ec.message.errorsString)
     }

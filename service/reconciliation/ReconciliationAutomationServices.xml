@@ -49,14 +49,8 @@
             <parameter name="file2RemotePath">
                 <description>Remote path for file 2 (required if only referencing a server).</description>
             </parameter>
-            <parameter name="sftpRunScopeEnumId" default-value="DARPAN_SFTP_TENANT">
-                <description>Automation SFTP access scope. Use DARPAN_SFTP_TENANT for tenant jobs or DARPAN_SFTP_ADMIN for platform/admin jobs.</description>
-            </parameter>
             <parameter name="runTenantUserGroupId">
                 <description>Tenant user-group id for scheduled tenant jobs. Defaults to the active tenant for authenticated runs.</description>
-            </parameter>
-            <parameter name="allowAdminSftp" type="Boolean" default-value="false">
-                <description>Explicit opt-in required before an admin/platform SFTP server may be used by an admin-scoped job.</description>
             </parameter>
             <parameter name="archiveSubdir" default-value="archive">
                 <description>Folder name (under the remote/local directory) where consumed files will be moved.</description>

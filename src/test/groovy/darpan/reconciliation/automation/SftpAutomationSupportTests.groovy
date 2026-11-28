@@ -119,8 +119,8 @@ class SftpAutomationSupportTests {
         assertEquals("/incoming/shopify", call.params.file1RemotePath)
         assertEquals("/incoming/netsuite", call.params.file2RemotePath)
         assertEquals("TENANT_A", call.params.runTenantUserGroupId)
-        assertEquals(SftpAutomationSupport.SFTP_SCOPE_TENANT, call.params.sftpRunScopeEnumId)
-        assertFalse(call.params.allowAdminSftp)
+        assertFalse(call.params.containsKey("sftpRunScopeEnumId") || call.params.containsKey("allowAdminSftp"),
+                "every SFTP run is tenant-scoped; no admin run scope travels")
         assertEquals(10, call.params.pollIntervalMinutes)
         assertEquals(60, call.params.pollTimeoutMinutes)
 
@@ -316,33 +316,6 @@ class SftpAutomationSupportTests {
         assertEquals("RUN_RESULT_1", execution.reconciliationRunResultId)
         assertTrue(execution.safeMetadataJson.contains("No file found"))
         assertTrue(execution.safeMetadataJson.contains("\"pollAttemptCount\":7"))
-    }
-
-    @Test
-    void sftpFileAutomationPassesAdminScopeOnlyWhenExplicitlyRequested() {
-        FakeEc ec = fakeEc()
-        seedSftpAutomation(ec)
-        ec.service.nextResult = [
-                dataAvailable     : false,
-                statusMessage     : "No files found to reconcile",
-                validationErrors  : [],
-                processingWarnings: [],
-        ]
-        SftpAutomationSupport.setRetrySleeper { long ignored -> }
-
-        try {
-            SftpAutomationSupport.runSftpFileAutomation(ec, [
-                    automationId       : "AUTO_SFTP",
-                    sftpRunScopeEnumId : SftpAutomationSupport.SFTP_SCOPE_ADMIN,
-                    allowAdminSftp     : true,
-            ])
-        } finally {
-            SftpAutomationSupport.resetRetrySleeper()
-        }
-
-        FakeServiceCall call = ec.service.calls[0]
-        assertEquals(SftpAutomationSupport.SFTP_SCOPE_ADMIN, call.params.sftpRunScopeEnumId)
-        assertTrue(call.params.allowAdminSftp)
     }
 
     @Test
@@ -616,6 +589,34 @@ class SftpAutomationSupportTests {
         assertNotNull(runResults[0].notifiedDate)
         assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                 "the alert's won claim is what purges the subscription — never a purge ahead of it")
+    }
+
+    /**
+     * OC117 (DAR-OPS-029 S07b). A run the poll service failed is told by the service's error, not by the first line of the poll's
+     * log ("10:00:00 Starting SFTP poll ..."), on the run result, the execution row and Darpan's card; the log stays in metadata.
+     */
+    @Test
+    void aServiceErrorRunIsToldByTheErrorItselfNotByThePollLog() {
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        String error = "Could not archive file2 /incoming/netsuite/b.csv (sftp://source-b:22/incoming/netsuite): denied. Nothing was reconciled."
+        ec.service.nextResult = [dataAvailable: false, validationErrors: [], processingWarnings: [],
+                                 statusMessage: "10:00:00 Starting SFTP poll for RuleSet RS_ORDER\n10:00:01 Connecting to SFTP\nResult: " + error]
+        ec.service.onPollCall = { ec.message.addError(error) }
+        List<Map> cards = captureErrorCards()
+        Map result
+        try {
+            result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            AutomationExecutionSupport.resetForTests()
+            darpan.ops.ErrorChatSupport.resetForTests()
+        }
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+        assertEquals(error, execution.errorMessage)
+        assertTrue((execution.safeMetadataJson as String).contains("Starting SFTP poll"), "the log stays in the metadata")
+        assertEquals(error, ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0].errorMessage)
+        assertEquals(error, cards[0].errorFirstLine)
     }
 
     @Test
@@ -1346,8 +1347,11 @@ class SftpAutomationSupportTests {
             return error
         }
 
-        void addError(String ignored) {
+        List<String> errors = []
+
+        void addError(String message) {
             error = true
+            errors << message
         }
     }
 }

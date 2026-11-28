@@ -68,7 +68,7 @@ class SftpAutomationSupport {
         // Read the saved key fresh, never from the row the caller loaded: a run connects to one server more than once
         // (download, then the result upload), and a row read before the first connection saved the key would trust on
         // first use again on the second (review of DAR-BE-082).
-        def row = serverId ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
+        def row = serverId ? TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
                 "DAR-BE-082: the saved key of the server this run connects to (the run already holds that server)")
                 .condition("sftpServerId", serverId).useCache(false).one() : null
         String saved = (row?.hostKeyFingerprint ?: server?.hostKeyFingerprint) ?: null
@@ -78,7 +78,7 @@ class SftpAutomationSupport {
         if (saved || !seen || row == null) return
         // Save only while no key is saved, under a row lock: another run may have saved one since the read above (two
         // runs connecting at once). If it did, this connection's key must equal it, or it fails closed (review).
-        def locked = darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
+        def locked = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
                 "DAR-BE-082: save the key of the server this run just connected to, if none was saved meanwhile")
                 .condition("sftpServerId", serverId).forUpdate(true).useCache(false).one()
         if (locked == null) return
@@ -116,10 +116,8 @@ class SftpAutomationSupport {
 
     /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
     static void resetForTests() {
-        try {
-            resetClientFactory()
-            resetRetrySleeper()
-        } catch (Throwable ignored) { }
+        resetClientFactory()
+        resetRetrySleeper()
     }
 
     static String resolveDefaultOutputLocation(def ec, Object runId, Object timestamp) {
@@ -127,15 +125,11 @@ class SftpAutomationSupport {
     }
 
     /**
-     * Entry point for SFTP-file automations, reached both from {@code run#SftpFileAutomation} (which
-     * calls this directly, NOT through {@code execute#Automation}) and from the API runner's SFTP
-     * dispatch.
+     * Entry point for SFTP-file automations: {@code execute#Automation} dispatches an AUT_IN_SFTP_FILES automation here.
      *
-     * <p>Same defect as the API path (UAT 2026-07-31): {@code run#SftpFileAutomation} is
-     * {@code authenticate="anonymous-all"}, so the {@code resolveRunScope} default below finds no
-     * active tenant and the run dies with "runTenantUserGroupId is required for tenant-scoped SFTP
-     * automation". Publish the automation's own asserted tenant before any of that runs. Nesting is
-     * safe — when the API runner delegates here it has already published the same tenant.</p>
+     * <p>{@code execute#Automation} is {@code authenticate="anonymous-all"}, so a scheduled run has no active tenant and
+     * {@code resolveRunScope} would die with "runTenantUserGroupId is required for tenant-scoped SFTP automation" (UAT
+     * 2026-07-31). The automation's own asserted tenant is published before any of that runs.</p>
      */
     static Map<String, Object> runSftpFileAutomation(def ec, Map params) {
         Map input = params ?: [:]
@@ -187,6 +181,7 @@ class SftpAutomationSupport {
             Map<String, Object> pollParams = buildSftpPollParameters(automation, file1Source, file2Source, input)
 
             boolean hadMessageErrors = hasMessageErrors(ec)
+            int errorsBefore = messageErrors(ec).size()
             // Task 2c/2d: heartbeat after every poll attempt. This is the SFTP path's phase boundary and
             // it matters more here than anywhere on the API side — a poll runs pollTimeoutMinutes (60 by
             // default, operator-configurable) of attempt/sleep cycles, and the row minted above is now
@@ -222,7 +217,10 @@ class SftpAutomationSupport {
 
             String resultDataManagerPath = outputProduced ?
                     normalizeDataManagerPath(ec, pollResult.diffLocation ?: pollResult.diffFileName) : null
-            String failureReason = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
+            // OC117: a run the poll service failed is told by the service's own error; statusMessage is the poll's whole log
+            // (it stays in safeMetadataJson), whose first line ("10:00:00 Starting SFTP poll ...") says nothing.
+            List<String> serviceErrors = serviceReportedError ? messageErrors(ec).drop(errorsBefore) : []
+            String failureReason = normalize(serviceErrors.join("; ")) ?: normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
             // DAR-BE-015: a run whose rules failed is told (to Darpan, and in the row the daily error email reads) by the rule's error.
             String errorReason = ruleExecutionFailed ? (AutomationExecutionSupport.ruleFailureReason(pollResult) ?: failureReason) : failureReason
             Timestamp completedTimestamp = nowTimestamp(ec)
@@ -262,7 +260,6 @@ class SftpAutomationSupport {
                             mode                 : "SFTP_FILES",
                             dataAvailable        : dataAvailable,
                             statusMessage        : pollResult.statusMessage,
-                            sftpRunScopeEnumId   : pollParams.sftpRunScopeEnumId,
                             runTenantUserGroupId : pollParams.runTenantUserGroupId,
                             archiveSubdir        : pollParams.archiveSubdir,
                             file1Source          : pollResult.file1Source,
@@ -411,7 +408,7 @@ class SftpAutomationSupport {
      * for why a cancelled run is silent rather than alerting.</p>
      *
      * <p>Returns instead of re-throwing, unlike this runner's failure path: the cancel is the outcome the
-     * operator requested, not a crash, and propagating it would make {@code run#SftpFileAutomation}
+     * operator requested, not a crash, and propagating it would make {@code execute#Automation}
      * report their own stop as a service error. Mirrors runSavedRunDiff.groovy:1059-1064.</p>
      */
     private static Map<String, Object> cancelSftpAutomationRun(def ec, def automation, def execution,
@@ -460,29 +457,16 @@ class SftpAutomationSupport {
         TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
     }
 
-    static Map<String, Object> resolveRunScope(def ec, Object rawRunScopeEnumId, Object rawRunTenantUserGroupId,
-            Object rawAllowAdminSftp) {
-        String runScopeEnumId = normalize(rawRunScopeEnumId) ?: SFTP_SCOPE_TENANT
-        if (![SFTP_SCOPE_TENANT, SFTP_SCOPE_ADMIN].contains(runScopeEnumId)) {
-            throw new IllegalArgumentException("sftpRunScopeEnumId must be ${SFTP_SCOPE_TENANT} or ${SFTP_SCOPE_ADMIN}")
-        }
-
-        String runTenantUserGroupId = normalize(rawRunTenantUserGroupId)
-        if (!runTenantUserGroupId && runScopeEnumId == SFTP_SCOPE_TENANT) {
-            runTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        }
-
-        if (runScopeEnumId == SFTP_SCOPE_TENANT && !runTenantUserGroupId) {
+    /**
+     * The tenant an SFTP run reads for: the one given, else the active tenant. Every SFTP run is tenant-scoped (DAR-OPS-029
+     * S07b: the admin run scope had no caller), so an admin server, or another tenant's, is refused by requireSftpServerAccess.
+     */
+    static Map<String, Object> resolveRunScope(def ec, Object rawRunTenantUserGroupId) {
+        String runTenantUserGroupId = normalize(rawRunTenantUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!runTenantUserGroupId) {
             throw new IllegalArgumentException("runTenantUserGroupId is required for tenant-scoped SFTP automation")
         }
-
-        boolean allowAdminSftp = rawAllowAdminSftp == Boolean.TRUE ||
-                ["Y", "true", "TRUE", "yes", "YES"].contains(normalize(rawAllowAdminSftp))
-        return [
-                runScopeEnumId      : runScopeEnumId,
-                runTenantUserGroupId: runTenantUserGroupId,
-                allowAdminSftp      : allowAdminSftp,
-        ]
+        return [runTenantUserGroupId: runTenantUserGroupId] as Map<String, Object>
     }
 
     static Object loadSftpServerForRun(def ec, Object rawSftpServerId, Map<String, Object> runScope, String label) {
@@ -503,18 +487,7 @@ class SftpAutomationSupport {
     static void requireSftpServerAccess(def ec, def server, Map<String, Object> runScope, String label) {
         String sftpServerId = normalize(readField(server, "sftpServerId"))
         String serverScopeEnumId = resolveServerScopeEnumId(server)
-        String runScopeEnumId = normalize(runScope?.runScopeEnumId) ?: SFTP_SCOPE_TENANT
         String runTenantUserGroupId = normalize(runScope?.runTenantUserGroupId)
-
-        if (runScopeEnumId == SFTP_SCOPE_ADMIN) {
-            if (serverScopeEnumId != SFTP_SCOPE_ADMIN) {
-                throw new IllegalArgumentException("SFTP Server ${sftpServerId} is not an admin SFTP server for ${label}")
-            }
-            if (runScope?.allowAdminSftp != true) {
-                throw new IllegalArgumentException("allowAdminSftp must be true to use admin SFTP Server ${sftpServerId} for ${label}")
-            }
-            return
-        }
 
         if (serverScopeEnumId == SFTP_SCOPE_ADMIN) {
             throw new IllegalArgumentException("Admin SFTP Server ${sftpServerId} is not available to tenant-scoped automation for ${label}")
@@ -616,9 +589,7 @@ class SftpAutomationSupport {
                 file2SchemaFileName      : normalize(readField(file2Source, "schemaFileName")),
                 file1RemotePath          : normalize(readField(file1Source, "remotePathTemplate")),
                 file2RemotePath          : normalize(readField(file2Source, "remotePathTemplate")),
-                sftpRunScopeEnumId       : normalize(input.sftpRunScopeEnumId) ?: SFTP_SCOPE_TENANT,
                 runTenantUserGroupId     : runTenantUserGroupId,
-                allowAdminSftp           : toBoolean(input.allowAdminSftp),
                 archiveSubdir            : normalize(input.archiveSubdir) ?: "archive",
                 hasHeader                : input.containsKey("hasHeader") ? input.hasHeader : Boolean.TRUE,
                 stageLocation            : normalize(input.stageLocation) ?: "runtime://tmp/reconciliation/automation/input",
@@ -771,11 +742,12 @@ class SftpAutomationSupport {
     }
 
     protected static boolean hasMessageErrors(def ec) {
-        try {
-            return ec?.message?.hasError() == true
-        } catch (Exception ignored) {
-            return false
-        }
+        return ec?.message?.hasError() == true
+    }
+
+    /** The message facade's errors, oldest first. */
+    private static List<String> messageErrors(def ec) {
+        return ((ec?.message?.errors ?: []) as List).collect { it as String }
     }
 
     protected static Integer positiveInteger(Object rawValue) {
@@ -786,10 +758,6 @@ class SftpAutomationSupport {
     protected static Long positiveLong(Object rawValue) {
         Long value = normalizeLong(rawValue)
         return value != null && value > 0L ? value : null
-    }
-
-    protected static boolean toBoolean(Object rawValue) {
-        return rawValue == Boolean.TRUE || ["Y", "true", "TRUE", "yes", "YES"].contains(normalize(rawValue))
     }
 
 }

@@ -1,3 +1,5 @@
+import darpan.common.SecretRedactor
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import org.slf4j.LoggerFactory
@@ -118,11 +120,7 @@ def selectSftpCandidateFile = { client, String basePath, String label, String ar
             if (pathVal.endsWith("/${archiveFolderName}")) return false
         }
 
-        def isFileFlag = entry.isFile == true
-        def isDirFlag = (entry.isDir == true) || (entry.isDirectory == true)
-        if (!isFileFlag) return false
-        if (isDirFlag) return false
-        return true
+        return entry.isFile == true
     }
 
     if (!entries) {
@@ -147,7 +145,7 @@ String compareScopeIdValue = normalize(compareScopeId)
 String mappingIdValue = normalize(reconciliationMappingId)
 String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
 String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
-Map<String, Object> sftpRunScope = SftpAutomationSupport.resolveRunScope(ec, sftpRunScopeEnumId, runTenantUserGroupId, allowAdminSftp)
+Map<String, Object> sftpRunScope = SftpAutomationSupport.resolveRunScope(ec, runTenantUserGroupId)
 
 if (!ruleSetIdValue && !mappingIdValue) {
     throw new IllegalArgumentException("Either ruleSetId or reconciliationMappingId is required")
@@ -441,7 +439,9 @@ if (ruleSetIdValue) {
             onlyInFile1Count            : onlyInFile1Count,
             onlyInFile2Count            : onlyInFile2Count,
             missingObjectDifferenceCount: reconcileResult.missingObjectDifferenceCount,
-            ruleDifferenceCount         : reconcileResult.ruleDifferenceCount
+            ruleDifferenceCount         : reconcileResult.ruleDifferenceCount,
+            // OC118: the rows under a repeated key, so totalDifferences = only1 + only2 + rule + duplicate is checkable here too
+            duplicateDifferenceCount    : reconcileResult.duplicateDifferenceCount
     ]
     Map outputInfo = ReconciliationServices.writeDiffDatasetOutput(
             ec,
@@ -500,56 +500,39 @@ statusMessage = "${reconciliationType ?: 'Reconciliation'} complete"
 logger.info("SFTP reconciliation done: run=${reconciliationRunId ?: 'ad-hoc'} type=${reconciliationType} diff=${diffFileName} dataAvailable=${dataAvailable}")
 logMsg("Reconciliation complete. Diff: ${diffFileName}. Counts: Only1=${onlyInFile1Count}, Only2=${onlyInFile2Count}, Diff=${differenceCount}")
 
-// Upload Result to SFTP (Server 1)
-try {
-    def resultFile = null
-    if (diffLocation) {
-        resultFile = ec.resource.getLocationReference(diffLocation)
-    } else {
-         resultFile = ec.resource.getLocationReference(outputLoc + "/" + diffFileName)
-    }
-
-    if (resultFile && (!resultFile.supportsExists() || resultFile.getExists())) {
-        def server = file1Prep.server ?: SftpAutomationSupport.loadSftpServerForRun(ec, file1SftpServerId, sftpRunScope, "result upload")
-        if (server) {
-            def hostInfo = resolveHostAndPort(server.host, server.port, "Server ${file1SftpServerId}")
-            def cleanHost = hostInfo.host
-            def cleanPort = hostInfo.port
-            def remoteResultDir = normalizePath(remoteUploadPath ?: (outputLocation ? (file1BasePathUsed ?: hostInfo.basePath) : defaultRemoteUploadPath)) ?: "/"
-            def cleanUser = normalize(server.username)
-            def cleanPass = normalize(server.password)
-            
-            def sftpClient = SftpAutomationSupport.createClient((String) cleanHost, (String) cleanUser, (int) cleanPort)
-            
-            if (cleanPass) sftpClient.password((String) cleanPass)
-            if (server.privateKey) sftpClient.privateKey((String) server.privateKey)
-            
-            logMsg("Uploading result ${diffFileName} to SFTP Server 1 (${cleanHost}:${cleanPort}) at ${remoteResultDir} ...")
-            try {
-                SftpAutomationSupport.connectPinned(ec, sftpClient, server)
-                try { sftpClient.mkdirs(remoteResultDir) } catch (Exception ignored) {}
-                String remoteResultPath = (remoteResultDir.endsWith("/") ? remoteResultDir + diffFileName : remoteResultDir + "/" + diffFileName)
-                
-                // Read local file stream
-                InputStream resultStream = resultFile.openStream()
-                try {
-                    sftpClient.put(remoteResultDir, diffFileName, resultStream)
-                    logMsg("Result uploaded successfully to ${remoteResultPath}")
-                } finally {
-                    try { resultStream?.close() } catch (Exception ignored) {}
-                }
-            } catch (Exception e) {
-                logMsg("Error uploading result to SFTP: ${e.message}")
-                logger.error("SFTP Upload Error", e)
-            } finally {
-                try { sftpClient.close() } catch (Exception ignored) {}
-            }
+// Upload the result to file 1's server. A failed upload leaves the run's result in Darpan, so the run still reads complete;
+// OC119: it says so in Darpan's alerts room (never a client room), secret-masked.
+def alertUploadFailure = { String target, Exception e ->
+    logMsg("Error uploading result to SFTP: ${e.message}")
+    logger.error("SFTP result upload failed for ${target}", e)
+    ErrorChatSupport.postAlertText(ec, SecretRedactor.redact(("SFTP result upload failed: ${diffFileName} of run " +
+            "${defaultRunToken ?: 'ad-hoc'} (tenant ${sftpRunScope.runTenantUserGroupId ?: '-'}) to ${target}: ${e.message}").toString()))
+}
+def resultFile = ec.resource.getLocationReference(diffLocation ?: (outputLoc + "/" + diffFileName))
+if (resultFile && (!resultFile.supportsExists() || resultFile.getExists())) {
+    def server = file1Prep.server
+    def hostInfo = resolveHostAndPort(server.host, server.port, "Server ${file1SftpServerId}")
+    def remoteResultDir = normalizePath(remoteUploadPath ?: (outputLocation ? (file1BasePathUsed ?: hostInfo.basePath) : defaultRemoteUploadPath)) ?: "/"
+    String target = "${hostInfo.host}:${hostInfo.port}${remoteResultDir}".toString()
+    logMsg("Uploading result ${diffFileName} to SFTP Server 1 (${hostInfo.host}:${hostInfo.port}) at ${remoteResultDir} ...")
+    def sftpClient = null
+    try {
+        sftpClient = connectTo(server, (String) hostInfo.host, (int) hostInfo.port)
+        try { sftpClient.mkdirs(remoteResultDir) } catch (Exception ignored) {}   // an existing folder answers with an error on some servers
+        InputStream resultStream = resultFile.openStream()
+        try {
+            sftpClient.put(remoteResultDir, diffFileName, resultStream)
+            logMsg("Result uploaded successfully to ${remoteResultDir.endsWith("/") ? remoteResultDir + diffFileName : remoteResultDir + "/" + diffFileName}")
+        } finally {
+            try { resultStream?.close() } catch (Exception ignored) {}
         }
-    } else {
-        logMsg("Result file ${diffFileName} not found at ${outputLoc}, skipping upload.")
+    } catch (Exception e) {
+        alertUploadFailure(target, e)
+    } finally {
+        try { sftpClient?.close() } catch (Exception ignored) {}
     }
-} catch (Exception e) {
-    logMsg("Failed to initiate result upload: ${e.message}")
+} else {
+    logMsg("Result file ${diffFileName} not found at ${outputLoc}, skipping upload.")
 }
 
 statusMessage = messages.toString()

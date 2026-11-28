@@ -636,7 +636,6 @@ class SyncPulseEngineSmokeTests {
         }
     }
 
-    /** A sample write that throws (no SPS_* enums, FK SPSAMPLE_STATUS) leaves the claim stamped: no re-read every tick. */
     /**
      * DAR-OPS-029 S17a R1: two instances whose scans read the same lastPulseStamp pulse the pair once. busy() is per
      * instance and the claim stamped the pair whatever it held, so both pulsed and each could open an order for one key.
@@ -672,6 +671,113 @@ class SyncPulseEngineSmokeTests {
         assertEquals(1, orders("#A1").size(), "one open order for the key")
     }
 
+    /**
+     * DAR-OPS-029 S17a P15: the claim reads the pair row FOR UPDATE. While another instance's claim holds the row
+     * uncommitted, a claimer that read the old stamp waits on the lock, then reads the new stamp and loses. Without the
+     * lock it would read the old stamp past the uncommitted one and stamp the pair a second time.
+     */
+    @Test
+    void aClaimWaitsForAnotherInstancesClaimInFlightAndLoses() {
+        Map stale = pairMap(SP)
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1)
+        List<Boolean> wins = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Thread holder = Thread.start {
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                boolean began = tec.transaction.begin(60)
+                try {
+                    def row = tec.entity.find("darpan.pulse.SyncPair").condition("syncPairId", SP).useCache(false).forUpdate(true).one()
+                    row.set("lastPulseStamp", Timestamp.from(T0))
+                    row.update()
+                    held.countDown()
+                    // Held open so the claimer meets this claim uncommitted.
+                    release.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                } finally {
+                    tec.transaction.commit(began)
+                }
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        assertTrue(held.await(30, java.util.concurrent.TimeUnit.SECONDS), "the other claim must hold the row")
+        Thread claimer = Thread.start {
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                wins << (TenantAccessSupport.withSystemTenant(A) { -> SyncPulseSupport.claimPulse(tec, new LinkedHashMap(stale), T0.plus(Duration.ofMinutes(1))) } as boolean)
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        // Give the claimer time to reach the row while the other claim is uncommitted; the outcome must not depend on it.
+        claimer.join(500L)
+        release.countDown()
+        holder.join(30_000L)
+        claimer.join(30_000L)
+
+        assertTrue(failures.isEmpty(), "no claim may throw: ${failures*.toString()}")
+        assertEquals([false], wins, "the claimer that read the old stamp loses")
+        assertEquals(Timestamp.from(T0), pairMap(SP).lastPulseStamp, "the other instance's claim stands")
+    }
+
+    /**
+     * DAR-OPS-029 S17a P17: on two instances, a pulse running longer than its cadence overlaps the next one. Both read the
+     * open orders before either settled, so each opened an order for the same past key, and the older pulse's final stamp
+     * moved lastPulseStamp back. Pulse A is held at its target read while pulse B runs start to finish.
+     */
+    @Test
+    void twoOverlappingPulsesOpenOneOrderForAKeyAndTheStampNeverGoesBack() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        java.util.concurrent.CountDownLatch aAsking = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch releaseA = new java.util.concurrent.CountDownLatch(1)
+        SyncPulseSupport.setReaders(null, { def rec, Map p, Map automation, Collection keys ->
+            targetCalls << new ArrayList(keys)
+            if (Thread.currentThread().name == "pulse-A") {
+                aAsking.countDown()
+                releaseA.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            }
+            return [ok: true, present: [] as Set<String>, unasked: [] as Set<String>, errors: [], warnings: []]
+        })
+        List<Map> aResults = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Thread pulseA = new Thread({
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                aResults << (TenantAccessSupport.withSystemTenant(A) { -> SyncPulseSupport.runPulse(tec, pairMap(SP), T0) } as Map)
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        } as Runnable, "pulse-A")
+        pulseA.start()
+        try {
+            assertTrue(aAsking.await(30, java.util.concurrent.TimeUnit.SECONDS), "pulse A reached its target read")
+            Instant later = T0.plus(Duration.ofMinutes(5))
+            Map b = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
+            assertEquals("SPS_OK", b.status, "pulse B claims from A's stamp and runs")
+            assertEquals(["#A1"], b.newlyPast*.recordKey)
+        } finally {
+            releaseA.countDown()
+            pulseA.join(30_000L)
+        }
+
+        assertTrue(failures.isEmpty(), "no pulse may throw: ${failures*.toString()}")
+        assertEquals("SPS_OK", aResults[0]?.status)
+        assertEquals(1, orders("#A1").size(), "one open order for the key, never a second")
+        assertEquals(1, aResults[0].pastCount, "A counts the order B opened")
+        assertEquals(Timestamp.from(T0.plus(Duration.ofMinutes(5))), pairMap(SP).lastPulseStamp, "the stamp never moves back")
+    }
+
+    /** A sample write that throws (no SPS_* enums, FK SPSAMPLE_STATUS) leaves the claim stamped: no re-read every tick. */
     @Test
     void aSampleWriteThatThrowsStillClaimsThePulse() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))

@@ -311,6 +311,30 @@ class SyncPulseChatTests {
                 alerts*.text)
     }
 
+    /**
+     * DAR-OPS-029 S17a OC141. A pulse that cannot even save its FAILED sample (here: no SPS_* enums, FK SPSAMPLE_STATUS)
+     * left no sample for the two-in-a-row check, so Darpan never heard. Each such pulse now tells the alerts room, with
+     * the reason, and never the client's room.
+     */
+    @Test
+    void aPulseThatCannotSaveItsFailureAlertsDarpanEachTime() {
+        upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
+        ec.entity.find("moqui.basic.Enumeration").condition("enumId", "in", ["SPS_OK", "SPS_FAILED", "SPS_SKIPPED"])
+                .disableAuthz().deleteAll()
+        try {
+            pulse(T0)
+            assertEquals([ALERTS], alerts*.url)
+            String text = alerts[0].text as String
+            assertTrue(text.startsWith("${A}${DOT}${LABEL}: a pulse did not finish, and its failure could not be saved.\nReason: HotWax answered 503".toString()), text)
+            assertTrue(text.contains("\nNot saved: "), text)
+            pulse(T0.plus(Duration.ofMinutes(5)))
+            assertEquals(2, alerts.size(), "one notice per such pulse")
+            assertEquals([], posts, "nothing reaches the client's room")
+        } finally {
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SyncPulseSeedData.xml")
+        }
+    }
+
     /** DAR-BE-382. A pair with no chat space still tells Darpan when its pulses stop. */
     @Test
     void aPairWithNoChatSpaceStillAlertsDarpan() {

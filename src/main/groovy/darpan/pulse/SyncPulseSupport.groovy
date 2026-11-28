@@ -396,6 +396,8 @@ class SyncPulseSupport {
         try {
             Instant now = scanNow
             pulseEc.user.loginAnonymousIfNoUser()
+            // P18: every ec.user.nowTimestamp in the pulse (the target read's window) is the scan's now, not the wall clock
+            pulseEc.user.setEffectiveTime(Timestamp.from(scanNow))
             aei = pulseEc.artifactExecution.push("darpan.pulse.SyncPulseSupport", ArtifactExecutionInfo.AT_OTHER,
                     ArtifactExecutionInfo.AUTHZA_ALL, false)
             pulseEc.artifactExecution.setAnonymousAuthorizedAll()
@@ -542,8 +544,13 @@ class SyncPulseSupport {
         List<Map> closed = [], dropped = [], newlyPast = [], stillOpen = []
         Map sample = null, oldest = null
         ec.transaction.runUseOrBegin(120, "Sync pulse ${pair.syncPairId} could not save its sample".toString()) {
+            // P17: on two instances a pulse running longer than its cadence overlaps the next one. The pair row's lock makes
+            // them settle one at a time, and the open orders read under it show what the other pulse opened or closed.
+            pairRow(ec, pair, true)
+            Map<String, Map> openNow = openOrders(ec, pair).collectEntries { Map o -> [(o.recordKey as String): o] }
             open.each { Map o ->
                 String key = o.recordKey as String
+                if (!openNow.containsKey(key)) return
                 if (present.contains(key)) {
                     closed << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp, closeReason: ARRIVED])
                 } else if (unasked.contains(key)) {
@@ -556,7 +563,9 @@ class SyncPulseSupport {
                 }
             }
             past.each { Map r ->
-                if (openByKey.containsKey(r.key as String)) return
+                String key = r.key as String
+                if (openByKey.containsKey(key)) return
+                if (openNow.containsKey(key)) { stillOpen << openNow[key]; return }
                 Map created = createOrder(ec, pair, r, stamp)
                 newlyPast << created
                 stillOpen << created
@@ -610,14 +619,38 @@ class SyncPulseSupport {
         return best
     }
 
+    /** OC141: an alerts-room notice (never a client room) for a pulse that failed and could not save why. Never throws. */
+    private static void alertUnsavedFailure(def ec, Map pair, String reason, String saveError) {
+        String tenantId = normalize(pair?.get("companyUserGroupId"))
+        String label
+        try {
+            label = pairNames(ec, pair).get("label") as String
+        } catch (Throwable ignored) {
+            clearErrors(ec)
+            label = normalize(pair?.get("syncPairId"))
+        }
+        String text = "${tenantId}${DOT}${label}: a pulse did not finish, and its failure could not be saved.\nReason: ${reason}\nNot saved: ${saveError}".toString()
+        if (!ErrorChatSupport.postAlertText(ec, text)) {
+            logger.warn("Sync pulse {} (tenant {}): no alerts room took the unsaved-failure notice", pair?.syncPairId, tenantId)
+        }
+    }
+
     private static Map failed(def ec, Map pair, Instant now, Integer allowance, List<Map> open, Collection errors) {
         List<String> reasons = (errors ?: []).collect { normalize(it) }.findAll { it } as List<String>
         String message = sampleMessage(reasons ? reasons.join("; ") : "The pulse could not read.")
         int openCount = open?.size() ?: 0
         Map sample = null
-        ec.transaction.runUseOrBegin(60, "Sync pulse ${pair.syncPairId} could not record its failure".toString()) {
-            sample = writeSample(ec, pair, now, [statusEnumId: FAILED, allowanceMinutes: allowance, pastAllowanceCount: openCount, message: message])
-            stampPair(ec, pair, now, FAILED)
+        try {
+            ec.transaction.runUseOrBegin(60, "Sync pulse ${pair.syncPairId} could not record its failure".toString()) {
+                sample = writeSample(ec, pair, now, [statusEnumId: FAILED, allowanceMinutes: allowance, pastAllowanceCount: openCount, message: message])
+                stampPair(ec, pair, now, FAILED)
+            }
+        } catch (Throwable t) {
+            // OC141: with no sample the two-in-a-row check never fires, so each such pulse tells the alerts room itself
+            String saveError = normalize(t.message) ?: t.class.simpleName
+            logger.error("Sync pulse {} (tenant {}) could not record its failure: {}", pair.syncPairId, pair.companyUserGroupId, saveError)
+            clearErrors(ec)
+            alertUnsavedFailure(ec, pair, message, saveError)
         }
         return [status   : FAILED, sample: sample, newlyPast: [], closed: [], waitingCount: null, oldest: null,
                 pastCount: openCount, priorPastCount: openCount, skipped: false]
@@ -742,9 +775,10 @@ class SyncPulseSupport {
         }
     }
 
+    /** Stamps the pair's last pulse and its status, unless a later pulse already stamped it (P17: never moves back). */
     private static void stampPair(def ec, Map pair, Instant now, String status) {
         def row = pairRow(ec, pair, false)
-        if (row == null) return
+        if (row == null || (row.get("lastPulseStamp") as Timestamp)?.toInstant()?.isAfter(now)) return
         row.setAll([lastPulseStamp: Timestamp.from(now), lastPulseStatusEnumId: status])
         row.update()
     }

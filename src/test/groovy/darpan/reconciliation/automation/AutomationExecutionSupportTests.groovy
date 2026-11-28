@@ -4164,6 +4164,23 @@ class AutomationExecutionSupportTests {
         assertEquals(noDuplicates.totalDifferences, [noDuplicates.onlyInFile1Count, noDuplicates.onlyInFile2Count, noDuplicates.ruleDifferenceCount].sum())
     }
 
+    // DAR-OPS-029 OC135: a real 0 is stored as 0 on the document and both rows, which read the counts in one order.
+    @Test
+    void aZeroSideStoresZeroAndTheSummaryAndRowsAgree() {
+        Map<String, Object> compared = [differenceCount: 4L, missingInFile1Count: 0L, missingInFile2Count: 4L, onlyInFile1Count: 9L]
+        Map<String, Object> summary = AutomationExecutionSupport.automationDiffSummary(compared)
+        Map<String, Object> row = AutomationExecutionSupport.executionUpdateFields([:], [:], compared)
+        assertEquals(0L, summary.onlyInFile2Count, "a two-sided run with nothing only in side 2 says 0, not nothing")
+        assertEquals(0, row.onlyInFile2Count)
+        assertEquals([4, 0], [summary.onlyInFile1Count as Integer, summary.onlyInFile2Count as Integer])
+        assertEquals([4, 0], [row.onlyInFile1Count, row.onlyInFile2Count], "the row reads the verified missingInFile* first, as the summary does")
+
+        Map<String, Object> evaluated = [differenceCount: 3L]
+        assertFalse(AutomationExecutionSupport.automationDiffSummary(evaluated).containsKey("onlyInFile1Count"),
+                "an evaluate never checked a second side: no only-in count at all")
+        assertFalse(AutomationExecutionSupport.executionUpdateFields([:], [:], evaluated).containsKey("onlyInFile2Count"))
+    }
+
     // DAR-OPS-029 OC18 (DAR-BE-362): a verify check's raw error reaches Darpan's alerts room; the run's warnings, which a client's
     // completion message renders, carry only a neutral line.
     @Test

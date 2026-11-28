@@ -2956,6 +2956,18 @@ class AutomationExecutionSupport {
     }
 
     /**
+     * DAR-OPS-029 OC135. A side's only-in count, read in ONE order by the stored document's summary, the execution row and the
+     * run-result row: the compare's missingInFile* (the side's records the other side lacks, which the verification passes
+     * correct), else onlyInFile*. A real 0 is a count and is stored as 0 (`?:` read it as missing, so a two-sided run with
+     * nothing only-in showed as single-sided in the app); absent on both (an evaluate, which never checked a second side)
+     * stays absent.
+     */
+    static Object onlyInCount(Map reconcileResult, String side) {
+        Object missingFromOther = reconcileResult?.get(side == FILE_SIDE_1 ? "missingInFile2Count" : "missingInFile1Count")
+        return missingFromOther != null ? missingFromOther : reconcileResult?.get(side == FILE_SIDE_1 ? "onlyInFile1Count" : "onlyInFile2Count")
+    }
+
+    /**
      * The stored diff document's summary counts. DAR-OPS-029 (S01a/S03a/S02 conservation gap; runSavedRunDiff's F23):
      * duplicateDifferenceCount is passed through whenever the compare reports it, so a stored document shows
      * totalDifferences = onlyInFile1Count + onlyInFile2Count + ruleDifferenceCount + duplicateDifferenceCount.
@@ -2963,8 +2975,8 @@ class AutomationExecutionSupport {
     static Map<String, Object> automationDiffSummary(Map<String, Object> reconcileResult) {
         return [
                 totalDifferences             : reconcileResult.differenceCount,
-                onlyInFile1Count             : reconcileResult.missingInFile2Count ?: reconcileResult.onlyInFile1Count,
-                onlyInFile2Count             : reconcileResult.missingInFile1Count ?: reconcileResult.onlyInFile2Count,
+                onlyInFile1Count             : onlyInCount(reconcileResult, FILE_SIDE_1),
+                onlyInFile2Count             : onlyInCount(reconcileResult, FILE_SIDE_2),
                 missingObjectDifferenceCount : reconcileResult.missingObjectDifferenceCount,
                 ruleDifferenceCount          : reconcileResult.ruleDifferenceCount,
                 duplicateDifferenceCount     : reconcileResult.duplicateDifferenceCount,
@@ -3098,8 +3110,8 @@ class AutomationExecutionSupport {
                 file1ReadCount   : normalizeInt(file1Result.readCount),
                 file2ReadCount   : normalizeInt(file2Result?.readCount),
                 differenceCount  : normalizeInt(reconcileResult.differenceCount),
-                onlyInFile1Count : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
-                onlyInFile2Count : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
+                onlyInFile1Count : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_1)),
+                onlyInFile2Count : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_2)),
         ].findAll { it.value != null } as Map<String, Object>
     }
 
@@ -3294,8 +3306,8 @@ class AutomationExecutionSupport {
                     resultDataManagerPath  : normalize(resultDataManagerPath),
                     reconciliationType     : normalize(reconcileResult.reconciliationType ?: reconcileResult.objectType),
                     differenceCount        : normalizeInt(reconcileResult.differenceCount),
-                    onlyInFile1Count       : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
-                    onlyInFile2Count       : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
+                    onlyInFile1Count       : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_1)),
+                    onlyInFile2Count       : normalizeInt(onlyInCount(reconcileResult, FILE_SIDE_2)),
             ].each { key, value -> if (value != null) runResultValue.set(key as String, value) }
             // Explicit terminal status: the row was minted RUNNING, and on the create path the entity
             // default (AUT_STAT_SUCCESS) already produced this value — so this is the same end state,

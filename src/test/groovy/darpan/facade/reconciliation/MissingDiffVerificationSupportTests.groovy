@@ -472,4 +472,37 @@ class MissingDiffVerificationSupportTests {
         Map document = parseDocument(file)
         assertEquals(["1002", "1003"], ((List) document.differences).collect { it.primaryId })
     }
+
+    /**
+     * DAR-OPS-029 S20 (QA): two sides whose labels read as one token (a same-system run: "Shopify" vs "Shopify") leave a
+     * row's missingIn unable to say which side it is missing from, and the label-keyed lookups collapse to one. The
+     * pass used to send rows missing in one side to the other side's lookup, where they exist by definition, and
+     * remove them: real differences hidden. It now refuses and says why.
+     */
+    @Test
+    void sidesThatShareALabelAreNotVerifiedAgainstEachOther() {
+        File file = writeDiffDocument([
+                missingRow("1001", "Shopify", "Shopify"),
+                missingRow("2001", "Shopify", "Shopify"),
+        ], [
+                totalDifferences            : 2,
+                onlyInFile1Count            : 1,
+                onlyInFile2Count            : 1,
+                missingObjectDifferenceCount: 2,
+                ruleDifferenceCount         : 0,
+        ])
+        String before = file.text
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : "Shopify",
+                file2Label       : "shopify",
+                sideCheckedCounts: ["Shopify": 1_000_000],
+                sideLookups      : ["Shopify": { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+        ])
+
+        assertFalse((Boolean) result.performed)
+        assertEquals(0, result.removedCount)
+        assertEquals(before, file.text, "nothing is removed when a row's side cannot be told")
+        assertTrue(((List) result.warnings).any { it.toString().contains("share the label") }, "warnings: ${result.warnings}")
+    }
 }

@@ -263,18 +263,33 @@ class ExchangePairVerificationSupportTests {
         assertEquals(1, result.appendedCount)
     }
 
+    /**
+     * DAR-OPS-029 S20 (OUTPUT CHANGE): the manifest is only a free shortcut for matches, so an unreadable one
+     * costs the shortcut, never the check. It used to skip the whole presence check while the step closed
+     * SUCCESS, so Shopify exchanges never imported into OMS went unflagged with nothing on the timeline.
+     * Every candidate now goes to the OMS point lookup, and only a lookup-confirmed absence becomes a row.
+     */
     @Test
-    void malformedManifestIsInertWithWarning() {
+    void unreadableManifestCostsTheShortcutNotTheCheck() {
         File manifest = tempDir.resolve("bad.exchange-manifest.json").toFile()
         manifest.text = "{ not valid json"
         File diff = diffFile()
-        String before = diff.text
+        List<List> lookedUp = []
         Map result = runCheck([diffFile: diff, manifestFile: manifest,
-                shopifySweep: { long s, long e -> fail("no sweep on unreadable manifest") },
-                omsPairLookup: { List ids -> fail("no lookups on unreadable manifest") }])
-        assertFalse(result.performed as boolean)
+                shopifySweep: { long s, long e -> sweepOk([sweepExchange("111"), sweepExchange("777")]) },
+                omsPairLookup: { List ids ->
+                    lookedUp << ids
+                    [ok: true, errors: [], ordersByExternalId: [
+                            "111": [[omsOrderId: "exch-111", externalId: "111", hasExchangeAssoc: true]],
+                            "777": [[omsOrderId: "orig-777", externalId: "777", hasExchangeAssoc: false]]]]
+                }])
+        assertTrue(result.performed as boolean)
+        assertFalse(result.lookupFailed as boolean)
+        assertEquals([["111", "777"]], lookedUp, 'every candidate is looked up when the shortcut is gone')
+        assertEquals(1, result.confirmedPresentCount)
+        assertEquals(1, result.appendedCount, 'only the lookup-confirmed absence becomes a row')
         assertTrue((result.warnings as List).any { it.toString().contains("unreadable") })
-        assertEquals(before, diff.text)
+        assertTrue(diff.text.contains('"primaryId":"777"'))
     }
 
     @Test

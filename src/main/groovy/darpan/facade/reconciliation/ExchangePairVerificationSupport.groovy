@@ -62,7 +62,6 @@ class ExchangePairVerificationSupport {
         if (diffFile == null || !diffFile.isFile() || shopifySweep == null || omsPairLookup == null) return result
 
         Set<String> omsExchangeExternalIds = readManifestExternalIds(manifestFile, warnings)
-        if (omsExchangeExternalIds == null) return result   // unreadable manifest: warned, stay inert
 
         Map sweep = invokeSweep(shopifySweep, windowStartMillis, windowEndMillis, warnings)
         if (sweep == null) { result.lookupFailed = true; return result }
@@ -153,7 +152,12 @@ class ExchangePairVerificationSupport {
         return result
     }
 
-    /** null = unreadable (warned); empty set = no manifest or no exchange orders in the OMS window. */
+    /**
+     * The manifest's external ids: empty when there is none (an OMS window with no exchange orders) or when it cannot be
+     * read. It only settles matches for free, so an unreadable one costs the shortcut, never the check: every candidate
+     * then goes to the point lookup, and only a lookup-confirmed absence becomes a row (DAR-OPS-029 S20, OC; it used to
+     * skip the whole check while the step closed SUCCESS).
+     */
     private static Set<String> readManifestExternalIds(File manifestFile, List<String> warnings) {
         if (manifestFile == null || !manifestFile.isFile()) return new HashSet<String>()
         try {
@@ -165,8 +169,9 @@ class ExchangePairVerificationSupport {
             }
             return externalIds
         } catch (Exception e) {
-            warnings.add("Exchange presence check skipped: manifest unreadable (${e.message}).".toString())
-            return null
+            // "could not", never the AUDIT_NOTE_PREFIX colon: this is a warning, not the all-clear note.
+            warnings.add("Exchange presence check could not use the OMS exchange manifest (unreadable: ${e.message}); every Shopify exchange was looked up in OMS instead.".toString())
+            return new HashSet<String>()
         }
     }
 

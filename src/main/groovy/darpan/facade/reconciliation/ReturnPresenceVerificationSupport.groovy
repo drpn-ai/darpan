@@ -227,7 +227,7 @@ class ReturnPresenceVerificationSupport {
         // the window-start gate, using that row's own embedded record data — never a fresh join.
         // SUPERSEDED-SIBLING SUPPRESSION (2026-08-20) — see the class doc. Read once, before the
         // streaming pass, so the per-row test is a set membership rather than a file touch.
-        Set<String> omsOrderIds = readOmsOrderIds(args?.omsExtractFile as File)
+        Set<String> omsOrderIds = readOmsOrderIds(args?.omsExtractFile as File, warnings)
 
         JsonSlurper slurper = new JsonSlurper()
         Map<String, Set<String>> removeIdsByToken = [:]
@@ -599,11 +599,6 @@ class ReturnPresenceVerificationSupport {
     }
 
     /**
-     * One sentence the operator always gets — even a run with nothing pending shows its work. The
-     * window-start clause is only appended when it can actually apply (mirrors the retired
-     * suppression-caveat sentence's own "never a blanket disclaimer" rule).
-     */
-    /**
      * Streaming scan of the OMS extract for the set of orders OMS booked a return for. Deliberately
      * NOT a JsonSlurper parse: a backfill window's extract reaches GB scale and exactly one field is
      * wanted. A null/absent/unreadable file yields an EMPTY set, which disables the suppression
@@ -612,8 +607,11 @@ class ReturnPresenceVerificationSupport {
      * DAR-BE-318 (Ruling 3b2b-11): where the OMS side kept in Spark (a .keep.json beside the extract) the
      * extract also holds the returns Keep set aside, which booked nothing for the run; only the kept
      * records (and the extract's other top-level fields, which the scan below reads too) give orders.
+     *
+     * An extract that is there but cannot be read says so in {@code warnings} (DAR-OPS-029 S20): the rule then
+     * suppresses nothing, which over-reports, and the run must say why.
      */
-    protected static Set<String> readOmsOrderIds(File omsExtractFile) {
+    protected static Set<String> readOmsOrderIds(File omsExtractFile, List<String> warnings = null) {
         Set<String> ids = new HashSet<String>()
         if (omsExtractFile == null || !omsExtractFile.isFile()) return ids
         try {
@@ -636,8 +634,9 @@ class ReturnPresenceVerificationSupport {
                     if (buffer.length() > 8192) buffer.delete(0, buffer.length() - 512)
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
             // Fail open: an unreadable extract must not suppress anything, and must not fail the run.
+            warnings?.add("Return presence check could not read the OMS extract (${normalize(e.message) ?: e.class.simpleName}); the superseded-return rule did not run, so those returns are left as reported.".toString())
             return new HashSet<String>()
         }
         return ids
@@ -658,6 +657,11 @@ class ReturnPresenceVerificationSupport {
         }
     }
 
+    /**
+     * One sentence the operator always gets — even a run with nothing pending shows its work. The
+     * window-start clause is only appended when it can actually apply (mirrors the retired
+     * suppression-caveat sentence's own "never a blanket disclaimer" rule).
+     */
     private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,
                                          int cancelledRefundCount, int siblingReturnCount = 0,
                                          int cancelledItemCount = 0, int linePairedCount = 0) {

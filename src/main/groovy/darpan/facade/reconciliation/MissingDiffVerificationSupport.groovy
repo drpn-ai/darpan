@@ -85,6 +85,13 @@ class MissingDiffVerificationSupport {
             if (token && lookup instanceof Closure) sidesByToken.put(token, [label: label.toString(), lookup: lookup] as Map<String, Object>)
         }
         if (!sidesByToken || diffFile == null || !diffFile.isFile()) return inert
+        // A row is attributed to a side by its missingIn label. Two sides reading as one token (a same-system run) leave
+        // that unanswerable, and a row missing in one side would be looked up in the other, where it exists by
+        // definition, and removed. Refuse rather than hide real differences (DAR-OPS-029 S20).
+        if (file1Token && file1Token == file2Token) {
+            warnings.add("Verification pass skipped: both sides share the label ${args.file1Label}, so a missing row cannot be told to its side; nothing was looked up.".toString())
+            return inert
+        }
 
         // Pass 1 — collect candidate ids per lookup-capable side, one row in memory at a time.
         JsonSlurper slurper = new JsonSlurper()

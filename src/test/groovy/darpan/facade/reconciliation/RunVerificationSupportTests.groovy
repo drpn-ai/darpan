@@ -152,4 +152,30 @@ class RunVerificationSupportTests {
         assertTrue(RunVerificationSupport.keyIsLookupKind("refundOrReturnId", null), "no plain key: no check")
     }
 
+    // --- the exchange pass's fold (DAR-OPS-029 S20: untested until now) ---------------------------
+
+    /** Appended rows are missing on the OMS side: every total moves up by them, on that side's own count. */
+    @Test
+    void anExchangeFoldRaisesTheOmsSidesMissingCountAndEveryTotalByTheRowsAppended() {
+        Map omsFileTwo = [differenceCount: 5L, missingInFile1Count: 1L, missingInFile2Count: 2L, missingObjectDifferenceCount: 3L]
+        RunVerificationSupport.applyExchangeOutcome(omsFileTwo, [appendedCount: 4, auditNote: "4 missing"], "FILE_2")
+        assertEquals(9L, omsFileTwo.differenceCount)
+        assertEquals(1L, omsFileTwo.missingInFile1Count)
+        assertEquals(6L, omsFileTwo.missingInFile2Count)
+        assertEquals(7L, omsFileTwo.missingObjectDifferenceCount)
+        assertEquals(["4 missing"], omsFileTwo.processingWarnings)
+
+        Map omsFileOne = [differenceCount: 5L, missingInFile1Count: 1L, missingInFile2Count: 2L]
+        RunVerificationSupport.applyExchangeOutcome(omsFileOne, [appendedCount: 4], "FILE_1")
+        assertEquals(5L, omsFileOne.missingInFile1Count)
+        assertEquals(2L, omsFileOne.missingInFile2Count)
+        assertNull(omsFileOne.missingObjectDifferenceCount, "a count the compare never reported is not invented")
+    }
+
+    @Test
+    void anExchangeFoldThatAppendedNothingMovesNoCount() {
+        Map serviceResult = [differenceCount: 5L, missingInFile1Count: 1L, missingInFile2Count: 2L]
+        RunVerificationSupport.applyExchangeOutcome(serviceResult, [appendedCount: 0, warnings: ["sweep unavailable"]], "FILE_2")
+        assertEquals([differenceCount: 5L, missingInFile1Count: 1L, missingInFile2Count: 2L, processingWarnings: ["sweep unavailable"]], serviceResult)
+    }
 }

@@ -793,6 +793,26 @@ class ReturnPresenceVerificationSupportTests {
         assertEquals(["27051229315"], ((List) parseDocument(diff).differences).collect { it.primaryId })
     }
 
+    /**
+     * DAR-OPS-029 S20: an OMS extract that is there but cannot be read switched the superseded-return rule off with no
+     * word, so the run over-reported with nothing saying why. It still suppresses nothing; now it says so.
+     */
+    @Test
+    void anUnreadableOmsExtractSuppressesNothingAndSaysSo() {
+        File extract = writeOmsExtract(["7005613588611"])
+        File diff = writeDiffDocument([missingInOmsRow("27051229315", OLD, "RETURN", "7005613588611")])
+        assertTrue(extract.setReadable(false), "the fixture must be unreadable")
+        try {
+            Map result = verifyWithOmsExtract(diff, extract)
+            assertEquals(0, result.siblingReturnSuppressedCount)
+            assertEquals(["27051229315"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+            assertTrue((result.warnings as List).any { it.toString().contains("could not read the OMS extract") },
+                    "warnings: ${result.warnings}")
+        } finally {
+            extract.setReadable(true)
+        }
+    }
+
     /** With no .keep.json the scan is today's, even beside a rows file. */
     @Test
     void withNoKeepSummaryTheOrderScanIsTodays() {

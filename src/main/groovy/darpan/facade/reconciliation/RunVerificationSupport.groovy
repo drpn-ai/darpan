@@ -94,6 +94,11 @@ class RunVerificationSupport {
             }
         }
 
+        return appendPassNotes(serviceResult, result)
+    }
+
+    /** A pass's audit note, then its warnings, onto the result's processingWarnings; nothing when it has neither. */
+    private static Map appendPassNotes(Map serviceResult, Map result) {
         List notes = []
         if (result.get("auditNote")) notes.add(result.get("auditNote"))
         notes.addAll((result.get("warnings") ?: []) as List)
@@ -113,6 +118,8 @@ class RunVerificationSupport {
     static final String SKIP_NO_DIFF_FILE = "DIFF_ARTIFACT_UNREADABLE"
     /** Neither side could be point-checked; the detail names each side and why. */
     static final String SKIP_NO_LOOKUP = "NO_POINT_LOOKUP"
+    /** Both sides carry one label, so a missing row's side cannot be told (MissingDiffVerificationSupport refuses too). */
+    static final String SKIP_SHARED_LABEL = "SIDES_SHARE_A_LABEL"
 
     // Named from the one place that owns it, not restated: two copies of a property name drift, and
     // a skip reason naming a switch that no longer exists is worse than no reason at all.
@@ -202,6 +209,11 @@ class RunVerificationSupport {
         // would carry an "unverified" note and the report would stop meaning anything.
         if (!sideLookups) {
             return blockers ? skipped(SKIP_NO_LOOKUP, blockers.join("; ")) : ([applies: false] as Map<String, Object>)
+        }
+        // Checked only once a lookup would run: a same-system run with no point lookup (NetSuite vs NetSuite) never had
+        // verification, and saying "not verified" on it would be noise. The lookups and the rows are attributed by label.
+        if (DiffDetailClassifier.normalizeToken(file1Label) == DiffDetailClassifier.normalizeToken(file2Label)) {
+            return skipped(SKIP_SHARED_LABEL, "both sides are labelled ${file1Label}, so a missing row cannot be told to its side".toString())
         }
 
         return [applies       : true,
@@ -295,7 +307,7 @@ class RunVerificationSupport {
      *
      * <p>A null {@code skipReason} means there was nothing to verify, which is not a skip.</p>
      */
-    static void recordVerificationSkipped(def ec, String runResultId, Map stepCtx, Map serviceResult,
+    private static void recordVerificationSkipped(def ec, String runResultId, Map stepCtx, Map serviceResult,
                                           String skipReason, String skipDetail) {
         if (skipReason == null) return
         // endStep truncates errorMessage at 255 characters, so the sentence leads with the fact and
@@ -373,7 +385,7 @@ class RunVerificationSupport {
      * 2026-08-27 gorjana report and hid inert verification for the whole of v1.5.0. Every early
      * return here now says which one it was, in words an operator can act on.</p>
      */
-    static Map<String, Object> resolveSideLookup(def ec, Object source, String runOwnerUserGroupId,
+    private static Map<String, Object> resolveSideLookup(def ec, Object source, String runOwnerUserGroupId,
                                                  Closure dispatcher, Map<String, Object> runConfigDefaults = null) {
         if (source == null) return [reason: "no source is configured on that side"] as Map<String, Object>
         if (dispatcher == null) return [reason: "no service dispatcher was supplied to the pass"] as Map<String, Object>
@@ -485,63 +497,55 @@ class RunVerificationSupport {
      * {@code source?.sourceConfigId} directly, which on a {@code ReconciliationAutomationSource}
      * row raises an EntityException rather than answering null.</p>
      */
-    static Closure buildCancelledOrderLookup(def ec, Object omsSource, Map<String, Object> connector,
+    private static Closure buildCancelledOrderLookup(def ec, Object omsSource, Map<String, Object> connector,
                                              String runOwnerUserGroupId, Closure dispatcher,
                                              Map<String, Object> runConfigDefaults = null) {
-        if (omsSource == null || connector == null || dispatcher == null) return null
-        String serviceName = normalize(connector.get("orderStateLookupServiceName"))
-        if (serviceName == null) return null
-        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
-        String configId = resolveSourceConfigId(omsSource, connector, runConfigDefaults)
-        if (configId == null) return null
-        String configParameterName = normalize(connector.get("configParameterName")) ?: "sourceConfigId"
-        return { List<String> ids ->
-            Map out = (Map) dispatcher.call(serviceName, [(configParameterName): configId,
-                                                          externalIds       : ids,
-                                                          companyUserGroupId: runOwnerUserGroupId])
-            return [ok: out?.get("ok"), ordersByExternalId: out?.get("ordersByExternalId") ?: [:],
-                    errors: out?.get("errors") ?: []]
-        }
+        return omsResultLookup(ec, omsSource, connector, "orderStateLookupServiceName", "ordersByExternalId",
+                runOwnerUserGroupId, dispatcher, runConfigDefaults)
     }
 
     /**
      * The OMS return-lines lookup behind order + line pairing (DAR-BE-085, DAR-BE-086), or null when this
      * run cannot do it. Same OMS-side resolution and lookup fence as {@link #buildCancelledOrderLookup}.
      */
-    static Closure buildReturnLinesLookup(def ec, Object omsSource, Map<String, Object> connector,
+    private static Closure buildReturnLinesLookup(def ec, Object omsSource, Map<String, Object> connector,
                                           String runOwnerUserGroupId, Closure dispatcher,
                                           Map<String, Object> runConfigDefaults = null) {
-        if (omsSource == null || connector == null || dispatcher == null) return null
-        String serviceName = normalize(connector.get("returnLinesLookupServiceName"))
-        if (serviceName == null) return null
-        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
-        String configId = resolveSourceConfigId(omsSource, connector, runConfigDefaults)
-        if (configId == null) return null
-        String configParameterName = normalize(connector.get("configParameterName")) ?: "sourceConfigId"
-        return { List<String> ids ->
-            Map out = (Map) dispatcher.call(serviceName, [(configParameterName): configId,
-                                                          externalIds       : ids,
-                                                          companyUserGroupId: runOwnerUserGroupId])
-            return [ok: out?.get("ok"), returnLinesByExternalId: out?.get("returnLinesByExternalId") ?: [:],
-                    errors: out?.get("errors") ?: []]
-        }
+        return omsResultLookup(ec, omsSource, connector, "returnLinesLookupServiceName", "returnLinesByExternalId",
+                runOwnerUserGroupId, dispatcher, runConfigDefaults)
     }
 
     /**
-     * Resolve the return-presence pass for a run, or null when this run is not a returns pair.
-     *
-     * <p>args: {@code ec}, {@code diffFile}, {@code sides} (each {@code [source, extractResult, label]}),
-     * {@code file1Label}, {@code file2Label}, {@code windowStartMillis}, {@code runOwnerUserGroupId},
-     * {@code dispatcher}, {@code runConfigDefaults}.</p>
-     *
-     * <p>Returns {@code [omsLabel, shopifyLabel, run]}, where {@code run} is a no-arg closure that
-     * executes the pass and returns its verification map. Split that way so the verify step
-     * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
-     * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
+     * An OMS-side lookup by external ids whose answer is reduced to {@code [ok, <resultField>, errors]}: the
+     * connector names the service in {@code serviceField}, and {@link #buildFencedSourceLookup} fences and resolves it.
      */
+    private static Closure omsResultLookup(def ec, Object omsSource, Map<String, Object> connector, String serviceField,
+                                           String resultField, String runOwnerUserGroupId, Closure dispatcher,
+                                           Map<String, Object> runConfigDefaults) {
+        Closure lookup = buildFencedSourceLookup(ec, omsSource, connector, normalize(connector?.get(serviceField)),
+                "externalIds", runOwnerUserGroupId, dispatcher, runConfigDefaults)
+        if (lookup == null) return null
+        return { List<String> ids ->
+            Map out = (Map) lookup.call(ids)
+            return [ok: out?.get("ok"), (resultField): out?.get(resultField) ?: [:], errors: out?.get("errors") ?: []]
+        }
+    }
+
     /** The OMS side of a returns pair (OMS_RETURNS_GQL, DAR-BE-040 fix 3). */
     static boolean isOmsReturnsSystem(String systemEnumId) {
         return systemEnumId == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL
+    }
+
+    /** A returns pair's two sides, {@code [omsSide, shopifySide]}, or null when the run is not one. */
+    private static List<Map> returnsPairSides(def ec, List sides) {
+        Map omsSide = (Map) sides.find { Map side ->
+            isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
+        }
+        Map shopifySide = (Map) sides.find { Map side ->
+            normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
+                    ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
+        }
+        return (omsSide == null || shopifySide == null) ? null : [omsSide, shopifySide]
     }
 
     /**
@@ -562,15 +566,9 @@ class RunVerificationSupport {
             File diffFile = (File) (rawDiffFile instanceof Closure ? ((Closure) rawDiffFile).call() : rawDiffFile)
             if (ec == null || serviceResult == null || diffFile == null || !diffFile.isFile()) return false
             if (serviceResult.get("ruleExecutionFailed") == true) return false
-            List sides = (args.get("sides") ?: []) as List
-            Map omsSide = (Map) sides.find { Map side ->
-                isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
-            }
-            Map shopifySide = (Map) sides.find { Map side ->
-                normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
-                        ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
-            }
-            if (omsSide == null || shopifySide == null) return false
+            List<Map> pair = returnsPairSides(ec, (args.get("sides") ?: []) as List)
+            if (pair == null) return false
+            Map omsSide = pair[0], shopifySide = pair[1]
             long missingInFile1 = missingCount(serviceResult, "missingInFile1Count")
             long missingInFile2 = missingCount(serviceResult, "missingInFile2Count")
             Map verification = RebuiltReturnPairingSupport.pairRebuiltReturns([
@@ -595,20 +593,26 @@ class RunVerificationSupport {
         }
     }
 
+    /**
+     * Resolve the return-presence pass for a run, or null when this run is not a returns pair.
+     *
+     * <p>args: {@code ec}, {@code diffFile}, {@code sides} (each {@code [source, extractResult, label]}),
+     * {@code file1Label}, {@code file2Label}, {@code windowStartMillis}, {@code runOwnerUserGroupId},
+     * {@code dispatcher}, {@code runConfigDefaults}.</p>
+     *
+     * <p>Returns {@code [omsLabel, shopifyLabel, run]}, where {@code run} is a no-arg closure that
+     * executes the pass and returns its verification map. Split that way so the verify step
+     * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
+     * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
+     */
     static Map prepareReturnPresencePass(Map args) {
         def ec = args?.get("ec")
         File diffFile = (File) args?.get("diffFile")
         if (ec == null || diffFile == null || !diffFile.isFile()) return null
 
-        List sides = (args.get("sides") ?: []) as List
-        Map omsSide = (Map) sides.find { Map side ->
-            isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
-        }
-        Map shopifySide = (Map) sides.find { Map side ->
-            normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
-                    ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
-        }
-        if (omsSide == null || shopifySide == null) return null
+        List<Map> pair = returnsPairSides(ec, (args.get("sides") ?: []) as List)
+        if (pair == null) return null
+        Map omsSide = pair[0], shopifySide = pair[1]
 
         Map<String, Object> omsConnector = resolveConnector(ec, omsSide.get("source"))
         Map<String, Object> runConfigDefaults = args.get("runConfigDefaults") instanceof Map ?
@@ -694,9 +698,8 @@ class RunVerificationSupport {
         File manifestFile = omsFileLocation == null ? null :
                 resolveLocationFile(ec, omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
 
-        Closure omsPairLookup = buildFencedSourceLookup(ec, omsSide.get("source"), omsConnector,
-                normalize(omsConnector.get("pairLookupServiceName")), "externalIds",
-                runOwnerUserGroupId, dispatcher, runConfigDefaults)
+        Closure omsPairLookup = omsResultLookup(ec, omsSide.get("source"), omsConnector, "pairLookupServiceName",
+                "ordersByExternalId", runOwnerUserGroupId, dispatcher, runConfigDefaults)
         String sweepServiceName = normalize(shopifyConnector.get("exchangeSweepServiceName"))
         String shopifyConfigId = resolveSourceConfigId(shopifySide.get("source"), shopifyConnector, runConfigDefaults)
         String shopifyConfigParameterName = normalize(shopifyConnector.get("configParameterName")) ?: "sourceConfigId"
@@ -726,11 +729,7 @@ class RunVerificationSupport {
                                 return [ok       : out?.get("ok"), exchanges: out?.get("exchanges") ?: [],
                                         truncated: out?.get("truncated") == true, errors: out?.get("errors") ?: []]
                             },
-                            omsPairLookup    : { List<String> ids ->
-                                Map out = (Map) omsPairLookup.call(ids)
-                                return [ok: out?.get("ok"), ordersByExternalId: out?.get("ordersByExternalId") ?: [:],
-                                        errors: out?.get("errors") ?: []]
-                            },
+                            omsPairLookup    : omsPairLookup,
                     ])
                 }] as Map
     }
@@ -755,14 +754,7 @@ class RunVerificationSupport {
                         longValue(serviceResult.get("missingObjectDifferenceCount")) + appended)
             }
         }
-        List notes = []
-        if (result.get("auditNote")) notes.add(result.get("auditNote"))
-        notes.addAll((result.get("warnings") ?: []) as List)
-        if (notes) {
-            serviceResult.put("processingWarnings",
-                    ((serviceResult.get("processingWarnings") ?: []) as List) + notes)
-        }
-        return serviceResult
+        return appendPassNotes(serviceResult, result)
     }
 
     /** The STAGE_VERIFY_EXCHANGE metrics body for an exchange-pair pass, shared by both entry points. */
@@ -785,7 +777,7 @@ class RunVerificationSupport {
      * as anonymous {@code _NA_}, so a lookup that relies on the session's tenant resolves the wrong
      * config or none at all.</p>
      */
-    static Closure buildFencedSourceLookup(def ec, Object source, Map<String, Object> connector,
+    private static Closure buildFencedSourceLookup(def ec, Object source, Map<String, Object> connector,
                                            String serviceName, String idsParameterName,
                                            String runOwnerUserGroupId, Closure dispatcher,
                                            Map<String, Object> runConfigDefaults = null) {
@@ -840,7 +832,7 @@ class RunVerificationSupport {
      * verification pass apply its own default. Resolved separately from the lookup closure so an
      * unreadable or blank gate can never stop a usable lookup from being built.
      */
-    static Integer buildVerificationLookupShare(def ec, Object source) {
+    private static Integer buildVerificationLookupShare(def ec, Object source) {
         if (source == null) return null
         Object share = resolveConnector(ec, source)?.lookupMaxShare
         return (share instanceof Number && ((Number) share).intValue() > 0) ? ((Number) share).intValue() : null
@@ -851,7 +843,7 @@ class RunVerificationSupport {
      * (lookupIdField, comma-separated field names) and the run's key on this side is a different
      * field. Anything unknown (no connector field, no scope, no plain key) keeps today's behaviour.
      */
-    static boolean lookupAnswersKey(def ec, Object source, String compareScopeId, String fileSide) {
+    private static boolean lookupAnswersKey(def ec, Object source, String compareScopeId, String fileSide) {
         if (source == null || compareScopeId == null) return true
         String idFields = normalize(resolveConnector(ec, source)?.lookupIdField)
         if (idFields == null) return true

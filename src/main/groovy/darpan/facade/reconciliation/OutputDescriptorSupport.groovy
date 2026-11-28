@@ -328,11 +328,6 @@ class OutputDescriptorSupport {
     }
 
     /**
-     * The API window this run actually used, stamped onto the run row at beginRun. Runs created
-     * before that column existed read null here and fall through to the older sources, so no
-     * backfill is needed.
-     */
-    /**
      * A window boundary as an unambiguous instant.
      *
      * normalize() is Timestamp.toString(), which renders in the JVM's default zone and marks it
@@ -345,6 +340,11 @@ class OutputDescriptorSupport {
         return normalize(value)
     }
 
+    /**
+     * The API window this run actually used, stamped onto the run row at beginRun. Runs created
+     * before that column existed read null here and fall through to the older sources, so no
+     * backfill is needed.
+     */
     protected static Map<String, Object> dateRangeFromRunResult(def runResult) {
         if (runResult == null) return null
         String start = isoInstant(runResult.windowStartDate)

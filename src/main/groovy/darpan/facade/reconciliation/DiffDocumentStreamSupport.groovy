@@ -30,14 +30,14 @@ class DiffDocumentStreamSupport {
     static final String FILE_2 = "FILE_2"
 
     /** A row line ends with "," (more rows follow) or "]" (last row); the closing "}" line ends the region. */
-    static String stripRowLine(String line) {
+    private static String stripRowLine(String line) {
         String trimmed = line.trim()
         if (trimmed == "}" || trimmed == "]" || trimmed.isEmpty()) return null
         if (trimmed.endsWith(",") || trimmed.endsWith("]")) return trimmed.substring(0, trimmed.length() - 1)
         return trimmed
     }
 
-    static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
+    private static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
         try {
             Object parsed = slurper.parseText(rowJson)
             return parsed instanceof Map ? (Map) parsed : null

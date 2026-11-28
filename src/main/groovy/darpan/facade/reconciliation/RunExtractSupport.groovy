@@ -1,8 +1,12 @@
 package darpan.facade.reconciliation
 
+import darpan.conclusion.brain.BrainFactAdapter
 import darpan.dataset.KeptCopySupport
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.common.TenantScopedFinder
+import darpan.idindex.IdIndexRunHook
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.source.KeepPlanSupport
@@ -49,8 +53,7 @@ import static darpan.common.ValueSupport.normalizeInt
  *                         an extract still taking the filter
  *                         parameter (3b2b-23); an evaluate run
  *                         keeps in Spark too
- *  state window mode      not supported                     isStateWindowMode + supportsStateExtract
- *                                                            sends NO date parameters at all
+ *  state window mode      retired (DAR-BE-052): no connector reads by status; both paths refuse an AUT_WIN_STATE row
  *  status parameter       absent                            applyStatusParameter
  *  progress heartbeat     yes (reconciliationRunResultId)    absent
  *  output location        under the run's artifact dir       extractor default, per automationExecutionId
@@ -97,7 +100,7 @@ class RunExtractSupport {
     static Map<String, Object> stageTextInput(def ec, Object source, String fileSide, String inputName,
                                               String inputText, Map<String, Object> artifactContext) {
         String token = sideToken(fileSide)
-        String safeName = ReconciliationOutputSupport.sanitizeUploadFileName(inputName, token)
+        String safeName = OutputPathSupport.sanitizeUploadFileName(inputName, token)
         String location = DataManagerSupport.childLocation(
                 artifactContext.location as String,
                 DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, safeName)
@@ -225,7 +228,7 @@ class RunExtractSupport {
         if (ec.message.hasError()) return [:]
 
         String token = sideToken(fileSide)
-        String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
+        String fileNameValue = OutputPathSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
 
         // DAR-BE-318 (plan 3b-2b): where this side's Keep runs is the caller's plan (sideKeep, which it hands the compare as
         // keepBySide), never one built here: a caller whose compare takes no Keep must not have its filters dropped. SPARK sets
@@ -248,7 +251,7 @@ class RunExtractSupport {
         SourceExtractOptionsSupport.mergeUnder(extractParams,
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
         // DAR-BE-192: readByOtherSideKeys is the run's choice, not the extract's; byKeys carries the other side's keys.
-        extractParams.remove(darpan.reconciliation.automation.AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS)
+        extractParams.remove(AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS)
         // DAR-BE-239: the fields this side's rules read, as the scheduled path sends them.
         List<String> readFields = ReconciliationSavedRunSupport.extractReadFields(ec, extractServiceName, source?.compareScopeId, fileSide)
         List<String> declaredParameters = (ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList ?: []) as List<String>
@@ -261,7 +264,7 @@ class RunExtractSupport {
             extractParams[KeepPlanSupport.KEEP_FIELDS_PARAMETER] = new ArrayList<String>(keepRuleFields)
         }
         if (byKeys != null) {
-            if (!ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList?.contains("lookupKeys")) {
+            if (!("lookupKeys" in declaredParameters)) {
                 ec.message.addError("${label} is read by the other side's keys, and its source cannot read by key.")
                 return [:]
             }
@@ -288,7 +291,7 @@ class RunExtractSupport {
             return [:]
         }
         // DAR-BE-374: what this run read feeds the ID index, in the background
-        darpan.idindex.IdIndexRunHook.afterLiveRead(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+        IdIndexRunHook.afterLiveRead(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
                 normalize(connector?.systemEnumId), configId, extractedLocation)
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
@@ -344,8 +347,8 @@ class RunExtractSupport {
     private static List<String> brainRecordFields(def ec, Object source) {
         String compareScopeId = normalize(source?.compareScopeId)
         if (!compareScopeId) return []
-        def scope = darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", compareScopeId)
-        return darpan.conclusion.brain.BrainFactAdapter.recordFieldsFor(scope?.conclusionBrain, normalize(source?.fileSide))
+        def scope = TenantScopedFinder.findTenantScopedByIdQuiet(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", compareScopeId)
+        return BrainFactAdapter.recordFieldsFor(scope?.conclusionBrain, normalize(source?.fileSide))
     }
 
 }

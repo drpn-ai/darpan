@@ -91,6 +91,16 @@
         </out-parameters>
         <actions>
             <set field="nowDate" from="ec.user.nowTimestamp"/>
+            <!-- OC209b: lock the approver's account BEFORE the device row, the order endEverySignIn takes them in (it writes
+                 UserAccount, then denies device rows), so a poll that lands while an ending is still committing waits for it
+                 and reads its sessionsEndedDate, instead of reading the old one and inserting its key after the ending's delete. -->
+            <entity-find-one entity-name="darpan.auth.CliDeviceCode" value-field="peekRow" cache="false">
+                <field-map field-name="deviceCodeHash" from="darpan.facade.auth.CliAuthSupport.hashDeviceCode(deviceCode)"/>
+            </entity-find-one>
+            <if condition="peekRow?.approvedByUserId">
+                <entity-find-one entity-name="moqui.security.UserAccount" value-field="approverLock" for-update="true" cache="false">
+                    <field-map field-name="userId" from="peekRow.approvedByUserId"/></entity-find-one>
+            </if>
             <!-- Locked, so two polls racing on one approval cannot both claim it. -->
             <entity-find-one entity-name="darpan.auth.CliDeviceCode" value-field="deviceRow" for-update="true">
                 <field-map field-name="deviceCodeHash" from="darpan.facade.auth.CliAuthSupport.hashDeviceCode(deviceCode)"/>

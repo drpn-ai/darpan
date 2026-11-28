@@ -269,12 +269,17 @@ class AuthSessionSupport {
         String userId = ec?.user?.userId?.toString()?.trim()
         def request = ec?.web?.request
         if (request == null || !userId) return null
-        for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
+        List<String> hashes = CliAuthSupport.requestLoginKeyHashes(ec)
+        for (String hash : hashes) {
             def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                             "self-scoped auth: when the request's own login key was issued")
                     .condition("loginKey", hash).useCache(false).one()
             if (key != null && key.userId == userId) return (Timestamp) key.fromDate
         }
+        // OC209b: the request signed in with a key that is gone now: an ending deleted it while this request ran. In header
+        // mode every request gets a new servlet session, so that session's start would date the sign-in to now; the epoch
+        // instead, so poll denies it once the person has a sessionsEndedDate.
+        if (hashes) return new Timestamp(0L)
         try {
             def session = request.getSession(false)
             return session != null ? new Timestamp(session.creationTime as long) : null

@@ -933,6 +933,70 @@ class AuthFacadeSupportTests {
                 "a disabled account must not reach the framework password change at all")
     }
 
+    /** OC208b: a burst of wrong guesses can lock the account between change#ExpiredPassword's first read (open) and its
+     *  compare, as it could at sign-in before OC208. The right password then changes nothing: no new password, no sign-in
+     *  ended, and no failed login counted (that write would wait on the row this change already holds). */
+    @Test
+    void changeExpiredPasswordRefusesWhenTheAccountLockedWhileItsPasswordWasChecked() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        ServiceFacadeStub service = new ServiceFacadeStub(message: message, resultsByName: [
+                "org.moqui.impl.UserServices.update#Password": [updateSuccessful: true, passwordIssues: false],
+        ])
+        Map open = [userId: "EX_USER", username: "avnindra.sharma", disabled: "N"]
+        Map locked = [userId: "EX_USER", username: "avnindra.sharma", disabled: "Y", disabledDateTime: null]
+        FinderStub loginKeys = new FinderStub(deleteAllResult: 3)
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserAccount": new SequenceFinderStub(results: [open, locked]),
+                "moqui.security.UserLoginKey": loginKeys,
+        ])
+        def ec = executionContext(message: message, entity: entity, service: service)
+
+        Map<String, Object> result = AuthFacadeSupport.changeExpiredPassword(
+                ec, "avnindra.sharma", "temp-pass", "N3w-password!", "N3w-password!")
+
+        assertFalse(result.passwordUpdated as boolean)
+        assertEquals(["Unable to change the password. Check the username and current password."], result.errors,
+                "the same answer as a wrong password; the error rolls the framework's password change back")
+        assertEquals(null, service.callTo("org.moqui.impl.UserServices.increment#UserAccountFailedLogins"))
+        assertFalse(loginKeys.conditions.containsKey("userId"), "no sign-in is ended for a refused change")
+    }
+
+    /** OC208b: a refusal the realm raises AFTER the password matched (the account locked while it was hashed) spent the
+     *  hash already. A decoy on top would make the right-but-refused password the one slow reply in a burst. */
+    @Test
+    void loginSessionDoesNotSpendADecoyWhenTheAccountLockedWhileItsPasswordWasChecked() {
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        UserStub user = new UserStub(loginUserResult: false, loginFailureError:
+                "Authenticate failed for user avnindra.sharma because the account locked while its password was checked [DISHASH].")
+        AuthFacadeSupport.loginSession(executionContext(user: user, ecfi: ecfi), "avnindra.sharma", "right-password")
+        assertEquals(0, ecfi.credentialChecks.size(), "the realm already spent the hash")
+    }
+
+    /** OC207b: a current password that matched while a burst locked the account answers no, and counts like a wrong one,
+     *  so the refused right password does no less work than a wrong guess. */
+    @Test
+    void ownPasswordCountsARightPasswordRefusedBecauseTheAccountLockedMeanwhile() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        ServiceFacadeStub service = new ServiceFacadeStub(message: message)
+        Map open = [userId: "EX_USER", username: "test.user", currentPassword: "hashed-password", passwordSalt: "salt",
+                    passwordHashType: "SHA-256", passwordBase64: "N", disabled: "N"]
+        Map locked = open + [disabled: "Y", disabledDateTime: null]
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
+        def ec = executionContext(message: message, user: user, service: service, ecfi: new EcfiStub(credentialsMatch: true),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserAccount": new SequenceFinderStub(results: [open, locked])]))
+
+        assertFalse(AuthFacadeSupport.verifyOwnPassword(ec, "old-password").passwordVerified as boolean)
+        assertNotNull(service.callTo("org.moqui.impl.UserServices.increment#UserAccountFailedLogins"))
+    }
+
+    /** A finder whose one() answers its results in turn: a row read again after something changed it. */
+    static class SequenceFinderStub extends FinderStub {
+        List results = []
+        int reads = 0
+        @Override
+        Object one() { return results[Math.min(reads++, results.size() - 1)] }
+    }
+
     /** Login resolves an account case-insensitively, so a user who signed in as "Avnindra.Sharma" and was
      *  told to change their password must not hit a dead end on the very next step. */
     @Test

@@ -51,6 +51,8 @@ class AuthFacadeSupport {
             PASSWORD_CHANGE_REQUIRED_MARKER,
             PASSWORD_EXPIRED_MARKER,
             "is not in allowed list",
+            // OC208b: the realm refused after the password matched (the account locked while it was hashed).
+            "[DISHASH]",
     ]
 
     /** Decoy credential for the check below: a fixed salt and a well-formed SHA-256 hex digest that is not
@@ -397,6 +399,17 @@ class AuthFacadeSupport {
         ]).call()
 
         if (updateOut?.updateSuccessful == true && !ec.message.hasError()) {
+            // OC208b: the first read (unlocked) saw the account open, but a burst of wrong guesses may have locked it while
+            // update#Password hashed: read it again, under the lock that change already holds, and refuse as a wrong password
+            // does. The error rolls the new password back. No failed login is counted: that write runs in a transaction of
+            // its own and would wait on this row.
+            def lockedNow = TwoFactorRecords.find(ec, "moqui.security.UserAccount",
+                            "self-scoped auth: the account again after a forced password change matched, for its lockout")
+                    .condition("userId", userAccount.userId).forUpdate(true).useCache(false).one()
+            if (!CliAuthSupport.canSignIn(ec, lockedNow)) {
+                rejectAnonymousPasswordChange(ec)
+                return false
+            }
             // The framework success message names the account; darpan-ui renders its own confirmation copy.
             ec.message.clearAll()
             // As change#OwnPassword: a password change ends every sign-in, CLI ones included (OC39).
@@ -501,7 +514,10 @@ class AuthFacadeSupport {
             AuthPrimitives.countFailedLogin(ec, userId)
             return false
         }
-        return CliAuthSupport.canSignIn(ec, ownAccountNow(ec, userId))
+        if (CliAuthSupport.canSignIn(ec, ownAccountNow(ec, userId))) return true
+        // OC207b: counted like a wrong guess, so the refused right password does no less work than one.
+        AuthPrimitives.countFailedLogin(ec, userId)
+        return false
     }
 
     private static def ownAccountNow(def ec, String userId) {

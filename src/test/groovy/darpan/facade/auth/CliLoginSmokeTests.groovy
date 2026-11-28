@@ -531,6 +531,48 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("OC208b: a wrong password after a temporary lockout has run out locks the account again, so the right one waits out the new lockout")
+    void aLockoutThatRanOutLocksAgainOnTheNextWrongGuess() {
+        String password = "Oc208b-start-Aa1!"
+        setPassword(APPROVER_ID, password)
+        Timestamp ranOut = lockoutThatRanOut()
+        assertFalse(anonAuth("login#Session", [username: APPROVER_USERNAME, password: "Oc208b-wrong-Bb2!"]).out.authenticated as boolean)
+        Timestamp lockedAt = account(APPROVER_ID).disabledDateTime as Timestamp
+        assertTrue(lockedAt != null && lockedAt.after(ranOut), "the wrong guess locks the account again (was ${ranOut}, now ${lockedAt})")
+        assertFalse(anonAuth("login#Session", [username: APPROVER_USERNAME, password: password]).out.authenticated as boolean,
+                "so a guess budget is max-failures per lockout, not unlimited once the first lockout ran out")
+    }
+
+    @Test
+    @DisplayName("OC208b control: the right password after a temporary lockout has run out signs in and clears it")
+    void aLockoutThatRanOutLetsTheRightPasswordIn() {
+        String password = "Oc208b-right-Aa1!"
+        setPassword(APPROVER_ID, password)
+        lockoutThatRanOut()
+        assertTrue(anonAuth("login#Session", [username: APPROVER_USERNAME, password: password]).out.authenticated as boolean)
+        assertEquals("N", account(APPROVER_ID).disabled)
+        assertEquals(0, account(APPROVER_ID).successiveFailedLogins as int)
+    }
+
+    /** The account as a burst leaves it once its temporary lockout has run out: still disabled=Y with an old date and a
+     *  count past max-failures (nothing clears them but a sign-in). Returns the old date. */
+    private Timestamp lockoutThatRanOut() {
+        int disableMinutes = (ec.ecfi.confXmlRoot.first("user-facade").first("login").attribute("disable-minutes") ?: "30") as int
+        Timestamp ranOut = new Timestamp(System.currentTimeMillis() - (disableMinutes + 1) * 60_000L)
+        ec.entity.find("moqui.security.UserAccount").condition("userId", APPROVER_ID).disableAuthz()
+                .updateAll([disabled: "Y", disabledDateTime: ranOut, successiveFailedLogins: 10])
+        return ranOut
+    }
+
+    @Test
+    @DisplayName("OC209: approve#CliLogin records when the approving sign-in began")
+    void approveRecordsTheApprovingSignIn() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([], signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        assertNotNull(deviceRow(started.userCode as String).approvedSignInDate, "poll compares it with the approver's sessionsEndedDate")
+    }
+
+    @Test
     @DisplayName("OC209: an approval whose sign-in began before the approver's sign-ins were ended issues nothing, even when it lands after the ending's deny step")
     void anApprovalRacingAnEndingIssuesNothing() {
         long signedInBefore = System.currentTimeMillis() - 60_000L
@@ -571,6 +613,9 @@ class CliLoginSmokeTests {
         }
         assertEquals(key.fromDate, startedAt([login_key: raw]), "a request carrying the person's key began when the key was issued")
         assertEquals(new Timestamp(sessionStarted), startedAt([:]), "a cookie session began when the session started")
+        // OC209b: a key the request carried but that is gone now (an ending deleted it mid-request) dates the sign-in to the
+        // epoch, never to the request's fresh header-mode session, so poll denies it once the person has a sessionsEndedDate.
+        assertEquals(new Timestamp(0L), startedAt([login_key: "Oc209b-a-key-an-ending-deleted-mid-request"]))
     }
 
     @Test

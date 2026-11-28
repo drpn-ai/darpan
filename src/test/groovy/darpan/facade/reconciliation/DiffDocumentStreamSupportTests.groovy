@@ -237,29 +237,6 @@ class DiffDocumentStreamSupportTests {
         }
     }
 
-    @Test
-    void removeMissingRowsRefusesAFileWithNoDifferencesSection() {
-        File f = cutBeforeDifferences()
-        assertRefusedUntouched(f, "no differences section") {
-            DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
-        }
-    }
-
-    @Test
-    void removeMissingRowsRefusesAFileCutMidRows() {
-        File f = cutMidRows()
-        assertRefusedUntouched(f, "ends before") {
-            DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
-        }
-    }
-
-    @Test
-    void removeMissingRowsStillRemovesFromAWholeFile() {
-        File f = writeDiffDocument([row("1"), row("2")])
-        DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
-        assertEquals(["2"], parse(f).differences*.primaryId)
-        assertEquals([f.name] as Set, tempDir.list() as Set)
-    }
     // S20 HANDOFF R1: the verify passes attribute a missing row to a side by its missingIn LABEL, which cannot tell two
     // sides of one system apart. A row's side comes from its diffType first (MISSING_IN_FILE_n), the label only when the
     // two labels differ, and is never guessed.
@@ -314,6 +291,14 @@ class DiffDocumentStreamSupportTests {
                 ((Map) doc.summary).collectEntries { k, v -> [(k): (v as long)] })
         assertEquals(["compare warning", "3 rows were found on a second look"], doc.processingWarnings)
         assertEquals([f.name] as Set, tempDir.list() as Set)
+    }
+
+    @Test
+    void removeMissingRowsBySideRefusesAFileWithNoDifferencesSection() {
+        File f = cutBeforeDifferences()
+        assertRefusedUntouched(f, "no differences section") {
+            DiffDocumentStreamSupport.removeMissingRowsBySide(f, ".verify-tmp", [FILE_2: ["1"] as Set], null)
+        }
     }
 
     @Test

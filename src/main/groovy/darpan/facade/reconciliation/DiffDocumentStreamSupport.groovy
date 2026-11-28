@@ -17,8 +17,8 @@ import java.nio.file.StandardCopyOption
  *
  * Lifted out of MissingDiffVerificationSupport (DAR-UI-044) so the conclude pass rewrites the document
  * with the same row splitting the verify pass has already proven, rather than a second reading of it.
- * The missing-diff and return-presence verify passes share its missing-row read pass and its
- * row-removal rewrite; the exchange pass shares its header handling.
+ * The verify passes share its side-aware missing-row read (forEachMissingRowBySide) and removal
+ * (removeMissingRowsBySide, R1); the exchange pass shares its header handling.
  */
 class DiffDocumentStreamSupport {
 
@@ -82,14 +82,6 @@ class DiffDocumentStreamSupport {
         return warningsList
     }
 
-    /** The summary line's counts, less the missing-object rows a verify pass removed. */
-    static Map summaryLessRemovedMissing(JsonSlurper slurper, String summaryLine, int removedCount,
-                                         int removedMissingInFile1, int removedMissingInFile2) {
-        Object fragment = headerFragment(slurper, summaryLine, SUMMARY_PREFIX)
-        return lowerSummaryByRemovedMissing(fragment instanceof Map ? (Map) fragment : [:], removedCount,
-                removedMissingInFile1, removedMissingInFile2)
-    }
-
     /** The summary's counts, less the missing-object rows removed: removedMissingInFile1 are rows missing from side 1. */
     private static Map lowerSummaryByRemovedMissing(Map summary, int removedCount, int removedMissingInFile1, int removedMissingInFile2) {
         decrement(summary, "totalDifferences", removedCount)
@@ -104,118 +96,6 @@ class DiffDocumentStreamSupport {
     private static void decrement(Map summary, String key, int by) {
         Object value = summary.get(key)
         if (value instanceof Number && by > 0) summary.put(key, Math.max(0L, ((Number) value).longValue() - by))
-    }
-
-    /**
-     * Read pass of a verify pass: visits every parseable row that carries a "missingIn", one row in
-     * memory at a time. Returns false when the document has no differences section at all.
-     */
-    static boolean forEachMissingRow(File diffFile, JsonSlurper slurper, Closure visit) {
-        boolean sawDifferencesHeader = false
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            String line
-            boolean inRows = false
-            while ((line = lines.readLine()) != null) {
-                if (!inRows) {
-                    if (line.startsWith(DIFFERENCES_HEADER)) {
-                        sawDifferencesHeader = true
-                        inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                    }
-                    continue
-                }
-                String rowJson = stripRowLine(line)
-                if (rowJson == null) break
-                if (!rowJson.contains("\"missingIn\"")) continue
-                Map row = parseRowQuietly(slurper, rowJson)
-                if (row == null) continue
-                visit.call(row)
-            }
-        }
-        return sawDifferencesHeader
-    }
-
-    /**
-     * Rewrite pass of a verify pass: streams the document to a sibling temp file (the document's name
-     * plus {@code tmpSuffix}), dropping every missing row whose id is in {@code removeIdsByToken} under
-     * its own normalized missingIn token, lowering the summary by the removed counts and appending
-     * {@code auditNote} to processingWarnings — then atomically replaces the original.
-     */
-    static void removeMissingRows(File diffFile, String tmpSuffix, Map<String, Set<String>> removeIdsByToken,
-                                  int removedCount, int removedMissingInFile1, int removedMissingInFile2,
-                                  String auditNote) {
-        JsonSlurper slurper = new JsonSlurper()
-        File tempFile = new File(diffFile.getParentFile(), diffFile.getName() + tmpSuffix)
-        // OC56: what the read saw, so a cut-off document is refused rather than rewritten as a whole, smaller one.
-        DiffRowScan scan = new DiffRowScan()
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            tempFile.withWriter("UTF-8") { Writer writer ->
-                String line
-                boolean inRows = false
-                boolean documentClosed = false
-                boolean firstRowWritten = false
-                while ((line = lines.readLine()) != null) {
-                    // once "]\n}" has been emitted the only remaining input line is the original
-                    // closing "}", which the row branch already wrote — skip it
-                    if (documentClosed) continue
-                    if (!inRows) {
-                        if (line.startsWith(SUMMARY_PREFIX)) {
-                            writer << SUMMARY_PREFIX + JsonOutput.toJson(summaryLessRemovedMissing(slurper, line,
-                                    removedCount, removedMissingInFile1, removedMissingInFile2)) + ",\n"
-                        } else if (line.startsWith(DIFFERENCES_HEADER)) {
-                            scan.headerFound = true
-                            inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                            if (inRows) writer << DIFFERENCES_HEADER
-                            else {
-                                scan.closed = true
-                                writer << line << "\n"
-                            }
-                        } else if (line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
-                            writer << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(
-                                    appendedWarnings(slurper, line, auditNote)) + ",\n"
-                        } else {
-                            writer << line << "\n"
-                        }
-                        continue
-                    }
-                    String trimmed = line.trim()
-                    String rowJson = stripRowLine(line)
-                    if (rowJson == null) {
-                        scan.closed = trimmed == "]" || trimmed == "}"
-                        writer << "]\n}"
-                        documentClosed = true
-                        continue
-                    }
-                    scan.rows++
-                    boolean lastRow = line.endsWith("]")
-                    boolean removeRow = false
-                    if (rowJson.contains("\"missingIn\"")) {
-                        Map row = parseRowQuietly(slurper, rowJson)
-                        String missingToken = row == null ? null : DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-                        String rowId = row == null ? null : rowIdOf(row)
-                        removeRow = rowId != null && removeIdsByToken.get(missingToken)?.contains(rowId)
-                    }
-                    if (!removeRow) {
-                        if (firstRowWritten) writer << ","
-                        writer << "\n" << rowJson
-                        firstRowWritten = true
-                    }
-                    if (lastRow) {
-                        scan.closed = true
-                        writer << "]\n}"
-                        documentClosed = true
-                        inRows = false
-                    }
-                }
-            }
-        }
-        // A row that does not parse is kept as it was (it is never one this pass removes), so only a cut is refused here.
-        if (!scan.headerFound || !scan.closed) {
-            tempFile.delete()
-            throw new IllegalStateException("Not rewritten: ${scan.problem()}".toString())
-        }
-        replaceFile(tempFile, diffFile)
     }
 
     /**
@@ -257,7 +137,8 @@ class DiffDocumentStreamSupport {
     }
 
     /**
-     * S20 HANDOFF R1: forEachMissingRow with each row's side (missingSide; null when nothing settles it), and what the read
+     * S20 HANDOFF R1: read pass of a verify pass. Visits each missing row with its side (missingSide; null when nothing
+     * settles it), one row in memory at a time, and returns what the read
      * saw. Rows that carry a "missingIn" are the ones read; unparsed counts those that did not parse.
      */
     static DiffRowScan forEachMissingRowBySide(File diffFile, JsonSlurper slurper, Closure visit) {

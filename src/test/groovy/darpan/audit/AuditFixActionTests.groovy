@@ -22,7 +22,7 @@ class AuditFixActionTests {
     @Test
     void theCausesFixNamesTheFactItsConditionsRead() {
         assertEquals("Fulfil SO7323719 in NetSuite; return M262129 syncs once its order is fulfilled.",
-                AuditReportAssembler.causeFix(FIX, CONDITIONS, EVIDENCE, [recordKey: "M262129"]))
+                AuditFindingDocument.causeFix(FIX, CONDITIONS, EVIDENCE, [recordKey: "M262129"]))
     }
 
     // DAR-BE-294 (gorjana R10 F-126473 read "Re-route order {orderName}"): a field the finding's record carries fills
@@ -32,20 +32,20 @@ class AuditFixActionTests {
         List<Map> rows = [[recordType: "order", recordId: "SO7373140",
                            recordData: '{"orderName":"EXC-#GOR196892531-1","tranId":"SO7373140","lines":[1],"omsOrder":{"orderId":"M1"}}'],
                           [recordType: "order", recordId: "M1213406", recordData: '{"orderName":"ignored: first record wins"}']]
-        Map<String, String> fromRecords = AuditReportAssembler.recordFieldValues(rows)
+        Map<String, String> fromRecords = AuditFindingDocument.recordFieldValues(rows)
         assertEquals([orderName: "EXC-#GOR196892531-1", tranId: "SO7373140"], fromRecords,
                 "scalar fields only, first record wins")
         assertEquals("Re-route order EXC-#GOR196892531-1 (SO7323719) for M262129.",
-                AuditReportAssembler.causeFix("Re-route order {orderName} ({orderInNetsuite.tranId}) for {recordKey}.",
+                AuditFindingDocument.causeFix("Re-route order {orderName} ({orderInNetsuite.tranId}) for {recordKey}.",
                         CONDITIONS, EVIDENCE, [recordKey: "M262129"], fromRecords))
-        assertEquals("Fulfil SO7323719", AuditReportAssembler.causeFix("Fulfil {orderInNetsuite.tranId}", CONDITIONS, EVIDENCE,
+        assertEquals("Fulfil SO7323719", AuditFindingDocument.causeFix("Fulfil {orderInNetsuite.tranId}", CONDITIONS, EVIDENCE,
                 [:], ["orderInNetsuite.tranId": "from the record"]), "a condition's evidence outranks the record")
     }
 
     @Test
     void aFactTheFindingDoesNotCarryStaysNamed() {
         assertEquals("Fulfil {orderInNetsuite.tranId} in NetSuite; return M1 syncs once its order is fulfilled.",
-                AuditReportAssembler.causeFix(FIX, CONDITIONS, [], [recordKey: "M1"]),
+                AuditFindingDocument.causeFix(FIX, CONDITIONS, [], [recordKey: "M1"]),
                 "a fact the finding does not carry stays named, never guessed")
     }
 }

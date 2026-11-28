@@ -781,7 +781,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([amount: "1500", currency: "JPY"], AuditRecordFacts.money(new BigDecimal("1500.00"), "JPY"))
         assertNull(AuditRecordFacts.money(null, "USD"))
         assertEquals('Fix CM-1 by {unknown}; ${x} stays text',
-                AuditReportAssembler.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
+                AuditFindingDocument.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
         // DAR-BE-093: a composite compare key (order id + item seq id) is joined by an invisible unit separator; people
         // and agents read it as order/item.
         assertEquals("M1137118/01", AuditRecordFacts.displayKey("M1137118\u001F01"))

@@ -172,7 +172,7 @@
             <parameter name="document" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="document" from="darpan.audit.AuditReportAssembler.assembleFinding(ec, companyUserGroupId, findingId)"/>
+            <set field="document" from="darpan.audit.AuditFindingDocument.assembleFinding(ec, companyUserGroupId, findingId)"/>
             <if condition="document == null">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
         </actions>

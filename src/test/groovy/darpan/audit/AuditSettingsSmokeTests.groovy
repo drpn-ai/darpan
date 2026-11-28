@@ -351,8 +351,11 @@ class AuditSettingsSmokeTests {
         assertTrue((facade("retry#AuditCheck", params).errorText as String).contains("has no run on"), "no run that morning yet")
 
         String paid = checkRow("TSET_PAID").automationId
+        // startedDate: when its reads were taken; without one OC34 counts the read time unknown and refuses every retry as
+        // "a later run is already recorded" before the case this test means (reads that never finished) is reached
         insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_RETRY_X", automationId: paid,
-                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_FAILED", retryCount: 0L])
+                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_FAILED", retryCount: 0L,
+                startedDate: new java.sql.Timestamp(System.currentTimeMillis())])
         insert("darpan.audit.AuditCheckRun", [checkRunId: "TSET_RETRY_CR", companyUserGroupId: MINE, checkId: "TSET_PAID",
                 reportDate: java.sql.Date.valueOf(today), period: period, windowFromDate: java.sql.Date.valueOf(today.substring(0, 8) + "01"),
                 windowThruDate: java.sql.Date.valueOf(today), statusEnumId: "AUDCS_NOT_RUN", runStamp: new java.sql.Timestamp(System.currentTimeMillis()),

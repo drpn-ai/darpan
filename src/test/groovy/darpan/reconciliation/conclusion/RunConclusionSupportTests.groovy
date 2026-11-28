@@ -233,6 +233,23 @@ class RunConclusionSupportTests {
                 ((List<Map>) lines.file2).collect { [it.key, it.presence, ((Map) it.record).itemName] })
     }
 
+    // DAR-OPS-029 S03a (handoff from S10, lens E2): past MAX_FIRST_KEY_RECORDS lines per side the rest are left off the row;
+    // the row says how many, per side, so "every line of the order" never reads complete when it is not.
+    @Test
+    void linesPastTheCapAreCountedNotDroppedSilently() {
+        int over = RunConclusionSupport.MAX_FIRST_KEY_RECORDS + 2
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2, [omsOrderId: "M1", orderItemSeqId: "01"])])
+        File oms = extract("oms-many.json", (1..over).collect { int i -> [omsOrderId: "M1", orderItemSeqId: String.format("%02d", i)] })
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, null, oms))
+        Map row = (Map) ((List) parse(doc).differences)[0]
+        assertEquals(RunConclusionSupport.MAX_FIRST_KEY_RECORDS, ((List) ((Map) row.firstKeyRecords).file1).size())
+        assertEquals([file1: 2], row.firstKeyRecordsOmitted)
+
+        File under = writeDiffDocument([missingRow("M2${SEP}01", FILE1, FILE2, [omsOrderId: "M2", orderItemSeqId: "01"])])
+        RunConclusionSupport.concludeRun(args(under, NEVER_REACHED_RULES, null, extract("oms-few.json", [[omsOrderId: "M2", orderItemSeqId: "01"]])))
+        assertFalse(((Map) ((List) parse(under).differences)[0]).containsKey("firstKeyRecordsOmitted"), "nothing left off, no count")
+    }
+
     /** Aditi on R1 F-100781: the NetSuite line the run screened out is the finding's NetSuite record; its ids ride on the row. */
     @Test
     void aFoundOtherSideRecordsIdsRideOnTheRow() {

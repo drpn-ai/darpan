@@ -33,7 +33,7 @@ class RunConclusionSupport {
     /**
      * DAR-UI-099: the records sharing a row's first key field (every line of its order, on a side keyed by order + line)
      * that ride on the row as firstKeyRecords, at most this many per side. Aditi: "always make sure all lines are present
-     * within the order".
+     * within the order". Lines past it are counted per side as firstKeyRecordsOmitted, never dropped silently.
      */
     static final int MAX_FIRST_KEY_RECORDS = 60
     /**
@@ -437,12 +437,13 @@ class RunConclusionSupport {
         Map keptFull = [:], keptFirst = [:], excludedFull = [:], excludedFirst = [:]
         // DAR-UI-099: on a side keyed by more than one field, every record of a needed first field, kept or excluded.
         Map<String, List<Map>> byFirst = keyFields.size() > 1 ? [:] : null
+        Map<String, Integer> byFirstOmitted = byFirst != null ? [:] : null
         boolean readable = extractFile?.exists() && spec.keyReliable != false
         if (readable) {
             // DAR-BE-318 (3b2b-11): under Keep the extract holds every record; set-aside ones are not kept.
             Map head = KeepArtifacts.forEachKeptRecord(extractFile) { Map record ->
                 add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
-                addFirstKeyRecord(byFirst, "KEPT", record, keyFields, normalizer, neededFirstFields)
+                addFirstKeyRecord(byFirst, byFirstOmitted, "KEPT", record, keyFields, normalizer, neededFirstFields)
             }
             // Where a Spark Keep ran its summary decides what was set aside and extract metadata is ignored for it;
             // with no .keep.json the metadata counts are read as before.
@@ -453,13 +454,13 @@ class RunConclusionSupport {
             boolean rowsLost = keep != null && ((keep.get("setAsideCount") ?: 0) as long) > 0 && !KeepArtifacts.rowsFile(extractFile).isFile()
             Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
                 add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
-                addFirstKeyRecord(byFirst, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)
+                addFirstKeyRecord(byFirst, byFirstOmitted, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)
             }
             // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
             // when the side's own metadata does not prove that every rule dropped nothing.
             boolean unknown = rowsLost || exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
             return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
-                    excludedFirst: excludedFirst, unknownWhenAbsent: unknown, byFirst: byFirst]
+                    excludedFirst: excludedFirst, unknownWhenAbsent: unknown, byFirst: byFirst, byFirstOmitted: byFirstOmitted]
         }
         // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
         return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
@@ -495,8 +496,8 @@ class RunConclusionSupport {
      * A record whose key cannot be built (a NetSuite payment line with no HotWax line id) still belongs to its order: its
      * key is the first field alone.
      */
-    private static void addFirstKeyRecord(Map<String, List<Map>> byFirst, String presence, Map record, List<String> keyFields,
-                                          String normalizer, Set<String> neededFirstFields) {
+    private static void addFirstKeyRecord(Map<String, List<Map>> byFirst, Map<String, Integer> omitted, String presence, Map record,
+                                          List<String> keyFields, String normalizer, Set<String> neededFirstFields) {
         if (byFirst == null) return
         String key = ConclusionKeySupport.compareKey(record, keyFields, normalizer)
         String firstField = key != null ? ConclusionKeySupport.firstField(key) :
@@ -504,19 +505,26 @@ class RunConclusionSupport {
         if (firstField == null || !neededFirstFields.contains(firstField)) return
         List<Map> under = byFirst.computeIfAbsent(firstField) { [] }
         if (under.size() < MAX_FIRST_KEY_RECORDS) under.add([key: key, presence: presence, record: record])
+        else omitted.put(firstField, (omitted.get(firstField) ?: 0) + 1)
     }
 
-    /** DAR-UI-099: every record of the row's first key field on each side that collects them, as firstKeyRecords. */
+    /**
+     * DAR-UI-099: every record of the row's first key field on each side that collects them, as firstKeyRecords, and per side
+     * how many past the cap were left off, as firstKeyRecordsOmitted (absent when none were).
+     */
     private static Map firstKeyRecords(Map row, Map<String, Map> index) {
         String key = row.get("primaryId")?.toString()
         if (!key) return [:]
         String firstField = ConclusionKeySupport.firstField(key)
-        Map out = [:]
+        Map out = [:], omitted = [:]
         index.each { String side, Map sideIndex ->
+            String name = side == "FILE_1" ? "file1" : "file2"
             List found = (List) ((Map) sideIndex?.get("byFirst"))?.get(firstField)
-            if (found) out.put(side == "FILE_1" ? "file1" : "file2", found)
+            if (found) out.put(name, found)
+            Integer left = (Integer) ((Map) sideIndex?.get("byFirstOmitted"))?.get(firstField)
+            if (left) omitted.put(name, left)
         }
-        return out ? [firstKeyRecords: out] : [:]
+        return (out ? [firstKeyRecords: out] : [:]) + (omitted ? [firstKeyRecordsOmitted: omitted] : [:])
     }
 
     /** One streamed record: kept only when a finding needs its key (or its first key field). */

@@ -14,7 +14,8 @@ import java.sql.Timestamp
  *       (conditionDate, IN, comparisons) still apply, because Moqui keeps them in the where condition;</li>
  *   <li>one() with a PK field given but empty: null;</li>
  *   <li>one() with no condition at all: null;</li>
- *   <li>one() otherwise: every condition, and more than one match throws, as Moqui does;</li>
+ *   <li>one() otherwise: every condition; with several matches, the first row (Moqui's EntityFindImpl reads the first
+ *       row and only trace-logs the rest);</li>
  *   <li>list() and count(): every condition; list() also sorts (orderBy) and pages (offset, limit);</li>
  *   <li>updateAll() and deleteAll(): change or remove the rows every condition matches, in the shared row list.</li>
  * </ul>
@@ -101,8 +102,7 @@ class FakeEntityFind {
     Map one() {
         if (pkFields.any { conditions.containsKey(it) && isEmpty(conditions.get(it)) }) return null
         if (conditions.isEmpty() && whereConditions.isEmpty()) return null
-        List<Map> found = matching(oneConditions())
-        if (found.size() > 1) throw new IllegalStateException("one() found ${found.size()} rows for ${conditions}")
+        List<Map> found = sorted(matching(oneConditions()))
         return found ? found[0] : null
     }
 

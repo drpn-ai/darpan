@@ -36,9 +36,10 @@ class FakeEntityFindTests {
     }
 
     @Test
-    void oneWithoutAFullPkAppliesEveryConditionAndRefusesTwoMatches() {
+    void oneWithoutAFullPkAppliesEveryConditionAndTakesTheFirstOfSeveral() {
         assertEquals("A room", chatSpaces().condition("companyUserGroupId", "TENANT_A").one()?.name)
-        assertThrows(IllegalStateException) { chatSpaces().condition("companyUserGroupId", "TENANT_B").one() }
+        assertEquals("B room", chatSpaces().condition("companyUserGroupId", "TENANT_B").one()?.name, "Moqui returns the first row, it does not throw")
+        assertEquals("B room two", chatSpaces().condition("companyUserGroupId", "TENANT_B").orderBy("-name").one()?.name)
     }
 
     @Test

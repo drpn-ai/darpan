@@ -67,7 +67,7 @@ class JudgeReplaySupport {
      * args: checkId, tenantId, matchedPairDf, missingDiffDf (RULESET_DIFF_SCHEMA), extractFiles [file1, file2: File],
      * keySpecs [file1, file2: RunConclusionStep.keySpec], promiseSides (Set of file1/file2), systems [file1, file2: system enum
      * id], statementsByClaim, params, setAsideBySide [file1/file2: the compare ids Spark's Keep set aside, for a side that kept
-     * in Spark]. Returns [findings, warnings, pairCounts: pairs judged from the matched frame, the missing frame and the
+     * in Spark], asks (the check's CheckAsk rows, from get#CheckJudgeConfig). Returns [findings, warnings, pairCounts: pairs judged from the matched frame, the missing frame and the
      * read-back records no row named]. Throws IllegalStateException, in words, when it cannot judge.
      */
     static Map judgeCompare(def ec, Map args) {
@@ -93,7 +93,7 @@ class JudgeReplaySupport {
             SIDES.each { String side -> if (row.get(side) != null) keys[side].addAll(((Map) row.get(side)).keySet()*.toString()) }
         }
         Map systems = (Map) (args.systems ?: [:])
-        Map generated = call(ec, "judge.PairFactServices.generate#PairFactType", [checkId: checkId,
+        Map generated = JudgeSupport.call(ec, "judge.PairFactServices.generate#PairFactType", [checkId: checkId,
                 sampleKeys: [file1: keys.file1 as List, file2: keys.file2 as List],
                 file1SystemEnumId: systems.file1, file2SystemEnumId: systems.file2], "Judging check ${checkId}")
         List<String> prefixes = PairFactSupport.sidePrefixes(systems.file1 as String, systems.file2 as String)
@@ -103,23 +103,25 @@ class JudgeReplaySupport {
                          file2     : [prefix: prefixes[1], setAside: setAside.file2, keyNames: keyNames.file2]]
 
         // Pass 2: the same pairs in batches, each batch's asks fetched once, then built and judged.
-        Map<String, Integer> skipped = [:]
-        Map<String, Integer> dropped = [:]
+        // Sorted, like every warning the judging gives: pair order is Spark's and not stable (JudgeSupport.judge).
+        Map<String, Integer> skipped = new TreeMap<>()
+        Map<String, Integer> dropped = new TreeMap<>()
         Map<String, Integer> pairCounts = [matched: 0, missing: 0, readBack: 0]
         Iterator<List<Map>> pairBatches = PairFactSupport.batches(new PairRows(matched, missing, readBack, skipped, dropped, pairCounts), BATCH_SIZE)
         Map params = (Map) (args.params ?: [:])
-        // Ruling P2-24: asks are answered from the replay's captured lookups only, never through AskSupport.fetcher.
+        // Ruling P2-24: asks are answered from the replay's captured lookups only (AskSupport has no live default).
+        List<Map> askRows = (List<Map>) (args.asks ?: [])
         File extract1 = (File) ((Map) args.extractFiles)?.get("file1")
         Closure askFetcher = capturedFetcher(lookupsDirOf(extract1), "the replayed run", "Ask", new TreeSet<String>())
         // Every warning an ask gives, once each across batches (each starts "Ask "; the replay also lists them in replayWarnings).
-        Set<String> askWarnings = new LinkedHashSet<>()
+        Set<String> askWarnings = new TreeSet<>()
         Iterator<List<Map>> factBatches = new Iterator<List<Map>>() {
             boolean hasNext() { return pairBatches.hasNext() }
 
             List<Map> next() {
                 List<Map> batch = pairBatches.next()
                 List<String> batchWarnings = []
-                Map<String, Map<String, Object>> asks = AskSupport.fetchAsks(ec, checkId, tenantId,
+                Map<String, Map<String, Object>> asks = AskSupport.fetchAsks(ec, askRows, tenantId,
                         batch.collect { Map row -> [row.compareId, row.file1, row.file2] }, batchWarnings, askFetcher)
                 askWarnings.addAll(batchWarnings)
                 return batch.collect { Map row -> PairFactSupport.buildFact(row, sideState, params, asks.get(row.compareId as String)) }
@@ -215,7 +217,7 @@ class JudgeReplaySupport {
     // ------------------------------------------------------------------------------------------------ captured lookups (P2-24)
 
     /** <replay>/lookups for a copied extract at <replay>/extracts/<side>/<name>; null when the extract is not a replay's copy. */
-    static File lookupsDirOf(File copiedExtract) {
+    private static File lookupsDirOf(File copiedExtract) {
         File extracts = copiedExtract?.parentFile?.parentFile
         return extracts?.name == EXTRACTS_DIR ? new File(extracts.parentFile, LOOKUPS_DIR) : null
     }
@@ -264,7 +266,7 @@ class JudgeReplaySupport {
     }
 
     /** Every capture of a lookup name in lookupsDir, oldest first by the millis in its name. */
-    static List<File> capturedLookupFiles(File lookupsDir, String name) {
+    private static List<File> capturedLookupFiles(File lookupsDir, String name) {
         if (lookupsDir == null || !name || !lookupsDir.isDirectory()) return []
         return (lookupsDir.listFiles() ?: []).findAll { File f ->
             def m = CAPTURED_LOOKUP.matcher(f.name)
@@ -502,7 +504,7 @@ class JudgeReplaySupport {
      * that was Spark's alone is not copied. Otherwise the whole file is the extractor's and is copied byte for byte. Copying
      * Spark's entries too would double them when the replay's own Keep merges its records in again.
      */
-    static void copyExtractorSideFile(File extract, File dir) {
+    private static void copyExtractorSideFile(File extract, File dir) {
         File side = new File(extract.parentFile, ExcludedRecordsSidecar.fileNameFor(extract.name))
         if (!side.isFile()) return
         File target = new File(dir, side.name)
@@ -571,7 +573,7 @@ class JudgeReplaySupport {
      * place a replay's lookups and asks are answered from. Today's live lookups do not write there yet, so a run captured before
      * they do replays every lookup as not captured.
      */
-    static void copyCapturedLookups(File runDir, File folder) {
+    private static void copyCapturedLookups(File runDir, File folder) {
         File captured = runDir != null ? new File(runDir, LOOKUPS_DIR) : null
         File target = new File(folder, LOOKUPS_DIR)
         DataManagerSupport.ensureDirectory(target, "judge replay")
@@ -592,7 +594,7 @@ class JudgeReplaySupport {
     }
 
     /** judge-replays/<checkId>/<stamp> under the data manager root, never an existing folder. */
-    static File newReplayFolder(def ec, String checkId) {
+    private static File newReplayFolder(def ec, String checkId) {
         String base = DataManagerSupport.childLocation(DataManagerSupport.childLocation(
                 DataManagerSupport.resolveDataManagerLocation(ec), REPLAYS_PATH), DataManagerSupport.safeToken(checkId, "check"))
         File parent = DataManagerSupport.resolveDirectoryFile(ec, base, true)
@@ -636,11 +638,5 @@ class JudgeReplaySupport {
         }
         judgedByRecord.each { String recordKey, List<Map> news -> if (!oldByRecord.containsKey(recordKey)) onlyJudged.addAll(news) }
         return [same: same, onlyOld: onlyOld, onlyJudged: onlyJudged, differentStatement: differentStatement]
-    }
-
-    private static Map call(def ec, String serviceName, Map params, String what) {
-        Map out = ec.service.sync().name(serviceName).parameters(params).call() as Map
-        if (ec.message.hasError()) throw new IllegalStateException("${what}: ${ec.message.errorsString}".toString())
-        return out ?: [:]
     }
 }

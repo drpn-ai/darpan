@@ -70,7 +70,8 @@
 
     <service verb="get" noun="CheckJudgeConfig" allow-remote="false">
         <description>Everything the judge reads for one of the active tenant's checks: its two decisions, the meaning of every
-            outcome of those decisions that has one, and its parameter sets. A check of another tenant does not exist.</description>
+            outcome of those decisions that has one, its parameter sets and its asks. A check of another tenant does not exist.
+            Read once per judging, never per batch of pairs.</description>
         <in-parameters>
             <parameter name="checkId" required="true"/>
         </in-parameters>
@@ -83,6 +84,8 @@
             <parameter name="decisions" type="Map"><description>Keyed by ruleSetId, for each of the two decisions that is the
                 active tenant's: firstMatchOnly and outcomeIds (the outcomes it lists). A decision of another tenant, or one
                 that does not exist, has no entry.</description></parameter>
+            <parameter name="asks" type="List"><description>The check's CheckAsk rows by askName, as maps (AskSupport.fetchAsks
+                takes them): askName, subjectSide, idField, systemEnumId, sourceConfigId, keyField, many, keepRecordFields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
@@ -148,6 +151,13 @@
                 </iterate>
                 <script>parameterSets.add([parameterSetId: parameterSet.parameterSetId, label: parameterSet.label, parameters: parameters])</script>
             </iterate>
+
+            <entity-find entity-name="darpan.judge.CheckAsk" list="askList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <order-by field-name="askName"/>
+            </entity-find>
+            <set field="asks" from="askList.collect { it.getMap() }"/>
         </actions>
     </service>
 

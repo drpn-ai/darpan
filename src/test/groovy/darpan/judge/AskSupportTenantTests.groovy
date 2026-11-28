@@ -4,7 +4,6 @@ import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -18,7 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-/** DAR-BE-318 plan 2, Task 5. The CheckAsk read is tenant-scoped: a foreign checkId gives no asks. Authz ON, as JudgeEntitiesTests. */
+/**
+ * DAR-BE-318 plan 2, Task 5. The CheckAsk read is tenant-scoped: a foreign checkId gives no asks. Authz ON, as JudgeEntitiesTests.
+ * DAR-OPS-029 S04: the read is get#CheckJudgeConfig's (once per judging); AskSupport fetches only from the rows it is given.
+ */
 @SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AskSupportTenantTests {
@@ -34,8 +36,8 @@ class AskSupportTenantTests {
     private ExecutionContext ec
     private String checkA
     private String checkB
-    private Closure savedFetcher
     private List<Map> asked
+    private Closure fetcher
 
     @BeforeAll
     void setup() {
@@ -62,40 +64,48 @@ class AskSupportTenantTests {
 
     @BeforeEach
     void stub() {
-        savedFetcher = AskSupport.fetcher
         asked = []
-        AskSupport.fetcher = { Object c, Map lookup, List<String> ids, String tenantId, List<String> warnings ->
+        fetcher = { Object c, Map lookup, List<String> ids, String tenantId, List<String> warnings ->
             asked.add(lookup)
             return ids.collectEntries { [(it): [status: "S-${lookup.systemEnumId}".toString()]] }
         }
         actAs(EDITOR_USERNAME, A)
     }
 
-    @AfterEach
-    void restore() {
-        AskSupport.fetcher = savedFetcher
-    }
-
     @Test
     void anOwnCheckGivesItsAsksFromTheRowsStoredColumns() {
-        Map out = underFacadeGrant { AskSupport.fetchAsks(ec, checkA, A, [["P1", [orderId: "O1"], null]], []) }
+        Map config = underFacadeGrant { configOf(checkA) }
+        assertEquals([], config.errors)
+        Map out = AskSupport.fetchAsks(ec, config.asks as List<Map>, A, [["P1", [orderId: "O1"], null]] as List<Map>, [], fetcher)
         assertEquals([ask_ask1_status: "S-NS"], out["P1"])
         assertEquals(["NS"], asked*.systemEnumId)
     }
 
     @Test
     void aForeignCheckIdGivesNoAsks() {
-        Map out = underFacadeGrant { AskSupport.fetchAsks(ec, checkB, A, [["P1", [orderId: "O1"], null]], []) }
-        assertEquals([:], out)
-        assertTrue(asked.isEmpty(), "no foreign ask was fetched")
+        Map config = underFacadeGrant { configOf(checkB) }
+        assertTrue(config.errors.any { it.contains("Check ${checkB} does not exist") }, "${config.errors}")
+        assertEquals(null, config.asks, "no foreign ask is read")
     }
 
     @Test
-    void aForeignTenantIdWhileAnotherTenantIsActiveGivesNoAsks() {
-        // The explicit tenant condition and the active-tenant filter must both hold: B's id with A active reads nothing.
-        Map out = underFacadeGrant { AskSupport.fetchAsks(ec, checkB, B, [["P1", [orderId: "O1"], null]], []) }
-        assertEquals([:], out)
-        assertTrue(asked.isEmpty())
+    void anotherActiveTenantReadsOnlyItsOwnAsks() {
+        // The explicit tenant condition and the active-tenant filter must both hold: with B active, A's check does not exist.
+        actAs(EDITOR_USERNAME, B)
+        Map config = underFacadeGrant { configOf(checkA) }
+        assertTrue(config.errors.any { it.contains("Check ${checkA} does not exist") }, "${config.errors}")
+        Map own = underFacadeGrant { configOf(checkB) }
+        assertEquals([], own.errors)
+        assertEquals([["ask1", "OMS", B]], (own.asks as List<Map>).collect { [it.askName, it.systemEnumId, it.companyUserGroupId] })
+    }
+
+    /** get#CheckJudgeConfig for one check: [asks, errors]; errors read and cleared. */
+    private Map configOf(String checkId) {
+        ec.message.clearAll()
+        Map out = ec.service.sync().name("judge.JudgeConfigServices.get#CheckJudgeConfig").parameters([checkId: checkId]).call()
+        List<String> errors = ec.message.errors.collect { it.toString() }
+        ec.message.clearAll()
+        return [asks: errors ? null : out?.asks, errors: errors]
     }
 
     private String seedCheck(String tenant, String system) {

@@ -322,7 +322,7 @@ class JudgeReplayTests {
     /**
      * Ruling P2-24. The scope has a conclusion lookup and the check a CheckAsk, so today's fetchLookup would resolve a connector
      * and call its extract. With the lookup captured, its answers appear (the conclusion and the ask's cause); without, nothing is
-     * fetched, each is named in a warning, and no field appears. The live AskSupport.fetcher is never swapped or used.
+     * fetched, each is named in a warning, and no field appears. AskSupport has no live fetcher to fall back on.
      * DAR-BE-318 (plan 3b-2b): the only registry reads are a side's Keep plan (replay#CheckJudgement resolves the side's connector
      * row as the run path does, RunExtractSupport.resolveExtractConnector) for a capture its read did not filter; no system is called.
      */
@@ -335,7 +335,6 @@ class JudgeReplayTests {
         SourceSystemConnectorSupport.metaClass.static.resolveBySystemEnumId = { def e, String id -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExtractServiceName = { def e, String name -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExpectedSourceConfigType = { def e, String type -> keepPlanReads.add("configType:" + type); return null }
-        Closure liveFetcher = AskSupport.fetcher
         try {
             // The stub is live: today's lookup reaches it.
             RunConclusionStep.fetchLookup(ec, [name: "probe", systemEnumId: "NETSUITE"], ["SR-1"], A, [])
@@ -368,7 +367,6 @@ class JudgeReplayTests {
             assertEquals("DKR5T_NO_RMA", ((Map) ((List<Map>) diff.differences).find { it.primaryId == "SR-1007" }.conclusion).code,
                     "no lookup answer reached the conclusion")
             assertEquals([], new File(bareDir, "lookups").list() as List)
-            assertTrue(AskSupport.fetcher.is(liveFetcher), "the live fetcher is never swapped")
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(SourceSystemConnectorSupport)
         }

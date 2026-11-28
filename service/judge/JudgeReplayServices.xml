@@ -229,6 +229,7 @@
             <set field="judged" from="darpan.judge.JudgeReplaySupport.judgeCompare(ec, [checkId: checkId, tenantId: tenantId,
                     matchedPairDf: matchedPairDf, missingDiffDf: missingDiffDf, keySpecs: keySpecs, systems: systems,
                     promiseSides: promiseSides, statementsByClaim: statementsByClaim, params: params, setAsideBySide: setAsideBySide,
+                    asks: config.asks,
                     extractFiles: [file1: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file1Location),
                                    file2: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file2Location)]])"/>
             <set field="judgedFindings" from="judged.findings"/>

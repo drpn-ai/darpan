@@ -109,4 +109,11 @@
                 the deleted LLM provider settings wrote, an LLM API key among them (DAR-OPS-029 S27). Nothing reads them. The dry run
                 counts them. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
 
+    <darpan.migration.DarpanMigration migrationId="DARPAN_SETTING_VALUE_WIDE" componentName="darpan"
+            serviceName="migration.MigrationServices.migrate#DarpanSettingValueWide"
+            sequenceNum="210" supportsDryRun="Y" enabled="N"
+            description="Widen DarpanSetting.settingValue to VARCHAR(4095), keeping NOT NULL (DAR-OPS-029 S27, OC124'): a STRING setting
+                may hold 2000 characters (errors.email.ignorePatterns ships 1,363) and the column was VARCHAR(255). Schema only.
+                The dry run shows the statement. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
+
 </entity-facade-xml>

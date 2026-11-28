@@ -245,4 +245,29 @@
         </actions>
     </service>
 
+    <!-- DAR-OPS-029 S27 OC124': registered migration DARPAN_SETTING_VALUE_WIDE (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="DarpanSettingValueWide" authenticate="false" allow-remote="false">
+        <description>One-time (DAR-OPS-029 S27, OC124'): DarpanSetting.settingValue is text-long (VARCHAR(4095)) so a STRING setting
+            up to DarpanSettings.STRING_MAX (2000) characters can be saved; it was VARCHAR(255), and errors.email.ignorePatterns
+            ships 1,363. Moqui never widens an existing column, so this does (darpan.migration.SettingValueWidening). Schema
+            only; no row is touched. Idempotent: a column already that wide is left alone. Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.SettingValueWidening.run(ec, dryRun as boolean)"/>
+            <if condition="result.error"><message error="true">${result.message}</message></if>
+            <set field="rowsUpdated" from="0" type="Integer"/>
+            <set field="messages" from="[result.message]"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
 </services>

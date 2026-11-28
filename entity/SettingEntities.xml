@@ -11,8 +11,10 @@
             (darpan/settings-catalog.json), not here. Reads go through darpan.config.DarpanSettings: row, then the JVM
             system property of the same key, then the catalog default; a row that fails the catalog's type or range is ignored.</description>
         <field name="settingKey" type="id-long" is-pk="true"/>
-        <field name="settingValue" type="text-medium" not-null="true">
-            <description>The value as text: a number, true/false, or a comma-separated list of numbers.</description></field>
+        <field name="settingValue" type="text-long" not-null="true">
+            <description>The value as text: a number, true/false, a comma-separated list of numbers, or text up to
+                DarpanSettings.STRING_MAX (2000) characters. text-long (VARCHAR(4095) on MySQL) since OC124'; the
+                DARPAN_SETTING_VALUE_WIDE migration widens a column made before it.</description></field>
         <field name="note" type="text-medium"><description>Why it was changed (optional).</description></field>
         <field name="lastChangedByUserId" type="id"/>
         <field name="lastChangedDate" type="date-time"/>

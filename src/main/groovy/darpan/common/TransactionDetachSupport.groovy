@@ -39,7 +39,7 @@ class TransactionDetachSupport {
                 try {
                     ec.transaction.resume()
                 } catch (Exception e) {
-                    logger.warn("Could not resume caller transaction after detached execution: ${e.message}")
+                    logger.warn("Could not resume caller transaction after detached execution", e)
                 }
             }
         }

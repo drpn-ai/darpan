@@ -121,7 +121,8 @@ class ValueSupport {
 
     static Object readField(def record, String fieldName) {
         if (record == null || !fieldName) return null
-        if (record instanceof Map) return record[fieldName]
+        // Map.get, not record[fieldName]: on a Groovy 4 Map, ["properties"] resolves to getProperties().
+        if (record instanceof Map) return ((Map) record).get(fieldName)
         if (record.metaClass.respondsTo(record, "get", String)) return record.get(fieldName)
         return record."${fieldName}"
     }

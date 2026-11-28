@@ -60,7 +60,7 @@ class MigrationSupervisorSupport {
      *
      * <p>Verified rather than sorted on: sequenceNum decides the order the registry is walked, these
      * rows decide whether a migration reached in that order is allowed to run. Separating the two
-     * avoids a topological sort for what is currently seven migrations, and makes a disagreement
+     * avoids a topological sort for a short registry, and makes a disagreement
      * between declared order and declared dependency visible as a BLOCKED outcome rather than as
      * silently wrong results.</p>
      */
@@ -94,6 +94,9 @@ class MigrationSupervisorSupport {
                             .findGlobalUnscoped(ec, LEDGER_ENTITY, LEDGER_READ_REASON)
                             .condition("migrationId", migrationId)
                             .orderBy("-startedDate")
+                            // runId breaks a same-millisecond tie, as get#MigrationHistory does;
+                            // without it two back-to-back attempts come back oldest first.
+                            .orderBy("-runId")
                             .list()
                     def latest = attempts ? attempts.first() : null
 
@@ -270,7 +273,7 @@ class MigrationSupervisorSupport {
     }
 
     /**
-     * The six existing migrations each report their own count under a differently named out-parameter
+     * The existing migrations each report their own count under a differently named out-parameter
      * (rowsWritten, rowsDeleted, disabledConfigCount, ...). Rather than force a uniform contract onto
      * services that already shipped, take the first integer-valued out-parameter whose name ends in
      * Count or begins with rows. A migration reporting nothing simply records a null count.

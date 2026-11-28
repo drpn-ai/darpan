@@ -427,11 +427,11 @@ class AuditAutomationSupport {
 
     /**
      * DAR-BE-123. A verify's status as record#CheckRun would derive it, without writing a run: not run when it has a reason
-     * or no read, or when a read names a system that is not a DarpanSystemSource (record#CheckRun refuses those); partial
-     * when any read is not complete; else ran.
+     * or no read, or every read failed (OC103), or when a read names a system that is not a DarpanSystemSource
+     * (record#CheckRun refuses those); partial when any read is not complete; else ran.
      */
     static Map verifyStatus(def ec, List<Map> reads, String notRunReason) {
-        if (notRunReason || !reads) return null
+        if (notRunReason || !reads || reads.every { it.statusEnumId == "AUDSR_FAILED" }) return null
         boolean known = reads.every { Map r ->
             ec.entity.find("moqui.basic.Enumeration").condition("enumId", r.systemEnumId).useCache(true).one()?.enumTypeId == "DarpanSystemSource"
         }

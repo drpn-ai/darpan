@@ -299,6 +299,18 @@ class AuditAutomationSmokeTests {
                 .condition("reportDate", Date.valueOf("2026-10-16")).count(), "a verify moves neither health nor the incremental read")
     }
 
+    // DAR-OPS-029 S11 (OC103 on the verify path). record#CheckRun calls a check whose every read failed not run (S13
+    // 2ec02a18); a verify writes no run, so verifyStatus must say the same, or the verify goes on to judge an empty read.
+    @Test
+    void aVerifyWhoseEveryReadFailedDidNotRun() {
+        Map failed = [statusEnumId: "AUDSR_FAILED", recordCount: null, readStamp: null, reason: "timed out"]
+        assertNull(AuditAutomationSupport.verifyStatus(ec, [failed + [systemEnumId: "OMS_RETURNS_GQL"],
+                failed + [systemEnumId: "NETSUITE_SUITEQL"]], null), "nothing was read, so the verify did not run")
+        assertEquals("AUDCS_PARTIAL", AuditAutomationSupport.verifyStatus(ec, [failed + [systemEnumId: "OMS_RETURNS_GQL"],
+                [systemEnumId: "NETSUITE_SUITEQL", statusEnumId: "AUDSR_COMPLETE", recordCount: 1]], null)?.checkStatusEnumId,
+                "one side read is partial, as before")
+    }
+
     // DAR-BE-122. A run reads from its checks' last complete day on; a full read only when asked.
     @Test
     void aRunReadsFromTheLastCompleteDayUnlessAFullReadIsAsked() {

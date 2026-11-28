@@ -6,6 +6,7 @@ import darpan.audit.AuditSettingsSupport
 import darpan.datasource.DataDefinedExtract
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -139,6 +140,9 @@ class AuditChangeBacktest {
 
         List<Map> bases = bases(ec, tenantId, savedRunId, evaluate ? [side] : [side, other])
         if (!bases) return unsupported("NO_LANDED_EXTRACT")
+        // OC169: a side whose Keep set records aside but lost its rows file cannot tell kept from set aside (the conclude pass
+        // claims nothing for it either); reading every record as kept would list closings with confidence.
+        if (bases.any { Map b -> (evaluate ? [side] : [side, other]).any { String s -> keepRowsLost(fileOf(b, s)) } }) return unsupported("KEEP_ROWS_LOST")
 
         List<String> limits = [LATEST_WINDOW_ONLY]
         if (evaluate) limits.add(0, CLOSES_ONLY)
@@ -206,8 +210,7 @@ class AuditChangeBacktest {
                         periodHolds(f, periodKinds, basis)) closedIds.add(f.findingId as String)
             }
         }
-        Set<String> openIds = open.collect { findingId(it.checkId, it.statementId, it.recordKey) } as Set<String>
-        List<String> opened = recordKeysOf(reportedAfter - openIds)
+        List<String> opened = recordKeysOf(reportedAfter - openInBasisPeriods(open, periodKinds, bases))
         return result(true, undecided ? OPENED_NOT_COMPUTED : null, basisId(bases), closedIds as List<String>, opened,
                 open.size() - closedIds.size(), limits)
     }
@@ -281,7 +284,10 @@ class AuditChangeBacktest {
         // D11: each tree's own targeted buckets decide which Unexplained rows a link that takes any type owns.
         Set<String> savedTargets = AuditSettingsSupport.targetedBucketsFrom(saved)
         Set<String> candidateTargets = AuditSettingsSupport.targetedBucketsFrom(candidate)
-        bases.each { Map basis ->
+        for (Map basis : bases) {
+            // OC168: the conclude pass reads whatever rows the document holds; a cut-off or unreadable one is no answer.
+            DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(fileOf(basis, ExtractReplaySupport.RESULT)) { Map row -> }
+            if (!scan.complete) return unsupported("RESULT_INCOMPLETE") + [detail: scan.problem()]
             Set<String> changed = new HashSet<String>()
             changedByBasis[basis.executionId as String] = changed
             // S03a asOf: conclude as the original run did, so a WITHIN_HOURS cause reads the hours that run saw.
@@ -310,6 +316,8 @@ class AuditChangeBacktest {
                     if (AuditAutomationSupport.countsRow(link, type, ruleId, afterExpected, after, candidateTargets)) candidateReported.add(id)
                 }
             }
+            // OC168: the two passes are paired row by row, so each must have read the rows the scan counted.
+            if (savedCodes.size() != scan.rows || i != scan.rows) return unsupported("RESULT_CHANGED")
         }
         List open = openFindings(ec, tenantId, checkIds, null)
         Map<String, String> periodKinds = periodKindsOf(ec, tenantId, open)
@@ -321,8 +329,7 @@ class AuditChangeBacktest {
                         periodHolds(f, periodKinds, basis)) closedIds.add(f.findingId as String)
             }
         }
-        Set<String> openIds = open.collect { findingId(it.checkId, it.statementId, it.recordKey) } as Set<String>
-        List<String> opened = recordKeysOf(candidateReported - savedReported - openIds)
+        List<String> opened = recordKeysOf(candidateReported - savedReported - openInBasisPeriods(open, periodKinds, bases))
         return result(true, null, basisId(bases), closedIds as List<String>, opened, open.size() - closedIds.size(), [LATEST_WINDOW_ONLY])
     }
 
@@ -396,11 +403,15 @@ class AuditChangeBacktest {
                 if (!needed.every { files.containsKey(it) }) continue
                 ZoneId zone
                 try { zone = ZoneId.of(normalize(automation.windowTimeZone) ?: "UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
+                // OC170: a replay concludes at the run's own time; with none it would conclude at now, and a WITHIN_HOURS
+                // cause would answer differently on every run.
+                Timestamp ranAt = (execution.completedDate ?: execution.startedDate) as Timestamp
+                if (ranAt == null) continue
                 Timestamp start = (Timestamp) (execution.childWindowStartDate ?: execution.windowStartDate)
                 Timestamp end = (Timestamp) (execution.childWindowEndDate ?: execution.windowEndDate)
                 // ranAt: when that run concluded (its end; else its start), the asOf its replay concludes at.
                 out << [automationId: automationId, executionId: execution.automationExecutionId, tenantId: tenantId, files: files,
-                        ranAt: (execution.completedDate ?: execution.startedDate) as Timestamp,
+                        ranAt: ranAt,
                         firstDay: start ? start.toInstant().atZone(zone).toLocalDate() : null,
                         lastDay : end ? new Timestamp(end.time - 1).toInstant().atZone(zone).toLocalDate() : null]
                 break
@@ -485,6 +496,21 @@ class AuditChangeBacktest {
     private static void forEachKeptRecord(File extract, Closure visit) {
         if (KeepArtifacts.keepFile(extract).isFile()) KeepArtifacts.forEachKeptRecord(extract, visit)
         else JsonRecordStream.forEachRecord(extract, "records", visit)
+    }
+
+    /**
+     * OC171. The open findings that hide a record a change newly reports: those whose period holds a basis window. An open
+     * finding of another period does not, since the basis would raise its own.
+     */
+    private static Set<String> openInBasisPeriods(List open, Map<String, String> periodKinds, List<Map> bases) {
+        return open.findAll { f -> bases.any { Map b -> periodHolds(f, periodKinds, b) } }
+                .collect { findingId(it.checkId, it.statementId, it.recordKey) } as Set<String>
+    }
+
+    /** OC169. A Spark Keep summary that set records aside, with its rows file gone (RunConclusionSupport reads it as rows lost). */
+    private static boolean keepRowsLost(File extract) {
+        Map keep = KeepArtifacts.readSummary(extract)
+        return keep != null && ((keep.get("setAsideCount") ?: 0) as long) > 0 && !KeepArtifacts.rowsFile(extract).isFile()
     }
 
     /** A finding's identity within one period's ledger: check, statement, record. */

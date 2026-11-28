@@ -493,6 +493,78 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(today2, twoSided())
     }
 
+    // ------------------------------------------------------------------ DAR-OPS-029 S30a: no hollow green (QA refutation)
+
+    private Map conclusionChange() {
+        asSystem { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
+                .useCache(false).list().each { it.set("outcome", "EXPECTED"); it.update() } }
+        return AuditChangeLevers.merge("CONCLUSION_ROWS", AuditChangeLevers.current(ec, "CONCLUSION_ROWS", [savedRunId: runId]),
+                [rows: [[conclusionCode: "CONC_TBT_A", conditions: [[fieldExpression: "status", operator: "IN", checkValue: "Closed"]]]]])
+    }
+
+    private Map exclusionOfCm2() {
+        Map target = [savedRunId: runId, fileSide: "FILE_1"]
+        return AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-2"]]))
+    }
+
+    /** OC-A: a result document cut off before its differences end is no answer; it used to read as closing nothing. */
+    @Test
+    void "a cut-off result document is refused, never read as closing nothing"() {
+        Map merged = conclusionChange()
+        File result = landed("TBT_EXEC1", "TBT_EXEC1-result.json")
+        String whole = result.text
+        result.text = whole.substring(0, whole.lastIndexOf("]"))
+        try {
+            Map out = AuditChangeBacktest.run(ec, MINE, "CONCLUSION_ROWS", [savedRunId: runId], merged)
+            assertEquals(false, out.supported, out.toString())
+            assertEquals("RESULT_INCOMPLETE", out.reason)
+            assertTrue((out.detail as String).contains("cut off"), out.toString())
+            assertEquals([], out.closed)
+        } finally {
+            result.text = whole
+        }
+    }
+
+    /** OC-B: a Spark Keep's summary that set records aside, with its rows file gone, cannot tell kept from set aside. */
+    @Test
+    void "a Keep summary whose rows file is gone is refused, never read as everything kept"() {
+        File memos = landed("TBT_EXEC1", "memos.json")
+        try {
+            keepSummary(memos, 1)
+            Map out = exclusionOfCm2()
+            assertEquals(false, out.supported, out.toString())
+            assertEquals("KEEP_ROWS_LOST", out.reason)
+            assertEquals([], out.closed, "it used to close F-TBT2 and F-TBT3 with confidence")
+        } finally {
+            removeKeep(memos)
+        }
+    }
+
+    /** OC-C: an execution with no completed or started date has no time to conclude at; it is no basis (asOf was now). */
+    @Test
+    void "a succeeded execution with neither a completed nor a started date is no basis"() {
+        asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one().setAll([completedDate: null, startedDate: null]).update() }
+        try {
+            Map out = exclusionOfCm2()
+            assertEquals(false, out.supported, out.toString())
+            assertEquals("NO_LANDED_EXTRACT", out.reason)
+        } finally {
+            asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one()
+                    .set("completedDate", Timestamp.valueOf("2026-11-02 06:10:00")).update() }
+        }
+    }
+
+    /** OC-D: an open finding of another period does not hide a record the change newly reports in the basis period. */
+    @Test
+    void "a record whose open finding is another period's is still opened in the basis period"() {
+        Map merged = conclusionChange()
+        asSystem { finding("F-TBT-OCT", "TBT_R2", "CM-1", "AUDFS_OPEN", "CONC_TBT_A", "2026-10") }
+        Map out = AuditChangeBacktest.run(ec, MINE, "CONCLUSION_ROWS", [savedRunId: runId], merged)
+        assertEquals(true, out.supported, out.toString())
+        assertEquals(["CM-1"], out.opened, "October's open R2 finding is another period's; November's would be new")
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** The summary a Spark Keep leaves beside extract, with setAside records set aside by one tenant rule. */
@@ -576,7 +648,6 @@ class AuditChangeBacktestSmokeTests {
                 conclusionEnumId: conclusion])
     }
 
-    /** Every row and file the backtest must leave alone. */
     /** Run2 gets a one-rule tree whose cause is EXPECTED (reset() removes it). */
     private void expectOnRun2(String code) {
         ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: run2Id,
@@ -586,6 +657,7 @@ class AuditChangeBacktestSmokeTests {
         ec.message.clearAll()
     }
 
+    /** Every row and file the backtest must leave alone. */
     private Map snapshot() {
         Map rows = asSystem {
             [findings  : ec.entity.find(FINDING).condition("companyUserGroupId", MINE).orderBy("findingId").useCache(false).list()

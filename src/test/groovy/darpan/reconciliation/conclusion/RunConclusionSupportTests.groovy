@@ -475,6 +475,18 @@ class RunConclusionSupportTests {
                 "M5 was set aside; with its row lost it must not read as kept")
     }
 
+    // OC67 follow-up (NetSuiteOrderExtractionServiceContractTests parity): a record read from the rows file still says which
+    // rule set it aside, "sequenceNum:label", exactly as the Keep step's side file tags it.
+    @Test
+    void aSetAsideRecordReadFromTheRowsFileSaysWhichRuleSetItAside() {
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M1", orderLineId: "01", quantityShipped: "0"]], [0], [KEEP_COUNTS])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        Map row = (Map) ((List) parse(doc).differences)[0]
+        assertEquals([["EXCLUDED", "1:quantityShipped"]],
+                ((List<Map>) ((Map) row.firstKeyRecords).file2).collect { [it.presence, ((Map) it.record)._excludedBy] })
+    }
+
     @Test
     void zeroSetAsideIsKnown() {
         File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])

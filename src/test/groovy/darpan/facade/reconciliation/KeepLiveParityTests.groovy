@@ -242,9 +242,9 @@ class KeepLiveParityTests {
         // the conclusions each finding reaches, from each side's presence (KEPT, EXCLUDED, ABSENT or unknown)
         List beforeConclusions = conclusions(before.diffFile as File, before1, before2)
         List afterConclusions = conclusions(runDiffFile(run), after1, after2)
-        assertEquals(beforeConclusions, afterConclusions)
+        assertKeepKnowsWhatItSetAside(beforeConclusions, afterConclusions)
         assertTrue(beforeConclusions.contains(["O2", "MISSING_FROM_FILE_1_EXCLUDED"]), "a set-aside record on a side file side: ${beforeConclusions}")
-        assertTrue(beforeConclusions.contains(["O6", "UNEXPLAINED"]), "a side with no side file that set something aside is unknown")
+        assertTrue(beforeConclusions.contains(["O6", "UNEXPLAINED"]), "a side with no side file that set something aside is unknown: ${beforeConclusions}")
         assertTrue(beforeConclusions.contains(["O11", "MISSING_FROM_FILE_1_ABSENT"]), "a key no record holds is not found")
 
         // the side files: the same records, with the extract's projection and the same _excludedBy, the extractor's drop kept
@@ -287,8 +287,9 @@ class KeepLiveParityTests {
         assertEquals(before.out.differenceCount as long, run.differenceCount as long)
         assertEquals(before.out.missingInFile2Count as long, run.onlyInFile1Count as long)
         assertEquals(before.out.missingInFile1Count as long, run.onlyInFile2Count as long)
-        assertEquals(conclusions(before.diffFile as File, before1, before2), conclusions(runDiffFile(run), after1, after2))
-        assertTrue(conclusions(runDiffFile(run), after1, after2).contains(["O6", "UNEXPLAINED"]), "the N side stays unknown")
+        assertKeepKnowsWhatItSetAside(conclusions(before.diffFile as File, before1, before2), conclusions(runDiffFile(run), after1, after2))
+        // OC67: the N side wrote no side file, but the Keep's rows file names what it set aside, so O6 is no longer unknown.
+        assertTrue(conclusions(runDiffFile(run), after1, after2).contains(["O6", "MISSING_FROM_FILE_2_EXCLUDED"]), "the N side's set-aside record is known")
     }
 
     /**
@@ -670,6 +671,20 @@ class KeepLiveParityTests {
     }
 
     /** [key, conclusion] per finding, from each side's presence: the conclude pass's own evidence (KeepArtifacts, side files). */
+    /**
+     * OC67 (6257e618): the Spark Keep names every record it set aside in its rows file, so O6 and O12 (set aside on FILE_2, their
+     * keys absent from what was kept) read EXCLUDED there, where today's read-time filtering, with no side file, can only call
+     * them unknown. Every other conclusion is the same on both paths.
+     */
+    private static void assertKeepKnowsWhatItSetAside(List before, List after) {
+        List<List<String>> unknownToday = [["O6", "UNEXPLAINED"], ["O12", "UNEXPLAINED"]]
+        List<List<String>> knownToTheKeep = [["O6", "MISSING_FROM_FILE_2_EXCLUDED"], ["O12", "MISSING_FROM_FILE_2_EXCLUDED"]]
+        assertTrue(before.containsAll(unknownToday), "today's read cannot tell: ${before}")
+        assertTrue(after.containsAll(knownToTheKeep), "the Keep knows: ${after}")
+        // findAll, not `-`: the caller's lists are asserted on after this, and must reach it whole.
+        assertEquals(before.findAll { !(it in unknownToday) }, after.findAll { !(it in knownToTheKeep) })
+    }
+
     private List conclusions(File diffFile, File file1, File file2) {
         Map labels = RunConclusionStep.documentLabels(diffFile)
         List out = []

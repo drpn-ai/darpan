@@ -38,6 +38,11 @@ class ExcludedRecordsSidecar {
         return [total: 0, kept: 0, truncated: false, spill: null, writer: null]
     }
 
+    /** Which rule set a record aside, as every excluded record carries it: "sequenceNum:fieldExpression". */
+    static String excludedBy(Object sequenceNum, Object fieldExpression) {
+        return "${sequenceNum}:${fieldExpression}".toString()
+    }
+
     /** The record is copied, never mutated: callers still hold it. */
     static void collect(Map collector, Map record, Map rule) {
         collector.total = ((collector.total ?: 0) as int) + 1
@@ -46,7 +51,7 @@ class ExcludedRecordsSidecar {
             return
         }
         Map copy = new LinkedHashMap(record ?: [:])
-        copy.put("_excludedBy", "${rule?.get('sequenceNum')}:${rule?.get('fieldExpression')}".toString())
+        copy.put("_excludedBy", excludedBy(rule?.get('sequenceNum'), rule?.get('fieldExpression')))
         appendLine(collector, JsonOutput.toJson(copy))
     }
 

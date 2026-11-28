@@ -493,7 +493,14 @@ class RunConclusionSupport {
                 // The rows file names every set-aside record, a built-in rule's too (the summary lists tenant rules only), so
                 // they read EXCLUDED from it (DAR-OPS-029 S03a: with no side file a built-in's record read "Not found"). A side
                 // file, where one was written, holds the same records: only whether it is present and whole is read.
-                KeepArtifacts.forEachSetAsideRecord(extractFile) { Map record, String ruleId -> excluded(record) }
+                // Each carries the rule that set it aside, "sequenceNum:label" from the summary's rules, as the side file
+                // tags it (OC67 follow-up: read from the rows file it arrived untagged).
+                Map<String, Map> ruleById = ((List) (keep.get("rules") ?: [])).findAll { it instanceof Map }
+                        .collectEntries { Map r -> [(r.get("id")?.toString()): r] }
+                KeepArtifacts.forEachSetAsideRecord(extractFile) { Map record, String ruleId ->
+                    Map rule = ruleById.get(ruleId)
+                    excluded(record + [_excludedBy: rule != null ? ExcludedRecordsSidecar.excludedBy(rule.get("sequenceNum"), rule.get("label")) : ruleId])
+                }
                 sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record -> }
             } else {
                 sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile, excluded)

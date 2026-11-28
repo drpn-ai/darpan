@@ -50,9 +50,12 @@ class EntityOwnershipGuardTest {
         List<String> duplicates = []
         COMPONENTS.each { String component ->
             Path entityDir = componentRoot.resolve(component).resolve("entity")
-            // A missing component would silently shrink the ownership map (and hide its entities from the ratchet).
-            // The dir must exist; its file count may be small (netsuite-darpan holds one file today).
-            assertTrue(Files.isDirectory(entityDir), "${component}/entity not found under ${componentRoot}; are sibling components checked out?")
+            // A missing component would silently shrink the ownership map (and hide its entities from the ratchet), so the
+            // component itself must be checked out. A component with no entities has no entity dir (git keeps no empty one:
+            // netsuite-darpan since e063b9b); it owns nothing and is skipped, and stays listed in case it gains entities again.
+            assertTrue(Files.isRegularFile(componentRoot.resolve(component).resolve("component.xml")),
+                    "${component} not found under ${componentRoot}; are sibling components checked out?")
+            if (!Files.isDirectory(entityDir)) return
             List<Path> xmls = Files.list(entityDir).withCloseable { stream -> stream.filter { Path p -> p.toString().endsWith(".xml") }.toList() }
             xmls.each { Path xml ->
                 def root = new XmlParser().parse(xml.toFile())

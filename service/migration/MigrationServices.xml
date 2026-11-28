@@ -304,4 +304,31 @@
         </actions>
     </service>
 
+    <!-- DAR-OPS-029: registered migration ORPHAN_SCHEMA_DROPS (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="OrphanSchemaDrops" authenticate="false" allow-remote="false">
+        <description>One-time, re-runnable (DAR-OPS-029): drops the tables and columns that deleted entities and fields left
+            behind, the list in darpan.migration.OrphanSchemaDrops. Only what this database has; never a table an entity
+            still maps or a column still a field of its entity; never a table another still references; never while an
+            entry's gate counts rows that need it. The dry run lists each statement with its row or value count. Schema
+            only. Idempotent: a second run has nothing to do, so it is re-run with force (run#Migration) after each
+            release that orphans another listed table or column. Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.OrphanSchemaDrops.run(ec, dryRun as boolean)"/>
+            <iterate list="result.errors" entry="dropError"><message error="true">${dropError}</message></iterate>
+            <set field="rowsUpdated" from="result.dropped" type="Integer"/>
+            <set field="messages" from="result.messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
 </services>

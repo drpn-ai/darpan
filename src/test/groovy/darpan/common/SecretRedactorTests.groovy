@@ -161,6 +161,21 @@ class SecretRedactorTests {
     }
 
     /**
+     * S99-230 follow-up: a dotted run ("a.a.a…", a host or package name gone long) is read in one pass by the URL userinfo
+     * rule, which used to try a scheme at every dot.
+     */
+    @Test
+    void aLongDottedRunIsRedactedQuickly() {
+        String dotted = "a." * 10_000
+        ["": "", "x://u:p@h": "x://u:***@h", " https://u:p@h": " https://u:***@h"].each { String tail, String out ->
+            long t0 = System.nanoTime()
+            assertEquals(dotted + out, masked(dotted + tail))
+            long ms = (long) ((System.nanoTime() - t0) / 1_000_000)
+            org.junit.jupiter.api.Assertions.assertTrue(ms < 500, "'${tail}' after a 20000-character dotted run took ${ms} ms")
+        }
+    }
+
+    /**
      * S99-230: the linear patterns mask exactly what the old ones did, over every input in this class, the edges of the
      * "Return " guard and word starts, and 4000 seeded random texts built from the patterns' own pieces. OLD is the rule set
      * as it was (b1a0c4 era), kept here as the oracle.
@@ -189,10 +204,16 @@ class SecretRedactorTests {
                 'return "authorization": "x"', "RETURN x-cookie: c", "return ab_authorization=x", "returnauthorization: x",
                 // word starts: a prefix that holds another key word, a key after a quoted value, keys back to back
                 "tokenpassword=x", 'password="a"token=b', "xtoken=1 ytoken=2", "a-b_c-password: v", '\\"secret\\": \\"v\\"',
+                // URL userinfo: where a scheme may start (after a non-word character only), runs of scheme characters, case
+                "-http://u:p@h", "+ftp://u:p@h", ".s3://u:p@h", "1http://u:p@h", "_http://u:p@h", "x-y.z+w://u:p@h", "a.b.1://u:p@h",
+                "1.2.3://u:p@h", "1.a://u:p@h", "HTTP://U:P@H", "(https://u:p@h)", '"sftp://svc:pa/ss@host"', "a://b://u:p@h",
+                "https://u:p@h https://v:q@g", "https://:p@h", "https://u:@h", "https://u:p", "http://u:p@h@x", "é.http://u:p@h",
         ]
         List<String> pieces = ["password", "token", "authorization", "Authorization", "cookie", "secret", "api_key", "webhook",
                 "Return ", "return\t", "return", "x", "Pre-", "_", "-", "=", ":", "=>", " ", "\t", "\"", "'", "\\\"", "\n", "Bearer ",
-                "abc", "u7u7", "@", "https://u:p", "?key=", "&", ",", "}", "Proxy-", "Set-"]
+                "abc", "u7u7", "@", "https://u:p", "?key=", "&", ",", "}", "Proxy-", "Set-",
+                // dotted and URL pieces (S99-230 follow-up)
+                "a.", ".", "+", "1", "http", "://", "u:", "p@", "h", "/", "_"]
         Random random = new Random(230L)
         4000.times {
             StringBuilder b = new StringBuilder()

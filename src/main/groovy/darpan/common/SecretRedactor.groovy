@@ -37,7 +37,13 @@ final class SecretRedactor {
     static final String MASK = "***"
 
     private static final Pattern PEM_BLOCK = ~/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END \1-----|\z)/
-    private static final Pattern URL_USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]*:)[^@\s]+@/
+    /**
+     * A URL's userinfo password. DAR-OPS-029 S99-230: tried once per run of scheme characters, from the run's start, not at
+     * every word start in it (a dotted run "a.a.a…" cost one scan per dot). A scheme always runs to the end of its run (':'
+     * is not a scheme character), and the replacement keeps the scheme text, so starting at the run's beginning masks the
+     * same text; the lookahead keeps the old rule that the scheme itself starts at a word boundary with a letter.
+     */
+    private static final Pattern URL_USERINFO = ~/(?i)(?<![a-z0-9+.-])((?=[a-z0-9+.-]*?\b[a-z])[a-z0-9+.-]*+:\/\/[^\/\s:@]*:)[^@\s]+@/
     private static final Pattern URL_SECRET_PARAM =
             ~/(?i)([?&](?:key|token|sig|signature|access_token|code|x-amz-signature|x-amz-credential|x-amz-security-token|oauth_[a-z_]+)=)[^&\s"'#]+/
     /**

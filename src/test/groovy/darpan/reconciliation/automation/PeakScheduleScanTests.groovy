@@ -33,9 +33,9 @@ class PeakScheduleScanTests {
 
     @AfterEach
     void resetSeams() {
-        AutomationExecutionSupport.peakWindowsLoader = null
-        AutomationExecutionSupport.tenantZoneLoader = null
-        AutomationExecutionSupport.peakAllowancesLoader = null
+        AutomationPeakGate.peakWindowsLoader = null
+        AutomationPeakGate.tenantZoneLoader = null
+        AutomationPeakGate.peakAllowancesLoader = null
     }
 
     private static Timestamp la(int month, int day, int hour, int minute) {
@@ -51,9 +51,9 @@ class PeakScheduleScanTests {
 
     private FakeEc ec(List<PeakWindow> peakWindows) {
         windows = peakWindows
-        AutomationExecutionSupport.peakWindowsLoader = loader
-        AutomationExecutionSupport.tenantZoneLoader = { def ec, String tenantId -> LA }
-        AutomationExecutionSupport.peakAllowancesLoader = { def ec, String tenantId -> allowanceCalls++; allowances }
+        AutomationPeakGate.peakWindowsLoader = loader
+        AutomationPeakGate.tenantZoneLoader = { def ec, String tenantId -> LA }
+        AutomationPeakGate.peakAllowancesLoader = { def ec, String tenantId -> allowanceCalls++; allowances }
         return new FakeEc()
     }
 
@@ -65,7 +65,7 @@ class PeakScheduleScanTests {
     }
 
     private static Instant startOf(FakeEc ec, FakeRow automation, Timestamp now) {
-        AutomationExecutionSupport.peakStart(ec, AutomationExecutionSupport.newPeakTick(now),
+        AutomationPeakGate.peakStart(ec, AutomationPeakGate.newPeakTick(now),
                 (automation.nextScheduledFireTime as Timestamp).toInstant(), automation.automationId as String, TENANT, true,
                 automation.lastScheduledFireTime as Timestamp, automation)
     }
@@ -214,7 +214,7 @@ class PeakScheduleScanTests {
     @Test
     void aFailingAllowanceLoaderStartsRunsAtTheirNormalTime() {
         FakeEc ec = ec([])
-        AutomationExecutionSupport.peakAllowancesLoader = { def e, String t -> throw new IllegalStateException("boom") }
+        AutomationPeakGate.peakAllowancesLoader = { def e, String t -> throw new IllegalStateException("boom") }
         addAutomation(ec)
 
         scan(ec, la(11, 28, 2, 16))
@@ -370,7 +370,7 @@ class PeakScheduleScanTests {
     @Test
     void aFailingPeakLoaderStartsRunsAtTheirNormalTime() {
         FakeEc ec = ec([])
-        AutomationExecutionSupport.peakWindowsLoader = { def e, String t, LocalDate d -> throw new IllegalStateException("boom") }
+        AutomationPeakGate.peakWindowsLoader = { def e, String t, LocalDate d -> throw new IllegalStateException("boom") }
         addAutomation(ec)
 
         scan(ec, la(11, 28, 2, 16))
@@ -409,7 +409,7 @@ class PeakScheduleScanTests {
         scan(ec, la(11, 27, 6, 1))
 
         assertTrue(executed(ec).isEmpty(), "06:00 LA is before the London read window closes")
-        assertEquals(windowEnd.toInstant(), AutomationExecutionSupport.peakStart(ec, AutomationExecutionSupport.newPeakTick(la(11, 27, 6, 1)),
+        assertEquals(windowEnd.toInstant(), AutomationPeakGate.peakStart(ec, AutomationPeakGate.newPeakTick(la(11, 27, 6, 1)),
                 fire.toInstant(), "100518", TENANT, true, automation.lastScheduledFireTime as Timestamp, automation))
 
         scan(ec, la(11, 27, 16, 1))
@@ -426,8 +426,8 @@ class PeakScheduleScanTests {
     void resolveCandidateFireTimeAnswersTheStoredFireBeforeAndAtItsTime() {
         Map automation = [scheduleExpr: "0 15 2 * * ?", windowTimeZone: "America/Los_Angeles",
                           nextScheduledFireTime: la(11, 28, 2, 15)]
-        assertEquals(la(11, 28, 2, 15), AutomationExecutionSupport.resolveCandidateFireTime(automation, la(11, 28, 1, 0)))
-        assertEquals(la(11, 28, 2, 15), AutomationExecutionSupport.resolveCandidateFireTime(automation, la(11, 28, 2, 15)))
+        assertEquals(la(11, 28, 2, 15), AutomationWindows.resolveCandidateFireTime(automation, la(11, 28, 1, 0)))
+        assertEquals(la(11, 28, 2, 15), AutomationWindows.resolveCandidateFireTime(automation, la(11, 28, 2, 15)))
     }
 
     // --- a minimal Moqui stand-in: entity finds by equality, an async service recorder --------------------------------

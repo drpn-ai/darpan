@@ -61,11 +61,11 @@ class AutomationExecutionSupportTests {
     @Test
     void previousDayWindowUsesAutomationTimezone() {
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 windowTimeZone          : "America/Los_Angeles",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-05-01T10:00:00Z"),
         ])
 
@@ -77,11 +77,11 @@ class AutomationExecutionSupportTests {
     @Test
     void customBackfillSplitsOnCalendarMonthBoundaries() {
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 windowStartDate: timestamp("2026-01-15T00:00:00Z"),
                 windowEndDate  : timestamp("2026-04-10T00:00:00Z"),
         ])
@@ -104,11 +104,11 @@ class AutomationExecutionSupportTests {
         // -> two executions, two run-result rows and two notifications from a single weekly fire, each
         // covering only part of the week. 2026-09-07 is a real occurrence (2026-08-31 -> 2026-09-07).
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_WEEK,
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
         ])
 
@@ -123,12 +123,12 @@ class AutomationExecutionSupportTests {
         // it exists to serve. 6 weeks back from 2026-09-07 is 42 days (> the 28-day splitWindowDays
         // default) and touches three calendar months.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_WEEKS,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_LAST_WEEKS,
                 relativeWindowCount     : 6,
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
         ])
 
@@ -146,12 +146,12 @@ class AutomationExecutionSupportTests {
         // The gate reads the automation's own splitWindowDays rather than a hardcoded 28: the same
         // week that stays whole above splits here because this automation asked for 3-day chunking.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_WEEK,
                 windowTimeZone          : "UTC",
                 splitWindowDays         : 3,
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
         ])
 
@@ -165,12 +165,12 @@ class AutomationExecutionSupportTests {
     @Test
     void lastNDaysUsesBoundedCalendarDaysBeforeScheduledFire() {
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_LAST_DAYS,
                 relativeWindowCount     : 3,
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-05-01T10:00:00Z"),
         ])
 
@@ -182,12 +182,12 @@ class AutomationExecutionSupportTests {
     @Test
     void lastNMonthsUsesCalendarMonthBoundariesBeforeScheduledFire() {
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_MONTHS,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_LAST_MONTHS,
                 relativeWindowCount     : 2,
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-05-18T10:00:00Z"),
         ])
 
@@ -201,13 +201,13 @@ class AutomationExecutionSupportTests {
     @Test
     void customWindowCanComeFromAutomationConfiguration() {
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 customWindowStartDate   : timestamp("2026-04-01T00:00:00Z"),
                 customWindowEndDate     : timestamp("2026-05-01T00:00:00Z"),
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 scheduledFireTime: timestamp("2026-05-18T10:00:00Z"),
         ])
 
@@ -221,11 +221,11 @@ class AutomationExecutionSupportTests {
         // HIGH gap 2: a caller-supplied 1970..9999 custom range would otherwise emit ~120k month
         // segments. resolveWindows must throw before any execution rows are produced.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 windowTimeZone          : "UTC",
         ]
         try {
-            AutomationExecutionSupport.resolveWindows(automation, [
+            AutomationWindows.resolveWindows(automation, [
                     windowStartDate: timestamp("1970-01-01T00:00:00Z"),
                     windowEndDate  : timestamp("9999-12-31T00:00:00Z"),
             ])
@@ -239,10 +239,10 @@ class AutomationExecutionSupportTests {
     void customWindowSpanWithinMaxIsAccepted() {
         // A normal one-year-ish window (under the 366-day default) must still resolve successfully.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 windowTimeZone          : "UTC",
         ]
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 windowStartDate: timestamp("2026-01-01T00:00:00Z"),
                 windowEndDate  : timestamp("2026-06-01T00:00:00Z"),
         ])
@@ -256,11 +256,11 @@ class AutomationExecutionSupportTests {
         // normal 31-day calendar-month window (Jan 1 .. Feb 1 = 31 days). The earlier attempt used
         // maxWindowDays as the DoS guard and wrongly rejected this legitimate monthly window.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 windowTimeZone          : "UTC",
                 maxWindowDays           : 28,
         ]
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(automation, [
                 windowStartDate: timestamp("2026-01-01T00:00:00Z"),
                 windowEndDate  : timestamp("2026-02-01T00:00:00Z"),
         ])
@@ -274,18 +274,18 @@ class AutomationExecutionSupportTests {
         // The pathological 1970..9999 (~2.9M-day) range must still be REJECTED by the hard sanity
         // ceiling, even when the automation carries the operational maxWindowDays default of 28.
         Map automation = [
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM,
                 windowTimeZone          : "UTC",
                 maxWindowDays           : 28,
         ]
         try {
-            AutomationExecutionSupport.resolveWindows(automation, [
+            AutomationWindows.resolveWindows(automation, [
                     windowStartDate: timestamp("1970-01-01T00:00:00Z"),
                     windowEndDate  : timestamp("9999-12-31T00:00:00Z"),
             ])
             throw new AssertionError("Expected IllegalArgumentException for a multi-million-day window span")
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.message.contains("exceeds the maximum of ${AutomationExecutionSupport.maxWindowSpanDays()}"),
+            assertTrue(expected.message.contains("exceeds the maximum of ${AutomationWindows.maxWindowSpanDays()}"),
                     "Unexpected message: ${expected.message}")
         }
     }
@@ -299,7 +299,7 @@ class AutomationExecutionSupportTests {
         ]
         Timestamp scheduled = timestamp("2026-08-05T06:00:00Z")
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(
                 automation, [scheduledFireTime: scheduled])
 
         assertEquals(1, windows.size())
@@ -317,7 +317,7 @@ class AutomationExecutionSupportTests {
                 windowTimeZone          : "UTC",
         ]
 
-        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(
+        List<Map<String, Object>> windows = AutomationWindows.resolveWindows(
                 automation, [scheduledFireTime: timestamp("2026-08-05T06:00:00Z")])
 
         // relativeWindowCount is meaningless in state mode and must not widen or split the window:
@@ -327,11 +327,11 @@ class AutomationExecutionSupportTests {
 
     @Test
     void stateWindowModeIsDetectable() {
-        assertTrue(AutomationExecutionSupport.isStateWindowMode(
+        assertTrue(AutomationWindows.isStateWindowMode(
                 [relativeWindowTypeEnumId: "AUT_WIN_STATE"]))
-        assertFalse(AutomationExecutionSupport.isStateWindowMode(
+        assertFalse(AutomationWindows.isStateWindowMode(
                 [relativeWindowTypeEnumId: "AUT_WIN_LAST_DAYS"]))
-        assertFalse(AutomationExecutionSupport.isStateWindowMode([:]))
+        assertFalse(AutomationWindows.isStateWindowMode([:]))
     }
 
     @Test
@@ -4332,7 +4332,7 @@ class AutomationExecutionSupportTests {
         seedApiAutomation(ec)
         FakeValue automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
         automation.put("chatSpaceId", "CS_OPS")
-        automation.put("relativeWindowTypeEnumId", AutomationExecutionSupport.WINDOW_CUSTOM)
+        automation.put("relativeWindowTypeEnumId", AutomationWindows.WINDOW_CUSTOM)
         addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
         failEveryCompare(ec)
         List<Map> cards = captureErrorCards()
@@ -4571,7 +4571,7 @@ class AutomationExecutionSupportTests {
                 savedRunType             : "ruleset",
                 ruleSetId                : "RS_ORDER",
                 compareScopeId           : "SCOPE_ORDER",
-                relativeWindowTypeEnumId : AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowTypeEnumId : AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount      : 1,
                 windowTimeZone           : "UTC",
                 isActive                 : "Y",

@@ -2,6 +2,7 @@ package darpan.facade.pulse
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationWindows
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -41,8 +42,8 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         seedTenant(A, "Krewe")
         seedTenant(B, "Gorjana")
-        String prev = AutomationExecutionSupport.WINDOW_PREVIOUS_DAY
-        String week = AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK
+        String prev = AutomationWindows.WINDOW_PREVIOUS_DAY
+        String week = AutomationWindows.WINDOW_PREVIOUS_WEEK
         String api = AutomationExecutionSupport.AUTOMATION_SOURCE_API
         StringBuilder xml = new StringBuilder('<entity-facade-xml type="test">' + """<darpan.rule.RuleSet ruleSetId="SPF_PAIR_RS" ruleSetName="Pair" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="SPF_SCOPE_A" ruleSetId="SPF_PAIR_RS" objectType="ORDER" companyUserGroupId="${A}"/>

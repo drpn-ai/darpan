@@ -61,6 +61,11 @@ import static darpan.reconciliation.automation.AutomationNoDataJudge.NOTICE_RUN_
 import static darpan.reconciliation.automation.AutomationNoDataJudge.hasData
 import static darpan.reconciliation.automation.AutomationNoDataJudge.keptCountsBySide
 import static darpan.reconciliation.automation.AutomationNoDataJudge.noDataNotice
+import static darpan.reconciliation.automation.AutomationPeakGate.longestAllowanceMinutes
+import static darpan.reconciliation.automation.AutomationPeakGate.peakAllowanceOf
+import static darpan.reconciliation.automation.AutomationWindows.resolveScheduledFireTime
+import static darpan.reconciliation.automation.AutomationWindows.resolveZoneId
+import static darpan.reconciliation.automation.AutomationWindows.toTimestamp
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSourceFilters
@@ -90,21 +95,6 @@ class AutomationExecutionSupport {
     static int maxConcurrentExecutions() {
         return DarpanSettings.intValue("darpan.reconciliation.automation.maxConcurrentExecutions")
     }
-    // Security (HIGH gap 2, reworked 2026-06-30): hard DoS sanity ceiling on the resolved window span,
-    // SEPARATE from the per-automation `maxWindowDays` operational default (entity default=28). This
-    // ceiling exists only to stop the 1970->9999 (~2.9M-day) explosion; it must never reject a real
-    // window, so it is deliberately huge (10 years). Tunable in the admin app Settings (darpan.reconciliation.automation.maxWindowSpanDays).
-    static int maxWindowSpanDays() {
-        return DarpanSettings.intValue("darpan.reconciliation.automation.maxWindowSpanDays")
-    }
-    /**
-     * Fallback for {@code ReconciliationAutomation.splitWindowDays} when the row carries no usable
-     * value, kept equal to that field's entity default (entity/ReconciliationEntities.xml). A window
-     * longer than this is chunked on calendar-month boundaries; a shorter one runs as a single child
-     * window (DAR-BE-042). Plain Maps in tests and rows written before the column existed have no
-     * default, so the constant has to state it rather than rely on the schema.
-     */
-    static final int DEFAULT_SPLIT_WINDOW_DAYS = 28
     static final String AUTOMATION_INPUT_API_RANGE = "AUT_IN_API_RANGE"
     static final String AUTOMATION_INPUT_SFTP_FILES = "AUT_IN_SFTP_FILES"
     static final String AUTOMATION_SOURCE_API = "AUT_SRC_API"
@@ -200,14 +190,39 @@ class AutomationExecutionSupport {
             "required access:",
     ]
 
-    static final String WINDOW_PREVIOUS_DAY = "AUT_WIN_PREV_DAY"
-    static final String WINDOW_PREVIOUS_WEEK = "AUT_WIN_PREV_WEEK"
-    static final String WINDOW_PREVIOUS_MONTH = "AUT_WIN_PREV_MONTH"
-    static final String WINDOW_LAST_DAYS = "AUT_WIN_LAST_DAYS"
-    static final String WINDOW_LAST_WEEKS = "AUT_WIN_LAST_WEEKS"
-    static final String WINDOW_LAST_MONTHS = "AUT_WIN_LAST_MONTHS"
-    static final String WINDOW_CUSTOM = "AUT_WIN_CUSTOM"
-    static final String WINDOW_STATE = "AUT_WIN_STATE"
+    // DAR-OPS-029 S06: window and fire-time maths moved to AutomationWindows, the peak gate to AutomationPeakGate. These
+    // delegates serve callers in other slices; each owner repoints, then S99 deletes them.
+    static final String WINDOW_PREVIOUS_DAY = AutomationWindows.WINDOW_PREVIOUS_DAY
+    static final String WINDOW_PREVIOUS_WEEK = AutomationWindows.WINDOW_PREVIOUS_WEEK
+    static final String WINDOW_PREVIOUS_MONTH = AutomationWindows.WINDOW_PREVIOUS_MONTH
+    static final String WINDOW_LAST_DAYS = AutomationWindows.WINDOW_LAST_DAYS
+    static final String WINDOW_LAST_WEEKS = AutomationWindows.WINDOW_LAST_WEEKS
+    static final String WINDOW_LAST_MONTHS = AutomationWindows.WINDOW_LAST_MONTHS
+    static final String WINDOW_CUSTOM = AutomationWindows.WINDOW_CUSTOM
+    static final String WINDOW_STATE = AutomationWindows.WINDOW_STATE
+
+    @Deprecated static boolean isStateWindowMode(def automation) { return AutomationWindows.isStateWindowMode(automation) }
+    @Deprecated static List<Map<String, Object>> resolveWindows(def automation, Map params = [:]) { return AutomationWindows.resolveWindows(automation, params) }
+    @Deprecated static Timestamp resolveNextScheduledFireTime(def automation, Timestamp scheduledFireTime, Timestamp now) {
+        return AutomationWindows.resolveNextScheduledFireTime(automation, scheduledFireTime, now)
+    }
+    @Deprecated static Timestamp resolveCandidateFireTime(def automation, Timestamp now) { return AutomationWindows.resolveCandidateFireTime(automation, now) }
+    @Deprecated static Map<String, Object> newPeakTick(Timestamp now) { return AutomationPeakGate.newPeakTick(now) }
+    @Deprecated static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
+                                         boolean applyMoves, Timestamp lastFire = null, def automation = null) {
+        return AutomationPeakGate.peakStart(ec, tick, fire, automationId, tenantId, applyMoves, lastFire, automation)
+    }
+    @Deprecated static Map<String, Object> peakNextRun(def ec, Map<String, Object> tick, def automation) { return AutomationPeakGate.peakNextRun(ec, tick, automation) }
+    @Deprecated static Instant peakHoursEndNow(def ec, String tenantId, Timestamp now) { return AutomationPeakGate.peakHoursEndNow(ec, tenantId, now) }
+    @Deprecated static Instant readWindowEnd(def automation, Instant fire) { return AutomationPeakGate.readWindowEnd(automation, fire) }
+    @Deprecated static LocalDate lastReadDay(Instant windowEnd, ZoneId tenantZone) { return AutomationPeakGate.lastReadDay(windowEnd, tenantZone) }
+    // the peak loader seams other slices' tests assign (AutomationExecutionSupport.peakWindowsLoader = { ... })
+    @Deprecated static Closure<List<PeakWindow>> getPeakWindowsLoader() { return AutomationPeakGate.peakWindowsLoader }
+    @Deprecated static void setPeakWindowsLoader(Closure<List<PeakWindow>> loader) { AutomationPeakGate.setPeakWindowsLoader(loader) }
+    @Deprecated static Closure<ZoneId> getTenantZoneLoader() { return AutomationPeakGate.tenantZoneLoader }
+    @Deprecated static void setTenantZoneLoader(Closure<ZoneId> loader) { AutomationPeakGate.setTenantZoneLoader(loader) }
+    @Deprecated static Closure<Map<String, AllowanceSpec>> getPeakAllowancesLoader() { return AutomationPeakGate.peakAllowancesLoader }
+    @Deprecated static void setPeakAllowancesLoader(Closure<Map<String, AllowanceSpec>> loader) { AutomationPeakGate.setPeakAllowancesLoader(loader) }
 
     static final String FILE_SIDE_1 = "FILE_1"
     static final String FILE_SIDE_2 = "FILE_2"
@@ -266,9 +281,7 @@ class AutomationExecutionSupport {
         errorCardPoster = null
         errorNoticeCopy = null
         resetExecutionHooks()
-        peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
-        tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
-        peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
+        AutomationPeakGate.resetForTests()
         RunAdmission.resetForTests()
         runAdmission = RunAdmission.SHARED
     }
@@ -1316,202 +1329,6 @@ class AutomationExecutionSupport {
         ]
     }
 
-    /** DAR-BE-328: a tenant's peak windows; tests set their own, as setRunAdmission. Null restores the default. */
-    private static final Closure<List<PeakWindow>> DEFAULT_PEAK_WINDOWS_LOADER = { def ec, String tenantId, LocalDate fromDate ->
-        PeakPeriodLoader.load(ec, tenantId, fromDate)
-    }
-    /** DAR-BE-328: a tenant's own zone (TenantSetting.timeZone, else UTC); tests set their own. Null restores the default. */
-    private static final Closure<ZoneId> DEFAULT_TENANT_ZONE_LOADER = { def ec, String tenantId ->
-        TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)
-    }
-    /** DAR-BE-328 plan 3: a tenant's sync lag allowances by automationId (active sync pairs); tests set their own. Null restores the default. */
-    private static final Closure<Map<String, AllowanceSpec>> DEFAULT_PEAK_ALLOWANCES_LOADER = { def ec, String tenantId ->
-        PeakPeriodLoader.allowances(ec, tenantId)
-    }
-    static Closure<List<PeakWindow>> peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
-    static Closure<ZoneId> tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
-    static Closure<Map<String, AllowanceSpec>> peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
-
-    static void setPeakWindowsLoader(Closure<List<PeakWindow>> loader) { peakWindowsLoader = loader ?: DEFAULT_PEAK_WINDOWS_LOADER }
-
-    static void setTenantZoneLoader(Closure<ZoneId> loader) { tenantZoneLoader = loader ?: DEFAULT_TENANT_ZONE_LOADER }
-
-    /**
-     * DAR-BE-328: one scan tick's per-tenant peak windows, zones and sync lag allowances, each loaded at most once and
-     * never kept past the tick.
-     */
-    static Map<String, Object> newPeakTick(Timestamp now) {
-        return [now: now, windows: [:], zones: [:], allowances: [:]] as Map<String, Object>
-    }
-
-    /**
-     * DAR-BE-328: when a run of this fire may start. A run-time move for the fire's date (applyMoves; only while no fire of
-     * that date has run yet, so a move cannot start every later fire of the same day too), then peak hours: a start inside
-     * them waits until they end, and so does one that would happen now while now is inside them. With no peak periods,
-     * or if reading them fails, the fire itself: a peak-period bug never stops scheduling.
-     * A run moved earlier never starts before its fire's date has begun in the automation's windowTimeZone, when its
-     * read window has closed (see readWindowEnd), or it would read orders still to come; with an automation in another
-     * zone than the tenant that can be hours after the move. Callers that apply moves pass the automation; without it
-     * no bound is applied.
-     * Plan 3: an automation with an active sync pair never starts before its read window's end plus the sync lag
-     * allowance in force on the fire's tenant-local date (PeakPeriodSupport.effectiveAllowance), with or without peak
-     * periods. That bound only raises the start, after the window clamp and before the peak hold; the fire, and so the
-     * read window, never changes. Only applied when the automation is passed (a retry's never is).
-     */
-    static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
-                                       boolean applyMoves, Timestamp lastFire = null, def automation = null) {
-        List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
-        AllowanceSpec allowance = automation != null ? peakAllowanceOf(ec, tick, tenantId, automationId) : null
-        if (!windows && allowance == null) return fire
-        try {
-            ZoneId zone = peakZoneOf(ec, tick, tenantId)
-            Instant now = ((Timestamp) tick.now).toInstant()
-            boolean moves = applyMoves && (lastFire == null ||
-                    lastFire.toInstant().atZone(zone).toLocalDate() != fire.atZone(zone).toLocalDate())
-            Instant start = PeakPeriodSupport.effectiveStart(fire, automationId, windows, zone, moves)
-            if (moves && automation != null && start.isBefore(fire)) {
-                Instant windowEnd = readWindowEnd(automation, fire)
-                if (start.isBefore(windowEnd)) start = PeakPeriodSupport.effectiveStart(windowEnd, automationId, windows, zone, false)
-            }
-            if (allowance != null) {
-                // The allowance of the day the check reads (not the fire's day): the last day of its window, tenant zone.
-                Instant windowEnd = readWindowEnd(automation, fire)
-                int minutes = PeakPeriodSupport.effectiveAllowance(allowance, windows, lastReadDay(windowEnd, zone))
-                Instant allowed = windowEnd.plus(Duration.ofMinutes(minutes))
-                if (start.isBefore(allowed)) start = PeakPeriodSupport.effectiveStart(allowed, automationId, windows, zone, false)
-            }
-            if (start.isAfter(now)) return start
-            Instant fromNow = PeakPeriodSupport.effectiveStart(now, automationId, windows, zone, false)
-            return fromNow.isAfter(now) ? fromNow : start
-        } catch (Throwable peakError) {
-            logger.error("Peak periods or the sync lag allowance of tenant {} could not be applied to automation {}; it starts at its normal time",
-                    tenantId, automationId, peakError)
-            return fire
-        }
-    }
-
-    /** DAR-BE-328 plan 3: the last day a read window ending at windowEnd reads, in the tenant's zone. */
-    static LocalDate lastReadDay(Instant windowEnd, ZoneId tenantZone) {
-        return windowEnd.minusMillis(1).atZone(tenantZone).toLocalDate()
-    }
-
-    /** DAR-BE-328 plan 3: the longest allowance a pair can have, normal or any period's, in minutes. */
-    static int longestAllowanceMinutes(AllowanceSpec spec) {
-        int longest = spec.normalMinutes
-        (spec.periodMinutes ?: [:]).values().each { Integer m -> if (m != null && m > longest) longest = m }
-        return longest
-    }
-
-    /**
-     * DAR-BE-328: the earliest a moved-earlier run of this fire may start: the start of the fire's own date in the
-     * automation's windowTimeZone, never after the fire. Every relative read window (last days, previous day, week or
-     * month) has closed by then. resolveWindows is not used: an audit's check reads the audit's window (a service call per
-     * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
-     * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
-     */
-    static Instant readWindowEnd(def automation, Instant fire) {
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
-        Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
-        return dayStart.isAfter(fire) ? fire : dayStart
-    }
-
-    /**
-     * DAR-BE-328: what the automation page shows for the next run. effectiveNextStart is when the scheduler will start it
-     * (the SAME peakStart the scan uses, so page and scheduler cannot disagree; the stored fire itself when no period
-     * applies); peakPeriodName names the period behind a differing start; peakHoursUntil is set only while now is inside
-     * peak hours. Fails open: any error leaves the stored fire and no peak hours.
-     */
-    static Map<String, Object> peakNextRun(def ec, Map<String, Object> tick, def automation) {
-        Map<String, Object> out = [:]
-        Timestamp fire = toTimestamp(readField(automation, "nextScheduledFireTime"))
-        if (fire != null) out.effectiveNextStart = fire
-        try {
-            String tenantId = normalize(readField(automation, "companyUserGroupId"))
-            String automationId = normalize(readField(automation, "automationId"))
-            List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
-            // Plan 3: a sync lag allowance moves the next run with no peak period at all.
-            if (!windows && peakAllowanceOf(ec, tick, tenantId, automationId) == null) return out
-            ZoneId zone = peakZoneOf(ec, tick, tenantId)
-            Instant until = PeakPeriodSupport.peakHoursEndIfInside(windows, ((Timestamp) tick.now).toInstant(), zone)
-            Map<String, Object> result = [:]
-            if (fire != null) {
-                Instant start = peakStart(ec, tick, fire.toInstant(), automationId, tenantId,
-                        true, toTimestamp(readField(automation, "lastScheduledFireTime")), automation)
-                result.effectiveNextStart = Timestamp.from(start)
-                if (start != fire.toInstant()) {
-                    PeakWindow period = PeakPeriodSupport.activeOn(windows, fire.toInstant().atZone(zone).toLocalDate()) ?:
-                            PeakPeriodSupport.activeOn(windows, start.atZone(zone).toLocalDate())
-                    if (period?.periodName) result.peakPeriodName = period.periodName
-                }
-            }
-            if (until != null) result.peakHoursUntil = Timestamp.from(until)
-            return result
-        } catch (Throwable peakError) {
-            logger.error("Peak periods could not be applied to the next run of automation {}; showing its normal time",
-                    readField(automation, "automationId"), peakError)
-            return out
-        }
-    }
-
-    /** DAR-BE-328: when the tenant's peak hours end, only while now is inside them; null otherwise or if they cannot be read. */
-    static Instant peakHoursEndNow(def ec, String tenantId, Timestamp now) {
-        try {
-            Map<String, Object> tick = newPeakTick(now)
-            List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
-            if (!windows) return null
-            return PeakPeriodSupport.peakHoursEndIfInside(windows, now.toInstant(), peakZoneOf(ec, tick, tenantId))
-        } catch (Throwable peakError) {
-            logger.error("Peak hours of tenant {} could not be read; none is shown", tenantId, peakError)
-            return null
-        }
-    }
-
-    private static List<PeakWindow> peakWindowsOf(def ec, Map<String, Object> tick, String tenantId) {
-        Map<String, List<PeakWindow>> cache = (Map<String, List<PeakWindow>>) tick.windows
-        String key = tenantId ?: ""
-        if (cache.containsKey(key)) return cache[key]
-        List<PeakWindow> windows = []
-        if (tenantId) {
-            try {
-                // UTC date less a day: the loader adds its own day back for peak hours that cross midnight in any zone.
-                LocalDate fromDate = ((Timestamp) tick.now).toInstant().atZone(ZoneId.of("UTC")).toLocalDate().minusDays(1)
-                windows = (peakWindowsLoader.call(ec, tenantId, fromDate) ?: []) as List<PeakWindow>
-            } catch (Throwable loadError) {
-                logger.error("Could not read the peak periods of tenant {}; its runs start at their normal time this tick",
-                        tenantId, loadError)
-                windows = []
-            }
-        }
-        cache[key] = windows
-        return windows
-    }
-
-    /**
-     * DAR-BE-328 plan 3: the automation's sync lag allowance, null when it has no active sync pair. The tenant's
-     * allowances load once per tick; if that read fails, none apply this tick (fail open, as peak periods do).
-     */
-    private static AllowanceSpec peakAllowanceOf(def ec, Map<String, Object> tick, String tenantId, String automationId) {
-        if (!tenantId || !automationId) return null
-        Map<String, Map<String, AllowanceSpec>> cache = (Map<String, Map<String, AllowanceSpec>>) tick.computeIfAbsent("allowances") { [:] }
-        if (!cache.containsKey(tenantId)) {
-            Map<String, AllowanceSpec> loaded = [:]
-            try {
-                loaded = (peakAllowancesLoader.call(ec, tenantId) ?: [:]) as Map<String, AllowanceSpec>
-            } catch (Throwable loadError) {
-                logger.error("Could not read the sync lag allowances of tenant {}; its runs start without them this tick",
-                        tenantId, loadError)
-            }
-            cache[tenantId] = loaded
-        }
-        return cache[tenantId][automationId]
-    }
-
-    private static ZoneId peakZoneOf(def ec, Map<String, Object> tick, String tenantId) {
-        Map<String, ZoneId> cache = (Map<String, ZoneId>) tick.zones
-        if (!cache.containsKey(tenantId)) cache[tenantId] = (tenantZoneLoader.call(ec, tenantId) ?: ZoneId.of("UTC")) as ZoneId
-        return cache[tenantId]
-    }
-
     /**
      * How many more executions this tick may enqueue: {@link #maxConcurrentExecutions} minus the
      * executions already RUNNING. Stale RUNNING rows (crashed JVM, killed container) cannot wedge the
@@ -2169,197 +1986,6 @@ class AutomationExecutionSupport {
         return minutes * 60_000L
     }
 
-    /**
-     * Whether the automation was saved with the retired state-based window (AUT_WIN_STATE): a population by record status
-     * rather than a date window. No connector reads that way any more (DAR-BE-052); the pulse and the automation facade still
-     * ask, to refuse such a row.
-     */
-    static boolean isStateWindowMode(def automation) {
-        return WINDOW_STATE == normalize(readField(automation, "relativeWindowTypeEnumId"))
-    }
-
-    static List<Map<String, Object>> resolveWindows(def automation, Map params = [:]) {
-        Map<String, Object> input = params ?: [:]
-        Timestamp scheduledFireTime = toTimestamp(input.scheduledFireTime ?: input.scheduledDate ?: input.nowTimestamp) ?:
-                new Timestamp(System.currentTimeMillis())
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
-        ZonedDateTime scheduledLocal = scheduledFireTime.toInstant().atZone(zone)
-        String windowType = normalize(readField(automation, "relativeWindowTypeEnumId")) ?: WINDOW_LAST_DAYS
-        int windowCount = normalizeInt(readField(automation, "relativeWindowCount")) ?: 1
-
-        if (WINDOW_STATE == windowType) {
-            // Exactly one segment, always. The bounds are the scheduled day in the automation's zone:
-            // a real, valid, non-empty window that satisfies every downstream consumer, and that the
-            // extractor never sees because state-mode dispatch omits the date parameters entirely.
-            ZonedDateTime stateStart = scheduledLocal.toLocalDate().atStartOfDay(zone)
-            ZonedDateTime stateEnd = stateStart.plusDays(1)
-            Timestamp stateStartTimestamp = Timestamp.from(stateStart.toInstant())
-            Timestamp stateEndTimestamp = Timestamp.from(stateEnd.toInstant())
-            return [[
-                    sequenceNum         : 1,
-                    windowStartDate     : stateStartTimestamp,
-                    windowEndDate       : stateEndTimestamp,
-                    childWindowStartDate: stateStartTimestamp,
-                    childWindowEndDate  : stateEndTimestamp,
-            ]] as List<Map<String, Object>>
-        }
-
-        ZonedDateTime windowStart
-        ZonedDateTime windowEnd
-        switch (windowType) {
-            case WINDOW_PREVIOUS_DAY:
-                LocalDate previousDay = scheduledLocal.toLocalDate().minusDays(1)
-                windowStart = previousDay.atStartOfDay(zone)
-                windowEnd = previousDay.plusDays(1).atStartOfDay(zone)
-                break
-            case WINDOW_PREVIOUS_WEEK:
-                LocalDate currentWeekStart = scheduledLocal.toLocalDate()
-                        .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                LocalDate previousWeekStart = currentWeekStart.minusWeeks(1)
-                windowStart = previousWeekStart.atStartOfDay(zone)
-                windowEnd = currentWeekStart.atStartOfDay(zone)
-                break
-            case WINDOW_PREVIOUS_MONTH:
-                YearMonth previousMonth = YearMonth.from(scheduledLocal.toLocalDate()).minusMonths(1)
-                windowStart = previousMonth.atDay(1).atStartOfDay(zone)
-                windowEnd = previousMonth.plusMonths(1).atDay(1).atStartOfDay(zone)
-                break
-            case WINDOW_LAST_WEEKS:
-                LocalDate weekEnd = scheduledLocal.toLocalDate()
-                        .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                windowStart = weekEnd.minusWeeks(Math.max(windowCount, 1)).atStartOfDay(zone)
-                windowEnd = weekEnd.atStartOfDay(zone)
-                break
-            case WINDOW_LAST_MONTHS:
-                YearMonth monthEnd = YearMonth.from(scheduledLocal.toLocalDate())
-                windowStart = monthEnd.minusMonths(Math.max(windowCount, 1)).atDay(1).atStartOfDay(zone)
-                windowEnd = monthEnd.atDay(1).atStartOfDay(zone)
-                break
-            case WINDOW_CUSTOM:
-                Object customStart = input.windowStartDate ?: input.childWindowStartDate ?: readField(automation, "customWindowStartDate")
-                Object customEnd = input.windowEndDate ?: input.childWindowEndDate ?: readField(automation, "customWindowEndDate")
-                windowStart = requireTimestamp(customStart, "windowStartDate is required for custom automation windows")
-                        .toInstant().atZone(zone)
-                windowEnd = requireTimestamp(customEnd, "windowEndDate is required for custom automation windows")
-                        .toInstant().atZone(zone)
-                break
-            case WINDOW_LAST_DAYS:
-            default:
-                LocalDate dayEnd = scheduledLocal.toLocalDate()
-                windowStart = dayEnd.minusDays(Math.max(windowCount, 1)).atStartOfDay(zone)
-                windowEnd = dayEnd.atStartOfDay(zone)
-                break
-        }
-
-        if (!windowStart.isBefore(windowEnd)) {
-            throw new IllegalArgumentException("Automation window start must be before window end")
-        }
-
-        // Security (HIGH gap 2): hard DoS sanity cap on the window span, INDEPENDENT of the
-        // per-automation `maxWindowDays` field. A caller-supplied WINDOW_CUSTOM range like
-        // 1970-01-01..9999-12-31 (~2.9M days) otherwise produces ~120k month segments, each inserting a
-        // ReconciliationAutomationExecution row inside a transaction -> DB bloat / heap OOM / ghost
-        // PENDING rows.
-        //
-        // IMPORTANT: `maxWindowDays` is an OPERATIONAL window default (entity default=28 days), NOT a
-        // security cap. Using it here would REJECT legitimate windows: a 31-day month
-        // (WINDOW_PREVIOUS_MONTH / LAST_MONTHS=1 on a 30/31-day month, ordinary CUSTOM month ranges)
-        // exceeds 28 and would be wrongly refused. The DoS guard must NEVER reject a legitimate window,
-        // so it uses a separate, deliberately huge sanity ceiling (10 years) that only the attack
-        // pathological ranges can breach. Operators can tune it in the admin app Settings (darpan.reconciliation.automation.maxWindowSpanDays).
-        long __spanDays = ChronoUnit.DAYS.between(windowStart, windowEnd)
-        int __maxSpanDays = maxWindowSpanDays()
-        if (__spanDays > __maxSpanDays) {
-            throw new IllegalArgumentException(
-                    "Automation window span (${__spanDays} days) exceeds the maximum of ${__maxSpanDays} days.")
-        }
-
-        Timestamp parentStart = Timestamp.from(windowStart.toInstant())
-        Timestamp parentEnd = Timestamp.from(windowEnd.toInstant())
-
-        // DAR-BE-042: chunk on calendar months only when the window is long enough to need chunking.
-        // This cut used to apply to EVERY window regardless of length. A 7-day previous-week span that
-        // happened to straddle the 1st therefore became two child windows, and because
-        // findOrCreateExecution keys on the CHILD bounds those are two DISTINCT executions rather than a
-        // duplicate — so one weekly fire produced two execution rows, two run-result rows and two
-        // notifications, each reconciling only part of the week. It bit roughly once a month (the week
-        // containing the 1st) and never bit the daily automations, whose one-day window cannot contain a
-        // month start.
-        //
-        // The threshold is the automation's own `splitWindowDays` (entity default 28). That field was
-        // already created, updated, persisted and published through the facade and the API contract, but
-        // NOTHING read it — so operators could set a chunk size that did nothing while an unconfigurable
-        // month rule ran instead. Reading it here makes the documented knob the one that decides.
-        // A null or non-positive value falls back to the entity default rather than meaning "split
-        // everything", which is the behaviour this fix exists to remove.
-        Integer configuredSplitWindowDays = normalizeInt(readField(automation, "splitWindowDays"))
-        int splitWindowDays = (configuredSplitWindowDays != null && configuredSplitWindowDays > 0) ?
-                configuredSplitWindowDays : DEFAULT_SPLIT_WINDOW_DAYS
-        List<Map<String, ZonedDateTime>> windowSegments = __spanDays > splitWindowDays ?
-                splitOnCalendarMonthBoundaries(windowStart, windowEnd, zone) :
-                [[start: windowStart, end: windowEnd] as Map<String, ZonedDateTime>]
-
-        return windowSegments.withIndex().collect { Map<String, ZonedDateTime> segment, int index ->
-            [
-                    sequenceNum         : index + 1,
-                    windowStartDate     : parentStart,
-                    windowEndDate       : parentEnd,
-                    childWindowStartDate: Timestamp.from(segment.start.toInstant()),
-                    childWindowEndDate  : Timestamp.from(segment.end.toInstant()),
-            ]
-        }
-    }
-
-    static Timestamp resolveNextScheduledFireTime(def automation, Timestamp scheduledFireTime, Timestamp now) {
-        String scheduleExpr = normalize(readField(automation, "scheduleExpr"))
-        if (!scheduleExpr) return null
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
-        Timestamp base = scheduledFireTime ?: now ?: new Timestamp(System.currentTimeMillis())
-
-        try {
-            ZonedDateTime cursor = base.toInstant().atZone(zone).plusNanos(1)
-            ZonedDateTime nowLocal = (now ?: base).toInstant().atZone(zone)
-            Optional<ZonedDateTime> next = ScheduledJobRunner.getExecutionTime(scheduleExpr).nextExecution(cursor)
-            while (next.present && !next.get().isAfter(nowLocal)) {
-                next = ScheduledJobRunner.getExecutionTime(scheduleExpr).nextExecution(next.get().plusNanos(1))
-            }
-            return next.present ? Timestamp.from(next.get().toInstant()) : null
-        } catch (Throwable ignored) {
-            Duration duration = parseScheduleDuration(scheduleExpr)
-            if (duration == null || duration.isZero() || duration.isNegative()) return null
-            ZonedDateTime next = base.toInstant().atZone(zone).plus(duration)
-            ZonedDateTime nowLocal = (now ?: base).toInstant().atZone(zone)
-            while (!next.isAfter(nowLocal)) next = next.plus(duration)
-            return Timestamp.from(next.toInstant())
-        }
-    }
-
-    /**
-     * DAR-BE-328: the fire this automation is waiting on, past or future: nextScheduledFireTime when set, else the last
-     * cron or duration fire not yet run. A peak-period move may start it before it is due.
-     */
-    static Timestamp resolveCandidateFireTime(def automation, Timestamp now) {
-        Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
-        Timestamp nextFire = toTimestamp(readField(automation, "nextScheduledFireTime"))
-        if (nextFire != null) return nextFire
-
-        String scheduleExpr = normalize(readField(automation, "scheduleExpr"))
-        if (!scheduleExpr) return null
-
-        Timestamp lastScheduledFireTime = toTimestamp(readField(automation, "lastScheduledFireTime"))
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
-        Timestamp cronFireTime = resolveLastCronFireTime(scheduleExpr, nowValue, zone)
-        if (cronFireTime != null) {
-            return lastScheduledFireTime == null || lastScheduledFireTime.before(cronFireTime) ? cronFireTime : null
-        }
-
-        Timestamp durationFireTime = resolveLastDurationFireTime(scheduleExpr, lastScheduledFireTime, nowValue, zone)
-        if (durationFireTime != null) {
-            return lastScheduledFireTime == null || lastScheduledFireTime.before(durationFireTime) ? durationFireTime : null
-        }
-        return null
-    }
-
     protected static Map<String, Object> normalizeSftpExecutionParams(Map<String, Object> input) {
         Map<String, Object> sftpParams = [:]
         sftpParams.putAll(input)
@@ -2459,45 +2085,6 @@ class AutomationExecutionSupport {
             return execution
         })
         return [execution: created, duplicate: false, reused: false]
-    }
-
-    protected static List<Map<String, ZonedDateTime>> splitOnCalendarMonthBoundaries(ZonedDateTime start,
-            ZonedDateTime end, ZoneId zone) {
-        List<Map<String, ZonedDateTime>> segments = []
-        ZonedDateTime segmentStart = start
-        while (segmentStart.isBefore(end)) {
-            ZonedDateTime nextMonthStart = YearMonth.from(segmentStart.toLocalDate()).plusMonths(1)
-                    .atDay(1).atStartOfDay(zone)
-            ZonedDateTime segmentEnd = nextMonthStart.isBefore(end) ? nextMonthStart : end
-            segments << [start: segmentStart, end: segmentEnd]
-            segmentStart = segmentEnd
-        }
-        return segments
-    }
-
-    protected static Timestamp resolveLastCronFireTime(String scheduleExpr, Timestamp now, ZoneId zone) {
-        try {
-            ZonedDateTime nowLocal = now.toInstant().atZone(zone)
-            Optional<ZonedDateTime> last = ScheduledJobRunner.getExecutionTime(scheduleExpr).lastExecution(nowLocal)
-            return last.present ? Timestamp.from(last.get().toInstant()) : null
-        } catch (Throwable ignored) {
-            return null
-        }
-    }
-
-    protected static Timestamp resolveLastDurationFireTime(String scheduleExpr, Timestamp lastScheduledFireTime,
-            Timestamp now, ZoneId zone) {
-        Duration duration = parseScheduleDuration(scheduleExpr)
-        if (duration == null || duration.isZero() || duration.isNegative() || lastScheduledFireTime == null) return null
-
-        ZonedDateTime nowLocal = now.toInstant().atZone(zone)
-        ZonedDateTime candidate = lastScheduledFireTime.toInstant().atZone(zone).plus(duration)
-        Timestamp latestDue = null
-        while (!candidate.isAfter(nowLocal)) {
-            latestDue = Timestamp.from(candidate.toInstant())
-            candidate = candidate.plus(duration)
-        }
-        return latestDue
     }
 
     /**
@@ -4081,58 +3668,6 @@ class AutomationExecutionSupport {
             automation.update()
             return null
         })
-    }
-
-    protected static Timestamp resolveScheduledFireTime(def ec, Map<String, Object> input) {
-        return toTimestamp(input.scheduledFireTime ?: input.scheduledDate ?: input.nowTimestamp) ?: nowTimestamp(ec)
-    }
-
-    protected static Timestamp requireTimestamp(Object rawValue, String message) {
-        Timestamp timestamp = toTimestamp(rawValue)
-        if (!timestamp) throw new IllegalArgumentException(message)
-        return timestamp
-    }
-
-    protected static Timestamp toTimestamp(Object rawValue) {
-        if (rawValue == null) return null
-        if (rawValue instanceof Timestamp) return rawValue
-        if (rawValue instanceof Date) return new Timestamp(rawValue.time)
-        if (rawValue instanceof Instant) return Timestamp.from((Instant) rawValue)
-        if (rawValue instanceof ZonedDateTime) return Timestamp.from(((ZonedDateTime) rawValue).toInstant())
-        if (rawValue instanceof LocalDateTime) return Timestamp.valueOf((LocalDateTime) rawValue)
-
-        String normalized = normalize(rawValue)
-        if (!normalized) return null
-        try {
-            return Timestamp.from(Instant.parse(normalized))
-        } catch (Exception ignored) {
-        }
-        try {
-            return Timestamp.valueOf(normalized)
-        } catch (Exception ignored) {
-        }
-        try {
-            return Timestamp.valueOf(LocalDateTime.parse(normalized))
-        } catch (Exception ignored) {
-        }
-        throw new IllegalArgumentException("Invalid timestamp '${normalized}'")
-    }
-
-    protected static ZoneId resolveZoneId(Object rawZoneId) {
-        String normalized = normalize(rawZoneId) ?: "UTC"
-        try {
-            return ZoneId.of(normalized)
-        } catch (Exception ignored) {
-            return ZoneId.of("UTC")
-        }
-    }
-
-    protected static Duration parseScheduleDuration(String scheduleExpr) {
-        try {
-            return Duration.parse(scheduleExpr)
-        } catch (Exception ignored) {
-            return null
-        }
     }
 
     protected static Map<String, Object> parseJsonMap(Object rawJson) {

@@ -24,9 +24,9 @@ class PeakNextRunTests {
 
     @AfterEach
     void resetSeams() {
-        AutomationExecutionSupport.peakWindowsLoader = null
-        AutomationExecutionSupport.tenantZoneLoader = null
-        AutomationExecutionSupport.peakAllowancesLoader = null
+        AutomationPeakGate.peakWindowsLoader = null
+        AutomationPeakGate.tenantZoneLoader = null
+        AutomationPeakGate.peakAllowancesLoader = null
     }
 
     private static Timestamp la(int month, int day, int hour, int minute) {
@@ -40,9 +40,9 @@ class PeakNextRunTests {
     }
 
     private static void windows(List<PeakWindow> peakWindows) {
-        AutomationExecutionSupport.peakWindowsLoader = { def ec, String tenantId, LocalDate from -> peakWindows }
-        AutomationExecutionSupport.tenantZoneLoader = { def ec, String tenantId -> LA }
-        AutomationExecutionSupport.peakAllowancesLoader = { def ec, String tenantId -> [:] }
+        AutomationPeakGate.peakWindowsLoader = { def ec, String tenantId, LocalDate from -> peakWindows }
+        AutomationPeakGate.tenantZoneLoader = { def ec, String tenantId -> LA }
+        AutomationPeakGate.peakAllowancesLoader = { def ec, String tenantId -> [:] }
     }
 
     private static Map automation() {
@@ -50,7 +50,7 @@ class PeakNextRunTests {
     }
 
     private static Map next(Timestamp now) {
-        AutomationExecutionSupport.peakNextRun(null, AutomationExecutionSupport.newPeakTick(now), automation())
+        AutomationPeakGate.peakNextRun(null, AutomationPeakGate.newPeakTick(now), automation())
     }
 
     @Test
@@ -82,16 +82,16 @@ class PeakNextRunTests {
     void aMoveAlreadyUsedTodayIsNotShown() {
         windows([window()])
         Map moved = automation() + [lastScheduledFireTime: la(11, 28, 1, 0)]
-        Map result = AutomationExecutionSupport.peakNextRun(null, AutomationExecutionSupport.newPeakTick(la(11, 28, 3, 0)), moved)
+        Map result = AutomationPeakGate.peakNextRun(null, AutomationPeakGate.newPeakTick(la(11, 28, 3, 0)), moved)
         assertEquals(la(11, 28, 2, 15), result.effectiveNextStart)
         assertNull(result.peakPeriodName)
     }
 
     @Test
     void aFailingLoaderFailsOpen() {
-        AutomationExecutionSupport.peakWindowsLoader = { def ec, String tenantId, LocalDate from -> throw new IllegalStateException("boom") }
-        AutomationExecutionSupport.tenantZoneLoader = { def ec, String tenantId -> LA }
-        AutomationExecutionSupport.peakAllowancesLoader = { def ec, String tenantId -> [:] }
+        AutomationPeakGate.peakWindowsLoader = { def ec, String tenantId, LocalDate from -> throw new IllegalStateException("boom") }
+        AutomationPeakGate.tenantZoneLoader = { def ec, String tenantId -> LA }
+        AutomationPeakGate.peakAllowancesLoader = { def ec, String tenantId -> [:] }
         Map result = next(la(11, 27, 12, 0))
         assertEquals(la(11, 28, 2, 15), result.effectiveNextStart)
         assertNull(result.peakHoursUntil)
@@ -100,9 +100,9 @@ class PeakNextRunTests {
     @Test
     void theSyncLagAllowanceIsShownWithNoPeakPeriod() {
         windows([])
-        AutomationExecutionSupport.peakAllowancesLoader = { def ec, String tenantId -> ["100518": new AllowanceSpec(360, [:])] }
+        AutomationPeakGate.peakAllowancesLoader = { def ec, String tenantId -> ["100518": new AllowanceSpec(360, [:])] }
         Map paired = automation() + [windowTimeZone: "America/Los_Angeles"]
-        Map result = AutomationExecutionSupport.peakNextRun(null, AutomationExecutionSupport.newPeakTick(la(11, 27, 12, 0)), paired)
+        Map result = AutomationPeakGate.peakNextRun(null, AutomationPeakGate.newPeakTick(la(11, 27, 12, 0)), paired)
         assertEquals(la(11, 28, 6, 0), result.effectiveNextStart, "the page shows the scheduler's 06:00, not the 02:15 fire")
         assertNull(result.peakPeriodName)
         assertNull(result.peakHoursUntil)

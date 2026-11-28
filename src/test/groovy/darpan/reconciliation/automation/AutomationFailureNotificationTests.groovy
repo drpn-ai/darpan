@@ -278,7 +278,7 @@ class AutomationFailureNotificationTests {
                 savedRunType            : "ruleset",
                 ruleSetId               : "DARPAN_TEST_COMPARE_RS",
                 compareScopeId          : "DARPAN_TEST_ORDER_JSON_SCOPE",
-                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount     : 1,
                 windowTimeZone          : "UTC",
                 isActive                : "Y",

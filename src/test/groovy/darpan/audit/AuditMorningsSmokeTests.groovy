@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationWindows
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -73,7 +74,7 @@ class AuditMorningsSmokeTests {
                 automationName: "Month close: invoices without an Etail id", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
                 savedRunId: "MORNINGS_INVOICE_ETAIL_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_INVOICE_ETAIL_RS",
-                compareScopeId: "MORNINGS_INVOICE_ETAIL_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                compareScopeId: "MORNINGS_INVOICE_ETAIL_SCOPE", relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATION, fileSide: "FILE_1"], [
                 automationId: AUTOMATION, fileSide: "FILE_1", companyUserGroupId: TENANT,
@@ -301,7 +302,7 @@ class AuditMorningsSmokeTests {
                 automationName: "Month close: exchange credits against replacements", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
                 savedRunId: "MORNINGS_MEMO_REPLACEMENT_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_MEMO_REPLACEMENT_RS",
-                compareScopeId: "MORNINGS_MEMO_REPLACEMENT_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                compareScopeId: "MORNINGS_MEMO_REPLACEMENT_SCOPE", relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         ["FILE_1", "FILE_2"].each { String side ->
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
@@ -360,7 +361,7 @@ class AuditMorningsSmokeTests {
                 automationName: "Month close: warranty claims against credit memos", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
                 savedRunId: "MORNINGS_WARRANTY_CLAIM_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_WARRANTY_CLAIM_RS",
-                compareScopeId: "MORNINGS_WARRANTY_CLAIM_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                compareScopeId: "MORNINGS_WARRANTY_CLAIM_SCOPE", relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         ["FILE_1", "FILE_2"].each { String side ->
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
@@ -420,7 +421,7 @@ class AuditMorningsSmokeTests {
                 automationName: "Month close: cancelled returns left open", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
                 savedRunId: "MORNINGS_CANCELLED_RETURN_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_CANCELLED_RETURN_RS",
-                compareScopeId: "MORNINGS_CANCELLED_RETURN_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                compareScopeId: "MORNINGS_CANCELLED_RETURN_SCOPE", relativeWindowTypeEnumId: AutomationWindows.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: "FILE_1"], [
                 automationId: auto, fileSide: "FILE_1", companyUserGroupId: TENANT,

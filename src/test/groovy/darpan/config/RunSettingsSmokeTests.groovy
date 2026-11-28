@@ -2,6 +2,7 @@ package darpan.config
 
 import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationWindows
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -76,11 +77,11 @@ class RunSettingsSmokeTests {
 
     @Test
     void theWindowCeilingStaysAtTheSettingAndRefusesBeyondIt() {
-        Map automation = [relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM, windowTimeZone: "UTC", maxWindowDays: 28]
-        assertNotNull(AutomationExecutionSupport.resolveWindows(automation, [
+        Map automation = [relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM, windowTimeZone: "UTC", maxWindowDays: 28]
+        assertNotNull(AutomationWindows.resolveWindows(automation, [
                 windowStartDate: ts("2025-01-01T00:00:00Z"), windowEndDate: ts("2026-02-05T00:00:00Z")]))
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
-            AutomationExecutionSupport.resolveWindows(automation, [
+            AutomationWindows.resolveWindows(automation, [
                     windowStartDate: ts("2010-01-01T00:00:00Z"), windowEndDate: ts("2021-01-01T00:00:00Z")])
         }
         assertTrue(refused.message.contains("maximum of 3660"), refused.message)
@@ -88,12 +89,12 @@ class RunSettingsSmokeTests {
 
     @Test
     void aWindowCeilingRowTakesEffectWithNoRestart() {
-        Map automation = [relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM, windowTimeZone: "UTC", maxWindowDays: 28]
+        Map automation = [relativeWindowTypeEnumId: AutomationWindows.WINDOW_CUSTOM, windowTimeZone: "UTC", maxWindowDays: 28]
         saveRow("darpan.reconciliation.automation.maxWindowSpanDays", "400")
-        assertNotNull(AutomationExecutionSupport.resolveWindows(automation, [
+        assertNotNull(AutomationWindows.resolveWindows(automation, [
                 windowStartDate: ts("2025-01-01T00:00:00Z"), windowEndDate: ts("2026-01-26T00:00:00Z")]))   // 390 days
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
-            AutomationExecutionSupport.resolveWindows(automation, [
+            AutomationWindows.resolveWindows(automation, [
                     windowStartDate: ts("2025-01-01T00:00:00Z"), windowEndDate: ts("2026-02-07T00:00:00Z")])   // 402 days
         }
         assertTrue(refused.message.contains("maximum of 400"), refused.message)

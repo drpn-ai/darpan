@@ -33,7 +33,7 @@ class AutomationFacadeSupportTests {
                            childWindowEndDate: ts("2026-05-03T00:00:00Z")]
         Map windowless = [automationId: "A1"]
 
-        List collapsed = AutomationFacadeSupport.collapseExecutionHistory([first, retryOfFirst, otherWindow, windowless])
+        List collapsed = AutomationRowSupport.collapseExecutionHistory([first, retryOfFirst, otherWindow, windowless])
         assertEquals([first, otherWindow, windowless], collapsed)
     }
 
@@ -42,8 +42,8 @@ class AutomationFacadeSupportTests {
         // Rows with no child window have no logical key and must never dedupe each other.
         Map a = [automationId: "A1", statusEnumId: "X"]
         Map b = [automationId: "A1", statusEnumId: "Y"]
-        assertEquals([a, b], AutomationFacadeSupport.collapseExecutionHistory([a, b]))
-        assertEquals([], AutomationFacadeSupport.collapseExecutionHistory(null))
+        assertEquals([a, b], AutomationRowSupport.collapseExecutionHistory([a, b]))
+        assertEquals([], AutomationRowSupport.collapseExecutionHistory(null))
     }
 
     @Test
@@ -51,18 +51,18 @@ class AutomationFacadeSupportTests {
         Timestamp start = ts("2026-05-01T00:00:00Z")
         Map viaTimestamp = [automationId: "A1", childWindowStartDate: start, childWindowEndDate: null]
         Map viaDate = [automationId: "A1", childWindowStartDate: new Date(start.time), childWindowEndDate: null]
-        assertEquals(AutomationFacadeSupport.logicalExecutionWindowKey(viaTimestamp),
-                AutomationFacadeSupport.logicalExecutionWindowKey(viaDate))
-        assertNull(AutomationFacadeSupport.logicalExecutionWindowKey([automationId: "A1"]))
+        assertEquals(AutomationRowSupport.logicalExecutionWindowKey(viaTimestamp),
+                AutomationRowSupport.logicalExecutionWindowKey(viaDate))
+        assertNull(AutomationRowSupport.logicalExecutionWindowKey([automationId: "A1"]))
     }
 
     // ─── schedule summary ────────────────────────────────────────────────────────
 
     @Test
     void buildScheduleSummaryDistinguishesCronDurationAndUnscheduled() {
-        assertEquals("Not scheduled", AutomationFacadeSupport.buildScheduleSummary([:]))
-        assertEquals("P1D", AutomationFacadeSupport.buildScheduleSummary([scheduleExpr: "P1D"]))
-        assertEquals("Cron: 0 0 2 * * ?", AutomationFacadeSupport.buildScheduleSummary([scheduleExpr: "0 0 2 * * ?"]))
+        assertEquals("Not scheduled", AutomationRowSupport.buildScheduleSummary([:]))
+        assertEquals("P1D", AutomationRowSupport.buildScheduleSummary([scheduleExpr: "P1D"]))
+        assertEquals("Cron: 0 0 2 * * ?", AutomationRowSupport.buildScheduleSummary([scheduleExpr: "0 0 2 * * ?"]))
     }
 
     // ─── next fire time (timezone regression H15.3 area, pure input path) ────────

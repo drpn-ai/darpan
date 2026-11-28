@@ -3,6 +3,7 @@ package darpan.facade.settings
 import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.AutomationFacadeSupport
+import darpan.facade.reconciliation.AutomationRowSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -159,7 +160,7 @@ class ChatSpaceCrossTenantSmokeTests {
 
     @Test
     void anAutomationSummaryDoesNotRevealAnotherTenantsChatSpace() {
-        Map<String, Object> summary = AutomationFacadeSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE])
+        Map<String, Object> summary = AutomationRowSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE])
         assertNull(summary.chatSpaceName, "the victim's space name leaked into the attacker's automation summary")
         assertFalse(summary.chatSpaceActive as boolean, "the victim's space reads as usable for the attacker")
     }
@@ -182,7 +183,7 @@ class ChatSpaceCrossTenantSmokeTests {
             AutomationFacadeSupport.validateChatSpace(ec, VICTIM_SPACE)
             assertFalse(ec.message.hasError(), "the owning tenant's own space was refused: ${ec.message.errors}")
             assertEquals("Victim Ops",
-                    AutomationFacadeSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE]).chatSpaceName)
+                    AutomationRowSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE]).chatSpaceName)
             List destinations = (List) TenantNotificationSupport.resolveDestinationChatSpaces(
                     ec, VICTIM, VICTIM_SPACE, "NO_SUCH_RUN_RESULT").destinations
             assertTrue(destinations.any { it.chatSpaceId == VICTIM_SPACE },

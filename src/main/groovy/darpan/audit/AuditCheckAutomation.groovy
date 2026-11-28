@@ -97,7 +97,7 @@ class AuditCheckAutomation {
             // (loadAutomationSourceFilters), so without this copy every run that filters its source (R1 "completed units
             // only", R15 "EXC- orders, not WH") ran unfiltered and raised findings for records it never meant to read.
             // A1: the audit's own tenant, not the session's (the agent pipeline makes these under another active tenant).
-            darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet(ec, tenantId, scope.compareScopeId as String, source.fileSide as String)
+            darpan.facade.reconciliation.AutomationSaveSupport.seedFromRuleSet(ec, tenantId, scope.compareScopeId as String, source.fileSide as String)
                     .eachWithIndex { Map filter, int i ->
                         ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSourceFilter").setAll([
                                 automationId: automationId, fileSide: source.fileSide, sequenceNum: i + 1,

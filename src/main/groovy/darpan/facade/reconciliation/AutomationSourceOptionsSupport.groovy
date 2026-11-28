@@ -216,7 +216,7 @@ class AutomationSourceOptionsSupport {
      * built through the wizard gets the same windowing as one built by a data load — including
      * windowDateOnly, without which a custom date range runs the previous day (DAR-BE-057).</p>
      */
-    protected static List<Map<String, Object>> listNsSuiteQlQueryOptions(def ec) {
+    static List<Map<String, Object>> listNsSuiteQlQueryOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, NETSUITE_SUITEQL_SYSTEM_ENUM_ID)
@@ -279,7 +279,8 @@ class AutomationSourceOptionsSupport {
         } as List<Map<String, Object>>
     }
 
-    static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) {
+    /** DAR-OPS-029 S99-314: HotWax OMS endpoints (GraphQL; the REST path is gone), one row per connection and endpoint. */
+    static List<Map<String, Object>> listHotWaxOmsSourceRemoteOptions(def ec) {
         return remoteOptionsForType(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
     }
 
@@ -433,7 +434,7 @@ class AutomationSourceOptionsSupport {
      * control that would validate, persist and then exclude nothing (design: fail closed and loudly).
      * Registry-driven on purpose: a connector opting in later needs no UI change.
      */
-    protected static boolean supportsExcludeFiltersForSystem(def ec, String systemEnumId) {
+    static boolean supportsExcludeFiltersForSystem(def ec, String systemEnumId) {
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(systemEnumId))
         // Explicit truthiness, NOT `as boolean`: String.asType(Boolean) routes through
         // Boolean.valueOf, which would turn "sourceFilters" into false.

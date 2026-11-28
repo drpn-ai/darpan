@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.reconciliation.AutomationFacadeSupport
+import darpan.facade.reconciliation.AutomationSourceOptionsSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -260,7 +261,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void shopifyReturnRefsConnectorDeclaresTheExclusionFilterParameter() {
         // Opted in 2026-08-27 for return-status exclusion. Without filterParameterName the rules board
-        // hides the exclusion control (AutomationFacadeSupport.supportsExcludeFiltersForSystem ->
+        // hides the exclusion control (AutomationSourceOptionsSupport.supportsExcludeFiltersForSystem ->
         // RuleSetBoard.supportsExclusions) and a configured rule would never dispatch. The canonical
         // SHOPIFY connector opted in separately on 2026-09-30 (DAR-BE-063) — see the sibling test above.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
@@ -329,13 +330,13 @@ class SourceSystemConnectorSupportSmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
         assertNotNull(oms, "OMS_GQL connector row should resolve")
-        List<String> pillFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_GQL")
+        List<String> pillFields = AutomationSourceOptionsSupport.fieldOptionsForSystem(ec, "OMS_GQL")
                 .collect { Map<String, Object> option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
         List<String> keepFields = ((String) oms.keepFieldsBase).split(",").collect { it.trim() }.findAll { it }
         assertTrue(pillFields.contains("productStoreId"))
         assertFalse(keepFields.contains("productStoreId"))
         assertTrue(pillFields.containsAll(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"]))
-        assertEquals(3, AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").size())
+        assertEquals(3, AutomationSourceOptionsSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").size())
     }
 
     @Test
@@ -432,14 +433,14 @@ class SourceSystemConnectorSupportSmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
         // The endpoints that had NO case in the old switch must now return real options.
-        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS_GQL").isEmpty(),
+        assertFalse(AutomationSourceOptionsSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS_GQL").isEmpty(),
                 "OMS_RETURNS_GQL must return real options from the registry")
-        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "SHOPIFY_RETURN_REFS").isEmpty())
+        assertFalse(AutomationSourceOptionsSupport.primaryIdOptionsForSystem(ec, "SHOPIFY_RETURN_REFS").isEmpty())
 
         assertEquals(["\$.records[*].orderId", "\$.records[*].orderName", "\$.records[*].externalId"],
-                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").collect { it.fieldPath })
+                AutomationSourceOptionsSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").collect { it.fieldPath })
         assertEquals("Return channel",
-                AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
+                AutomationSourceOptionsSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
                         .find { it.fieldPath == "\$.records[*].returnChannelEnumId" }.label)
     }
 
@@ -455,7 +456,7 @@ class SourceSystemConnectorSupportSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
 
         assertFalse(options.isEmpty(), "OMS_RETURNS_GQL must have a curated pill list — an empty list means the "
                 + "channel pill silently disappears (design §5)")
@@ -476,7 +477,7 @@ class SourceSystemConnectorSupportSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
         options.each { Map<String, Object> option ->
             String path = option.fieldPath as String
             String tail = path.substring(path.lastIndexOf('.') + 1)

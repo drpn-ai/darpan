@@ -2595,7 +2595,7 @@
             <set field="executionsByAutomationId" from="executionRecords.groupBy { executionRecord -> ((executionRecord.automationId)?.toString()?.trim()) }"/>
             <!-- DAR-BE-328: one peak tick for the page, so a tenant's peak periods are read once, not once per row. -->
             <set field="peakTick" from="darpan.reconciliation.automation.AutomationExecutionSupport.newPeakTick(ec.user.nowTimestamp)"/>
-            <set field="automationRows" from="automationRecords.collect { automationRecord -> darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, false, sourcesByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [], darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionsByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: []), peakTick) }"/>
+            <set field="automationRows" from="automationRecords.collect { automationRecord -> darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, automationRecord, false, sourcesByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [], darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(executionsByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: []), peakTick) }"/>
             <if condition="search">
                 <set field="automationRows" from="automationRows.findAll { row -> [row.automationId, row.automationName, row.description, row.savedRunId, row.savedRunName, row.inputModeLabel, row.sourceSummary, row.scheduleSummary, row.timezone, row.lastExecution?.statusLabel].any { value -> value?.toString()?.toLowerCase()?.contains(search) } }"/>
             </if>
@@ -2636,13 +2636,13 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
-                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
                 <!-- Snapshot drift: derived from the SAME deriveRunAuthoritativeConfig that
                      sync#Automation applies, so the edit form's out-of-date marker can never
                      disagree with what Sync would actually change. Read-only. -->
-                <set field="automationSourcesForSync" from="darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, automationSources, automationIdValue)"/>
-                <set field="syncStatus" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, automationSourcesForSync, darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord))"/>
+                <set field="automationSourcesForSync" from="darpan.facade.reconciliation.AutomationSyncSupport.attachCapturedFilters(ec, automationSources, automationIdValue)"/>
+                <set field="syncStatus" from="darpan.facade.reconciliation.AutomationSyncSupport.buildAutomationSyncStatus(automationRecord, automationSourcesForSync, darpan.facade.reconciliation.AutomationSyncSupport.deriveRunAuthoritativeConfig(ec, automationRecord))"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -2824,7 +2824,7 @@
                     sourceEntries: sourceEntries
             ]"/>
             <if condition="!ec.message.hasError()">
-                <set field="prepareAutomationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.prepareAutomationSave(ec, saveAutomationInput)"/>
+                <set field="prepareAutomationResult" from="darpan.facade.reconciliation.AutomationSaveSupport.prepareAutomationSave(ec, saveAutomationInput)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="automationFields" from="prepareAutomationResult.automationFields"/>
@@ -2866,7 +2866,7 @@
                      resolved above and exactly what gets persisted to automationRecord.compareScopeId
                      either way — rather than from automationRecord itself. -->
                 <set field="automationCompareScopeId" from="automationFields.compareScopeId"/>
-                <set field="existingAutomationFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.captureSourceFiltersByFileSide(ec, savedAutomationId)"/>
+                <set field="existingAutomationFilters" from="darpan.facade.reconciliation.AutomationSaveSupport.captureSourceFiltersByFileSide(ec, savedAutomationId)"/>
                 <set field="ignoreDeleteAutomationFilters" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="ignoreDeleteAutomationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <iterate list="sourceEntries" entry="sourceEntry">
@@ -2897,7 +2897,7 @@
                     <service-call name="create#darpan.reconciliation.ReconciliationAutomationSource"
                             disable-authz="true"
                             in-map="sourceCreateMap"/>
-                    <set field="resolvedSourceFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.resolveSourceFilters(ec, automationCompareScopeId, sourceEntry, existingAutomationFilters)"/>
+                    <set field="resolvedSourceFilters" from="darpan.facade.reconciliation.AutomationSaveSupport.resolveSourceFilters(ec, automationCompareScopeId, sourceEntry, existingAutomationFilters)"/>
                     <set field="sourceFilterSequence" from="0"/>
                     <iterate list="resolvedSourceFilters" entry="sourceFilterRow">
                         <set field="sourceFilterSequence" from="sourceFilterSequence + 1"/>
@@ -2912,8 +2912,8 @@
                 </iterate>
                 <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', savedAutomationId).disableAuthz().useCache(false).one()"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', savedAutomationId).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
-                <set field="automation" from="automationRecord ? darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions) : null"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', savedAutomationId).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="automationRecord ? darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions) : null"/>
                 <message>Saved automation ${automation?.automationName ?: savedAutomationId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -2959,7 +2959,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="derivedConfig" from="darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord)"/>
+                <set field="derivedConfig" from="darpan.facade.reconciliation.AutomationSyncSupport.deriveRunAuthoritativeConfig(ec, automationRecord)"/>
                 <if condition="derivedConfig.savedRunMissing">
                     <message error="true">This automation's saved run is no longer available, so it cannot be synced.</message>
                 </if>
@@ -2969,9 +2969,9 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="storedSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="changedFields" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, storedSources, automationIdValue), derivedConfig).changedFields"/>
-                <set field="mergedSources" from="darpan.facade.reconciliation.AutomationFacadeSupport.mergeSyncedSourceEntries(storedSources, derivedConfig.sourcesByFileSide, derivedConfig.filtersByFileSide)"/>
-                <set field="syncPayload" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncPayload(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.resolveSyncedInputMode(mergedSources), mergedSources)"/>
+                <set field="changedFields" from="darpan.facade.reconciliation.AutomationSyncSupport.buildAutomationSyncStatus(automationRecord, darpan.facade.reconciliation.AutomationSyncSupport.attachCapturedFilters(ec, storedSources, automationIdValue), derivedConfig).changedFields"/>
+                <set field="mergedSources" from="darpan.facade.reconciliation.AutomationSyncSupport.mergeSyncedSourceEntries(storedSources, derivedConfig.sourcesByFileSide, derivedConfig.filtersByFileSide)"/>
+                <set field="syncPayload" from="darpan.facade.reconciliation.AutomationSyncSupport.buildAutomationSyncPayload(automationRecord, darpan.facade.reconciliation.AutomationSyncSupport.resolveSyncedInputMode(mergedSources), mergedSources)"/>
                 <service-call name="facade.ReconciliationFacadeServices.save#Automation"
                         in-map="syncPayload" out-map="saveResult"/>
                 <set field="automation" from="saveResult.automation"/>
@@ -3357,8 +3357,8 @@
                 <!-- DAR-BE-107: a pause carries the streak. -->
                 <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
-                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
                 <message>Paused automation ${automationIdValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -3403,8 +3403,8 @@
                 <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="automationRecord"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
-                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
                 <message>Resumed automation ${automationIdValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -3467,8 +3467,8 @@
                         out-map="runResult"/>
                 <set field="refreshedAutomationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
-                <set field="automation" from="refreshedAutomationRecord ? darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, refreshedAutomationRecord, true, automationSources, automationExecutions) : null"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="refreshedAutomationRecord ? darpan.facade.reconciliation.AutomationRowSupport.buildAutomationRow(ec, refreshedAutomationRecord, true, automationSources, automationExecutions) : null"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3692,7 +3692,7 @@
                 <if condition="automationIdValue">
                     <set field="ignoreAutomationCondition" from="executionFinder.condition('automationId', automationIdValue)"/>
                 </if>
-                <set field="executionRows" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionFinder.list() ?: []).collect { execution -> darpan.facade.reconciliation.AutomationFacadeSupport.buildExecutionRow(ec, execution) }"/>
+                <set field="executionRows" from="darpan.facade.reconciliation.AutomationRowSupport.collapseExecutionHistory(executionFinder.list() ?: []).collect { execution -> darpan.facade.reconciliation.AutomationRowSupport.buildExecutionRow(ec, execution) }"/>
             </if>
             <set field="totalCount" from="executionRows.size()"/>
             <set field="fromIndex" from="Math.min(page * size, totalCount)"/>
@@ -3757,20 +3757,20 @@
             <parameter name="systemRemotes" type="List"/>
         </out-parameters>
         <actions>
-            <set field="inputModes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationInputMode').findAll { it.enumId in darpan.facade.reconciliation.AutomationFacadeSupport.SUPPORTED_INPUT_MODES }"/>
-            <set field="sourceTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationSourceType')"/>
+            <set field="inputModes" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listEnumOptions(ec, 'AutomationInputMode').findAll { it.enumId in darpan.facade.reconciliation.AutomationFacadeSupport.SUPPORTED_INPUT_MODES }"/>
+            <set field="sourceTypes" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listEnumOptions(ec, 'AutomationSourceType')"/>
             <!-- Interim guard rail: state mode (AUT_WIN_STATE) additionally requires a per-source
                  status list, and that list's write path does not exist yet, so offering the mode
                  today lets an operator save an automation that fails on every run. Filter it out of
                  the selectable options until the status-list configuration surface ships; the enum
                  row, WINDOW_STATE constant, and state-mode dispatch logic all stay intact. -->
-            <set field="relativeWindows" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationRelWindow').findAll { it.enumId != darpan.reconciliation.automation.AutomationExecutionSupport.WINDOW_STATE }"/>
-            <set field="fileTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanFileType')"/>
-            <set field="systems" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanSystemSource')"/>
+            <set field="relativeWindows" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listEnumOptions(ec, 'AutomationRelWindow').findAll { it.enumId != darpan.reconciliation.automation.AutomationExecutionSupport.WINDOW_STATE }"/>
+            <set field="fileTypes" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listEnumOptions(ec, 'DarpanFileType')"/>
+            <set field="systems" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listEnumOptions(ec, 'DarpanSystemSource')"/>
             <set field="savedRuns" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec)"/>
-            <set field="sftpServers" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSftpServerOptions(ec)"/>
-            <set field="sourceConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSourceConfigOptions(ec)"/>
-            <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listOmsRestSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listShopifySourceRemoteOptions(ec)"/>
+            <set field="sftpServers" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listSftpServerOptions(ec)"/>
+            <set field="sourceConfigs" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listSourceConfigOptions(ec)"/>
+            <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationSourceOptionsSupport.listHotWaxOmsSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationSourceOptionsSupport.listShopifySourceRemoteOptions(ec)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

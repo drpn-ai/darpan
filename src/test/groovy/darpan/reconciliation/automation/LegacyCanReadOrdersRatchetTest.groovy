@@ -44,27 +44,12 @@ class LegacyCanReadOrdersRatchetTest {
             "SourceEndpointWriteSupport.groovy",
 
             // --- Comment-only mentions: no field access, just prose explaining the migration ---
-            // AutomationExecutionSupport.groovy's post-filter comment ("Endpoint enablement replaced
+            // AutomationSourceConfig.groovy's post-filter comment ("Endpoint enablement replaced
             // canReadOrders...") and ShopifyGraphqlFacadeSupport.groovy's similar comment both name
             // the retired flag in text only; grep-by-substring can't tell a comment from a read, so
             // both files are allowlisted rather than teaching the ratchet to parse Groovy comments.
-            "AutomationExecutionSupport.groovy",
+            "AutomationSourceConfig.groovy",
             "ShopifyGraphqlFacadeSupport.groovy",
-
-            // --- Known, tracked-elsewhere readers that Task 13 does not fix ---
-            // AutomationFacadeSupport.groovy's listOmsRestSourceConfigOptions, listShopifyAuthConfigOptions
-            // and listOmsRestSourceRemoteOptions still filter the automation source-config picker by
-            // the raw canReadOrders field instead of SourceEndpointAccessSupport.isEndpointEnabled.
-            // This is real, pre-existing (not introduced by Task 13) technical debt, already planned:
-            // docs/superpowers/plans/2026-08-14-endpoint-enablement-plan2-registry-driven-options.md,
-            // Task 6 Step 3 rewrites listOmsRestSourceConfigOptions's and listShopifyAuthConfigOptions's
-            // option shaping, and Step 4 rewrites listOmsRestSourceRemoteOptions (together with
-            // listShopifySourceRemoteOptions) into one registry-driven builder — between them, Task 6
-            // covers all three of this file's canReadOrders reads. NOT the Plan 1 "Explicitly NOT in
-            // this plan" section, which names only listOmsRestSourceRemoteOptions,
-            // listShopifySourceRemoteOptions and inferSystemEnumId, not the two Options builders.
-            // Allowlisted here as tracked, planned debt — not silently accepted as permanent.
-            "AutomationFacadeSupport.groovy",
     ]
 
     @Test
@@ -86,5 +71,21 @@ class LegacyCanReadOrdersRatchetTest {
         assertEquals([], offenders.sort(),
                 "New canReadOrders reader(s) found. Per-endpoint enablement replaced this flag — " +
                 "route the check through SourceEndpointAccessSupport.isEndpointEnabled instead.")
+    }
+
+    // DAR-OPS-029 S99-208. The allowlist only shrinks: an entry whose file is gone or no longer names the flag is a hole a
+    // new same-named reader would slip through, so it is dropped the day it goes stale.
+    @Test
+    void everyAllowedFileStillNamesTheLegacyFlag() {
+        Path componentsRoot = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component")
+        Map<String, Boolean> naming = ALLOWED.collectEntries { [(it): false] }
+        ["darpan", "darpan-hotwax", "shopify-darpan"].each { String component ->
+            Path mainSrc = componentsRoot.resolve("${component}/src/main")
+            if (!Files.isDirectory(mainSrc)) return
+            Files.walk(mainSrc).filter { naming.containsKey(it.fileName.toString()) }.forEach { Path file ->
+                if (Files.readString(file).contains("canReadOrders")) naming[file.fileName.toString()] = true
+            }
+        }
+        assertEquals([], naming.findAll { !it.value }.keySet().sort(), "stale allowlist entries: drop them")
     }
 }

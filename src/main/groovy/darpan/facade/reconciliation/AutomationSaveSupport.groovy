@@ -348,7 +348,7 @@ class AutomationSaveSupport {
         }
     }
 
-    protected static void validateApiSource(def ec, Map<String, Object> source) {
+    static void validateApiSource(def ec, Map<String, Object> source) {
         // DAR-UI-064: a side the connector registry knows (an extract service and a config parameter: NetSuite SuiteQL,
         // the OMS GraphQL and order-line endpoints) is identified by its config id, not by a remote. Holding
         // it to the remote rule made every such automation unsavable, so Sync failed on each one the audit made.

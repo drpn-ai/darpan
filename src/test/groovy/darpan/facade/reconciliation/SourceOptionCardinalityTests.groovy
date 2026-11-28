@@ -86,7 +86,7 @@ class SourceOptionCardinalityTests {
 
     @Test
     void oneConfigYieldsOneOptionPerEnabledEndpoint() {
-        List<Map<String, Object>> options = AutomationFacadeSupport.listSourceConfigOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listSourceConfigOptions(ec)
                 .findAll { it.sourceConfigId == CONFIG_ID }
 
         // HotWax is read over GraphQL only (DAR-BE-052). The list is spelled out rather than counted on
@@ -98,7 +98,7 @@ class SourceOptionCardinalityTests {
 
     @Test
     void eachOptionCarriesItsOwnConnectorFields() {
-        Map<String, Object> returnsOption = AutomationFacadeSupport.listSourceConfigOptions(ec)
+        Map<String, Object> returnsOption = AutomationSourceOptionsSupport.listSourceConfigOptions(ec)
                 .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS_RETURNS_GQL" }
 
         assertNotNull(returnsOption, "The returns endpoint must appear as its own option row")
@@ -117,7 +117,7 @@ class SourceOptionCardinalityTests {
                              configId          : CONFIG_ID, systemEnumId: "OMS_RETURNS_GQL",
                              companyUserGroupId: TENANT, isEnabled: "N"]).createOrUpdate()
 
-            assertTrue(AutomationFacadeSupport.listSourceConfigOptions(ec)
+            assertTrue(AutomationSourceOptionsSupport.listSourceConfigOptions(ec)
                     .findAll { it.sourceConfigId == CONFIG_ID }
                     .every { it.systemEnumId != "OMS_RETURNS_GQL" })
         } finally {
@@ -130,7 +130,7 @@ class SourceOptionCardinalityTests {
 
     @Test
     void theOmsOrdersOptionIsTheGraphQlEndpoint() {
-        Map<String, Object> ordersOption = AutomationFacadeSupport.listSourceConfigOptions(ec)
+        Map<String, Object> ordersOption = AutomationSourceOptionsSupport.listSourceConfigOptions(ec)
                 .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS_GQL" }
 
         assertNotNull(ordersOption, "the HotWax orders option is OMS_GQL")

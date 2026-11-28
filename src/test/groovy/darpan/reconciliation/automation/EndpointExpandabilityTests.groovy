@@ -2,7 +2,7 @@ package darpan.reconciliation.automation
 
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
-import darpan.facade.reconciliation.AutomationFacadeSupport
+import darpan.facade.reconciliation.AutomationSourceOptionsSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -45,7 +45,7 @@ class EndpointExpandabilityTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
 
-        // AutomationFacadeSupport.listSourceConfigOptions routes through
+        // AutomationSourceOptionsSupport.listSourceConfigOptions routes through
         // SharedConfigAccessSupport.listAccessibleConfigRows -> TenantScopedFinder.findTenantScoped,
         // which needs a REAL active tenant derived from the caller's own UserGroupMember rows
         // (TenantAccessSupport.currentActiveTenantUserGroupId) — not just a preference value. Same
@@ -120,7 +120,7 @@ class EndpointExpandabilityTests {
 
     @Test
     void theNewEndpointIsOfferedAsASourceOption() {
-        Map<String, Object> option = AutomationFacadeSupport.listSourceConfigOptions(ec)
+        Map<String, Object> option = AutomationSourceOptionsSupport.listSourceConfigOptions(ec)
                 .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == NEW_ENDPOINT }
         assertNotNull(option, "The wizard must offer the new endpoint with no code change")
         assertEquals("HOTWAX_OMS_REST_SYNTHETIC", option.sourceConfigType)
@@ -129,7 +129,7 @@ class EndpointExpandabilityTests {
     @Test
     void theNewEndpointOffersItsPills() {
         assertEquals(["\$.records[*].shipmentId"],
-                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, NEW_ENDPOINT).collect { it.fieldPath })
+                AutomationSourceOptionsSupport.primaryIdOptionsForSystem(ec, NEW_ENDPOINT).collect { it.fieldPath })
     }
 
     @Test

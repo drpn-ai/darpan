@@ -141,7 +141,7 @@ class RunSideOptionsSmokeTests {
     /** The run builder learns a side's options from list#AutomationSourceOptions, whose rows project the connector. */
     @Test
     void theSourceOptionRowsCarryWhatTheConnectorDeclares() {
-        List<Map<String, Object>> connectors = AutomationFacadeSupport.connectorRowsForConfigEntity(ec, "darpan.hotwax.HotWaxOmsRestSourceConfig")
+        List<Map<String, Object>> connectors = AutomationSourceOptionsSupport.connectorRowsForConfigEntity(ec, "darpan.hotwax.HotWaxOmsRestSourceConfig")
         Map<String, Object> returns = connectors.find { it.systemEnumId == "OMS_RETURNS_GQL" }
         // DAR-BE-192: withReturnCredit, the credit HotWax gave each return.
         assertEquals(["includeReturnsWithoutShopifyRef", "onlyCancelledReturns", "withReturnCredit"],
@@ -153,7 +153,7 @@ class RunSideOptionsSmokeTests {
     void aSyncKeepsTheRunSidesOptions() {
         Map created = create([file1ExtractOptions: [onlyCancelledReturns: true]])
         assertFalse(created.hadError as boolean, created.errorText as String)
-        Map derived = AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, [savedRunId: created.savedRun.savedRunId, savedRunType: "ruleset"])
+        Map derived = AutomationSyncSupport.deriveRunAuthoritativeConfig(ec, [savedRunId: created.savedRun.savedRunId, savedRunType: "ruleset"])
         Map file1 = (Map) ((Map) derived.sourcesByFileSide).FILE_1
         assertEquals([onlyCancelledReturns: true], new groovy.json.JsonSlurper().parseText(file1.safeMetadataJson as String).parameters)
         assertNull(((Map) ((Map) derived.sourcesByFileSide).FILE_2).safeMetadataJson, "a side with no options derives none")
@@ -163,14 +163,14 @@ class RunSideOptionsSmokeTests {
     @Test
     void aRegistryDrivenSideSavesOnItsConfigIdAlone() {
         String suiteQl = "reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
-        AutomationFacadeSupport.validateApiSource(ec, [fileSide: "FILE_2", systemEnumId: "NETSUITE_SUITEQL", sourceTypeEnumId: "AUT_SRC_API",
+        AutomationSaveSupport.validateApiSource(ec, [fileSide: "FILE_2", systemEnumId: "NETSUITE_SUITEQL", sourceTypeEnumId: "AUT_SRC_API",
                 safeMetadataJson: groovy.json.JsonOutput.toJson([extractServiceName: suiteQl, parameters: [nsSuiteQlSourceQueryId: "NS_OPEN_RMA"]])])
         assertFalse(ec.message.hasError(), ec.message.errorsString)
-        AutomationFacadeSupport.validateApiSource(ec, [fileSide: "FILE_2", systemEnumId: "NETSUITE_SUITEQL", sourceTypeEnumId: "AUT_SRC_API",
+        AutomationSaveSupport.validateApiSource(ec, [fileSide: "FILE_2", systemEnumId: "NETSUITE_SUITEQL", sourceTypeEnumId: "AUT_SRC_API",
                 safeMetadataJson: groovy.json.JsonOutput.toJson([extractServiceName: suiteQl, parameters: [:]])])
         assertTrue(ec.message.errorsString.contains("requires its nsSuiteQlSourceQueryId"), ec.message.errorsString)
         ec.message.clearErrors()
-        AutomationFacadeSupport.validateApiSource(ec, [fileSide: "FILE_1", systemEnumId: "NO_SUCH_SYSTEM", sourceTypeEnumId: "AUT_SRC_API"])
+        AutomationSaveSupport.validateApiSource(ec, [fileSide: "FILE_1", systemEnumId: "NO_SUCH_SYSTEM", sourceTypeEnumId: "AUT_SRC_API"])
         assertTrue(ec.message.errorsString.contains("requires systemMessageRemoteId"), "an unknown system keeps the old rule")
         ec.message.clearErrors()
     }
@@ -240,7 +240,7 @@ class RunSideOptionsSmokeTests {
         } finally {
             if (!was) ec.artifactExecution.enableAuthz()
         }
-        Map option = AutomationFacadeSupport.listNsSuiteQlQueryOptions(ec).find { it.sourceConfigId == "TSIDE_Q" }
+        Map option = AutomationSourceOptionsSupport.listNsSuiteQlQueryOptions(ec).find { it.sourceConfigId == "TSIDE_Q" }
         assertEquals(['$.records[*].tranId', '$.records[*].status', '$.records[*].memoOrigin'], option.fieldOptions*.fieldPath,
                 "the origin field is filterable: an only-HotWax filter reads it")
         assertEquals(['$.records[*].tranId', '$.records[*].status'], option.primaryIdOptions*.fieldPath, "but it is no key")

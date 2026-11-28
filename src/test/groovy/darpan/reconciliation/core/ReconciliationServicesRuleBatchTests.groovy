@@ -85,4 +85,28 @@ class ReconciliationServicesRuleBatchTests {
         assertEquals(calls.size(), result.firedRuleCount as int)
         assertEquals((long) calls.size(), result.ruleDifferenceCount as long)
     }
+
+    /**
+     * OC150 (DAR-OPS-029 S01a, determinism). Matched pairs reach the rules in primaryId order, whatever their partitions: which
+     * rule rows survive the rule-diff cap, and what a rule that looks across one batch sees, no longer depend on partition luck.
+     */
+    @Test
+    void matchedPairsReachTheRulesInPrimaryIdOrder() {
+        List<String> errors = []
+        List<String> seen = []
+        MessageFacade message = [hasError: { -> false }, getErrorsString: { -> "" }] as MessageFacade
+        ServiceFacade service = [sync: { ->
+            Map parameters = [:]
+            ServiceCallSync call = null
+            call = [name      : { String n -> call },
+                    parameters: { Map p -> parameters.putAll(p); call },
+                    call      : { -> seen.addAll(((List<Map>) parameters.dataList).collect { it.primaryId.toString() }); [diffResults: [], warnings: []] }] as ServiceCallSync
+            return call
+        }] as ServiceFacade
+        ExecutionContext ec = [getService: { -> service }, getMessage: { -> message }] as ExecutionContext
+        List<String> ids = (1..60).collect { String.format("K%03d", it) }
+        Dataset shuffled = spark.createDataset(ids.reverse(), org.apache.spark.sql.Encoders.STRING()).toDF("primaryId").repartition(4)
+        ReconciliationServices.executeRuleSetMatchedPairBatches(ec, shuffled, "RS1", "SCOPE1", "Orders", 7)
+        assertEquals(ids, seen)
+    }
 }

@@ -87,4 +87,31 @@ class DiffDatasetOutputFileTests {
         assertEquals("diff-20261017-101500.json", write(ec, "fallback", null, null).diffFileName)
         assertTrue(new File(runtimeDir, "out/fallback/diff-20261017-101500.json").isFile())
     }
+
+    /**
+     * OC150 (DAR-OPS-029 S01a, determinism). The differences are written in one stable order (type, key, field, then the rest),
+     * whatever order Spark's partitions hold them in: the conclude pass's "first code that hid one", the brain's findings cap
+     * and the rule-diff cap all read the document in order, so the same rows must always come out the same way.
+     */
+    @Test
+    void theDifferencesAreWrittenInOneStableOrderWhateverThePartitions() {
+        ExecutionContext ec = stubEc()
+        List<String> rows = ['{"diffType":"MISSING_IN_FILE_2","primaryId":"B","field":null}',
+                             '{"diffType":"FIELD_MISMATCH","primaryId":"C","field":"total"}',
+                             '{"diffType":"FIELD_MISMATCH","primaryId":"A","field":"total"}',
+                             '{"diffType":"FIELD_MISMATCH","primaryId":"A","field":"status"}',
+                             '{"diffType":"MISSING_IN_FILE_2","primaryId":"A","field":null}']
+        Dataset oneWay = diffs(rows as String[]).coalesce(1)
+        Dataset otherWay = diffs(rows.reverse() as String[]).repartition(3)
+        List<String> first = order(ReconciliationServices.writeDiffDatasetOutput(ec, oneWay, "runtime://out/stable", "one", null, [:], [:], [], []))
+        List<String> second = order(ReconciliationServices.writeDiffDatasetOutput(ec, otherWay, "runtime://out/stable", "two", null, [:], [:], [], []))
+        assertEquals(["FIELD_MISMATCH A status", "FIELD_MISMATCH A total", "FIELD_MISMATCH C total",
+                      "MISSING_IN_FILE_2 A null", "MISSING_IN_FILE_2 B null"], first)
+        assertEquals(first, second, "the same rows in another partition order are written the same way")
+    }
+
+    private static List<String> order(Map written) {
+        Map doc = (Map) new JsonSlurper().parse(new File((String) written.diffLocation))
+        return ((List<Map>) doc.differences).collect { "${it.diffType} ${it.primaryId} ${it.field}".toString() }
+    }
 }

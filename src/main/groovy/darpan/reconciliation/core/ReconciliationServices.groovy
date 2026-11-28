@@ -607,10 +607,26 @@ class ReconciliationServices {
     /** DAR-BE-166: matched pairs per partition when they are brought to the driver for the rule batches. */
     static final int MATCHED_PAIRS_PER_PARTITION = 2000
 
-    /** DAR-BE-166: df in partitions of at most rowsPerPartition rows, whatever the shuffle that made it coalesced to. */
-    static Dataset boundedPartitions(Dataset df, int rowsPerPartition) {
+    /**
+     * DAR-BE-166: df in partitions of at most rowsPerPartition rows, whatever the shuffle that made it coalesced to. With an
+     * orderColumn (OC150), the partitions are ranges of it, each sorted, so reading them in turn gives one stable order.
+     */
+    static Dataset boundedPartitions(Dataset df, int rowsPerPartition, String orderColumn = null) {
         long rows = df.count()
-        return df.repartition((int) Math.max(1L, (rows + rowsPerPartition - 1) / rowsPerPartition))
+        int partitions = (int) Math.max(1L, (rows + rowsPerPartition - 1) / rowsPerPartition)
+        if (orderColumn == null) return df.repartition(partitions)
+        return df.repartitionByRange(partitions, col(orderColumn)).sortWithinPartitions(orderColumn)
+    }
+
+    /**
+     * OC150 (DAR-OPS-029 S01a, determinism). A diff document's rows in one stable order: type, key, field, then every other
+     * column, so the same rows always come out the same way whatever order Spark's partitions held them in. The conclude
+     * pass's "first code that hid one", the brain's findings cap and the rule-diff cap all read the document in order.
+     */
+    static Dataset inStableOrder(Dataset df) {
+        List<String> columns = df.columns() as List<String>
+        List<String> lead = ["diffType", "type", "primaryId", "id", "field", "ruleId"].findAll { columns.contains(it) }
+        return df.orderBy((lead + (columns - lead)).collect { String c -> col(c).asc_nulls_first() } as Column[])
     }
 
     static Map<String, Object> executeRuleSetMatchedPairBatches(ExecutionContext ec, Dataset matchedPairDf,
@@ -640,7 +656,9 @@ class ReconciliationServices {
         // DAR-BE-166: toLocalIterator brings one whole partition to the driver, and adaptive execution coalesces a shuffle's
         // small partitions: on SM's October run all 125,602 matched pairs came back as ONE partition and the driver ran out of
         // heap holding them as JSON. An explicit partition count is never coalesced, so each trip carries a bounded number.
-        Iterator<String> rowIterator = boundedPartitions(matchedPairDf, MATCHED_PAIRS_PER_PARTITION).toJSON().toLocalIterator()
+        // OC150: in primaryId order, so which rule rows survive the cap, and what a rule that looks across a batch sees, never
+        // depend on how the partitions fell.
+        Iterator<String> rowIterator = boundedPartitions(matchedPairDf, MATCHED_PAIRS_PER_PARTITION, "primaryId").toJSON().toLocalIterator()
         while (rowIterator.hasNext()) {
             List<Map<String, Object>> batch = nextMatchedPairBatch(rowIterator, safeRuleBatchSize)
             if (!batch) break
@@ -789,7 +807,7 @@ class ReconciliationServices {
             writer << "\"processingWarnings\":" + JsonOutput.toJson(processingWarnings ?: []) + ",\n"
             writer << "\"differences\":["
             boolean first = true
-            def iter = diffDf.toJSON().toLocalIterator()
+            def iter = inStableOrder(diffDf).toJSON().toLocalIterator()
             while (iter.hasNext()) {
                 String rowJson = iter.next()
                 if (!first) writer << ","

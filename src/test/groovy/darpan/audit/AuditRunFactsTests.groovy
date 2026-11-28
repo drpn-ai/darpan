@@ -139,20 +139,20 @@ class AuditRunFactsTests {
     }
 
     @Test
-    void theReadsLineSaysWhatThePlayReadAndOnlyCountsCallsAndFlagsWhenThereAreAny() {
-        // DAR-BE-320 phase 1b: one line in the email, its text and the chat card; nothing when the facts carry no reads.
+    void theReadsLineIsDarpansAloneNeverTheClients() {
+        // DAR-BE-320 phase 1b, OC102 (Aditi 2026-11-28: "this part is for darpan team not the client... dont ever send this to
+        // client"): the read and cost line goes to Darpan's alerts room (staffText), never the client's email or card.
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
         assertNull(AuditRunMessage.readsLine(facts, COPY))
-        assertFalse(AuditRunMessage.emailText(facts, [:], null, COPY).contains("read your systems"))
 
         Map flagged = facts + [reads: [reads: 9, connections: 4, calls: 214L, flags: 2]]
         String line = "This morning Darpan read your systems 9 times over 4 connections. 214 API calls were counted. " +
                 "2 of those reads could cost less; the Darpan team reviews them."
         assertEquals(line, AuditRunMessage.readsLine(flagged, COPY))
-        assertTrue(AuditRunMessage.emailHtml(flagged, [:], BASE, COPY).contains(line.replace("'", "&#39;")))
-        assertTrue(AuditRunMessage.emailText(flagged, [:], null, COPY).contains("\n" + line + "\n"))
-        assertTrue(((List<Map>) AuditRunMessage.card(flagged, [:], BASE, COPY).cardsV2[0].card.sections[0].widgets)
-                .any { it.decoratedText?.text == line })
+        assertFalse(AuditRunMessage.emailHtml(flagged, [:], BASE, COPY).contains("read your systems"))
+        assertFalse(AuditRunMessage.emailText(flagged, [:], null, COPY).contains("read your systems"))
+        assertFalse(AuditRunMessage.card(flagged, [:], BASE, COPY).toString().contains("read your systems"))
+        assertTrue(AuditRunMessage.staffText(flagged, BASE, COPY).contains(line), "Darpan's alerts room gets it")
 
         assertEquals("This morning Darpan read your systems 3 times over 0 connections.",
                 AuditRunMessage.readsLine(facts + [reads: [reads: 3, connections: 0, calls: 0L, flags: 0]], COPY), "no tally, no flags: the reads alone")

@@ -33,6 +33,25 @@ class AuditRunMessageTests {
 
     private static int times(String text, String part) { return text.split(java.util.regex.Pattern.quote(part), -1).length - 1 }
 
+    // OC102 (Aditi 2026-11-28, "dont ever send this to client"): no client render of a run (email text, HTML email, chat card)
+    // carries what Darpan read or what it cost; Darpan's alerts room does, and only when there is something to act on.
+    @Test
+    void noClientRenderCarriesTheReadOrCostLine() {
+        Map f = facts() + [reads: [reads: 9, connections: 4, calls: 214L, flags: 2]]
+        List<String> client = [AuditRunMessage.emailText(f, [:], "https://app.example", COPY),
+                               AuditRunMessage.emailHtml(f, [:], "https://app.example", COPY),
+                               AuditRunMessage.card(f, [:], "https://app.example", COPY).toString()]
+        ["read your systems", "API calls", "could cost less"].each { String words ->
+            client.eachWithIndex { String render, int i -> assertFalse(render.contains(words), "client render ${i} carries '${words}'") }
+        }
+        String staff = AuditRunMessage.staffText(f, "https://app.example", COPY)
+        assertTrue(staff.contains("read your systems") && staff.contains("could cost less") && staff.contains(ALERTED), staff)
+
+        Map clean = facts() + [reads: [reads: 3, connections: 1, calls: 0L, flags: 0]]
+        clean.rules.each { Map r -> r.checksNotRun = [] }
+        assertEquals(null, AuditRunMessage.staffText(clean, "https://app.example", COPY), "a clean run with clean reads posts nothing")
+    }
+
     @Test
     void aRuleWhoseOnlyCheckDidNotRunShowsTheShortRowAndTheNoticeNamesItNotZero() {
         String text = AuditRunMessage.emailText(facts(), [:], null, COPY)

@@ -191,8 +191,9 @@ class AuditRunUpdateSupport {
                 html       : AuditRunMessage.emailHtml(facts, words, base, copy),
                 text       : AuditRunMessage.emailText(facts, words, base, copy),
                 card       : AuditRunMessage.card(facts, words, base, copy),
-                // DAR-BE-378: what did not run, for Darpan's alerts room only; null when every check ran.
-                alert      : AuditRunMessage.alertText(facts, base, copy),
+                // DAR-BE-378 / OC102: what did not run, and what the reads cost when one could cost less, for Darpan's alerts
+                // room only; null when there is nothing for Darpan to act on.
+                alert      : AuditRunMessage.staffText(facts, base, copy),
                 attachments: csvs.collect { String rule, String body ->
                     [fileName: AuditRunMessage.csvName(facts, rule), contentType: "text/csv; charset=UTF-8", contentText: body]
                 }]

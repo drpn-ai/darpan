@@ -94,7 +94,8 @@ class AuditRunMessage {
 
     /**
      * DAR-BE-320. One line on what the play read and what it cost: "reads", "reads.calls" when calls were counted, and
-     * "reads.flags" when any read could cost less; null when the facts carry no read summary.
+     * "reads.flags" when any read could cost less; null when the facts carry no read summary. Darpan's alone (OC102): only
+     * staffText carries it, never a client's email or card.
      */
     static String readsLine(Map facts, EmailCopyReader copy) {
         Map r = facts?.reads as Map
@@ -137,8 +138,9 @@ class AuditRunMessage {
     }
 
     /**
-     * Google Chat cardsV2 for the client's room: the counts, the writer's headline, the reads line and the report's link.
-     * Never a warning (DAR-BE-378, Aditi 2026-11-26): what did not run goes to Darpan's alerts room (alertText), not here.
+     * Google Chat cardsV2 for the client's room: the counts, the writer's headline and the report's link. Never a warning
+     * (DAR-BE-378, Aditi 2026-11-26) and never what Darpan read or what it cost (OC102, Aditi 2026-11-28: "this part is for
+     * darpan team not the client"): both go to Darpan's alerts room (staffText).
      */
     static Map card(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
@@ -147,8 +149,6 @@ class AuditRunMessage {
                                               wrapText : true, topLabel: "Findings",
                                               startIcon: [materialIcon: [name: "fact_check"]]]]]
         if (words?.headline) widgets << [textParagraph: [text: esc(words.headline as String)]]
-        String reads = readsLine(facts, copy)
-        if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)
         if (url) widgets << [buttonList: [buttons: [[text: "Open the report", onClick: [openLink: [url: url]]]]]]
         // The card alone (Aditi 2026-11-27, DAR-BE-391): Chat shows a message's text above its card, so the one line
@@ -167,6 +167,18 @@ class AuditRunMessage {
         String notice = notRunNotice(facts, copy)
         if (!notice) return null
         return [title(facts), subtitle(facts, copy), notice, reportUrl(base, facts)].findAll { it }.join("\n")
+    }
+
+    /**
+     * OC102 (Aditi 2026-11-28). Darpan's alerts-room text after a run: the tenant and audit, the not-run notice, the read and
+     * cost line, and the report's link. Only when Darpan has something to act on: a check that did not or partly ran, or a
+     * read that could cost less (DAR-BE-320 flags). Null otherwise, so a clean run with clean reads posts nothing.
+     */
+    static String staffText(Map facts, String base, EmailCopyReader copy) {
+        String notice = notRunNotice(facts, copy)
+        boolean flagged = (((facts?.reads as Map)?.flags ?: 0) as int) > 0
+        if (!notice && !flagged) return null
+        return [title(facts), subtitle(facts, copy), notice, readsLine(facts, copy), reportUrl(base, facts)].findAll { it }.join("\n")
     }
 
     /** DAR-BE-361: "3 acknowledged" when the team set some findings aside today; null when none. */
@@ -237,7 +249,7 @@ ${EmailFrame.eyebrow(copy.text("rules.heading").toUpperCase(Locale.ROOT), 28)}
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
 ${blocks}
 ${button}
-<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">${esc(copy.text("attachments"))}</p>${readsLine(facts, copy) ? "<p style=\"${F}font-size:12px;color:${DIM};margin:8px 0 0;line-height:1.6;\">${esc(readsLine(facts, copy))}</p>" : ""}
+<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">${esc(copy.text("attachments"))}</p>
 ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
     }
 
@@ -274,8 +286,6 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         }
         String url = reportUrl(base, facts)
         if (url) lines += ["", "${copy.text('button')}: ${url}".toString()]
-        String reads = readsLine(facts, copy)
-        if (reads) lines += ["", reads]
         return lines.join("\n") + "\n" + EmailCopy.guidesText(copy.guides())
     }
 

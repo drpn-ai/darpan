@@ -328,11 +328,10 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ruleId" from="ruleIdValue"/>
-                <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', ruleId).disableAuthz().useCache(false).one()"/>
-                <!-- DAR-OPS-029 S02: a rule of another tenant's rule set answers exactly as a missing one. -->
-                <if condition="existingRule &amp;&amp; !darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', existingRule.ruleSetId)">
-                    <set field="existingRule" from="null"/>
-                </if>
+                <!-- DAR-OPS-029 S02: a rule of another tenant's rule set answers exactly as a missing one. A rule carries its rule
+                     set's tenant (stamped at save and by RuleChildTenant.eecas.xml), so its own stamp decides, with no
+                     tenant-blind read. -->
+                <set field="existingRule" from="darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.Rule', 'ruleId', ruleId)"/>
                 <if condition="!existingRule">
                     <message error="true">Rule ${ruleId} not found</message>
                 </if>

@@ -103,6 +103,64 @@ class DuplicateKeySplitTests {
         }
     }
 
+    /** K2 once on FILE_1, twice on FILE_2; K4 twice on FILE_2 and absent from FILE_1; K5 twice on BOTH sides. */
+    private Map<String, Dataset> mixed() {
+        return [FILE_1: rows('{"compare_id":"K1","data":{}}', '{"compare_id":"K2","data":{}}',
+                             '{"compare_id":"K5","data":{"n":"a"}}', '{"compare_id":"K5","data":{"n":"b"}}'),
+                FILE_2: rows('{"compare_id":"K1","data":{}}', '{"compare_id":"K2","data":{"n":"a"}}', '{"compare_id":"K2","data":{"n":"b"}}',
+                             '{"compare_id":"K4","data":{"n":"a"}}', '{"compare_id":"K4","data":{"n":"b"}}',
+                             '{"compare_id":"K5","data":{"n":"c"}}', '{"compare_id":"K5","data":{"n":"d"}}')]
+    }
+
+    private static List<String> idsOrEmpty(Object df) { return df == null ? [] : ids((Dataset) df) }
+
+    @Test
+    void everyKeyedRecordLandsInExactlyOnePlace() {
+        // S01b I1, conservation: per side, input = kept + own duplicates + partners (key repeated only on the other side).
+        Map<String, Dataset> input = mixed()
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)])
+        Map partnersBySide = [FILE_1: ["K2"], FILE_2: []]
+        ["FILE_1", "FILE_2"].each { String side ->
+            List<String> kept = ids((Dataset) ((Map) split.ingestBySide)[side].dataDf)
+            List<String> own = idsOrEmpty(split.duplicateDataBySide[side])
+            List<String> partners = (List<String>) partnersBySide[side]
+            assertEquals(ids(input[side]), (kept + own + partners).sort(), "${side}: every record is in exactly one place")
+        }
+    }
+
+    @Test
+    void aRepeatedKeyIsNeverMatched() {
+        // S01b I2: no repeated key, on either side, survives into the frames the matched set is joined from.
+        Map<String, Dataset> input = mixed()
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)])
+        Map sides = (Map) split.ingestBySide
+        Dataset matched = CompareDatasetSupport.buildMatchedIdDataset((Dataset) sides.FILE_1.idDf, (Dataset) sides.FILE_2.idDf)
+        assertEquals(["K1"], ids(matched))
+        assertEquals(["K5", "K5"], ids((Dataset) split.duplicateDataBySide.FILE_1))
+        assertEquals(["K2", "K2", "K4", "K4", "K5", "K5"], ids((Dataset) split.duplicateDataBySide.FILE_2))
+        assertEquals([FILE_1: 1L, FILE_2: 3L], split.duplicateKeyCountBySide)
+    }
+
+    @Test
+    void theSplitMirrorsWhenTheSidesSwap() {
+        // S01b I3: direction-symmetric.
+        Map<String, Dataset> input = mixed()
+        Map forward = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)])
+        Map swapped = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_2), FILE_2: ingest(input.FILE_1)])
+        assertEquals(ids((Dataset) forward.ingestBySide.FILE_1.dataDf), ids((Dataset) swapped.ingestBySide.FILE_2.dataDf))
+        assertEquals(ids((Dataset) forward.ingestBySide.FILE_2.dataDf), ids((Dataset) swapped.ingestBySide.FILE_1.dataDf))
+        assertEquals(idsOrEmpty(forward.duplicateDataBySide.FILE_1), idsOrEmpty(swapped.duplicateDataBySide.FILE_2))
+        assertEquals(idsOrEmpty(forward.duplicateDataBySide.FILE_2), idsOrEmpty(swapped.duplicateDataBySide.FILE_1))
+    }
+
+    @Test
+    void theRepeatedKeyWarningEndsWithTheTailApplyHiddenWithdraws() {
+        // S01b I4 / DAR-BE-337: RunConclusionSupport.applyHidden withdraws the warning by this tail.
+        String warning = RuleSetCompareScopeAdapter.duplicateKeyWarning("Compare scope 'Orders' FILE_2 (NetSuite)", 3L)
+        assertEquals("Compare scope 'Orders' FILE_2 (NetSuite) has 3 key(s) on more than one record; " +
+                RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL, warning)
+    }
+
     @Test
     void everyFrameTheSplitPersistsIsHandedBackForRelease() {
         // Review I3: a persisted frame nobody returns stays in Spark's CacheManager for the JVM's life.

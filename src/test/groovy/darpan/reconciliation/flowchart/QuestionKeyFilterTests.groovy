@@ -93,13 +93,15 @@ class QuestionKeyFilterTests {
     }
 
     @Test
-    void file1KeysAreWrittenOutDistinct() {
-        Dataset data = rows('{"compare_id":"K2","data":{}}', '{"compare_id":"K1","data":{}}', '{"compare_id":"K2","data":{}}')
+    void file1KeysAreWrittenOutSortedAndDistinct() {
+        Dataset data = rows('{"compare_id":"K2","data":{}}', '{"compare_id":"K3","data":{}}', '{"compare_id":"K1","data":{}}',
+                '{"compare_id":"K2","data":{}}')
         File out = tmp.resolve("out/keys.txt").toFile()
-        long n = RuleSetCompareScopeAdapter.writeSideIds([FILE_1: [dataDf: data, idDf: data.select("compare_id")]],
+        long n = RuleSetCompareScopeAdapter.writeSideIds([FILE_1: [dataDf: data.repartition(3), idDf: data.repartition(3).select("compare_id")]],
                 "FILE_1", out.absolutePath)
-        assertEquals(2L, n)
-        assertEquals(["K1", "K2"] as Set, QuestionKeyFiles.read(out))
+        assertEquals(3L, n)
+        // S01b I7: the same keys give the same file, whatever Spark's partition order (QuestionKeyFiles.write sorts too).
+        assertEquals("K1\nK2\nK3\n", out.text)
     }
 
     @Test

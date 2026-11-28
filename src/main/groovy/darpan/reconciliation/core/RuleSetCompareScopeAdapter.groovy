@@ -25,6 +25,11 @@ class RuleSetCompareScopeAdapter {
     /** DAR-BE-337: how the repeated-key warning ends, so RunConclusionSupport.applyHidden can withdraw it once a rule hid
      *  every repeated-key row. */
     static final String DUPLICATE_KEY_WARNING_TAIL = "every record under them is reported as a duplicate finding and left out of the compare."
+
+    /** The repeated-key warning, built in one place so it always ends with DUPLICATE_KEY_WARNING_TAIL (I4). */
+    static String duplicateKeyWarning(Object sideRef, long count) {
+        return "${sideRef} has ${count} key(s) on more than one record; ${DUPLICATE_KEY_WARNING_TAIL}".toString()
+    }
     private static final int MAX_COMPOSITE_KEY_FIELDS = 5
 
     /**
@@ -75,10 +80,7 @@ class RuleSetCompareScopeAdapter {
         String ruleSetId = ReconciliationServices.normalize(context.get("ruleSetId"))
         String compareScopeId = ReconciliationServices.normalize(context.get("compareScopeId"))
         Boolean hasHeader = (Boolean) context.get("hasHeader")
-        // Security (HIGH gaps 3,5, defense-in-depth 2026-06-30): IGNORE any caller-supplied sparkMaster.
-        // Resolve server-side only (resource property, else local[*]) so a future allow-remote exposure
-        // of this service cannot redirect the tenant's Spark job to an attacker-controlled cluster.
-        String sparkMaster = ReconciliationServices.normalize(ec.resource.properties["spark.master"]) ?: "local[*]"
+        // Security (HIGH gaps 3,5): any caller-supplied sparkMaster is ignored; embeddedSparkSession reads the server's.
         String sparkAppName = ReconciliationServices.normalize(context.get("sparkAppName")) ?: "RuleSetCompareScopePreparation"
 
         List<String> processingWarnings = ((List<String>) context.get("processingWarnings") ?: []) as List<String>
@@ -215,19 +217,8 @@ class RuleSetCompareScopeAdapter {
                 ruleSetId, compareScopeId, compareScope.objectType,
                 singleSided ? SCOPE_MODE_EVALUATE : SCOPE_MODE_COMPARE, file1Plan.fileType, file2Plan?.fileType)
 
-        SparkSession spark = SparkSession.builder()
-                .appName(sparkAppName)
-                .master(sparkMaster)
-                .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-                .config("spark.sql.adaptive.enabled", "true")
-                .config("spark.ui.enabled", "false") // embedded batch use; Spark UI needs legacy javax.servlet, absent under Moqui 4 jakarta
-                .getOrCreate()
-        // Audit 2026-06-11 #18: getOrCreate returns a JVM singleton, so per-call builder .config() is
-        // ignored after the first session. Set the shuffle-partition count at runtime (it is a runtime
-        // SQL conf) so the embedded local[*] batches don't pay the 200-partition default overhead on
-        // the small datasets typical here. Overridable via the system property.
-        spark.conf().set("spark.sql.shuffle.partitions",
-                (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
+        // The JVM's one embedded session: server-side master only (never a caller's), UI off, shuffle partitions set at runtime.
+        SparkSession spark = ReconciliationServices.embeddedSparkSession(ec, sparkAppName)
 
         // DAR-BE-318 (plan 3b-2b, Task 11): each side's Keep (KeepPlanSupport.effectiveSideKeep), keyed FILE_1/FILE_2. It runs at ingest,
         // before the id restriction, keys out and duplicate split below, so those see kept records only. A side with no entry,
@@ -290,9 +281,8 @@ class RuleSetCompareScopeAdapter {
                     splitDuplicateKeys(ingestBySide)
             ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
             ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
-                if (count > 0) processingWarnings.add(("Compare scope '${compareScopeLabel}' ${fileSide} " +
-                        "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
-                        DUPLICATE_KEY_WARNING_TAIL).toString())
+                if (count > 0) processingWarnings.add(duplicateKeyWarning(
+                        "Compare scope '${compareScopeLabel}' ${fileSide} (${((Map) sidePlanBySide[fileSide]).label})", count))
             }
             Map<String, Object> ingest1 = (Map<String, Object>) ingestBySide.FILE_1
             Map<String, Object> ingest2 = (Map<String, Object>) ingestBySide.FILE_2
@@ -397,7 +387,7 @@ class RuleSetCompareScopeAdapter {
                 "differently.").toString()
     }
 
-    /** DAR-UI-048. Every distinct compare_id on one side, one per line: the records a question asked about. */
+    /** DAR-UI-048. Every distinct compare_id on one side, one per line and sorted (as QuestionKeyFiles.write): the records a question asked about. */
     static long writeSideIds(Map<String, Object> ingestBySide, String fileSide, String location) {
         Map ingest = (Map) ingestBySide?.get(fileSide)
         File target = new File(location)
@@ -405,7 +395,7 @@ class RuleSetCompareScopeAdapter {
         long written = 0
         target.withWriter("UTF-8") { Writer w ->
             if (ingest?.idDf != null) {
-                Iterator<Row> it = ((Dataset) ingest.idDf).select("compare_id").distinct().toLocalIterator()
+                Iterator<Row> it = ((Dataset) ingest.idDf).select("compare_id").distinct().orderBy("compare_id").toLocalIterator()
                 while (it.hasNext()) {
                     Object v = it.next().get(0)
                     if (v != null && v.toString().trim()) { w.write(v.toString()); w.write("\n"); written++ }
@@ -458,26 +448,18 @@ class RuleSetCompareScopeAdapter {
                 persistedFrames: new ArrayList<Dataset>(duplicateIdsBySide.values())]
     }
 
-    static List<Map<String, Object>> buildCompareSourceIdSpecsForTest(String compareScopeLabel, String fileSide, String fileType,
-                                                                        Map<String, Object> sourceConfig, List<String> processingWarnings) {
-        return buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sourceConfig, processingWarnings)
-    }
-
-    static void assertMatchingIdSpecCountsForTest(List file1IdSpecs, List file2IdSpecs) {
-        assertMatchingIdSpecCounts(file1IdSpecs, file2IdSpecs)
-    }
-
     // Defense in depth: mirrors the facade-level cross-side count guard (create#RuleSetRun /
     // save#RuleSetRun). A composed compare_id with N segments on one side can never join an
     // M-segment side, so every extraction path must fail loudly here rather than let Spark
-    // silently mis-join or mis-compose the compare_id columns.
-    private static void assertMatchingIdSpecCounts(List file1IdSpecs, List file2IdSpecs) {
+    // silently mis-join or mis-compose the compare_id columns. Package-visible: RuleSetCompareSourceCompositeKeyTests.
+    static void assertMatchingIdSpecCounts(List file1IdSpecs, List file2IdSpecs) {
         if (file1IdSpecs.size() != file2IdSpecs.size()) {
             throw new IllegalArgumentException("Compare scope sides must use the same number of primary-key fields; file1 has ${file1IdSpecs.size()}, file2 has ${file2IdSpecs.size()}")
         }
     }
 
-    private static List<Map<String, Object>> buildCompareSourceIdSpecs(String compareScopeLabel, String fileSide, String fileType,
+    /** One id spec per key field, in sequenceNum order. Package-visible: RuleSetCompareSourceCompositeKeyTests. */
+    static List<Map<String, Object>> buildCompareSourceIdSpecs(String compareScopeLabel, String fileSide, String fileType,
                                                                 Map<String, Object> sourceConfig, List<String> processingWarnings) {
         List<Map> keyFields = ((List) sourceConfig.keyFields ?: []) as List<Map>
         if (!keyFields) {

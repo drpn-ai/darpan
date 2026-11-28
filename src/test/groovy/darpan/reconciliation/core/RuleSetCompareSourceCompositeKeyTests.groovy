@@ -95,7 +95,7 @@ class RuleSetCompareSourceCompositeKeyTests {
                         [sequenceNum: 1, fieldExpression: "return_id"],
                 ]
         ]
-        List<Map<String, Object>> compositeSpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecsForTest(
+        List<Map<String, Object>> compositeSpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecs(
                 "Composite scope", "FILE_1", "JSON", compositeConfig, [])
         assertEquals(2, compositeSpecs.size())
         assertEquals('$.returns[*].return_id', compositeSpecs[0].idExpr)
@@ -107,7 +107,7 @@ class RuleSetCompareSourceCompositeKeyTests {
                 recordRootExpression: null,
                 keyFields: []
         ]
-        List<Map<String, Object>> legacySpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecsForTest(
+        List<Map<String, Object>> legacySpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecs(
                 "Legacy scope", "FILE_1", "JSON", legacyConfig, [])
         assertEquals(1, legacySpecs.size())
         assertEquals('$.returns[*].return_id', legacySpecs[0].idExpr)
@@ -316,36 +316,7 @@ class RuleSetCompareSourceCompositeKeyTests {
     // with neither a primaryIdExpression nor any key-field rows.
     @Test
     void createRuleSetRunWithSingleEntryPluralArrayWritesPrimaryIdExpressionAndNoKeyFieldRows() {
-        ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
-        ec.entity.makeValue("moqui.basic.EnumerationType").setAll([
-                enumTypeId : "DarpanFileType", description: "File Types for Reconciliation"
-        ]).createOrUpdate()
-        ec.entity.makeValue("moqui.basic.Enumeration").setAll([
-                enumId: "DftJson", enumTypeId: "DarpanFileType", enumCode: "JSON", description: "JSON", sequenceNum: 2
-        ]).createOrUpdate()
-
-        String companyUserGroupId = "KREWE"
-        def seedTimestamp = ec.user.nowTimestamp
-        String returnItemsSchemaText = '{"type":"object","properties":{"returns":{"type":"array",' +
-                '"items":{"type":"object","properties":{"return_id":{"type":"string"},"product_id":{"type":"string"}}}}}}'
-        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
-                jsonSchemaId      : "TestReturnItemsSchemaShopify",
-                schemaName        : "test-return-items-schema-shopify",
-                description       : "Composite-key facade test Shopify return items schema",
-                systemEnumId      : "SHOPIFY",
-                companyUserGroupId: companyUserGroupId,
-                createdDate       : seedTimestamp,
-                schemaText        : returnItemsSchemaText
-        ]).createOrUpdate()
-        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
-                jsonSchemaId      : "TestReturnItemsSchemaOms",
-                schemaName        : "test-return-items-schema-oms",
-                description       : "Composite-key facade test OMS return items schema",
-                systemEnumId      : "OMS",
-                companyUserGroupId: companyUserGroupId,
-                createdDate       : seedTimestamp,
-                schemaText        : returnItemsSchemaText
-        ]).createOrUpdate()
+        seedReturnItemsSchemas()
 
         Map<String, Object> result = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -517,7 +488,7 @@ class RuleSetCompareSourceCompositeKeyTests {
         def two = [[idExpr: 'a', idNormalizer: null], [idExpr: 'b', idNormalizer: null]]
         def one = [[idExpr: 'a', idNormalizer: null]]
         IllegalArgumentException ex = assertThrows(IllegalArgumentException) {
-            RuleSetCompareScopeAdapter.assertMatchingIdSpecCountsForTest(two, one)
+            RuleSetCompareScopeAdapter.assertMatchingIdSpecCounts(two, one)
         }
         assertTrue(ex.message.contains("same number"))
     }

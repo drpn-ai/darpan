@@ -453,30 +453,42 @@ class RunConclusionSupport {
         Map<String, List<Map>> byFirst = keyFields.size() > 1 ? [:] : null
         Map<String, Integer> byFirstOmitted = byFirst != null ? [:] : null
         boolean readable = extractFile?.exists() && spec.keyReliable != false
-        if (readable) {
-            // DAR-BE-318 (3b2b-11): under Keep the extract holds every record; set-aside ones are not kept.
-            Map head = KeepArtifacts.forEachKeptRecord(extractFile) { Map record ->
+        // DAR-BE-318: where a Spark Keep ran, its summary decides what was set aside and extract metadata is ignored for it;
+        // with no .keep.json the metadata counts are read as before.
+        Map keep = readable ? KeepArtifacts.readSummary(extractFile) : null
+        // A summary that reports set-aside records with no rows file lost its rows. Kept can then not be told from set aside,
+        // so no record is claimed kept, excluded or absent (DAR-OPS-029 S03a: before, every record read KEPT).
+        boolean rowsLost = keep != null && ((keep.get("setAsideCount") ?: 0) as long) > 0 && !KeepArtifacts.rowsFile(extractFile).isFile()
+        if (readable && !rowsLost) {
+            Closure kept = { Map record ->
                 add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, byFirstOmitted, "KEPT", record, keyFields, normalizer, neededFirstFields)
             }
-            // Where a Spark Keep ran its summary decides what was set aside and extract metadata is ignored for it;
-            // with no .keep.json the metadata counts are read as before.
-            Map keep = KeepArtifacts.readSummary(extractFile)
-            List exclusions = keep != null ? ((keep.get("configuredExclusions") as List) ?: [])
-                    : configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
-            // A summary that reports set-aside records with no rows file lost its rows: unknown, never "not found".
-            boolean rowsLost = keep != null && ((keep.get("setAsideCount") ?: 0) as long) > 0 && !KeepArtifacts.rowsFile(extractFile).isFile()
-            Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
+            Closure excluded = { Map record ->
                 add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, byFirstOmitted, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)
             }
+            // DAR-BE-318 (3b2b-11): under Keep the extract holds every record; set-aside ones are not kept.
+            Map head = KeepArtifacts.forEachKeptRecord(extractFile, kept)
+            Map sidecar
+            if (keep != null) {
+                // The rows file names every set-aside record, a built-in rule's too (the summary lists tenant rules only), so
+                // they read EXCLUDED from it (DAR-OPS-029 S03a: with no side file a built-in's record read "Not found"). A side
+                // file, where one was written, holds the same records: only whether it is present and whole is read.
+                KeepArtifacts.forEachSetAsideRecord(extractFile) { Map record, String ruleId -> excluded(record) }
+                sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record -> }
+            } else {
+                sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile, excluded)
+            }
+            List exclusions = keep != null ? ((keep.get("configuredExclusions") as List) ?: [])
+                    : configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
             // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
             // when the side's own metadata does not prove that every rule dropped nothing.
-            boolean unknown = rowsLost || exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
+            boolean unknown = exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
             return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
                     excludedFirst: excludedFirst, unknownWhenAbsent: unknown, byFirst: byFirst, byFirstOmitted: byFirstOmitted]
         }
-        // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
+        // No extract, a key this pass cannot rebuild, or a Keep whose rows were lost: nothing can be claimed.
         return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
                 excludedFirst: excludedFirst, unknownWhenAbsent: true]
     }

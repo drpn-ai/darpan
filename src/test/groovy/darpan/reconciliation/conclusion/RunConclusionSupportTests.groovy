@@ -453,6 +453,28 @@ class RunConclusionSupportTests {
         assertEquals("UNKNOWN", ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }.presence)
     }
 
+    // DAR-OPS-029 S03a (QA, lens E2): a record a BUILT-IN rule set aside is in the extract and named in the rows file. The
+    // .keep.json lists tenant rules only, so with no side file the record read ABSENT ("Not found"); it reads EXCLUDED.
+    @Test
+    void aRecordABuiltInRuleSetAsideReadsExcludedNotAbsent() {
+        File doc = writeDiffDocument([missingRow("M7${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]], [1], [])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("EXCLUDED", ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }.presence)
+        assertEquals("UNEXPLAINED", onlyConclusion(doc).code, "the order is on NetSuite, set aside: not 'never reached'")
+    }
+
+    // QA, lens E2: with the rows file lost the pass cannot tell kept from set aside, so no record is claimed KEPT.
+    @Test
+    void aLostRowsFileClaimsNoRecordKept() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M5", orderLineId: "01"], [orderId: "M6", orderLineId: "01"]], [0], [])
+        KeepArtifacts.rowsFile(ns).delete()
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("UNKNOWN", ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }.presence,
+                "M5 was set aside; with its row lost it must not read as kept")
+    }
+
     @Test
     void zeroSetAsideIsKnown() {
         File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
@@ -659,31 +681,33 @@ class RunConclusionSupportTests {
     }
 
     @Test
-    void hidingAKeysRepeatsHidesItsPartnerRowAndTheWarning() {
+    void hidingAKeysRepeatsHidesItsPartnerRowAndTheRunsWarning() {
         String repeats = "Compare scope 'Returns' FILE_2 (NetSuite) has 1 key(s) on more than one record; " +
                 darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
         // The partner row comes first: the repeats that decide it are read later in the document.
-        File doc = writeDiffDocument(repeatedOnFile2("K", "split"),
-                [totalDifferences: 3, duplicateDifferenceCount: 3, processingWarnings: [repeats]])
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split"), [totalDifferences: 3])
         Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
         Map d = parse(doc)
         assertEquals([], d.differences)
         assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
-        assertEquals([totalDifferences: 0, duplicateDifferenceCount: 0, processingWarnings: []],
-                ((Map) d.summary).subMap(["totalDifferences", "duplicateDifferenceCount", "processingWarnings"]))
+        assertEquals(0, d.summary.totalDifferences)
+        // The stored run counts (the compare's result, as the run paths hand them to applyHidden) carry the duplicate count
+        // and the warning; both go once every repeat and its partner are hidden.
+        Map runCounts = [differenceCount: 3, duplicateDifferenceCount: 3, processingWarnings: [repeats]]
+        RunConclusionSupport.applyHidden(runCounts, (Map) out.hiddenByBucket)
+        assertEquals([differenceCount: 0, duplicateDifferenceCount: 0, processingWarnings: []], runCounts)
         assertEquals([[code: "CONC_SPLIT_RMA", label: "One RMA per resolution", count: 3]], d.summary.conclusions.hidden)
     }
 
     @Test
     void aKeyWhoseRepeatsAreNotHiddenKeepsItsPartnerRow() {
-        File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"),
-                [totalDifferences: 6, duplicateDifferenceCount: 6])
+        File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"), [totalDifferences: 6])
         Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
         Map d = parse(doc)
         assertEquals([["J", "DUPLICATE_IN_FILE_1_PAIRED"], ["J", "DUPLICATE_IN_FILE_2"], ["J", "DUPLICATE_IN_FILE_2"]],
                 ((List<Map>) d.differences).collect { [it.primaryId, it.diffType] })
         assertEquals([DUPLICATE_IN_FILE_1_PAIRED: 1, DUPLICATE_IN_FILE_2: 2], out.hiddenByBucket)
-        assertEquals([totalDifferences: 3, duplicateDifferenceCount: 3], ((Map) d.summary).subMap(["totalDifferences", "duplicateDifferenceCount"]))
+        assertEquals(3, d.summary.totalDifferences)
     }
 
     // A DUPLICATE_IN_FILE_2_PAIRED row is FILE_2's record: a rule reading FILE_2's field on it holds (read as FILE_1's, FILE_2
@@ -793,8 +817,8 @@ class RunConclusionSupportTests {
              data: JsonOutput.toJson([omsOrderId: id.split(SEP)[0], reason: reason]), message: "Quantity differs"]
         }
         File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2), ruleRow("M2${SEP}01", "retired"), ruleRow("M3${SEP}01", "live")],
-                [totalDifferences: 3, onlyInFile1Count: 1, onlyInFile2Count: 0, ruleDifferenceCount: 2, duplicateDifferenceCount: 0,
-                 missingObjectDifferenceCount: 1])
+                // The document summary as runSavedRunDiff writes it: no duplicateDifferenceCount (none here to count).
+                [totalDifferences: 3, onlyInFile1Count: 1, onlyInFile2Count: 0, ruleDifferenceCount: 2, missingObjectDifferenceCount: 1])
         List rules = [[conclusionEnumId: "CONC_RETIRED_ITEM", label: "Retired item", appliesToBucket: "RULE", outcome: "HIDE",
                        conditions: [cond(subject: "FILE_1", fieldExpression: "reason", operator: "IN", conditionValues: ["retired"], checkLabel: "Retired")]]]
         Map out = RunConclusionSupport.concludeRun(args(doc, rules))
@@ -803,7 +827,7 @@ class RunConclusionSupportTests {
         assertEquals([RULE: 1], out.hiddenByBucket, "the case is not hollow: one rule row was hidden")
         assertEquals(2, ((List) d.differences).size())
         assertEquals(1, s.ruleDifferenceCount)
-        assertEquals(s.totalDifferences, s.onlyInFile1Count + s.onlyInFile2Count + s.ruleDifferenceCount + s.duplicateDifferenceCount)
+        assertEquals(s.totalDifferences, s.onlyInFile1Count + s.onlyInFile2Count + s.ruleDifferenceCount)
         assertEquals(((List) d.differences).size(), s.totalDifferences)
     }
 

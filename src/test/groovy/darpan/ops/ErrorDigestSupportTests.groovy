@@ -182,6 +182,20 @@ class ErrorDigestSupportTests {
         assertNull(claims[LocalDate.parse("2026-11-25")].sentDate, "the next digest covers this day again")
     }
 
+    /** DAR-OPS-029 S34: the summary's words are built after the claim. When they can't be (copy unreadable), sendIfDue
+     *  still never throws, still finishes the day, and a failed email keeps the window open. */
+    @Test
+    void aSummaryThatCannotBeBuiltStillFinishesTheDayAndKeepsAFailedEmailsWindowOpen() {
+        mailWorks = false
+        ErrorDigestSupport.copy = { def ec -> throw new IllegalStateException("copy unreadable") }
+        Map out = ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        assertEquals([sent: false, reason: "DELIVERY_FAILED"], out.subMap(["sent", "reason"]))
+        assertEquals(1, finished.size(), "the day is finished even when the summary fails")
+        assertNull(claims[LocalDate.parse("2026-11-25")].sentDate, "the next digest covers this day again")
+        assertTrue((out.warnings as List<String>).any { it.startsWith("the daily error summary failed") }, out.warnings.toString())
+        assertTrue(posts.isEmpty())
+    }
+
     @Test
     void sinceIsThePreviousSend() {
         ErrorDigestSupport.sendIfDue(null, ts("2026-11-24T12:05:00Z"))

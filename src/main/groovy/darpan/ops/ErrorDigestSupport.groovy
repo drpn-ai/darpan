@@ -1,5 +1,6 @@
 package darpan.ops
 
+import darpan.common.SecretRedactor
 import darpan.config.DarpanSettings
 import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantScopedFinder
@@ -124,13 +125,14 @@ class ErrorDigestSupport {
                 warn(warnings, "${EMAIL_SETTING} is blank: the daily error email was not sent")
             }
         } catch (Throwable t) {
-            warn(warnings, "the daily error email could not be built: ${t.getClass().name}: ${t.message}")
+            warn(warnings, "the daily error email could not be built: ${t.getClass().name}: ${SecretRedactor.redact(t.message)}")
         }
 
         if (webhookUrl) {
             String state = emailed ? "sent" : (addresses ? "failed" : "noemail")
-            String line = ErrorDigestMessage.chatLine(counts, addresses.join(", "), state, copy.call(ec) as EmailCopyReader)
             try {
+                // Built inside the try: the claim is taken, so nothing past it may throw (the day must still be finished).
+                String line = ErrorDigestMessage.chatLine(counts, addresses.join(", "), state, copy.call(ec) as EmailCopyReader)
                 Map delivery = postChat.call(webhookUrl, [text: line]) as Map
                 if (delivery?.ok != true) warn(warnings, "the daily error summary was not delivered (status ${delivery?.statusCode})")
             } catch (Throwable t) {

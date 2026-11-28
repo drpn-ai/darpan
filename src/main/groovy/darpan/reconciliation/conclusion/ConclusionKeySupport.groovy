@@ -5,7 +5,8 @@ import darpan.reconciliation.core.ReconciliationServices
 
 /**
  * DAR-UI-044. The compare key, rebuilt in plain Groovy so the conclude pass can index a side's records
- * the way the Spark compare keyed them: each field trimmed of spaces (as Spark's trim), then normalized, joined with the composite
+ * the way the Spark compare keyed them: each field trimmed as the compare trims it (every edge character up to U+0020, S01b
+ * OC140), then normalized, joined with the composite
  * delimiter. The normalizer follows RuleSetCompareScopeAdapter: a composite key field carries its own
  * inline `field|NORMALIZER` (the caller passes no idNormalizer), a legacy key uses the source's
  * idValueNormalizer ?: its inline one, both through resolveIdNormalizer's aliases. A blank field has no
@@ -22,7 +23,7 @@ class ConclusionKeySupport {
             String field = plainField(expression) ?: CompareIdExpressionSupport.topLevelRecordField(expression) ?: (String) split.idExpr
             String normalizer = configured ?: CompareIdExpressionSupport.resolveIdNormalizer((String) split.normalizer)
             Object raw = field == null ? null : record.get(field)
-            String value = raw == null ? null : normalize(sparkTrim(keyText(raw)), normalizer)
+            String value = raw == null ? null : normalize(keyText(raw).trim(), normalizer)
             if (!value) return null
             parts.add(value)
         }
@@ -54,19 +55,16 @@ class ConclusionKeySupport {
      */
     private static String keyText(Object raw) {
         if (!(raw instanceof BigDecimal || raw instanceof Double || raw instanceof Float)) return raw.toString()
+        BigDecimal value
         try {
-            return new BigDecimal(raw.toString()).stripTrailingZeros().toPlainString()
+            value = new BigDecimal(raw.toString()).stripTrailingZeros()
         } catch (NumberFormatException ignored) {
             return raw.toString() // NaN or Infinity: no decimal to write
         }
-    }
-
-    /** Spark's trim (CompareDatasetSupport.applyIdNormalizer): spaces only. String.trim() also takes tabs and line breaks. */
-    private static String sparkTrim(String value) {
-        int start = 0, end = value.length()
-        while (start < end && value.charAt(start) == (char) ' ') start++
-        while (end > start && value.charAt(end - 1) == (char) ' ') end--
-        return value.substring(start, end)
+        // Bounded: past 2^53 (16 digits) Spark writes scientific notation anyway, and plain text of an exponent such as
+        // 1E999999999 would expand to a billion digits. Such a key keeps its own text.
+        if (value.precision() - value.scale() > 16 || value.scale() > 16) return raw.toString()
+        return value.toPlainString()
     }
 
     private static String normalize(String value, String idNormalizer) {

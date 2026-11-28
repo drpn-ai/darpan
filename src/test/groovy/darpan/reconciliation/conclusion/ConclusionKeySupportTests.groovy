@@ -30,13 +30,14 @@ class ConclusionKeySupportTests {
         assertEquals("M1", ConclusionKeySupport.compareKey([omsOrderId: "M1"], ['$.records[*].omsOrderId'], null))
     }
 
-    // DAR-OPS-029 S03a (lens E4): Spark's trim (CompareDatasetSupport.applyIdNormalizer) takes off spaces only, so a tab or
-    // line break at a key's edge stays in the compare's key and must stay in the key rebuilt here, or the evidence misses it.
+    // DAR-OPS-029 (lens E4, with S01b's OC140, cc7b59ce): the compare trims every leading and trailing character up to U+0020
+    // (tab, CR, LF and the rest, as String.trim), so the key rebuilt here does too, or the evidence misses it.
     @Test
-    void trimsOnlySpacesLikeSpark() {
-        assertEquals("M1\t\u001F01", ConclusionKeySupport.compareKey([o: " M1\t ", u: "01 "], ["o", "u"], null))
-        assertEquals("M2\n", ConclusionKeySupport.compareKey([o: "M2\n"], ["o"], null))
-        assertNull(ConclusionKeySupport.compareKey([o: "   "], ["o"], null))
+    void trimsEdgeWhitespaceLikeTheCompare() {
+        assertEquals("K1\u001F01", ConclusionKeySupport.compareKey([o: " K1\t", u: "01 "], ["o", "u"], null))
+        assertEquals("K2", ConclusionKeySupport.compareKey([o: "K2\r"], ["o"], null))
+        assertEquals("M2", ConclusionKeySupport.compareKey([o: "M2\n"], ["o"], null))
+        assertNull(ConclusionKeySupport.compareKey([o: " \t "], ["o"], null))
     }
 
     // DAR-OPS-029 (lens E4, with S01b's cf60f0e8): a numeric key reads the same in both passes. Spark writes a double key
@@ -50,6 +51,9 @@ class ConclusionKeySupportTests {
         assertEquals("2.25", ConclusionKeySupport.compareKey([id: 2.25f], ["id"], null))
         assertEquals("7.0", ConclusionKeySupport.compareKey([id: "7.0"], ["id"], null), "a string key is its text")
         assertEquals("7\u001F12345678901", ConclusionKeySupport.compareKey([o: 7, u: 12345678901L], ["o", "u"], null))
+        // Security review: an exponent is never expanded into digits; past 16 digits a key keeps its own text.
+        assertEquals("1E+999999999", ConclusionKeySupport.compareKey([id: new BigDecimal("1E999999999")], ["id"], null))
+        assertEquals("1E-999999999", ConclusionKeySupport.compareKey([id: new BigDecimal("1E-999999999")], ["id"], null))
     }
 
     @Test

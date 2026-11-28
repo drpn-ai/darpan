@@ -458,11 +458,10 @@ class ReconciliationSavedRunSupport {
 
         def compareScope = compareScopes[0]
         String compareScopeLabel = compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
-        // RuleSetCompareSource is transitively tenant-owned (compareScopeId → RuleSetCompareScope → RuleSet).
-        // The compareScope above is already gated to the active-tenant RuleSet (lines 455-472), and
-        // RuleSetCompareScope has NO companyUserGroupId of its own, so it cannot be by-id gated directly
-        // (findTenantScopedChildren on it would read a non-existent companyUserGroupId field). Read the
-        // sources by the already-validated compareScopeId; the upstream RuleSet gate is the tenant boundary.
+        // RuleSetCompareSource belongs to its scope, which belongs to the RuleSet (compareScopeId → RuleSetCompareScope →
+        // RuleSet). Both rows also carry a denormalized companyUserGroupId stamp, but the gate here is the RuleSet's:
+        // canAccessTenantRecord above refused any other tenant's run, and the scope was read as that RuleSet's child.
+        // So the sources are read by the already-validated compareScopeId.
         def sourceFinder = TenantScopedFinder.findGlobalUnscoped(
                 ec, "darpan.rule.RuleSetCompareSource",
                 "transitively tenant-owned; compareScopeId pre-gated via the active-tenant RuleSet above")

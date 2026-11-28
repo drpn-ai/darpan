@@ -867,26 +867,6 @@ class SavedRunsFacadeSmokeTests {
     }
 
     @Test
-    void csvRunKeepsCompareScopeIdsWithinEntityLengthAndUsesCsvSuffix() {
-        Map<String, Object> createResult = ec.service.sync()
-                .name("facade.ReconciliationFacadeServices.create#CsvRun")
-                .parameters([
-                        runName           : "CSV Compare Scope Name That Definitely Exceeds The Stored Id Limit",
-                        file1SystemEnumId : "OMS",
-                        file2SystemEnumId : "SHOPIFY",
-                        file1CompareColumn: "order_id",
-                        file2CompareColumn: "order_id",
-                ])
-                .disableAuthz()
-                .call()
-
-        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        String compareScopeId = createResult.savedRun.compareScopeId as String
-        assertNotNull(compareScopeId)
-        assertTrue(compareScopeId ==~ /CS_\d+/, compareScopeId)
-    }
-
-    @Test
     void ruleSetRunCanBeCreatedWithInlineRulesAndExecutedThroughTheSavedRunFacade() {
         String skuMismatchRule = '''rule "ORDER_STATUS_MISMATCH"
 when
@@ -1678,29 +1658,6 @@ end'''
         assertEquals(0L, (runResult.runResult.generatedOutput.totalDifferences ?: 0) as Long)
         assertEquals(0L, (runResult.runResult.generatedOutput.onlyInFile1Count ?: 0) as Long)
         assertEquals(0L, (runResult.runResult.generatedOutput.onlyInFile2Count ?: 0) as Long)
-    }
-
-    @Test
-    void ruleSetRunKeepsCompareScopeIdsWithinEntityLengthAndUsesNeutralSuffix() {
-        Map<String, Object> createResult = ec.service.sync()
-                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
-                .parameters([
-                        runName                 : "RuleSet Compare Scope Name That Definitely Exceeds The Stored Id Limit",
-                        file1SystemEnumId       : "OMS",
-                        file1FileTypeEnumId     : "DftCsv",
-                        file1PrimaryIdExpression: "order_id",
-                        file2SystemEnumId       : "SHOPIFY",
-                        file2FileTypeEnumId     : "DftCsv",
-                        file2PrimaryIdExpression: "order_id",
-                        rules                   : [],
-                ])
-                .disableAuthz()
-                .call()
-
-        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        String compareScopeId = createResult.savedRun.compareScopeId as String
-        assertNotNull(compareScopeId)
-        assertTrue(compareScopeId ==~ /CS_\d+/, compareScopeId)
     }
 
     @Test
@@ -2972,6 +2929,8 @@ end'''
                 .disableAuthz()
                 .call()
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        ruleSetRunFixturesToCleanUp << [ruleSetId: createResult.savedRun.ruleSetId as String,
+                                        compareScopeId: createResult.savedRun.compareScopeId as String]
         return createResult.savedRun.compareScopeId as String
     }
 

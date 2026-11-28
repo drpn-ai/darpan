@@ -503,6 +503,34 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("OC208: a right password that lands after a burst of wrong guesses locked the account is refused, though the realm's first, cached read still saw it open")
+    void aRightPasswordAfterTheBurstLockedTheAccountIsRefused() {
+        String password = "Oc208-start-Aa1!"
+        setPassword(APPROVER_ID, password)
+        Closure cachedDisabled = { ec.entity.find("moqui.security.UserAccount").condition("username", APPROVER_USERNAME)
+                .useCache(true).disableAuthz().one().disabled }
+        // MoquiShiroRealm.loginPrePassword checks the lockout on a cached read, before the slow hash: prime it open.
+        assertEquals("N", cachedDisabled())
+        // The burst's increments commit while the right guess's hash runs: the row locks, and the cached copy cannot know.
+        ec.transaction.runRequireNew(30, "OC208 test: lock the account behind the cache", {
+            def statement = ec.entity.getConnection("transactional")
+                    .prepareStatement("UPDATE USER_ACCOUNT SET DISABLED = 'Y', DISABLED_DATE_TIME = ? WHERE USER_ID = ?")
+            try {
+                statement.setTimestamp(1, new Timestamp(System.currentTimeMillis()))
+                statement.setString(2, APPROVER_ID)
+                assertEquals(1, statement.executeUpdate())
+            } finally {
+                statement.close()
+            }
+        })
+        assertEquals("N", cachedDisabled(), "precondition: the realm's cached read still sees the account open")
+
+        Map signedIn = anonAuth("login#Session", [username: APPROVER_USERNAME, password: password])
+        assertFalse(signedIn.out.authenticated as boolean, "the account locked while the hash ran, so its right password is refused: ${signedIn}")
+        assertEquals("Y", account(APPROVER_ID).disabled, "and the refused sign-in does not lift the lockout")
+    }
+
+    @Test
     @DisplayName("OC209: an approval whose sign-in began before the approver's sign-ins were ended issues nothing, even when it lands after the ending's deny step")
     void anApprovalRacingAnEndingIssuesNothing() {
         long signedInBefore = System.currentTimeMillis() - 60_000L

@@ -120,11 +120,12 @@ class Sample {
             String before = prevNonBlank
             prevNonBlank = t
             if (!(line =~ /\bstatic\b/)) continue
-            // join continuation lines: a declaration ending in '=' or leaving a '(' / '[' open
+            // join continuation lines: a declaration ending in '=' or leaving a '(' / '[' open. Each physical line loses
+            // its own `//` comment before it joins, so one comment can't swallow the lines after it.
             int guard = 0
             while (i + 1 < lines.size() && guard++ < 40 && continues(line)) {
                 i++
-                line = '    ' + line.trim() + ' ' + lines[i].trim()
+                line = '    ' + withoutLineComment(line).trim() + ' ' + withoutLineComment(lines[i]).trim()
             }
             // an annotation alone on the line above (@Field)
             if (before.matches(/^@\w+(\([^)]*\))?$/)) line = '    ' + before + ' ' + line.trim()
@@ -147,8 +148,12 @@ class Sample {
         return found
     }
 
+    private static String withoutLineComment(String line) {
+        return line.replaceAll(/\s*\/\/.*$/, '')
+    }
+
     private static boolean continues(String line) {
-        String t = line.replaceAll(/\s*\/\/.*$/, '').trim()
+        String t = withoutLineComment(line).trim()
         if (t.endsWith('=')) return true
         if (t.contains('{')) return false
         int open = 0
@@ -212,6 +217,28 @@ class S {
 }
 '''
         assertEquals(['WARNED', 'VIA', 'SW', 'MULTI', 'BRACKET', 'ANNOTATED'], scan(sample).collect { it.name })
+    }
+
+    /** DAR-OPS-029 S39 (from S16b): an inline comment inside a multi-line literal must not hide the literal's close. The
+     *  joiner used to strip `//` from the whole joined line, so the `]` never counted, the join ran on, swallowed the next
+     *  static (missed) and read a method's local as a static (phantom RetentionSupport.out). */
+    @Test
+    void inlineCommentInMultiLineLiteralDoesNotRunTheJoinOn() {
+        String sample = '''
+class Retention {
+    static final Map<String, String> TABLES = [
+            (A): "a.days", // the A table
+            (B): "b.days",
+    ].asImmutable()
+    static Closure hook = null
+
+    static Map plan() {
+        Map<String, Map> out = [:]
+        return out
+    }
+}
+'''
+        assertEquals(['hook'], scan(sample).collect { it.name })
     }
 
     @Test

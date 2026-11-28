@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *   <li>{@code facade/reconciliation/ReconciliationOutputSupport.groovy:140} — complex
  *       pre-built finder with a {@code condition("in", pathCandidates)} list; caller does
  *       the ownership check after. KEPT BARE (entity read, guarded by caller).</li>
- *   <li>{@code facade/reconciliation/AutomationFacadeSupport.groovy:279} — service call
+ *   <li>{@code facade/reconciliation/AutomationSaveSupport.groovy:216} — service call
  *       {@code ec.service.sync()...disableAuthz().call()}; not an entity read. KEPT BARE.</li>
  *   <li>{@code facade/reconciliation/ReconciliationSavedRunSupport.groovy:806} — service call.
  *       KEPT BARE.</li>

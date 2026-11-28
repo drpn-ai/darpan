@@ -38,15 +38,17 @@ class MissingDiffVerificationSupport {
         return errors ? errors.join("; ") : ""
     }
 
-    /** label -> positive number, keyed by the normalized side token; anything else is left out. */
-    private static Map<String, Long> positiveNumbersByToken(Object raw) {
+    /** side (FILE_1 / FILE_2) -> positive number; any other key or value is left out. */
+    private static Map<String, Long> positiveNumbersBySide(Object raw) {
         Map<String, Long> out = [:]
-        ((raw instanceof Map ? (Map) raw : [:]) as Map).each { Object label, Object value ->
-            String token = DiffDetailClassifier.normalizeToken(label)
-            if (token && value instanceof Number && ((Number) value).longValue() > 0L) out.put(token, ((Number) value).longValue())
+        ((raw instanceof Map ? (Map) raw : [:]) as Map).each { Object side, Object value ->
+            String key = side?.toString()
+            if (key in SIDES && value instanceof Number && ((Number) value).longValue() > 0L) out.put(key, ((Number) value).longValue())
         }
         return out
     }
+
+    private static final List<String> SIDES = [DiffDocumentStreamSupport.FILE_1, DiffDocumentStreamSupport.FILE_2]
 
     // The document's line shapes, and the read and rewrite passes over them, live in
     // DiffDocumentStreamSupport, shared with the return-presence and conclude passes.
@@ -54,55 +56,56 @@ class MissingDiffVerificationSupport {
     /**
      * args:
      *   diffFile     : File — diff document in writeDiffDatasetOutput format (required)
-     *   file1Label   : String, file2Label : String — side labels as written into the document
-     *   sideLookups  : Map side label -> Closure(List<String> ids) returning
+     *   file1Label   : String, file2Label : String — side labels as written into the document, for the words only
+     *   sideLookups  : Map side (FILE_1 / FILE_2) -> Closure(List<String> ids) returning
      *                  [ok, foundIds, missingIds, errors] (the lookup service contract)
-     *   sideCheckedCounts : Map side label -> how many records were checked against that side (the
-     *                  other side's record count). A side without one is not looked up (fail closed).
-     *   sideMaxShares : optional Map side label -> percent gate, default {@link #DEFAULT_MAX_LOOKUP_SHARE}.
+     *   sideCheckedCounts : Map side -> how many records were checked against that side (the other side's record
+     *                  count). A side without one is not looked up (fail closed).
+     *   sideMaxShares : optional Map side -> percent gate, default {@link #DEFAULT_MAX_LOOKUP_SHARE}.
      *                  A side over ITS OWN gate contributes nothing and must never disable a sibling
      *                  side that is under its.
      *   auditRun     : true for an audit's window (DAR-BE-351): only there does the gate skip a side. Any
      *                  other run looks up every row its read left missing and says the share as a note.
      *
+     * R1 (OC96): a row's side is the compare's own (DiffDocumentStreamSupport.missingSide: its diffType first, a label only
+     * when the two differ). A row nothing can settle is never looked up or removed, so two sides of one system are each
+     * verified against their own lookup. The summary drops by the rows actually removed.
+     *
      * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount, unresolvedCount,
-     *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
+     *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote, sideOutcomes (side -> outcome)]
      */
     static Map<String, Object> verifyMissingDiffs(Map<String, Object> args) {
         File diffFile = (File) args.diffFile
-        String file1Token = DiffDetailClassifier.normalizeToken(args.file1Label)
-        String file2Token = DiffDetailClassifier.normalizeToken(args.file2Label)
-        Map<String, Long> checkedCountByToken = positiveNumbersByToken(args.sideCheckedCounts)
-        Map<String, Long> maxShareByToken = positiveNumbersByToken(args.sideMaxShares)
+        Map<String, Long> checkedCountBySide = positiveNumbersBySide(args.sideCheckedCounts)
+        Map<String, Long> maxShareBySide = positiveNumbersBySide(args.sideMaxShares)
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, checkedCount: 0, removedCount: 0,
                 confirmedMissingCount: 0, unresolvedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
                 lookupFailed: false, warnings: warnings, auditNote: null] as Map<String, Object>
 
-        Map<String, Map<String, Object>> sidesByToken = new LinkedHashMap<>()
-        ((Map) (args.sideLookups ?: [:])).each { Object label, Object lookup ->
-            String token = DiffDetailClassifier.normalizeToken(label)
-            if (token && lookup instanceof Closure) sidesByToken.put(token, [label: label.toString(), lookup: lookup] as Map<String, Object>)
+        Map<String, Map<String, Object>> sides = new LinkedHashMap<>()
+        ((Map) (args.sideLookups ?: [:])).each { Object side, Object lookup ->
+            String key = side?.toString()
+            if (key in SIDES && lookup instanceof Closure) {
+                String label = (key == DiffDocumentStreamSupport.FILE_1 ? args.file1Label : args.file2Label)?.toString() ?: key
+                sides.put(key, [label: label, lookup: lookup] as Map<String, Object>)
+            }
         }
-        if (!sidesByToken || diffFile == null || !diffFile.isFile()) return inert
-        // A row is attributed to a side by its missingIn label. Two sides reading as one token (a same-system run) leave
-        // that unanswerable, and a row missing in one side would be looked up in the other, where it exists by
-        // definition, and removed. Refuse rather than hide real differences (DAR-OPS-029 S20).
-        if (file1Token && file1Token == file2Token) {
-            warnings.add("Verification pass skipped: both sides share the label ${args.file1Label}, so a missing row cannot be told to its side; nothing was looked up.".toString())
-            return inert
-        }
+        if (!sides || diffFile == null || !diffFile.isFile()) return inert
 
         // Pass 1 — collect candidate ids per lookup-capable side, one row in memory at a time.
         JsonSlurper slurper = new JsonSlurper()
-        Map<String, Set<String>> candidateIdsByToken = [:].withDefault { new LinkedHashSet<String>() }
-        boolean sawDifferencesHeader = DiffDocumentStreamSupport.forEachMissingRow(diffFile, slurper) { Map row ->
-            String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
+        Map<String, Set<String>> candidateIdsBySide = [:].withDefault { new LinkedHashSet<String>() }
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachMissingRowBySide(diffFile, slurper) { Map row, String side ->
             String rowId = DiffDocumentStreamSupport.rowIdOf(row)
-            if (rowId && sidesByToken.containsKey(missingToken)) candidateIdsByToken.get(missingToken).add(rowId)
+            if (rowId && side && sides.containsKey(side)) candidateIdsBySide.get(side).add(rowId)
         }
-        if (!sawDifferencesHeader) {
+        if (!scan.headerFound) {
             warnings.add("Verification pass skipped: diff document has no differences section.")
+            return inert
+        }
+        if (!scan.complete) {
+            warnings.add("Verification pass skipped: ${scan.problem()} Nothing was looked up.".toString())
             return inert
         }
 
@@ -113,24 +116,24 @@ class MissingDiffVerificationSupport {
         int checkedCount = 0
         int confirmedMissingCount = 0
         int unresolvedCount = 0
-        Map<String, Set<String>> removeIdsByToken = [:]
-        Map<String, Integer> removedCountByToken = [:]
+        Map<String, Set<String>> removeIdsBySide = [:]
         // DAR-BE-320 phase 1b: what happened on each side, for the audit's read report (AuditSourceRead.lookupJson).
         Map<String, Map<String, Object>> sideOutcomes = [:]
         List<String> auditSentences = []
-        sidesByToken.each { String token, Map<String, Object> side ->
-            Set<String> candidates = candidateIdsByToken.containsKey(token) ? candidateIdsByToken.get(token) : (Set<String>) null
+        sides.each { String side, Map<String, Object> sideInfo ->
+            Set<String> candidates = candidateIdsBySide.containsKey(side) ? candidateIdsBySide.get(side) : (Set<String>) null
             if (!candidates) return
             // `return` skips THIS side only — a side over its own gate must not suppress a sibling that
             // is under its, since the two sides are different systems with different completeness guarantees.
-            Long checked = checkedCountByToken.get(token)
-            long gate = maxShareByToken.containsKey(token) ? maxShareByToken.get(token) : (long) DEFAULT_MAX_LOOKUP_SHARE
+            Long checked = checkedCountBySide.get(side)
+            long gate = maxShareBySide.containsKey(side) ? maxShareBySide.get(side) : (long) DEFAULT_MAX_LOOKUP_SHARE
             Map<String, Object> outcome = [candidates: candidates.size(), checkedAgainst: checked, maxSharePercent: gate,
                                            lookedUp: 0, found: 0] as Map<String, Object>
-            sideOutcomes.put(side.label as String, outcome)
+            sideOutcomes.put(side, outcome)
+            String label = sideInfo.label as String
             if (checked == null) {
                 outcome.skipped = "NO_COUNT"
-                warnings.add("Verification pass skipped for ${side.label}: the run did not say how many records were checked against it, so ${candidates.size()} missing difference(s) were not looked up.".toString())
+                warnings.add("Verification pass skipped for ${label}: the run did not say how many records were checked against it, so ${candidates.size()} missing difference(s) were not looked up.".toString())
                 return
             }
             long maxShare = gate
@@ -139,16 +142,16 @@ class MissingDiffVerificationSupport {
                 // clears its doubts by looking up, and still says the read left too much to look up.
                 if (args.auditRun == true) {
                     outcome.skipped = "OVER_SHARE"
-                    warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
+                    warnings.add("Verification pass skipped for ${label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
                     return
                 }
                 outcome.overShare = true
-                auditSentences.add("${AUDIT_NOTE_PREFIX}the read left ${candidates.size()} of ${checked} records missing in ${side.label}, above the ${maxShare}% a read should leave; all were looked up. The read or the pairing needs fixing.".toString())
+                auditSentences.add("${AUDIT_NOTE_PREFIX}the read left ${candidates.size()} of ${checked} records missing in ${label}, above the ${maxShare}% a read should leave; all were looked up. The read or the pairing needs fixing.".toString())
             }
             List<String> ids = new ArrayList<>(candidates)
             Map lookupResult
             try {
-                lookupResult = (Map) ((Closure) side.lookup).call(ids)
+                lookupResult = (Map) ((Closure) sideInfo.lookup).call(ids)
             } catch (Exception e) {
                 lookupResult = [ok: false, errors: [e.message ?: e.class.simpleName]]
             }
@@ -158,7 +161,7 @@ class MissingDiffVerificationSupport {
             if (!(lookupResult?.ok)) {
                 lookupFailed = true
                 List errors = lookupResult?.errors instanceof List ? (List) lookupResult.errors : []
-                warnings.add("Verification lookup for ${side.label} failed; ${ids.size()} missing differences left as reported. ${errors ? errors.join("; ") : ""}".toString().trim())
+                warnings.add("Verification lookup for ${label} failed; ${ids.size()} missing differences left as reported. ${errors ? errors.join("; ") : ""}".toString().trim())
                 outcome.failed = true
                 return
             }
@@ -184,31 +187,28 @@ class MissingDiffVerificationSupport {
             confirmedMissingCount += confirmedMissingHere
             unresolvedCount += unresolved.size()
             if (unresolved) {
-                warnings.add("Verification lookup for ${side.label} could not be checked for ${unresolved.size()} of ${ids.size()} missing difference(s); those are left as reported. ${lookupErrorsOf(lookupResult)}".toString().trim())
+                warnings.add("Verification lookup for ${label} could not be checked for ${unresolved.size()} of ${ids.size()} missing difference(s); those are left as reported. ${lookupErrorsOf(lookupResult)}".toString().trim())
             }
             if (removable) {
-                removeIdsByToken.put(token, removable)
-                removedCountByToken.put(token, removable.size())
-                auditSentences.add("${AUDIT_NOTE_PREFIX}${removable.size()} of ${ids.size()} 'missing in ${side.label}' difference(s) confirmed present in ${side.label} by point lookup (bulk-export index gap) and removed; ${confirmedMissingHere} confirmed missing${unresolved ? ", ${unresolved.size()} unchecked" : ""}.".toString())
+                removeIdsBySide.put(side, removable)
+                auditSentences.add("${AUDIT_NOTE_PREFIX}${removable.size()} of ${ids.size()} 'missing in ${label}' difference(s) confirmed present in ${label} by point lookup (bulk-export index gap) and removed; ${confirmedMissingHere} confirmed missing${unresolved ? ", ${unresolved.size()} unchecked" : ""}.".toString())
             }
         }
 
-        int removedMissingInFile1 = removedCountByToken.get(file1Token) ?: 0
-        int removedMissingInFile2 = removedCountByToken.get(file2Token) ?: 0
-        int removedCount = (removedCountByToken.values().sum() ?: 0) as int
         String auditNote = auditSentences ? auditSentences.join(" ") : null
-        if (!removedCount) {
+        if (!removeIdsBySide) {
             return [performed: performed, rewritten: false, checkedCount: checkedCount, removedCount: 0,
                     confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                     removedMissingInFile1: 0, removedMissingInFile2: 0,
                     lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes] as Map<String, Object>
         }
 
-        // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
-        DiffDocumentStreamSupport.removeMissingRows(diffFile, ".verify-tmp", removeIdsByToken,
-                removedCount, removedMissingInFile1, removedMissingInFile2, auditNote)
+        // Pass 2 — remove the confirmed rows by side; the summary drops by the rows actually removed.
+        Map<String, Integer> dropped = DiffDocumentStreamSupport.removeMissingRowsBySide(diffFile, ".verify-tmp", removeIdsBySide, auditNote)
+        int removedMissingInFile1 = dropped.get(DiffDocumentStreamSupport.FILE_1) ?: 0
+        int removedMissingInFile2 = dropped.get(DiffDocumentStreamSupport.FILE_2) ?: 0
 
-        return [performed: true, rewritten: true, checkedCount: checkedCount, removedCount: removedCount,
+        return [performed: true, rewritten: true, checkedCount: checkedCount, removedCount: removedMissingInFile1 + removedMissingInFile2,
                 confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                 removedMissingInFile1: removedMissingInFile1,
                 removedMissingInFile2: removedMissingInFile2, lookupFailed: lookupFailed,

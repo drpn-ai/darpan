@@ -118,8 +118,6 @@ class RunVerificationSupport {
     static final String SKIP_NO_DIFF_FILE = "DIFF_ARTIFACT_UNREADABLE"
     /** Neither side could be point-checked; the detail names each side and why. */
     static final String SKIP_NO_LOOKUP = "NO_POINT_LOOKUP"
-    /** Both sides carry one label, so a missing row's side cannot be told (MissingDiffVerificationSupport refuses too). */
-    static final String SKIP_SHARED_LABEL = "SIDES_SHARE_A_LABEL"
 
     // Named from the one place that owns it, not restated: two copies of a property name drift, and
     // a skip reason naming a switch that no longer exists is worse than no reason at all.
@@ -199,10 +197,11 @@ class RunVerificationSupport {
                 if (resolved.get("applicable") == true) blockers.add("${side[2]}: ${resolved.get('reason')}".toString())
                 return
             }
-            sideLookups.put((String) side[2], lookup)
-            if (side[4] instanceof Number) sideCheckedCounts.put((String) side[2], ((Number) side[4]).longValue())
+            // R1: keyed by the compare's side, never by a label two sides of one system share.
+            sideLookups.put((String) side[3], lookup)
+            if (side[4] instanceof Number) sideCheckedCounts.put((String) side[3], ((Number) side[4]).longValue())
             Integer share = buildVerificationLookupShare(ec, side[1])
-            if (share != null) sideMaxShares.put((String) side[2], share)
+            if (share != null) sideMaxShares.put((String) side[3], share)
         }
         // No lookups AND no blocker means verification never applied to this run — a diff between
         // two uploaded files has no source of record to recheck against. Silent, or every such run
@@ -210,14 +209,8 @@ class RunVerificationSupport {
         if (!sideLookups) {
             return blockers ? skipped(SKIP_NO_LOOKUP, blockers.join("; ")) : ([applies: false] as Map<String, Object>)
         }
-        // Checked only once a lookup would run: a same-system run with no point lookup (NetSuite vs NetSuite) never had
-        // verification, and saying "not verified" on it would be noise. The lookups and the rows are attributed by label.
-        if (DiffDetailClassifier.normalizeToken(file1Label) == DiffDetailClassifier.normalizeToken(file2Label)) {
-            return skipped(SKIP_SHARED_LABEL, "both sides are labelled ${file1Label}, so a missing row cannot be told to its side".toString())
-        }
-
         return [applies       : true,
-                verifiedLabels: sideLookups.keySet() as List,
+                verifiedLabels: sideLookups.keySet().collect { String side -> side == "FILE_1" ? file1Label : file2Label },
                 missingInFile1: missingInFile1,
                 missingInFile2: missingInFile2,
                 run           : {
@@ -282,7 +275,7 @@ class RunVerificationSupport {
             ec.message.clearErrors()
         }
         applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
-        // DAR-BE-320 phase 1b: each side's lookup outcome (side label -> candidates, gate, looked up, found or why
+        // DAR-BE-320 phase 1b: each side's lookup outcome (side FILE_1 / FILE_2 -> candidates, gate, looked up, found or why
         // skipped) travels with the compare result to the audit's source reads.
         if (serviceResult != null && verification.sideOutcomes instanceof Map) serviceResult.verificationSides = verification.sideOutcomes
         // verifiedSystems names the sides this pass actually rechecked — several passes share the

@@ -28,7 +28,10 @@ class MissingDiffVerificationSupportTests {
     private static final String FILE1 = "OMS"
     private static final String FILE2 = "SHOPIFY"
     /** Enough records checked on each side that every fixture here is far under the 5% share gate. */
-    private static final Map PLENTY = [(FILE1): 1_000_000, (FILE2): 1_000_000]
+    /** R1: the lookups, counts and gates are keyed by the compare's own side, never by a label two sides can share. */
+    private static final String SIDE1 = "FILE_1"
+    private static final String SIDE2 = "FILE_2"
+    private static final Map PLENTY = [(SIDE1): 1_000_000, (SIDE2): 1_000_000]
 
     private static Map missingRow(String id, String presentIn, String missingIn) {
         return [
@@ -58,9 +61,9 @@ class MissingDiffVerificationSupportTests {
     }
 
     /** Mirrors ReconciliationServices.writeDiffDatasetOutput's writer exactly. */
-    private File writeDiffDocument(List<Map> rows, Map summaryOverride = null) {
+    private File writeDiffDocument(List<Map> rows, Map summaryOverride = null, Map labels = [file1Label: FILE1, file2Label: FILE2]) {
         File file = new File(tempDir, "ruleset-diff-${System.nanoTime()}.json")
-        Map metadata = [file1Label: FILE1, file2Label: FILE2, reconciliation: "RULESET"]
+        Map metadata = labels + [reconciliation: "RULESET"]
         int missing1 = rows.count { it.missingIn == FILE1 } as int
         int missing2 = rows.count { it.missingIn == FILE2 } as int
         Map summary = summaryOverride ?: [
@@ -110,7 +113,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids ->
+                sideLookups: [(SIDE2): { List<String> ids ->
                     dispatched.add(ids)
                     // 1001 exists in Shopify (bulk export skew); 1002 is truly missing
                     return [ok: true, foundIds: ["1001"], missingIds: ["1002"], errors: []]
@@ -153,7 +156,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids ->
+                sideLookups: [(SIDE2): { List<String> ids ->
                     return [ok: false, foundIds: [], missingIds: [], errors: ["boom"]]
                 }],
         ])
@@ -182,8 +185,8 @@ class MissingDiffVerificationSupportTests {
                 file1Label       : FILE1,
                 file2Label       : FILE2,
                 auditRun         : true,
-                sideCheckedCounts: [(FILE2): 10],
-                sideLookups      : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideCheckedCounts: [(SIDE2): 10],
+                sideLookups      : [(SIDE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertFalse((Boolean) result.performed)
@@ -193,7 +196,7 @@ class MissingDiffVerificationSupportTests {
         assertTrue(((List) result.warnings).any { it.toString().contains("3 of 10") && it.toString().contains("5%") },
                 "the warning names the share and the gate: ${result.warnings}")
         assertEquals([candidates: 3, checkedAgainst: 10L, maxSharePercent: 5L, lookedUp: 0, found: 0, skipped: "OVER_SHARE"],
-                ((Map) result.sideOutcomes).get(FILE2), "the audit's read report sees why nothing was looked up")
+                ((Map) result.sideOutcomes).get(SIDE2), "the audit's read report sees why nothing was looked up")
     }
 
     @Test
@@ -211,8 +214,8 @@ class MissingDiffVerificationSupportTests {
                 diffFile         : file,
                 file1Label       : FILE1,
                 file2Label       : FILE2,
-                sideCheckedCounts: [(FILE2): 10],
-                sideLookups      : [(FILE2): { List<String> ids -> looked.addAll(ids); [ok: true, foundIds: ids - ["1003"], missingIds: ["1003"], errors: []] }],
+                sideCheckedCounts: [(SIDE2): 10],
+                sideLookups      : [(SIDE2): { List<String> ids -> looked.addAll(ids); [ok: true, foundIds: ids - ["1003"], missingIds: ["1003"], errors: []] }],
         ])
 
         assertEquals(["1001", "1002", "1003"], looked)
@@ -232,8 +235,8 @@ class MissingDiffVerificationSupportTests {
                 diffFile         : file,
                 file1Label       : FILE1,
                 file2Label       : FILE2,
-                sideCheckedCounts: [(FILE2): 100],
-                sideLookups      : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
+                sideCheckedCounts: [(SIDE2): 100],
+                sideLookups      : [(SIDE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
         ])
 
         assertTrue((Boolean) result.performed)
@@ -250,7 +253,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
-                sideLookups: [(FILE2): { List<String> ids -> dispatchCalls++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> dispatchCalls++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertFalse((Boolean) result.performed)
@@ -269,7 +272,7 @@ class MissingDiffVerificationSupportTests {
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
                 // only FILE2 is lookup-capable; the sole missing row is missing in FILE1
-                sideLookups: [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
         ])
 
         assertFalse((Boolean) result.performed)
@@ -288,7 +291,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
         ])
 
         assertTrue((Boolean) result.performed)
@@ -306,7 +309,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertEquals(2, result.removedCount)
@@ -324,7 +327,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertEquals(1, result.removedCount)
@@ -345,8 +348,8 @@ class MissingDiffVerificationSupportTests {
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
                 sideLookups: [
-                        (FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] },
-                        (FILE1): { List<String> ids -> return [ok: true, foundIds: ["2001"], missingIds: ["2002"], errors: []] },
+                        (SIDE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                        (SIDE1): { List<String> ids -> return [ok: true, foundIds: ["2001"], missingIds: ["2002"], errors: []] },
                 ],
         ])
 
@@ -383,7 +386,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideLookups: [(SIDE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         // generic rows carry the id in "id", not "primaryId"
@@ -408,12 +411,12 @@ class MissingDiffVerificationSupportTests {
                 diffFile         : file,
                 file1Label       : FILE1,
                 file2Label       : FILE2,
-                sideCheckedCounts: [(FILE2): 40, (FILE1): 100],
-                sideMaxShares    : [(FILE1): 2],
+                sideCheckedCounts: [(SIDE2): 40, (SIDE1): 100],
+                sideMaxShares    : [(SIDE1): 2],
                 auditRun         : true,
                 sideLookups      : [
-                        (FILE2): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
-                        (FILE1): { List<String> ids -> file1Checked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                        (SIDE2): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                        (SIDE1): { List<String> ids -> file1Checked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },
                 ],
         ])
 
@@ -424,8 +427,8 @@ class MissingDiffVerificationSupportTests {
         assertEquals(1, result.removedCount)
         assertTrue((Boolean) result.rewritten)
         assertEquals([candidates: 1, checkedAgainst: 100L, maxSharePercent: 2L, lookedUp: 1, found: 1],
-                ((Map) result.sideOutcomes).get(FILE1))
-        assertEquals("OVER_SHARE", ((Map) ((Map) result.sideOutcomes).get(FILE2)).skipped)
+                ((Map) result.sideOutcomes).get(SIDE1))
+        assertEquals("OVER_SHARE", ((Map) ((Map) result.sideOutcomes).get(SIDE2)).skipped)
         assertEquals(["1001", "1002", "1003"] as Set,
                 (((List) parseDocument(file).differences).collect { it.primaryId } as Set))
     }
@@ -451,7 +454,7 @@ class MissingDiffVerificationSupportTests {
                 file1Label : FILE1,
                 file2Label : FILE2,
                 sideCheckedCounts: PLENTY,
-                sideLookups: [(FILE2): { List<String> ids ->
+                sideLookups: [(SIDE2): { List<String> ids ->
                     return [ok           : true,
                             foundIds     : ["1001"],
                             missingIds   : ["1002"],
@@ -479,30 +482,64 @@ class MissingDiffVerificationSupportTests {
      * pass used to send rows missing in one side to the other side's lookup, where they exist by definition, and
      * remove them: real differences hidden. It now refuses and says why.
      */
+    /**
+     * R1 (OC96): two sides of one system share a label, but each row's diffType names its side, so each side is verified
+     * against its own lookup. Before, the rows were attributed by label, the run was skipped (OC63), and its missing rows
+     * went unverified. A row whose side nothing can settle is never looked up, never removed.
+     */
     @Test
-    void sidesThatShareALabelAreNotVerifiedAgainstEachOther() {
-        File file = writeDiffDocument([
-                missingRow("1001", "Shopify", "Shopify"),
-                missingRow("2001", "Shopify", "Shopify"),
-        ], [
-                totalDifferences            : 2,
+    void sidesThatShareALabelAreEachVerifiedAgainstTheirOwnLookup() {
+        Map inSide1 = missingRow("1001", "Shopify", "Shopify") + [diffType: "MISSING_IN_FILE_1"]
+        Map inSide2 = missingRow("2001", "Shopify", "Shopify") + [diffType: "MISSING_IN_FILE_2"]
+        Map unsided = missingRow("3001", "Shopify", "Shopify")
+        File file = writeDiffDocument([inSide1, inSide2, unsided], [
+                totalDifferences            : 3,
                 onlyInFile1Count            : 1,
                 onlyInFile2Count            : 1,
-                missingObjectDifferenceCount: 2,
+                missingObjectDifferenceCount: 3,
                 ruleDifferenceCount         : 0,
-        ])
-        String before = file.text
+        ], [file1Label: "Shopify", file2Label: "shopify"])
+        List<String> side1Asked = [], side2Asked = []
         Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
                 diffFile         : file,
                 file1Label       : "Shopify",
                 file2Label       : "shopify",
-                sideCheckedCounts: ["Shopify": 1_000_000],
-                sideLookups      : ["Shopify": { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                sideCheckedCounts: PLENTY,
+                sideLookups      : [
+                        (SIDE1): { List<String> ids -> side1Asked.addAll(ids); [ok: true, foundIds: [], missingIds: ids, errors: []] },
+                        (SIDE2): { List<String> ids -> side2Asked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                ],
+        ])
+
+        assertEquals(["1001"], side1Asked, "side 1 is asked only about the row missing from side 1")
+        assertEquals(["2001"], side2Asked, "side 2 is asked only about the row missing from side 2")
+        assertTrue((Boolean) result.performed)
+        assertEquals(1, result.removedCount)
+        assertEquals(0, result.removedMissingInFile1)
+        assertEquals(1, result.removedMissingInFile2)
+        assertEquals(["1001", "3001"], ((List) parseDocument(file).differences).collect { it.primaryId },
+                "the unsided row stays, never looked up")
+    }
+
+    /** OC96: a missing row that does not parse cannot be checked; the pass says so and leaves the document as it was. */
+    @Test
+    void aMissingRowThatDoesNotParseSkipsThePassAndLeavesTheDocument() {
+        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2), missingRow("1002", FILE1, FILE2)])
+        file.text = file.getText("UTF-8").replace(JsonOutput.toJson(missingRow("1002", FILE1, FILE2)),
+                "{\"missingIn\":\"SHOPIFY\",\"primaryId\":\"1002\",broken")
+        String before = file.text
+        int asked = 0
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: PLENTY,
+                sideLookups      : [(SIDE2): { List<String> ids -> asked++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertFalse((Boolean) result.performed)
-        assertEquals(0, result.removedCount)
-        assertEquals(before, file.text, "nothing is removed when a row's side cannot be told")
-        assertTrue(((List) result.warnings).any { it.toString().contains("share the label") }, "warnings: ${result.warnings}")
+        assertEquals(0, asked)
+        assertEquals(before, file.text)
+        assertTrue(((List) result.warnings).any { it.toString().contains("could not be read") }, "warnings: ${result.warnings}")
     }
 }

@@ -5,8 +5,7 @@
          times. Every row carries companyUserGroupId (filter DARPAN_ACTIVE_COMPANY_SCOPE, group DARPAN_APP). -->
 
     <entity entity-name="PeakPeriod" package="darpan.peak" use="configuration">
-        <description>One tenant peak period: a date range, the hours it is busy, and how runs behave inside it.
-            hotwaxReadSharePct and netsuiteSerial are stored now and take effect in plan 2 (DAR-BE-328).</description>
+        <description>One tenant peak period: a date range, the hours it is busy, and how runs behave inside it.</description>
         <field name="peakPeriodId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="periodName" type="text-medium" not-null="true"/>
@@ -19,10 +18,10 @@
             <description>HH:mm, end of the busy hours.</description>
         </field>
         <field name="hotwaxReadSharePct" type="number-integer">
-            <description>Share of HotWax read capacity a run may use in the period. Takes effect in plan 2 (DAR-BE-328).</description>
+            <description>Share of HotWax read capacity a run may use in the period (PeakReadPolicy); null is no limit.</description>
         </field>
         <field name="netsuiteSerial" type="text-indicator" default="'N'">
-            <description>Y runs NetSuite reads one at a time in the period. Takes effect in plan 2 (DAR-BE-328).</description>
+            <description>Y runs the tenant's NetSuite reads one at a time in the period (NetSuiteReadGate).</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="startPostedStamp" type="date-time">

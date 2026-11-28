@@ -95,6 +95,21 @@ class PeakPeriodSupport {
         return periodMinutes != null ? periodMinutes : spec.normalMinutes
     }
 
+    /** A stored date as a LocalDate: a LocalDate, a java.sql.Date or Date, or ISO text (its first 10 characters); null when blank or unreadable. */
+    static LocalDate toLocalDate(Object value) {
+        if (value == null) return null
+        if (value instanceof LocalDate) return (LocalDate) value
+        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate()
+        if (value instanceof Date) return new java.sql.Date(((Date) value).time).toLocalDate()
+        String text = value.toString().trim()
+        if (!text) return null
+        try {
+            return LocalDate.parse(text.take(10))
+        } catch (DateTimeParseException ignored) {
+            return null
+        }
+    }
+
     static LocalTime parseHhMm(String s) {
         if (s == null || s.trim().isEmpty()) return null
         String v = s.trim()

@@ -18,7 +18,7 @@
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="today" from="java.time.LocalDate.now(darpan.facade.common.TenantAccessSupport.tenantTimeZoneFor(ec, tenantId))"/>
+            <set field="today" from="ec.user.nowTimestamp.toInstant().atZone(darpan.facade.common.TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)).toLocalDate()"/>
             <set field="periodRows" from="tenantId ? darpan.peak.PeakPeriodFacadeSupport.periodsOf(ec, tenantId) : []"/>
             <set field="peakPeriods" from="darpan.peak.PeakPeriodFacadeSupport.listRows(periodRows, today)"/>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -68,11 +68,11 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="zone" from="darpan.facade.common.TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)"/>
-                <set field="today" from="java.time.LocalDate.now(zone)"/>
+                <set field="today" from="ec.user.nowTimestamp.toInstant().atZone(zone).toLocalDate()"/>
                 <set field="targetInfo" from="darpan.peak.PeakPeriodFacadeSupport.targetsOf(ec, tenantId)"/>
                 <set field="labelById" from="targetInfo.targets.collectEntries { [(it.automationId ?: it.auditId): it.label] }"/>
-                <set field="fromLocal" from="darpan.peak.PeakPeriodFacadeSupport.toLocalDate(periodRow.fromDate)"/>
-                <set field="thruLocal" from="darpan.peak.PeakPeriodFacadeSupport.toLocalDate(periodRow.thruDate)"/>
+                <set field="fromLocal" from="darpan.peak.PeakPeriodSupport.toLocalDate(periodRow.fromDate)"/>
+                <set field="thruLocal" from="darpan.peak.PeakPeriodSupport.toLocalDate(periodRow.thruDate)"/>
                 <set field="normalTimes" from="darpan.peak.PeakPeriodFacadeSupport.normalTimes(targetInfo.scheduled, fromLocal, zone)"/>
                 <set field="runTimeRows" from="darpan.peak.PeakPeriodFacadeSupport.rows(ec, 'darpan.peak.PeakPeriodRunTime', tenantId).condition('peakPeriodId', peakPeriodIdValue).orderBy(['onDate', 'runTime']).list() ?: []"/>
                 <set field="runTimes" from="runTimeRows.collect { rt -> [runTimeId: rt.runTimeId, automationId: rt.automationId, auditId: rt.auditId, targetLabel: labelById[rt.automationId ?: rt.auditId] ?: (rt.automationId ?: rt.auditId), onDate: rt.onDate?.toString(), runTime: rt.runTime, normalTime: normalTimes[rt.automationId ?: rt.auditId]] }"/>

@@ -29,7 +29,7 @@ class PeakPeriodLoader {
         if (!tenant) return []
         LocalDate earliestThru = fromDate?.minusDays(1)
         List periods = (rows(ec, "darpan.peak.PeakPeriod", tenant).list() ?: []).findAll { period ->
-            LocalDate thru = toLocalDate(period.get("thruDate"))
+            LocalDate thru = PeakPeriodSupport.toLocalDate(period.get("thruDate"))
             normalize(period.get("isActive")) != "N" && thru != null && (earliestThru == null || !thru.isBefore(earliestThru))
         }
         if (!periods) return []
@@ -64,8 +64,8 @@ class PeakPeriodLoader {
             List<RunTimeMove> moves = (runTimesByPeriod[peakPeriodId] ?: []).collect { runTime ->
                 moveOf(ec, tenant, runTime, auditAutomations)
             }.findAll { it != null }
-            windows << new PeakWindow(peakPeriodId, normalize(period.get("periodName")), toLocalDate(period.get("fromDate")),
-                    toLocalDate(period.get("thruDate")), peakStart, peakEnd, moves)
+            windows << new PeakWindow(peakPeriodId, normalize(period.get("periodName")), PeakPeriodSupport.toLocalDate(period.get("fromDate")),
+                    PeakPeriodSupport.toLocalDate(period.get("thruDate")), peakStart, peakEnd, moves)
         }
         return windows.findAll { it.fromDate != null }.sort { PeakWindow w -> w.fromDate }
     }
@@ -80,8 +80,8 @@ class PeakPeriodLoader {
         Integer share = null
         boolean serial = false
         (rows(ec, "darpan.peak.PeakPeriod", tenant).list() ?: []).each { period ->
-            LocalDate from = toLocalDate(period.get("fromDate"))
-            LocalDate thru = toLocalDate(period.get("thruDate"))
+            LocalDate from = PeakPeriodSupport.toLocalDate(period.get("fromDate"))
+            LocalDate thru = PeakPeriodSupport.toLocalDate(period.get("thruDate"))
             if (normalize(period.get("isActive")) == "N" || from == null || thru == null) return
             if (tenantDate.isBefore(from) || tenantDate.isAfter(thru)) return
             Integer pct = period.get("hotwaxReadSharePct") as Integer
@@ -169,20 +169,11 @@ class PeakPeriodLoader {
             })
         }
         if (!automationIds) return null
-        return new RunTimeMove(automationIds.asImmutable(), toLocalDate(runTime.get("onDate")), at)
+        return new RunTimeMove(automationIds.asImmutable(), PeakPeriodSupport.toLocalDate(runTime.get("onDate")), at)
     }
 
     private static def rows(def ec, String entityName, String tenant) {
         // Every scan tick reads every tenant: the DEBUG twin, so the INFO log does not get a line per tenant per tick.
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entityName, WHY).condition("companyUserGroupId", tenant).useCache(false)
-    }
-
-    private static LocalDate toLocalDate(Object value) {
-        if (value == null) return null
-        if (value instanceof LocalDate) return (LocalDate) value
-        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate()
-        if (value instanceof Date) return new java.sql.Date(((Date) value).time).toLocalDate()
-        String text = normalize(value)
-        return text ? LocalDate.parse(text.take(10)) : null
     }
 }

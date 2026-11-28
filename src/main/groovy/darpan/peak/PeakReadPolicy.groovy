@@ -92,7 +92,8 @@ class PeakReadPolicy {
             }
         }
         try {
-            LocalDate today = LocalDate.now(TenantAccessSupport.tenantTimeZoneFor(context, tenantId))
+            // today from the policy's own clock, so the seam that dates the cache dates the period lookup too
+            LocalDate today = java.time.Instant.ofEpochMilli(clock.call()).atZone(TenantAccessSupport.tenantTimeZoneFor(context, tenantId)).toLocalDate()
             return PeakPeriodLoader.readLimits(context, tenantId, today)
         } finally {
             if (created) ((ExecutionContextFactoryImpl) ecfi).destroyActiveExecutionContext()

@@ -16,9 +16,10 @@ import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
 /**
- * DAR-OPS-029 F3 (security). Every failed sign-in (a wrong password in MoquiShiroRealm, and through
- * AuthPrimitives.countFailedLogin a wrong second factor, passkey or recovery code) is counted by the framework's
- * increment#UserAccountFailedLogins, each in a transaction of its own. It read the account without a row lock and wrote
+ * DAR-OPS-029 F3 (security). Every failed sign-in (a wrong password in MoquiShiroRealm or a signed-in password check,
+ * and through AuthPrimitives.countFailedLogin a wrong authenticator or recovery code) is counted by the framework's
+ * increment#UserAccountFailedLogins, each in a transaction of its own. A refused passkey is not a failed login: a
+ * signature cannot be guessed (PasskeySignInSmokeTests asserts it is not counted). It read the account without a row lock and wrote
  * the count plus one, so guesses landing together read the same count and all but one increment was lost: the lockout let
  * through several times max-failures. Counted under a row lock, N concurrent failures end at exactly N.
  */

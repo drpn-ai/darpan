@@ -424,8 +424,9 @@
     <service verb="record" noun="CheckRun" authenticate="false" allow-remote="false">
         <description>DAR-BE-090 / DAR-BE-091. Records how one check ran on one morning, over which window, with one source
             read per extract, and the check's
-            status derived from them. Every read complete: ran. Any read partial or failed: partial, with each bad read
-            named in the reason. notRunReason given, or no reads at all: notRun. The returned checkStatusEnumId is
+            status derived from them. Every read complete: ran. Any read partial or failed while another read something:
+            partial, with each bad read named in the reason. notRunReason given, no reads at all, or every read failed
+            (OC103): notRun. The returned checkStatusEnumId is
             what close#ResolvedFindings must be given, so a partial read can never close a finding. A second call the
             same morning replaces the first run's status and reads.</description>
         <in-parameters>
@@ -492,6 +493,11 @@
                 <else-if condition="!sourceReads">
                     <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
                     <set field="reason" value="The check recorded no source read."/>
+                </else-if>
+                <!-- OC103: every read failed is a check that did not run; nothing was read, so nothing is filed or closed. -->
+                <else-if condition="sourceReads.every { it.statusEnumId == 'AUDSR_FAILED' }">
+                    <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
+                    <set field="reason" from="badReads.join(' ')"/>
                 </else-if>
                 <else-if condition="badReads">
                     <set field="checkStatusEnumId" value="AUDCS_PARTIAL"/>

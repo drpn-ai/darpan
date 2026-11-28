@@ -247,7 +247,16 @@ class AuditLedgerInvariantsSmokeTests {
         assertEquals("AUDCS_PARTIAL", partial.checkStatusEnumId, "one partial read makes the check partial")
         assertTrue((partial.reason as String).contains("was partial: page 4 timed out"), partial.reason as String)
 
-        assertEquals("AUDCS_PARTIAL", checkRun("2026-10-03", [read("OMS_RETURNS_GQL", "AUDSR_FAILED")]).checkStatusEnumId)
+        // OC103: every read failed is a check that did not run: nothing was read, so nothing is filed or closed from it.
+        Map allFailed = checkRun("2026-10-03", [read("OMS_RETURNS_GQL", "AUDSR_FAILED") + [reason: "timed out"],
+                read("NETSUITE_SUITEQL", "AUDSR_FAILED") + [reason: "401"]])
+        assertEquals("AUDCS_NOT_RUN", allFailed.checkStatusEnumId)
+        assertTrue((allFailed.reason as String).contains("failed: timed out") && (allFailed.reason as String).contains("failed: 401"),
+                "names each failed read: ${allFailed.reason}")
+        assertEquals("AUDCS_PARTIAL", checkRun("2026-10-06", [read("OMS_RETURNS_GQL", "AUDSR_FAILED"),
+                read("NETSUITE_SUITEQL", "AUDSR_COMPLETE")]).checkStatusEnumId, "one read did read: partial")
+        assertEquals("AUDCS_PARTIAL", checkRun("2026-10-08", [read("OMS_RETURNS_GQL", "AUDSR_FAILED"),
+                read("NETSUITE_SUITEQL", "AUDSR_PARTIAL")]).checkStatusEnumId, "a partial read read real records: partial")
         assertEquals("AUDCS_NOT_RUN", checkRun("2026-10-04", []).checkStatusEnumId, "no read at all is not a clean run")
         assertEquals("AUDCS_NOT_RUN", checkRun("2026-10-05", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")],
                 [notRunReason: "No saved run is configured"]).checkStatusEnumId, "a not-run reason wins over complete reads")

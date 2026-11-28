@@ -222,7 +222,7 @@ class PasswordResetSupport {
 
     /** Exact username, then case-insensitive username (both exactly as login resolves them), then email.
      *  An email shared by more than one row (only possible under a case-sensitive collation) matches none. */
-    static def findAccountForReset(def ec, String usernameOrEmail) {
+    private static def findAccountForReset(def ec, String usernameOrEmail) {
         if (!usernameOrEmail) return null
         def account = AuthFacadeSupport.findUserAccountForPasswordChange(ec, usernameOrEmail)
         if (account != null) return account

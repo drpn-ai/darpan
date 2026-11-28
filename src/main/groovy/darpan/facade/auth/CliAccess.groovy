@@ -56,7 +56,7 @@ class CliAccess {
     }
 
     /** The user's permission groups in the tenant, in force now. */
-    static List<String> tenantGroups(def ec, String userId, String tenantId) {
+    private static List<String> tenantGroups(def ec, String userId, String tenantId) {
         if (!userId || !tenantId) return []
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, WHY)
                 .condition("userId", userId).condition("tenantUserGroupId", tenantId).useCache(false).list()
@@ -152,7 +152,7 @@ class CliAccess {
     // Each service checks super admin first; these add errors to ec.message and answer null when they refuse.
 
     /** A grant as the admin app and CLI show it, with its state now and the sign-in lifetime it gives. */
-    static Map grantView(def ec, def g) {
+    private static Map grantView(def ec, def g) {
         def account = ec.entity.find("moqui.security.UserAccount").condition("userId", g.userId).useCache(true).one()
         return [grantId: g.grantId, userId: g.userId, username: account?.username, tenantUserGroupId: g.companyUserGroupId,
                 fromDate: g.fromDate, thruDate: g.thruDate, statusId: g.statusId, pausedDate: g.pausedDate,

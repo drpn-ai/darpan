@@ -1894,12 +1894,11 @@ class AutomationExecutionSupport {
             // read must degrade to an unverified run with a visible warning, never a failed one — the
             // compare has already finished (see verifyMissingDiffsIfEnabled's own note on the
             // EntityException that fell out of every scheduled run when verification defaulted on).
-            RunVerificationSupport.applyVerificationOutcome(reconcileResult,
-                    [performed: false, rewritten: false,
-                     warnings : ["Return presence check could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
+            Map unprepared = [performed: false, rewritten: false, warnings: []] as Map
+            settleCheckErrors(ec, automation, runResultId, RETURNS_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
+            RunVerificationSupport.applyVerificationOutcome(reconcileResult, unprepared,
                     RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count"),
                     RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count"))
-            if (ec?.message?.hasError()) ec.message.clearErrors()
             return false
         }
         if (prepared == null) return false
@@ -1910,22 +1909,21 @@ class AutomationExecutionSupport {
                 RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
         boolean checkFailed = false
         Map verification
+        List<String> checkErrors = []
         try {
             verification = (Map) ((Closure) prepared.run).call()
         } catch (Throwable t) {
             checkFailed = true
-            verification = [performed: false, rewritten: false, removedCount: 0,
-                            warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+            verification = [performed: false, rewritten: false, removedCount: 0, warnings: []] as Map
+            checkErrors << (normalize(t.message) ?: t.class.simpleName)
         }
-        if (ec.message.hasError()) {
-            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
-            ec.message.clearErrors()
-        }
+        settleCheckErrors(ec, automation, runResultId, RETURNS_CHECK, verification, checkErrors)
         RunVerificationSupport.applyVerificationOutcome(reconcileResult, verification, missingInFile1, missingInFile2)
         RunObservability.endStep(ec, returnsStep,
                 checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
                 [recordCount : (verification.removedCount ?: 0),
-                 errorMessage: checkFailed && verification.warnings ? verification.warnings.first().toString() : null,
+                 // the run's own timeline keeps the raw first error: the app page, never a chat room
+                 errorMessage: checkFailed && checkErrors ? checkErrors.first() : null,
                  metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
                          verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
         return true
@@ -1974,11 +1972,9 @@ class AutomationExecutionSupport {
                     runConfigDefaults  : runConfigDefaults,
             ])
         } catch (Throwable t) {
-            RunVerificationSupport.applyExchangeOutcome(reconcileResult,
-                    [appendedCount: 0,
-                     warnings     : ["Exchange presence check could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
-                    null)
-            if (ec?.message?.hasError()) ec.message.clearErrors()
+            Map unprepared = [appendedCount: 0, warnings: []] as Map
+            settleCheckErrors(ec, automation, runResultId, EXCHANGE_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
+            RunVerificationSupport.applyExchangeOutcome(reconcileResult, unprepared, null)
             return false
         }
         if (prepared == null) return false
@@ -1986,26 +1982,48 @@ class AutomationExecutionSupport {
         def exchangeStep = runResultId ?
                 RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
         Map verification
+        List<String> checkErrors = []
         try {
             verification = (Map) ((Closure) prepared.run).call()
         } catch (Throwable t) {
-            verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0,
-                            warnings: ["Exchange presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()],
-                            auditNote: null] as Map
+            verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0, warnings: [], auditNote: null] as Map
+            checkErrors << (normalize(t.message) ?: t.class.simpleName)
         }
-        if (ec.message.hasError()) {
-            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
-            verification.lookupFailed = true
-            ec.message.clearErrors()
-        }
+        if (settleCheckErrors(ec, automation, runResultId, EXCHANGE_CHECK, verification, checkErrors)) verification.lookupFailed = true
         RunVerificationSupport.applyExchangeOutcome(reconcileResult, verification, (String) prepared.omsFileSide)
         RunObservability.endStep(ec, exchangeStep,
                 verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
                 [recordCount : verification.sweepExchangeCount ?: 0,
-                 errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+                 // the run's own timeline keeps the raw first error: the app page, never a chat room
+                 errorMessage: verification.lookupFailed ? (checkErrors ? checkErrors.first() :
+                         (verification.warnings ? verification.warnings.first().toString() : null)) : null,
                  metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
                          verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
         return true
+    }
+
+    /** OC18: the check names a verify pass's neutral warning and alerts-room text use, as runSavedRunDiff names them. */
+    static final String EXCHANGE_CHECK = "Exchange presence check", RETURNS_CHECK = "Return presence check"
+
+    /**
+     * DAR-OPS-029 OC18 (DAR-BE-362, errors-warnings-to-alerts-room-only), mirroring runSavedRunDiff (f8953c79). A verify pass's raw
+     * errors (checkErrors, the exception text, plus any ec.message errors, which this consumes) go to Darpan's alerts room through
+     * ReconciliationSavedRunSupport.alertCheckFailure; the run's processingWarnings, which a client's completion message renders,
+     * get only checkIncompleteWarning's neutral line. Returns checkErrors (empty: nothing failed, nothing changed).
+     */
+    protected static List<String> settleCheckErrors(def ec, def automation, String runResultId, String checkLabel, Map verification,
+                                                    List<String> checkErrors) {
+        if (ec?.message?.hasError()) {
+            checkErrors.addAll(((ec.message.getErrors() ?: []) as List).collect { it?.toString() })
+            ec.message.clearErrors()
+        }
+        if (!checkErrors) return checkErrors
+        verification.warnings = ((verification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(checkLabel)]
+        ReconciliationSavedRunSupport.alertCheckFailure(ec, [companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                                                             runName                  : normalize(readField(automation, "automationName")) ?:
+                                                                     normalize(readField(automation, "automationId")),
+                                                             reconciliationRunResultId: runResultId], checkLabel, checkErrors)
+        return checkErrors
     }
 
     /**

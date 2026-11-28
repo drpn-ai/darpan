@@ -4149,6 +4149,44 @@ class AutomationExecutionSupportTests {
         }
     }
 
+    // DAR-OPS-029 OC18 (DAR-BE-362): a verify check's raw error reaches Darpan's alerts room; the run's warnings, which a client's
+    // completion message renders, carry only a neutral line.
+    @Test
+    void aVerifyCheckErrorGoesToTheAlertsRoomAndTheRunGetsOnlyANeutralLine() {
+        FakeEc ec = fakeEc()
+        List<Map> alerts = []
+        darpan.ops.ErrorChatSupport.postHook = { String url, Map payload -> alerts << payload; return [ok: true] }
+        darpan.config.DarpanSettings.rowLoader = { ->
+            [(darpan.ops.ErrorChatSupport.WEBHOOK_SETTING): [settingValue: "https://chat.googleapis.com/v1/spaces/ALERTS/messages?key=k&token=t"]]
+        }
+        // a settings cache an earlier test loaded would hide the alerts room this test sets
+        darpan.config.DarpanSettings.expire()
+        ec.message.addError("NetSuite answered 401 for account 123")
+        try {
+            Map verification = [warnings: ["Exchange presence check: 2 exchanges checked"]]
+            List<String> errors = AutomationExecutionSupport.settleCheckErrors(ec, [companyUserGroupId: "TENANT_A", automationName: "Order sync"],
+                    "RR_1", AutomationExecutionSupport.EXCHANGE_CHECK, verification, ["lookup timed out"])
+
+            assertEquals(["lookup timed out", "NetSuite answered 401 for account 123"], errors)
+            assertEquals(["Exchange presence check: 2 exchanges checked",
+                          "Exchange presence check did not finish; this run's results may be incomplete."], verification.warnings,
+                    "the pass's own notes stay; the raw errors never enter the run's warnings")
+            assertFalse(ec.message.hasError(), "the message errors are consumed, so a later service call is not short-circuited")
+            assertEquals(1, alerts.size())
+            assertEquals("Exchange presence check did not finish · TENANT_A · Order sync · run RR_1: lookup timed out; NetSuite answered 401 for account 123",
+                    alerts[0].text)
+
+            Map clean = [warnings: ["Return presence check: nothing to grade"]]
+            assertTrue(AutomationExecutionSupport.settleCheckErrors(ec, [companyUserGroupId: "TENANT_A"], "RR_1",
+                    AutomationExecutionSupport.RETURNS_CHECK, clean, []).isEmpty())
+            assertEquals(["Return presence check: nothing to grade"], clean.warnings, "a check that finished changes nothing")
+            assertEquals(1, alerts.size(), "and alerts no one")
+        } finally {
+            darpan.ops.ErrorChatSupport.resetForTests()
+            darpan.config.DarpanSettings.resetForTests()
+        }
+    }
+
     // DAR-BE-390: a verify reads by design and answers the person on the finding; an empty read there tells no room. A side
     // empty while the other read stays the DAR-BE-015 run error.
     @Test

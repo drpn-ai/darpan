@@ -1,5 +1,6 @@
 package darpan.idindex
 
+import darpan.facade.common.TenantScopedFinder
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -79,8 +80,10 @@ class IdIndexDatasetHook {
      * drops a condition beside a full key).
      */
     static boolean datasetStillThere(def ec, Map dataset) {
-        return !ec.entity.find("darpan.dataset.Dataset").condition("companyUserGroupId", dataset.companyUserGroupId)
-                .condition("datasetId", dataset.datasetId).forUpdate(true).useCache(false).disableAuthz().list().isEmpty()
+        return !TenantScopedFinder.findGlobalUnscoped(ec, "darpan.dataset.Dataset",
+                        "OC92: a background index pass (no user) re-checks its dataset still exists, under the drop's row lock")
+                .condition("companyUserGroupId", dataset.companyUserGroupId).condition("datasetId", dataset.datasetId)
+                .forUpdate(true).useCache(false).list().isEmpty()
     }
 
     /** The per-batch check IdIndexer.indexFile asks while it indexes this dataset (OC92). */

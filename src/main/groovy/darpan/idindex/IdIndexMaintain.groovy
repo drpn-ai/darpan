@@ -3,6 +3,7 @@ package darpan.idindex
 import darpan.config.DarpanSettings
 import darpan.dataset.DatasetRefreshSupport
 import darpan.dataset.KeptCopyStore
+import darpan.ops.ErrorChatSupport
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -55,10 +56,20 @@ class IdIndexMaintain {
         return [indexed: indexed, failed: failed]
     }
 
-    /** Deletes rows not seen for darpan.idindex.months, 10,000 at a time; returns how many. */
+    /**
+     * Deletes rows not seen for darpan.idindex.months (the catalog's default 13, 1 to 36), 10,000 at a time; returns how many.
+     * OC100: read with intValue. The setting is required, so optionalIntValue always threw and a catch kept 13 whatever was
+     * set. A settings failure now stops the sweep before anything is deleted: Darpan's alerts room hears why (never a client
+     * room) and the job fails.
+     */
     static int sweep(def ec) {
-        int months = 13
-        try { Integer v = DarpanSettings.optionalIntValue(MONTHS_SETTING); if (v != null) months = v } catch (Exception ignored) { }
+        int months
+        try {
+            months = DarpanSettings.intValue(MONTHS_SETTING)
+        } catch (Throwable t) {
+            ErrorChatSupport.postAlertText(ec, "ID index sweep stopped before deleting anything: the setting ${MONTHS_SETTING} could not be read (${t.message ?: t.class.simpleName}).".toString())
+            throw t
+        }
         Timestamp cutoff = Timestamp.from(ec.user.nowTimestamp.toInstant().atZone(ZoneOffset.UTC).minusMonths(months).toInstant())
         int deleted = 0
         while (true) {

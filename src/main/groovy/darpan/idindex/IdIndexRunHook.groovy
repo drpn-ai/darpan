@@ -1,5 +1,6 @@
 package darpan.idindex
 
+import darpan.facade.common.TenantScopedFinder
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -36,27 +37,29 @@ class IdIndexRunHook {
         if (source == null) return [skipped: true]
         File original = fileLocation.startsWith("/") ? new File(fileLocation) : ec.resource.getLocationReference(fileLocation)?.getFile()
         if (original == null || !original.isFile()) return [error: "no file at ${fileLocation}".toString()]
+        long readAt = original.lastModified()
         File lines = IdIndexer.toJsonLines(original)
         try {
             return IdIndexer.indexFile(ec, tenantId, source, connectionId, lines, kindHint(ec, source, connectionId),
-                    { -> connectionStillThere(ec, systemEnumId, connectionId) })
+                    { -> readAfterAnyDrop(ec, tenantId, connectionId, readAt) })
         } finally {
             if (lines != original) lines.delete()
         }
     }
 
+    static final String DROP = "darpan.idindex.RecordIdIndexDrop"
+
     /**
-     * OC92: whether the run's connection is still there: its connector's configEntityName row, by key (both run paths pass that
-     * config's id), read for update so a deletion and an index batch cannot interleave. True when the connector names no config
-     * entity: nothing to check.
+     * OC104: whether this extract may still be indexed for the tenant connection: its drop marker (drop#ConnectionKeptData writes
+     * and locks it first, before deleting anything), read for update, is absent or older than the read. A read made before a
+     * drop writes nothing after it; a later read (the same store installed again) indexes. Per tenant, so another tenant's runs
+     * on a shared connection are untouched. readAtMillis is the extract file's modified time: it is written as it is read.
      */
-    static boolean connectionStillThere(def ec, String systemEnumId, String connectionId) {
-        def connector = ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", systemEnumId)
-                .useCache(false).disableAuthz().one()
-        String entityName = connector?.configEntityName as String
-        if (!entityName || !ec.entity.isEntityDefined(entityName)) return true
-        String pk = ec.entity.getEntityDefinition(entityName).getPkFieldNames()[0]
-        return !ec.entity.find(entityName).condition(pk, connectionId).forUpdate(true).useCache(false).disableAuthz().list().isEmpty()
+    static boolean readAfterAnyDrop(def ec, String tenantId, String connectionId, long readAtMillis) {
+        def marker = TenantScopedFinder.findGlobalUnscoped(ec, DROP,
+                        "OC104: a background index pass (no user) checks its tenant connection's drop marker, under the drop's lock")
+                .condition("companyUserGroupId", tenantId).condition("connectionId", connectionId).forUpdate(true).useCache(false).one()
+        return marker == null || ((java.sql.Timestamp) marker.droppedAt).time < readAtMillis
     }
 
     /** The read's record kind named outside its records (IdIndexSource.kindHintEntity/kindHintField keyed by the connection), or null. */

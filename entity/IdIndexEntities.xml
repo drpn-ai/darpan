@@ -80,4 +80,13 @@
         <field name="lastStatus" type="text-short"><description>OK, FAILED or SKIPPED_BUSY.</description></field>
         <field name="lastError" type="text-long"/>
     </entity>
+    <entity entity-name="RecordIdIndexDrop" package="darpan.idindex" use="transactional" cache="never">
+        <description>OC104: when one tenant connection's kept data was dropped (drop#ConnectionKeptData writes and locks this row FIRST,
+            before it deletes anything). A run's extract indexed in the background reads it for update per batch and writes nothing it
+            read before droppedAt, so an erase stays erased; a later read (the same store installed again) indexes. Never deleted.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="connectionId" type="id" is-pk="true"/>
+        <field name="droppedAt" type="date-time" not-null="true"/>
+        <relationship type="one" related="moqui.security.UserGroup"><key-map field-name="companyUserGroupId" related="userGroupId"/></relationship>
+    </entity>
 </entities>

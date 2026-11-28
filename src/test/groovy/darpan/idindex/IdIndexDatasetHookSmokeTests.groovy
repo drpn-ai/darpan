@@ -162,6 +162,28 @@ class IdIndexDatasetHookSmokeTests {
         assertEquals(["NEW"], rows("c")*.idNorm)
     }
 
+    /** OC100: the sweep keeps rows for darpan.idindex.months as configured. It read the required setting with optionalIntValue,
+     *  which always throws for it; the catch kept 13 months whatever was set. */
+    @Test
+    void "OC100: the nightly sweep keeps index rows for the configured number of months"() {
+        [FORTY_DAYS: 40, TEN_DAYS: 10].each { String v, int days ->
+            ec.entity.makeValue("darpan.idindex.RecordIdIndex").setAll([rowKey: "k${v}".toString(), companyUserGroupId: A, idNorm: v, systemCode: "SHOPIFY",
+                    systemEnumId: "KC_ISO", connectionId: "c-months", recordKind: "ORDER", recordKey: v, fieldPath: "id", role: "OWN",
+                    lastSeenAt: Timestamp.from(NOW.minus(days, ChronoUnit.DAYS))]).create()
+        }
+        ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: IdIndexMaintain.MONTHS_SETTING, settingValue: "1"]).createOrUpdate()
+        darpan.config.DarpanSettings.resetForTests()
+        Map out
+        try {
+            out = asJob { ec.service.sync().name("idindex.IdIndexServices.maintain#IdIndex").call() }
+        } finally {
+            ec.entity.find("darpan.config.DarpanSetting").condition("settingKey", IdIndexMaintain.MONTHS_SETTING).disableAuthz().deleteAll()
+            darpan.config.DarpanSettings.resetForTests()
+        }
+        assertEquals([], out.errors)
+        assertEquals(["TEN_DAYS"], rows("c-months")*.idNorm, "one month configured: a row last seen 40 days ago goes, one seen 10 days ago stays")
+    }
+
     /**
      * OC92 (from S42c): a catch-up pass already holding a dataset when its connection's kept data is dropped
      * (drop#ConnectionKeptData, Shopify's shop/redact) must not write that dataset's rows or cursor back. The index commits per
@@ -198,33 +220,71 @@ class IdIndexDatasetHookSmokeTests {
         assertNull(cursor(id), "no cursor is written back for a dataset that is gone")
     }
 
-    /** OC92, the run path: a run's extract indexed in the background stops writing once its connection is gone. */
+    /**
+     * OC104 (security review of OC92): the run path. A run's extract indexed in the background was checked against its
+     * connection's config row, which drop#ConnectionKeptData never locks, so an extract read before the drop wrote the
+     * connection's rows back after it. The drop now marks the tenant connection dropped first (RecordIdIndexDrop, locked) and
+     * each batch checks that mark against the extract's own read time.
+     */
     @Test
-    void "OC92: a run's extract stops being indexed once its connection is deleted mid-pass"() {
-        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" configEntityName="darpan.reconciliation.NsSuiteQlSourceQuery"/>
-            <darpan.reconciliation.NsSuiteQlSourceQuery nsSuiteQlSourceQueryId="Q_GONE" nsAuthConfigId="NS1" companyUserGroupId="${A}"/>
-        </entity-facade-xml>""").dummyFks(true).load()
-        File extract = File.createTempFile("idx-run-gone", ".json")
-        extract.text = JsonOutput.toJson([metadata: [:], records: (1..300).collect { [id: "${it}".toString(), name: "IF${it}".toString()] }])
+    void "OC104: a run's extract read before its connection's kept data is dropped writes nothing after the drop"() {
+        File extract = extractOf("Q_DROP", 300, System.currentTimeMillis() - 60_000L)   // 600 rows, read a minute ago
         int batches = 0
-        Throwable deleteFailure = null
+        Throwable dropFailure = null
         IdIndexer.beforeBatchHook = { String tenant, String connection ->
-            if (connection != "Q_GONE" || ++batches != 2) return
-            deleteFailure = onOwnThread {
-                it.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", "Q_GONE").disableAuthz().deleteAll()
-            }
+            if (connection != "Q_DROP" || ++batches != 2) return
+            dropFailure = drop(A, "Q_DROP")
         }
         try {
-            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_GONE", extract.absolutePath)
+            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_DROP", extract.absolutePath)
         } finally {
             IdIndexer.resetForTests()
             extract.delete()
-            ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-                <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" configEntityName=""/></entity-facade-xml>""").load()
         }
-        assertNull(deleteFailure, "the delete itself: ${deleteFailure}")
-        assertEquals(500, rows("Q_GONE").size(), "the first batch went in before the connection was deleted; nothing after it")
+        assertNull(dropFailure, "the drop itself: ${dropFailure}")
+        assertEquals([], rows("Q_DROP"), "the drop took the first batch; nothing read before it is written after it")
+    }
+
+    @Test
+    void "OC104: a run read after a connection's drop indexes again, so a store installed again on the same connection is searchable"() {
+        assertNull(drop(A, "Q_AGAIN"))
+        Thread.sleep(20)
+        File extract = extractOf("Q_AGAIN", 300, System.currentTimeMillis())
+        try {
+            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_AGAIN", extract.absolutePath)
+        } finally {
+            extract.delete()
+        }
+        assertEquals(600, rows("Q_AGAIN").size())
+    }
+
+    @Test
+    void "OC104: one tenant's drop leaves another tenant's runs on a shared connection indexed"() {
+        assertNull(drop(A, "Q_SHARED"))
+        File extract = extractOf("Q_SHARED", 300, System.currentTimeMillis() - 60_000L)   // read before A's drop
+        try {
+            IdIndexRunHook.indexExtract(ec, "PEER_TENANT", "KC_ISO", "Q_SHARED", extract.absolutePath)
+        } finally {
+            extract.delete()
+        }
+        assertEquals(600, ec.entity.find("darpan.idindex.RecordIdIndex").condition("companyUserGroupId", "PEER_TENANT")
+                .condition("connectionId", "Q_SHARED").disableAuthz().useCache(false).count() as int)
+    }
+
+    /** drop#ConnectionKeptData for one tenant connection, committed on a thread of its own; its failure, or null. */
+    private Throwable drop(String tenant, String connection) {
+        return onOwnThread {
+            it.service.sync().name("${SERVICES}.drop#ConnectionKeptData".toString())
+                    .parameters([companyUserGroupId: tenant, sourceConfigIds: [connection]]).disableAuthz().call()
+        }
+    }
+
+    /** An extract of n records (id and name each: two rows a record), its file modified at readAtMillis (when it was read). */
+    private static File extractOf(String prefix, int n, long readAtMillis) {
+        File extract = File.createTempFile("idx-run-${prefix}", ".json")
+        extract.text = JsonOutput.toJson([metadata: [:], records: (1..n).collect { [id: "${it}".toString(), name: "${prefix}${it}".toString()] }])
+        extract.setLastModified(readAtMillis)
+        return extract
     }
 
     /** Runs work on a thread of its own (its own ExecutionContext and transaction), committed before this returns. */

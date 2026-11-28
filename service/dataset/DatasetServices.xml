@@ -505,6 +505,21 @@
             <if condition="busy">
                 <return error="true" message="Dataset ${busy.datasetId} is refreshing; its kept data can be dropped once the refresh ends."/></if>
 
+            <!-- OC104 (S14): mark each connection dropped, locked, before anything is deleted: a run's extract indexed in the
+                 background (IdIndexRunHook) reads this marker under the same lock and writes nothing it read before droppedAt. -->
+            <iterate list="sourceConfigIds" entry="dropConnectionId">
+                <entity-find-one entity-name="darpan.idindex.RecordIdIndexDrop" value-field="dropMarker" for-update="true">
+                    <field-map field-name="companyUserGroupId"/>
+                    <field-map field-name="connectionId" from="dropConnectionId"/>
+                </entity-find-one>
+                <if condition="dropMarker == null">
+                    <entity-make-value entity-name="darpan.idindex.RecordIdIndexDrop" value-field="dropMarker"
+                            map="[companyUserGroupId: companyUserGroupId, connectionId: dropConnectionId, droppedAt: ec.user.nowTimestamp]"/>
+                    <entity-create value-field="dropMarker"/>
+                    <else><set field="dropMarker.droppedAt" from="ec.user.nowTimestamp"/><entity-update value-field="dropMarker"/></else>
+                </if>
+            </iterate>
+
             <entity-find-count entity-name="darpan.idindex.RecordIdIndex" count-field="indexRowsDropped">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>

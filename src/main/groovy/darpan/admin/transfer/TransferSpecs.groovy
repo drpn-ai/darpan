@@ -133,8 +133,12 @@ class TransferSpecs {
             [kind: SHOPIFY_AUTH, entityName: "darpan.shopify.ShopifyAuthConfig", pkField: "shopifyAuthConfigId", naturalKey: null,
              grantType: SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH,
              dropFields: ["shopifyAppId", "refreshToken", "accessTokenExpiresDate", "refreshTokenExpiresDate", "grantedScopes", "installedDate"]],
+            // DAR-OPS-029 S99-303: ordersPath and returnsPageSize left the model (no reader since the REST read retired); a bundle
+            // made before still carries them, and the import drops them (retiredFields, DAR-BE-206) instead of refusing them as
+            // UNKNOWN_FIELD. A column S35's ORPHAN_SCHEMA_DROPS removes joins its kind's retiredFields when it leaves the model.
             [kind: HOTWAX_OMS_REST, entityName: "darpan.hotwax.HotWaxOmsRestSourceConfig", pkField: "omsRestSourceConfigId",
-             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, extraSecretFields: ["headersJson"]],
+             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, extraSecretFields: ["headersJson"],
+             retiredFields: ["ordersPath", "returnsPageSize"]],
             [kind: NETSUITE_SUITEQL, entityName: "darpan.reconciliation.NsSuiteQlSourceQuery", pkField: "nsSuiteQlSourceQueryId",
              naturalKey: "description", refFields: [nsAuthConfigId: NETSUITE_AUTH, omsStatusConfigId: HOTWAX_OMS_REST], children: [
                     [entityName: "darpan.reconciliation.NsSuiteQlSourceQueryField", parentFields: ["nsSuiteQlSourceQueryId"],

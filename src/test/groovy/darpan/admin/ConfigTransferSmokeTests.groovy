@@ -504,6 +504,28 @@ class ConfigTransferSmokeTests {
                 "dropped before the diff too, so a re-preview converges")
     }
 
+    /** DAR-OPS-029 S99-303: ordersPath/returnsPageSize left HotWaxOmsRestSourceConfig; an older bundle still carrying them imports. */
+    @Test
+    void aRetiredOmsRestColumnIsDroppedOnImportNotRefused() {
+        String ref = "HOTWAX_OMS_REST:XFER_RET_OMS"
+        create("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "XFER_RET_OMS", description: "retired-column oms",
+                companyUserGroupId: SRC, baseUrl: "https://oms.example/retired"])
+        try {
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, connectionRefs: [ref]])
+            assertNoErrors(out)
+            Map bundle = copy((Map) out.result.bundle)
+            Map oms = (bundle.connections as List<Map>).find { it.ref == ref }
+            assertFalse((oms.fields as Map).containsKey("ordersPath"), "the export no longer writes it")
+            oms.fields.ordersPath = "/rest/s1/oms/orders"
+            oms.fields.returnsPageSize = 500
+            Map plan = importInto(DST, bundle, [(ref): "CREATE"]).result.plan as Map
+            assertEquals([], plan.blocking, "a retired column is dropped, never refused as UNKNOWN_FIELD")
+            assertNoErrors(applyPlan(DST, bundle, [(ref): "CREATE"]))
+        } finally {
+            ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig").condition("description", "retired-column oms").disableAuthz().deleteAll()
+        }
+    }
+
     @Test
     void systemMessageRemoteBlocks() {
         Map bundle = copy(exportSource())

@@ -990,7 +990,6 @@ class AutomationFacadeSmokeTests {
                 companyUserGroupId    : tenantId,
                 createdByUserId       : TEST_USER_ID,
                 baseUrl               : "https://oms.example.invalid",
-                ordersPath            : "/rest/s1/oms/orders",
                 authType              : "NONE",
                 connectTimeoutSeconds : 30L,
                 readTimeoutSeconds    : 60L,

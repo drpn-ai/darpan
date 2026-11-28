@@ -51,7 +51,7 @@ class RunRetrySmokeTests {
                 enumId: "AUT_SRC_API", enumTypeId: "AutomationSourceType", enumCode: "API", description: "API source", sequenceNum: 1])
         ReconciliationSmokeTestSupport.upsertEntity(ec, "darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "RETRY_OMS"], [
                 omsRestSourceConfigId: "RETRY_OMS", description: "Unreachable OMS", companyUserGroupId: KREWE,
-                baseUrl: "https://oms.example.invalid", ordersPath: "/rest/s1/oms/orders", authType: "NONE",
+                baseUrl: "https://oms.example.invalid", authType: "NONE",
                 connectTimeoutSeconds: 1L, readTimeoutSeconds: 1L, isActive: "Y", canReadOrders: "Y"])
 
         Map created = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters([

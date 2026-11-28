@@ -109,4 +109,13 @@
                 may hold 2000 characters (errors.email.ignorePatterns ships 1,363) and the column was VARCHAR(255). Schema only.
                 The dry run shows the statement. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
 
+    <darpan.migration.DarpanMigration migrationId="RULE_LOGIC_SHAPE_CHECK" componentName="darpan"
+            serviceName="migration.MigrationServices.migrate#RuleLogicShapeCheck"
+            sequenceNum="230" supportsDryRun="Y" enabled="N"
+            description="Report only (DAR-OPS-029 S02, the OC6 release check): every enabled rule whose stored ruleLogic the compile gate
+                refuses in production (not the field-comparison generator's exact output, or a validator violation), by tenant and
+                rule set, with rule ids. A refused rule fails its run after the release that carries 913ecf6f: dry-run this on prod
+                and SM before that deploy (darpan-admin migrations dry-run RULE_LOGIC_SHAPE_CHECK). Changes nothing, dry run or
+                not. Ships disabled (a seed load keeps it so)."/>
+
 </entity-facade-xml>

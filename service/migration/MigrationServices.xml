@@ -270,4 +270,38 @@
         </actions>
     </service>
 
+    <!-- DAR-OPS-029 S02 (OC6 release check): registered migration RULE_LOGIC_SHAPE_CHECK (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="RuleLogicShapeCheck" authenticate="false" allow-remote="false">
+        <description>Report only, changes nothing (dry run or not). Lists every enabled Rule whose stored ruleLogic the compile
+            gate refuses in production (OC6, 913ecf6f): not FieldComparisonRuleLogicGenerator's exact output, or a
+            RuleLogicValidator violation; ruleText-only rules carry no ruleLogic and pass. By tenant and rule set, with rule
+            ids. A refused rule fails its run after the release that carries 913ecf6f, so dry-run this on prod and SM before
+            that deploy. Reads every tenant's rules (a system report). Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="ruleList" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.rule.Rule',
+                    'OC6 release check: enabled rule logic across all tenants').condition('enabled', 'Y').useCache(false).list() ?: []"/>
+            <set field="refusedRules" from="ruleList.findAll { rule -> String logic = rule.ruleLogic?.toString()?.trim();
+                    logic &amp;&amp; (reconciliation.rule.RuleLogicValidator.firstViolation(logic) != null
+                    || !reconciliation.rule.FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic(logic)) }"/>
+            <set field="scopeLines" from="refusedRules.groupBy { [it.companyUserGroupId ?: '(no tenant)', it.ruleSetId] }
+                    .collect { scope, rules -> 'tenant ' + scope[0] + ', rule set ' + scope[1] + ': ' + rules*.ruleId.sort().join(', ') }.sort()"/>
+            <set field="flagNote" from="'true'.equalsIgnoreCase(System.getProperty(reconciliation.rule.RuleEngineSupport.ALLOW_RAW_DRL_PROP, 'false'))
+                    ? ' (allowRawDrl is on in this environment, so here they still compile)' : ''"/>
+            <set field="messages" from="['Enabled rules the compile gate refuses in production: ' + refusedRules.size() + ' of ' + ruleList.size()
+                    + flagNote + '. Report only: nothing changes.'] + scopeLines"/>
+            <set field="rowsUpdated" from="0" type="Integer"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
 </services>

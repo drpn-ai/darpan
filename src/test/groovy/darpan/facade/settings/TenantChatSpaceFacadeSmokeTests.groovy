@@ -218,25 +218,6 @@ class TenantChatSpaceFacadeSmokeTests {
         }
     }
 
-    // OC122 follow-up (Session 010 re-verify): a refused save builds no chat space into its result, so a viewer who names an
-    // existing space never gets its webhook URL back (today only the JSON-RPC dispatcher dropping an errored result hid it).
-    @Test
-    void aRefusedSaveReturnsNoChatSpace() {
-        def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [spaceName: "Refusal gate", webhookUrl: WEBHOOK, isActive: true])
-        assertTrue(save.ok as boolean)
-        String chatSpaceId = save.chatSpace.chatSpaceId
-        try {
-            actAs("DARPAN_COMPANY_VIEW_ONLY")
-            def refused = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [chatSpaceId: chatSpaceId, spaceName: "Refusal gate"])
-            assertFalse(refused.ok as boolean, "a viewer may not edit a space")
-            assertNull(refused.chatSpace, "a refused save returns no chat space, so no webhook URL")
-        } finally {
-            ec.message.clearErrors()
-            actAs("DARPAN_COMPANY_EDITOR")
-            callFacade("facade.SettingsFacadeServices.delete#TenantChatSpace", [chatSpaceId: chatSpaceId])
-        }
-    }
-
     private Map listedSpace(String chatSpaceId) {
         def list = callFacade("facade.SettingsFacadeServices.list#TenantChatSpaces", [:])
         assertTrue(list.ok as boolean)

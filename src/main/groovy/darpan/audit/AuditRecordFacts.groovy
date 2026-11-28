@@ -1,6 +1,5 @@
 package darpan.audit
 
-import darpan.common.BoundedDecimal
 import darpan.reconciliation.core.ReconciliationServices
 
 import java.math.RoundingMode
@@ -99,8 +98,8 @@ class AuditRecordFacts {
         if (!data) return [:]
         Closure<String> text = { String field -> data.get(field) instanceof Map || data.get(field) instanceof List ? null : (data.get(field)?.toString()?.trim() ?: null) }
         Closure<Map> amount = { String value ->
-            // OC219: bounded, so an amount like 1E999999999 is not scaled into a billion digits; it shows no amount.
-            BigDecimal number = value ? BoundedDecimal.of(value) : null
+            BigDecimal number = null
+            try { number = value ? new BigDecimal(value) : null } catch (NumberFormatException ignored) { }
             number != null ? money(number, text("currencyUomId") ?: text("currencyCode")) : null
         }
         String fulfilled = text("displayFulfillmentStatus")
@@ -251,9 +250,8 @@ class AuditRecordFacts {
         return "${u.stripTrailingZeros().toPlainString()} of ${q.stripTrailingZeros().toPlainString()} unfulfilled".toString()
     }
 
-    /** OC219: bounded (BoundedDecimal); a quantity too large to write is no quantity. */
     private static BigDecimal decimalOrNull(Object value) {
-        return BoundedDecimal.of(value)
+        try { return value == null ? null : new BigDecimal(value.toString()) } catch (NumberFormatException ignored) { return null }
     }
 
     /** ORDER_COMPLETED, RETURN_REQUESTED, ITEM_COMPLETED -> "Completed", "Requested"; null stays null. */
@@ -274,8 +272,6 @@ class AuditRecordFacts {
     }
 
     static String amountText(BigDecimal amount, String currency) {
-        // OC219: setScale on an unbounded exponent would build its digits; such an amount keeps its own text.
-        if (BoundedDecimal.of(amount) == null) return amount?.toString()
         int scale = 2
         try { if (currency) scale = Currency.getInstance(currency).defaultFractionDigits } catch (IllegalArgumentException ignored) { }
         return amount.setScale(Math.max(scale, 0), RoundingMode.HALF_UP).toPlainString()

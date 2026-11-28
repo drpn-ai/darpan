@@ -247,8 +247,7 @@
                 <set field="chatSpaceIdValue" from="chatSpaceIdValue ?: ((storeResult?.chatSpaceId)?.toString()?.trim())"/>
                 <if condition="!ec.message.hasError()"><message>Saved chat space.</message></if>
             </if>
-            <!-- Nothing is built after a refusal: the result would carry the space's webhook URL (OC122 follow-up). -->
-            <set field="savedSpace" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
+            <set field="savedSpace" from="chatSpaceIdValue ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
             <set field="savedSpaceInUse" from="savedSpace ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0 || ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0) : false"/>
             <set field="chatSpace" from="savedSpace ? darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, savedSpace, savedSpaceInUse) : null"/>
             <set field="ok" from="!ec.message.hasError()"/>

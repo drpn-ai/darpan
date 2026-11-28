@@ -1,6 +1,5 @@
 package darpan.reconciliation.conclusion
 
-import darpan.common.BoundedDecimal
 import darpan.reconciliation.core.CompareIdExpressionSupport
 import darpan.reconciliation.core.ReconciliationServices
 
@@ -55,9 +54,19 @@ class ConclusionKeySupport {
      * Integer and a Long exactly as they are.
      */
     private static String keyText(Object raw) {
-        // Bounded (BoundedDecimal, OC219): past 2^53 Spark writes scientific notation anyway, a huge exponent is never expanded,
-        // and one whose zeros cannot be stripped (100E2147483647) keeps its own text instead of aborting the pass.
-        return raw instanceof BigDecimal || raw instanceof Double || raw instanceof Float ? BoundedDecimal.plainText(raw) : raw.toString()
+        if (!(raw instanceof BigDecimal || raw instanceof Double || raw instanceof Float)) return raw.toString()
+        BigDecimal value
+        try {
+            value = new BigDecimal(raw.toString()).stripTrailingZeros()
+        } catch (NumberFormatException ignored) {
+            return raw.toString() // NaN or Infinity: no decimal to write
+        }
+        // Bounded: past 2^53 (16 digits) Spark writes scientific notation anyway, and plain text of an exponent such as
+        // 1E999999999 would expand to a billion digits. Such a key keeps its own text. In long arithmetic: precision minus a
+        // scale near Integer.MIN_VALUE overflows an int and would pass the check.
+        long integerDigits = (long) value.precision() - (long) value.scale()
+        if (integerDigits > 16L || value.scale() > 16 || value.scale() < -16) return raw.toString()
+        return value.toPlainString()
     }
 
     private static String normalize(String value, String idNormalizer) {

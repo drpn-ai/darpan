@@ -82,14 +82,14 @@ class IdIndexSearch {
     /** The live reads for one tenant: every condition carries companyUserGroupId (the tenant filter is skipped with authz off). */
     static Map liveDeps(def ec, String tenantId) {
         return [byIdNorm: { String v ->
-                    ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("idNorm", v).orderBy(ROW_ORDER)
+                    ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("idNorm", v).orderBy(DB_ORDER)
                             .limit(MAX_ROWS_PER_VALUE + 1).useCache(false).disableAuthz().list().collect { it.getMap() }
                 },
                 byRecord: { List<Map> refs ->
                     List<Map> out = []
                     refs.groupBy { [it.connectionId, it.recordKind] }.each { List k, List<Map> ofKind ->
                         out.addAll(ec.entity.find(IdIndexer.ENTITY).condition("companyUserGroupId", tenantId).condition("connectionId", k[0])
-                                .condition("recordKind", k[1]).condition("recordKey", EntityCondition.IN, ofKind*.recordKey).orderBy(ROW_ORDER)
+                                .condition("recordKind", k[1]).condition("recordKey", EntityCondition.IN, ofKind*.recordKey).orderBy(DB_ORDER)
                                 .useCache(false).disableAuthz().list().collect { it.getMap() })
                     }
                     return out
@@ -113,6 +113,8 @@ class IdIndexSearch {
 
     /** OC101: the one order every row list is walked in, so one index state gives one answer (records, their ids, a capped set). */
     static final List<String> ROW_ORDER = ["systemCode", "connectionId", "recordKind", "recordKey", "fieldPath", "idNorm"].asImmutable()
+    /** The reads' order: ROW_ORDER, then the row's unique key, so the hub-limited read is the same rows under any collation. */
+    static final List<String> DB_ORDER = (ROW_ORDER + ["rowKey"]).asImmutable()
 
     private static List<Map> inOrder(List<Map> rows) {
         return (rows ?: []).sort(false) { Map a, Map b ->

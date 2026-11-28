@@ -21,6 +21,11 @@ class IdIndexMaintain {
     private static final Logger logger = LoggerFactory.getLogger(IdIndexMaintain)
     static final String MONTHS_SETTING = "darpan.idindex.months"
 
+    /** Test seam: called with each chunk's row keys after the sweep selected them, before it deletes them. */
+    static Closure beforeSweepDeleteHook = null
+
+    static void resetForTests() { beforeSweepDeleteHook = null }
+
     static Map catchUp(def ec) {
         Map<String, Map> sources = IdIndexCatalog.sources(ec).collectEntries { [(it.systemEnumId): it] }
         int indexed = 0, failed = 0
@@ -76,8 +81,11 @@ class IdIndexMaintain {
             List<String> keys = ec.entity.find(IdIndexer.ENTITY).condition("lastSeenAt", EntityCondition.LESS_THAN, cutoff)
                     .selectField("rowKey").limit(10_000).useCache(false).disableAuthz().list()*.rowKey as List<String>
             if (!keys) break
+            if (beforeSweepDeleteHook != null) beforeSweepDeleteHook.call(keys)
             ec.transaction.runRequireNew(null, "ID index sweep failed") {
-                ec.entity.find(IdIndexer.ENTITY).condition("rowKey", EntityCondition.IN, keys).disableAuthz().deleteAll()
+                // OC187: the age again, in the delete itself: a row an index pass saw again after the select above stays
+                ec.entity.find(IdIndexer.ENTITY).condition("rowKey", EntityCondition.IN, keys)
+                        .condition("lastSeenAt", EntityCondition.LESS_THAN, cutoff).disableAuthz().deleteAll()
             }
             deleted += keys.size()
             if (keys.size() < 10_000) break

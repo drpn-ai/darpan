@@ -184,6 +184,31 @@ class IdIndexDatasetHookSmokeTests {
         assertEquals(["TEN_DAYS"], rows("c-months")*.idNorm, "one month configured: a row last seen 40 days ago goes, one seen 10 days ago stays")
     }
 
+    /** QA E-e: a row an index pass sees again between the sweep's select and its delete is kept: the delete re-applies the age. */
+    @Test
+    void "the sweep keeps a row seen again between its select and its delete"() {
+        ec.entity.makeValue("darpan.idindex.RecordIdIndex").setAll([rowKey: "kSEEN_AGAIN", companyUserGroupId: A, idNorm: "SEEN_AGAIN",
+                systemCode: "SHOPIFY", systemEnumId: "KC_ISO", connectionId: "c-sweep-race", recordKind: "ORDER", recordKey: "SEEN_AGAIN",
+                fieldPath: "id", role: "OWN", lastSeenAt: Timestamp.from(NOW.minus(400, ChronoUnit.DAYS))]).create()
+        Throwable touchFailure = null
+        IdIndexMaintain.beforeSweepDeleteHook = { List<String> keys ->
+            if (!("kSEEN_AGAIN" in keys)) return
+            touchFailure = onOwnThread {
+                it.entity.find("darpan.idindex.RecordIdIndex").condition("rowKey", "kSEEN_AGAIN").disableAuthz()
+                        .updateAll([lastSeenAt: new Timestamp(System.currentTimeMillis())])
+            }
+        }
+        Map out
+        try {
+            out = asJob { ec.service.sync().name("idindex.IdIndexServices.maintain#IdIndex").call() }
+        } finally {
+            IdIndexMaintain.resetForTests()
+        }
+        assertNull(touchFailure, "the touch itself: ${touchFailure}")
+        assertEquals([], out.errors)
+        assertEquals(["SEEN_AGAIN"], rows("c-sweep-race")*.idNorm, "seen again after the sweep chose it: it stays")
+    }
+
     /**
      * OC92 (from S42c): a catch-up pass already holding a dataset when its connection's kept data is dropped
      * (drop#ConnectionKeptData, Shopify's shop/redact) must not write that dataset's rows or cursor back. The index commits per

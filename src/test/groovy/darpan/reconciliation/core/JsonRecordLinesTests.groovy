@@ -7,8 +7,6 @@ import groovy.json.JsonParserType
 import darpan.common.ValueSupport
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
-import org.apache.spark.sql.types.DataTypes
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
 import org.junit.jupiter.api.AfterAll
@@ -137,17 +135,6 @@ class JsonRecordLinesTests {
         assertEquals(1, ReconciliationServices.boundedPartitions(spark.range(0).toDF("n"), 2000).rdd().getNumPartitions())
     }
 
-    @Test
-    void aSavedDocumentSchemaGivesItsRecordSchema() {
-        def schema = new org.apache.spark.sql.types.StructType()
-                .add("metadata", new org.apache.spark.sql.types.StructType().add("sourceType", "string"))
-                .add("records", org.apache.spark.sql.types.DataTypes.createArrayType(
-                        new org.apache.spark.sql.types.StructType().add("orderName", "string").add("grandTotal", "double")))
-        assertEquals(["orderName", "grandTotal"], JsonRecordLines.recordSchema(schema, paths('$.records[*].orderName')).fieldNames() as List)
-        assertNull(JsonRecordLines.recordSchema(null, paths('$.records[*].orderName')))
-        assertNull(JsonRecordLines.recordSchema(schema, paths('$.orderName')))
-    }
-
     private static List<String> sorted(Dataset<String> json) {
         return json.collectAsList().sort()
     }
@@ -257,19 +244,6 @@ class JsonRecordLinesTests {
         assertEquals([0, 1, 2], got.collect { ((Number) it.get(KeepRules.ROW_COLUMN)).intValue() })
         assertEquals("1", got[2].get("_darpanKeep_0"))
         assertEquals("1", got[2].get("_darpanKeep_1"))
-    }
-
-    @Test
-    void theSavedReadSchemaGainsTheInjectedColumns() {
-        StructType document = new StructType().add("records", DataTypes.createArrayType(new StructType().add("id", DataTypes.StringType)))
-        List<Map> infos = paths('$.records[*].id')
-        StructType plain = JsonRecordLines.recordSchema(document, infos, null)
-        assertEquals(["id"], plain.fieldNames() as List)
-        StructType with = JsonRecordLines.recordSchema(document, infos, inj("v", "GROOVY"))
-        assertEquals(["id", "_darpanKeep_0", "_darpanRow"], with.fieldNames() as List)
-        assertEquals(DataTypes.StringType, with.apply("_darpanKeep_0").dataType())
-        assertEquals(DataTypes.LongType, with.apply("_darpanRow").dataType())
-        assertNull(JsonRecordLines.recordSchema(null, infos, inj("v", "GROOVY")))
     }
 
     @Test

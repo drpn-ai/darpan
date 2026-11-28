@@ -279,16 +279,12 @@ class ReconciliationServices {
                 } catch (Exception e) { validationErrors.add("${label}: Validation check failed: ${e.message}") }
              }
 
-            // Audit #25: when an operator opts in (darpan.reconciliation.spark.useSavedReadSchema),
-            // supply the saved schema as the read schema to skip Spark's per-run inference scan. If the
-            // saved schema does not resolve the id/rule paths, degrade transparently to inference so the
-            // optimization can never fail a run. Default (no property) keeps the inference behaviour.
+            // Spark infers the schema. The saved read schema (audit #25) was behind a flag set nowhere, and it typed every
+            // JSON number a double, so money would have read through a double; it went in DAR-OPS-029 S01a/S01b.
             List<Map> pathInfos = idSpecs.collect { Map spec -> CompareIdExpressionSupport.convertJsonPathToSpark(normalize((String) spec.idExpr)) }
             if (keep) pathInfos = KeepStepSupport.keysOnRecords(pathInfos)
             List<String> idNormalizers = idSpecs.collect { (String) it.idNormalizer }
             List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
-            StructType readSchema = (schemaFile && SparkReadSchemaSupport.savedReadSchemaEnabled()) ?
-                    SparkReadSchemaSupport.buildReadSchema(ec, schemaFile) : null
             // DAR-BE-318: under Keep each record also carries its Keep field text and its row (KeepStepSupport.injections).
             List<Map> injections = keep ? KeepStepSupport.injections((List<Map>) sideKeep.rules) : null
             File extract = keep ? new File(path) : null
@@ -305,17 +301,12 @@ class ReconciliationServices {
                 asideIdDf = spark.createDataFrame(new ArrayList<Row>(), EMPTY_COMPARE_ID_SCHEMA)
             }
             List<Map> readPathInfos = recordLines != null ? JsonRecordLines.recordRootPathInfos(pathInfos) : pathInfos
-            Closure<Dataset> readJson = { StructType schema ->
+            try {
                 def reader = spark.read()
                 if (recordLines == null) reader = reader.option("multiLine", "true")
-                StructType effective = recordLines != null ? JsonRecordLines.recordSchema(schema, pathInfos, injections) : schema
-                if (effective != null) reader = reader.schema(effective)
-                return reader.json(recordLines?.absolutePath ?: path)
-            }
-            Closure buildFrames = { Dataset read ->
-                df = read
+                df = reader.json(recordLines?.absolutePath ?: path)
                 if (keep && recordLines != null) {
-                    Map applied = KeepStepSupport.apply(read, sideKeep, extract)
+                    Map applied = KeepStepSupport.apply(df, sideKeep, extract)
                     persisted.addAll((List<Dataset>) applied.persisted)
                     keepSummary = (Map) applied.summary
                     df = (Dataset) applied.kept
@@ -324,17 +315,6 @@ class ReconciliationServices {
                 }
                 idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
                 dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
-            }
-            try {
-                try {
-                    buildFrames(readJson(readSchema))
-                } catch (Exception readFailure) {
-                    if (readSchema == null) throw readFailure
-                    logger.warn("Saved read schema for '${label}' did not cover the data (${readFailure.message}); re-reading with inference.")
-                    persisted.each { Dataset frame -> frame.unpersist() }
-                    persisted.clear()
-                    buildFrames(readJson(null))
-                }
             } catch (Throwable failure) {
                 // The caller never sees a failed ingest's persisted frames, so they are released here (none without Keep).
                 persisted.each { Dataset frame -> frame.unpersist() }

@@ -11,10 +11,6 @@ import darpan.common.FactText
 import darpan.reconciliation.source.KeepRules
 import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.transform.CompileStatic
-import org.apache.spark.sql.types.ArrayType
-import org.apache.spark.sql.types.DataTypes
-import org.apache.spark.sql.types.StructField
-import org.apache.spark.sql.types.StructType
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Files
@@ -83,29 +79,6 @@ class JsonRecordLines {
     /** The key paths as the lines file sees them: from the record root, with nothing to explode. */
     static List<Map> recordRootPathInfos(List<Map> pathInfos) {
         return pathInfos.collect { Map info -> [needsExplode: false, path: info.fieldPath] as Map }
-    }
-
-    /** The record schema inside a saved document schema (the element of its records array), or null to infer one. */
-    static StructType recordSchema(StructType documentSchema, List<Map> pathInfos) {
-        return recordSchema(documentSchema, pathInfos, (List<Map>) null)
-    }
-
-    /** As above, with a string column per injection and the long row column appended when there are injections. */
-    static StructType recordSchema(StructType documentSchema, List<Map> pathInfos, List<Map> injections) {
-        StructType base = baseRecordSchema(documentSchema, pathInfos)
-        if (base == null || !injections) return base
-        StructType out = base
-        for (Map injection : injections) out = out.add(injection.get("column") as String, DataTypes.StringType, true)
-        return out.add(KeepRules.ROW_COLUMN, DataTypes.LongType, true)
-    }
-
-    private static StructType baseRecordSchema(StructType documentSchema, List<Map> pathInfos) {
-        String arrayField = topLevelArray(pathInfos)
-        if (documentSchema == null || arrayField == null) return null
-        StructField field = documentSchema.fields().find { StructField f -> f.name() == arrayField }
-        if (!(field?.dataType() instanceof ArrayType)) return null
-        def element = ((ArrayType) field.dataType()).elementType()
-        return element instanceof StructType ? (StructType) element : null
     }
 
     /** Copies each object under `arrayField` to `target`, one per line; answers how many, or -1 when there is no such array. */

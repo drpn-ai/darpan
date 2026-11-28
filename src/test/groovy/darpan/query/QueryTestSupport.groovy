@@ -2,14 +2,11 @@ package darpan.query
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
-import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
 import java.sql.Timestamp
 
-import static org.junit.jupiter.api.Assertions.assertEquals
-import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -49,23 +46,5 @@ class QueryTestSupport {
 
     static void insert(ExecutionContext ec, String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
-    }
-
-    /** Production posture: no harness grant on the stack, authz ON. */
-    static <T> T withProductionAuthz(ExecutionContext ec, Closure<T> body) {
-        def harnessFrame = ec.artifactExecution.peek()
-        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
-        ec.artifactExecution.pop(harnessFrame)
-        boolean wasDisabled = ec.artifactExecution.authzDisabled
-        ec.artifactExecution.enableAuthz()
-        try {
-            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
-            return body.call()
-        } finally {
-            if (wasDisabled) ec.artifactExecution.disableAuthz()
-            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
-            ec.artifactExecution.setAnonymousAuthorizedAll()
-            ec.message.clearErrors()
-        }
     }
 }

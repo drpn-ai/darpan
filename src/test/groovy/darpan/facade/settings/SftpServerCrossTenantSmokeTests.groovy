@@ -8,7 +8,6 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
@@ -18,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.withProductionAuthz
 
 /**
  * DAR-BE-079 — save#SftpServer must not overwrite another tenant's SFTP server, with authz ON.
@@ -90,7 +90,7 @@ class SftpServerCrossTenantSmokeTests {
     @Test
     void filterIsActiveUnderProductionAuthz() {
         // Control: proves the filter applies here, so the refusal below is not a hollow pass.
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec, true) {
             callService("facade.SettingsFacadeServices.list#SftpServers", [pageIndex: 0, pageSize: 20, query: ""])
         }
         assertTrue(out.ok as Boolean, "list#SftpServers failed under production authz: ${out.errors}")
@@ -101,7 +101,7 @@ class SftpServerCrossTenantSmokeTests {
 
     @Test
     void editorCannotOverwriteAnotherTenantsServer() {
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [sftpServerId: "VICTIM_SFTP", host: "attacker.sftp.test", port: 22,
                                 username: "attacker", password: "attacker-secret"])
         }
@@ -118,7 +118,7 @@ class SftpServerCrossTenantSmokeTests {
     @Test
     void editorCanStillUpdateOwnServerAndKeepStoredSecret() {
         ownServer("KEEP_SFTP")
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [sftpServerId: "KEEP_SFTP", host: "KREWE.sftp.test", port: 22, username: "krewe-user2"])
         }
         assertTrue(out.ok as Boolean, "own update failed: ${out.errors}")
@@ -132,14 +132,14 @@ class SftpServerCrossTenantSmokeTests {
     @Test
     void movingTheServerNeedsTheSecretAgain() {
         ownServer("MOVE_SFTP")
-        Map<String, Object> refused = withProductionAuthz {
+        Map<String, Object> refused = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [sftpServerId: "MOVE_SFTP", host: "attacker.sftp.test", port: 2222, username: "krewe-user"])
         }
         assertFalse(refused.ok as Boolean, "a moved server kept its secret: ${refused}")
         assertTrue((refused.errors as List).any { it.toString().startsWith("Enter the password or key again") }, "${refused.errors}")
         assertEquals(["krewe.sftp.test", "krewe-secret"], findRow("MOVE_SFTP").with { [it.host, it.password] }, "the row is unchanged")
 
-        Map<String, Object> moved = withProductionAuthz {
+        Map<String, Object> moved = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [sftpServerId: "MOVE_SFTP", host: "krewe2.sftp.test", port: 2222, username: "krewe-user", password: "new-secret"])
         }
         assertTrue(moved.ok as Boolean, "${moved.errors}")
@@ -152,7 +152,7 @@ class SftpServerCrossTenantSmokeTests {
         ownServer("MIX_SFTP")
         // A new secret was sent, so the move is allowed (DAR-BE-080 refuses only a move with nothing sent),
         // and the stored password of the other kind is dropped, not carried to the new host.
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [sftpServerId: "MIX_SFTP", host: "attacker.sftp.test", port: 22, username: "krewe-user", privateKey: "KEY-DECOY"])
         }
         assertTrue(out.ok as Boolean, "a moved server with a new key must save: ${out.errors}")
@@ -169,21 +169,21 @@ class SftpServerCrossTenantSmokeTests {
         try { findRow("KEY_SFTP").setAll([hostKeyFingerprint: "SHA256:saved", hostKeyPinnedDate: FROM_DATE]).update() }
         finally { if (!was) ec.artifactExecution.enableAuthz() }
 
-        Map<String, Object> list = withProductionAuthz { callService("facade.SettingsFacadeServices.list#SftpServers", [pageIndex: 0, pageSize: 50, query: ""]) }
+        Map<String, Object> list = withProductionAuthz(ec, true) { callService("facade.SettingsFacadeServices.list#SftpServers", [pageIndex: 0, pageSize: 50, query: ""]) }
         assertEquals("SHA256:saved", ((list.servers ?: []) as List<Map>).find { it.sftpServerId == "KEY_SFTP" }?.hostKeyFingerprint)
 
-        Map<String, Object> same = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2"]) }
+        Map<String, Object> same = withProductionAuthz(ec, true) { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2"]) }
         assertTrue(same.ok as Boolean, "same-server save failed: ${same.errors}")
         assertEquals("SHA256:saved", findRow("KEY_SFTP").hostKeyFingerprint, "same server keeps its key")
 
-        Map<String, Object> reset = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2", resetHostKey: true]) }
+        Map<String, Object> reset = withProductionAuthz(ec, true) { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2", resetHostKey: true]) }
         assertTrue(reset.ok as Boolean, "reset save failed: ${reset.errors}")
         assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "reset clears it")
 
         was = ec.artifactExecution.disableAuthz()
         try { findRow("KEY_SFTP").setAll([hostKeyFingerprint: "SHA256:saved"]).update() }
         finally { if (!was) ec.artifactExecution.enableAuthz() }
-        Map<String, Object> moved = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe3.sftp.test", port: 22, username: "krewe-user2", password: "new"]) }
+        Map<String, Object> moved = withProductionAuthz(ec, true) { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe3.sftp.test", port: 22, username: "krewe-user2", password: "new"]) }
         assertTrue(moved.ok as Boolean, "moved save failed: ${moved.errors}")
         assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "a moved server is a new server")
     }
@@ -195,7 +195,7 @@ class SftpServerCrossTenantSmokeTests {
 
     @Test
     void editorCreatesANewServerUnderAMintedIdOwnedByTheActiveTenant() {
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec, true) {
             callService(SAVE_SERVICE, [host: "new.sftp.test", port: 22, username: "new-user", password: "new-secret"])
         }
         assertTrue(out.ok as Boolean, "create failed: ${out.errors}")
@@ -211,8 +211,8 @@ class SftpServerCrossTenantSmokeTests {
         // DAR-BE-135: before, a free id created a row while a foreign id was refused with its own
         // message, so the answer told a tenant which ids another tenant holds.
         Map<String, Object> params = [host: "probe.sftp.test", port: 22, username: "probe", password: "probe-secret"]
-        Map<String, Object> foreign = withProductionAuthz { callService(SAVE_SERVICE, params + [sftpServerId: "VICTIM_SFTP"]) }
-        Map<String, Object> missing = withProductionAuthz { callService(SAVE_SERVICE, params + [sftpServerId: "NO_SUCH_SFTP"]) }
+        Map<String, Object> foreign = withProductionAuthz(ec, true) { callService(SAVE_SERVICE, params + [sftpServerId: "VICTIM_SFTP"]) }
+        Map<String, Object> missing = withProductionAuthz(ec, true) { callService(SAVE_SERVICE, params + [sftpServerId: "NO_SUCH_SFTP"]) }
         assertFalse(foreign.ok as Boolean)
         assertFalse(missing.ok as Boolean)
         assertEquals(["SFTP server 'VICTIM_SFTP' was not found."], foreign.errors)
@@ -231,24 +231,5 @@ class SftpServerCrossTenantSmokeTests {
 
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
-    }
-
-    /** Production posture: no harness grant on the stack, authz ON. Copied from MigrationAdminServiceSmokeTests. */
-    private <T> T withProductionAuthz(Closure<T> body) {
-        def harnessFrame = ec.artifactExecution.peek()
-        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
-        ec.artifactExecution.pop(harnessFrame)
-        boolean wasDisabled = ec.artifactExecution.authzDisabled
-        ec.artifactExecution.enableAuthz()
-        try {
-            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
-            assertTrue(ec.artifactExecution.stack.isEmpty(), "test precondition: no inherited grant on the stack")
-            return body.call()
-        } finally {
-            if (wasDisabled) ec.artifactExecution.disableAuthz()
-            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
-            ec.artifactExecution.setAnonymousAuthorizedAll()
-            ec.message.clearErrors()
-        }
     }
 }

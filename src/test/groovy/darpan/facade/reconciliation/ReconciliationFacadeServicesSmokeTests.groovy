@@ -9,7 +9,6 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
@@ -18,6 +17,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.withProductionAuthz
 
 /**
  * DAR-OPS-029 S22: facade.ReconciliationFacadeServices behaviour that no other class pins.
@@ -122,7 +122,7 @@ class ReconciliationFacadeServicesSmokeTests {
         String keepId = rules[0].ruleId as String
         rules[1].set("companyUserGroupId", null).update()   // a row from before rules carried a stamp
 
-        Map<String, Object> saved = withProductionAuthz {
+        Map<String, Object> saved = withProductionAuthz(ec) {
             ec.service.sync().name(F + "save#RuleSetRun")
                     .parameters(ruleSetParams(runName) + [savedRunId: savedRunId, rules: [rule("S22_KEEP", 10) + [ruleId: keepId]]])
                     .call()
@@ -187,23 +187,6 @@ class ReconciliationFacadeServicesSmokeTests {
     private static Map<String, Object> ruleSetParams(String runName) {
         return [runName: runName, file1SystemEnumId: "OMS", file1FileTypeEnumId: "DftCsv", file1PrimaryIdExpression: "order_id",
                 file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv", file2PrimaryIdExpression: "order_id"] as Map<String, Object>
-    }
-
-    /** Production posture: no harness grant on the stack, authz ON (as TenantOwnedEntityFilterRuntimeTests). */
-    private <T> T withProductionAuthz(Closure<T> body) {
-        def harnessFrame = ec.artifactExecution.peek()
-        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
-        ec.artifactExecution.pop(harnessFrame)
-        boolean wasDisabled = ec.artifactExecution.authzDisabled
-        ec.artifactExecution.enableAuthz()
-        try {
-            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
-            return body.call()
-        } finally {
-            if (wasDisabled) ec.artifactExecution.disableAuthz()
-            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
-            ec.artifactExecution.setAnonymousAuthorizedAll()
-        }
     }
 
     private void actAs(String username, String tenant) {

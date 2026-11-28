@@ -8,17 +8,16 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ArtifactAuthorizationException
-import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
-import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.withProductionAuthz
 
 /**
  * The remote surface. Everything an agent can reach over /rpc/json for a client instance lives
@@ -234,31 +233,6 @@ class MigrationAdminServiceSmokeTests {
                 (history.attempts as List<Map<String, Object>>)[0].messageDetail)
     }
 
-    /**
-     * Runs {@code body} the way production runs: authz ON and without the harness's own grant.
-     * initMoqui disables authz for the whole test JVM AND pushes a "smokeTests" artifact authorized
-     * as anonymous-ALL, and Moqui lets anything below an anonymous-authorized artifact inherit it — so
-     * with that frame on the stack every entity read passes whatever the caller is. Pop it, enable
-     * authz, then put both back exactly as initMoqui left them.
-     */
-    private void withProductionAuthz(Closure body) {
-        def harnessFrame = ec.artifactExecution.peek()
-        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
-        ec.artifactExecution.pop(harnessFrame)
-        boolean wasDisabled = ec.artifactExecution.authzDisabled
-        ec.artifactExecution.enableAuthz()
-        try {
-            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
-            assertTrue(ec.artifactExecution.stack.isEmpty(), "test precondition: no inherited grant on the stack")
-            body.call()
-        } finally {
-            if (wasDisabled) ec.artifactExecution.disableAuthz()
-            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
-            ec.artifactExecution.setAnonymousAuthorizedAll()
-            ec.message.clearErrors()
-        }
-    }
-
     @Test
     void historyAndParkingWorkWithAuthzOnForARealSuperAdmin() {
         // Every other test here runs with authz off. The supervisor's history and park/unpark reads
@@ -271,7 +245,7 @@ class MigrationAdminServiceSmokeTests {
                              messageDetail: "connection refused reaching the OMS host"])
                 .disableAuthz().call()
 
-        withProductionAuthz {
+        withProductionAuthz(ec) {
             // Control: without the admin.* fence above it, the same user writing a ledger row is
             // refused at the entity — so a pass below is the fence's grant, not a hollow test.
             // record#MigrationRun is authenticate="false", so the refusal is the entity-create authz check,

@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.withProductionAuthz
 
 /**
  * DAR-BE-076 — the DARPAN_ACTIVE_COMPANY_SCOPE filter, proven at runtime, with authz ON.
@@ -29,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * <p>Every other smoke test runs inside the harness's anonymous-authorized-all "smokeTests" frame
  * with authz disabled, where no entity filter can ever apply — so none of them can tell a filtered
  * entity from an unfiltered one. Here the harness frame is removed and authz enabled (see
- * {@link #withProductionAuthz}), the caller is a real DARPAN_USER member, and the security seed is
+ * {@link darpan.reconciliation.support.TestHelpers#withProductionAuthz}), the caller is a real DARPAN_USER member, and the security seed is
  * loaded, so a facade read sees exactly what it sees in production.</p>
  *
  * <p>Two layers:</p>
@@ -238,7 +239,7 @@ class TenantOwnedEntityFilterRuntimeTests {
 
     @Test
     void listReconciliationsStillReturnsOwnRowsAndOnlyThem() {
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.list#Reconciliations").call()
         }
         assertTrue(out.ok as Boolean, "list#Reconciliations failed under production authz: ${out.errors}")
@@ -248,7 +249,7 @@ class TenantOwnedEntityFilterRuntimeTests {
 
     @Test
     void listReconciliationsCountsOnlyTheTenantsActiveQuestions() {
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.list#Reconciliations").call()
         }
         Map own = (out.reconciliations as List).find { it.reconciliationId == "TOEF_REC_K" } as Map
@@ -269,7 +270,7 @@ class TenantOwnedEntityFilterRuntimeTests {
     @Test
     void listReconciliationsGivesACallerWithNoActiveTenantNothing() {
         actAs(NO_TENANT_USERNAME, null)
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.list#Reconciliations").call()
         }
         assertEquals([], (out.reconciliations as List)*.reconciliationId.findAll { it.toString().startsWith("TOEF_") })
@@ -278,7 +279,7 @@ class TenantOwnedEntityFilterRuntimeTests {
     @Test
     void getReconciliationExecutionReturnsOnlyTheActiveTenantsResults() {
         assertEquals(["TOEF_EXEC_RR_K"], executionResultIds(true))
-        Map own = (withProductionAuthz {
+        Map own = (withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.get#ReconciliationExecution")
                     .parameters([reconciliationExecutionId: "TOEF_EXEC"]).call()
         }.results as List)[0] as Map
@@ -327,7 +328,7 @@ class TenantOwnedEntityFilterRuntimeTests {
 
     @Test
     void listDatabaseSourceConfigsStillReturnsOwnRowsAndOnlyThem() {
-        Map<String, Object> out = withProductionAuthz {
+        Map<String, Object> out = withProductionAuthz(ec) {
             ec.service.sync().name("facade.DatabaseFacadeServices.list#DatabaseSourceConfigs").call()
         }
         assertFalse(ec.message.hasError(), "${ec.message.errors}")
@@ -343,7 +344,7 @@ class TenantOwnedEntityFilterRuntimeTests {
         assertTrue(catalog.ok as Boolean, "owner cannot list its own endpoints: ${catalog.errors}")
         List<String> allEndpoints = (catalog.endpoints as List)*.systemEnumId as List<String>
         assertTrue(allEndpoints.contains("OMS_GQL"), "test precondition: OMS_GQL is in the HotWax catalog: ${allEndpoints}")
-        Map<String, Object> stored = withProductionAuthz {
+        Map<String, Object> stored = withProductionAuthz(ec) {
             ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                     .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                                  configId            : HWC_OWNED,
@@ -367,7 +368,7 @@ class TenantOwnedEntityFilterRuntimeTests {
         // RunVerificationSupport passes an empty step context on one path. Under the filter an
         // unstamped step is invisible to its own heartbeat, which would then silently do nothing.
         Object step = null
-        withProductionAuthz {
+        withProductionAuthz(ec) {
             underFacadeGrant {
                 step = RunObservability.beginStep(ec, OBS_RUN_RESULT, [:], RunObservability.STAGE_EXTRACT_FILE1)
                 RunObservability.heartbeatStageProgress(ec, OBS_RUN_RESULT, RunObservability.STAGE_EXTRACT_FILE1, 42, null)
@@ -386,7 +387,7 @@ class TenantOwnedEntityFilterRuntimeTests {
         Map<String, String> created = createRuleSetRunWithUnstampedFilter(runName)
         String compareScopeId = created.compareScopeId
 
-        Map<String, Object> saved = withProductionAuthz {
+        Map<String, Object> saved = withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
                     .parameters(ruleSetParams(created.savedRunId, runName) +
                             [file2ExcludeFilters: [[fieldExpression: "statusId", values: ["NEW"]]]])
@@ -429,7 +430,7 @@ class TenantOwnedEntityFilterRuntimeTests {
         String runName = "TOEF composite key save"
         Map<String, String> created = createRuleSetRunWithUnstampedKeyFields(runName)
 
-        Map<String, Object> saved = withProductionAuthz {
+        Map<String, Object> saved = withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
                     .parameters(compositeKeyParams(created.savedRunId, runName, ["order_id", "sku"]))
                     .call()
@@ -526,13 +527,13 @@ class TenantOwnedEntityFilterRuntimeTests {
             if (!productionAuthz) svc.disableAuthz()
             return svc.call() as Map
         }
-        Map out = productionAuthz ? withProductionAuthz(get) : get.call()
+        Map out = productionAuthz ? withProductionAuthz(ec, get) : get.call()
         assertEquals(true, out.ok, "${out.errors}")
         return (out.results as List)*.reconciliationRunResultId as List<String>
     }
 
     private Map<String, Object> deleteQuestion(String id) {
-        return withProductionAuthz {
+        return withProductionAuthz(ec) {
             ec.service.sync().name("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion")
                     .parameters([reconciliationRunId: id]).call()
         } as Map<String, Object>
@@ -544,7 +545,7 @@ class TenantOwnedEntityFilterRuntimeTests {
     }
 
     private Map<String, Object> listEndpoints(String configId) {
-        return withProductionAuthz {
+        return withProductionAuthz(ec) {
             ec.service.sync().name("facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints")
                     .parameters([configTypeEnumId: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, configId: configId])
                     .call()
@@ -583,24 +584,6 @@ class TenantOwnedEntityFilterRuntimeTests {
         return params
     }
 
-    /** Production posture: no harness grant on the stack, authz ON. Copied from MigrationAdminServiceSmokeTests. */
-    private <T> T withProductionAuthz(Closure<T> body) {
-        def harnessFrame = ec.artifactExecution.peek()
-        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
-        ec.artifactExecution.pop(harnessFrame)
-        boolean wasDisabled = ec.artifactExecution.authzDisabled
-        ec.artifactExecution.enableAuthz()
-        try {
-            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
-            assertTrue(ec.artifactExecution.stack.isEmpty(), "test precondition: no inherited grant on the stack")
-            return body.call()
-        } finally {
-            if (wasDisabled) ec.artifactExecution.disableAuthz()
-            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
-            ec.artifactExecution.setAnonymousAuthorizedAll()
-        }
-    }
-
     /**
      * Runs {@code body} inside a facade service's frame, authorized for the logged-in user exactly as
      * the service engine authorizes a facade call (requiresAuthz). Finds made here are what a facade
@@ -612,7 +595,7 @@ class TenantOwnedEntityFilterRuntimeTests {
                     ArtifactExecutionInfo.AUTHZA_VIEW, true)
             try { body.call() } finally { ec.artifactExecution.pop(aei) }
         }
-        if (ec.artifactExecution.authzDisabled) withProductionAuthz(inner) else inner.call()
+        if (ec.artifactExecution.authzDisabled) withProductionAuthz(ec, inner) else inner.call()
     }
 
     private void actAs(String username, String tenant) {

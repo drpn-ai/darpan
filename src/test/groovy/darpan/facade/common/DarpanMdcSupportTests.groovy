@@ -82,6 +82,28 @@ class DarpanMdcSupportTests {
         assertEquals("GORJANA",       ThreadContext.get(DarpanMdcSupport.MDC_TENANT))
     }
 
+    /**
+     * DAR-OPS-029 S26b. The header is the caller's text, written into every log line of the request: a newline would forge
+     * log lines, and a megabyte would ride on each one. Only a plain, short id is kept; anything else gets a fresh UUID.
+     */
+    @Test
+    void stampReplacesAnInboundIdThatCouldForgeOrFloodTheLog() {
+        ["trace-1\n2026-11-28 ERROR forged line", "trace\u001b[31m", "has space", "x" * 129, ""].each { String hostile ->
+            ThreadContext.clearMap()
+            def requestStub = [getHeader: { String name -> name == "X-Request-Id" ? hostile : null }] as Object
+            DarpanMdcSupport.stamp(stubEc(userId: "unit-user-4", web: [request: requestStub] as Object), "GORJANA")
+            String cid = ThreadContext.get(DarpanMdcSupport.MDC_CORRELATION_ID)
+            assertNotEquals(hostile, cid, "a hostile inbound id was logged as is")
+            assertTrue(cid ==~ /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, "expected a fresh UUID, got: ${cid}")
+        }
+        // A plain id at the length limit is kept, so a tracing system's ids still join up.
+        ThreadContext.clearMap()
+        String longest = "a" * 128
+        def requestStub = [getHeader: { String name -> name == "X-Request-Id" ? longest : null }] as Object
+        DarpanMdcSupport.stamp(stubEc(userId: "unit-user-4", web: [request: requestStub] as Object), "GORJANA")
+        assertEquals(longest, ThreadContext.get(DarpanMdcSupport.MDC_CORRELATION_ID))
+    }
+
     @Test
     void stampUsesXCorrelationIdFallbackWhenXRequestIdAbsent() {
         def requestStub = [getHeader: { String name ->

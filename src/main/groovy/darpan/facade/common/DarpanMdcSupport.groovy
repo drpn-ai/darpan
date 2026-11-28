@@ -24,6 +24,9 @@ class DarpanMdcSupport {
     static final String MDC_STAGE          = "darpan.stage"
     static final String MDC_SAVED_RUN_ID   = "darpan.savedRunId"
 
+    /** An inbound X-Request-Id / X-Correlation-Id worth keeping: 1-128 characters a tracing id uses, no space or control. */
+    private static final java.util.regex.Pattern INBOUND_ID = ~/[A-Za-z0-9._:=+\/-]{1,128}/
+
     /**
      * Stamp MDC keys from the resolved execution context. Safe to call multiple times per request
      * (stamp is idempotent — correlationId is only generated on the first call per thread).
@@ -86,7 +89,10 @@ class DarpanMdcSupport {
             // Try X-Request-Id first (GitHub/AWS convention), then X-Correlation-Id
             String id = web.request?.getHeader("X-Request-Id")
             if (!id || id.trim().isEmpty()) id = web.request?.getHeader("X-Correlation-Id")
-            return id?.trim() ?: null
+            String trimmed = id?.trim()
+            // The caller's text goes into every log line of the request: only a plain, short id is kept, so a newline
+            // cannot forge a log line and a huge value cannot ride on each one. Anything else gets a fresh UUID.
+            return trimmed && trimmed ==~ INBOUND_ID ? trimmed : null
         } catch (MissingPropertyException | NullPointerException ignored) {
             return null
         }

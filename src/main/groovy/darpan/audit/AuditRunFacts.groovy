@@ -32,7 +32,8 @@ class AuditRunFacts {
              open        : count(counts.open),
              newToday    : count(counts.newToday),
              fixedToday  : count(counts.fixedToday),
-             checksNotRun: ((st.checks ?: []) as List<Map>).findAll { it.status == "notRun" }*.id,
+             // OC99: a partial check (a read failed) did not fully run either: never read clean, always the alerts room's.
+             checksNotRun: ((st.checks ?: []) as List<Map>).findAll { it.status != "ran" }*.id,
              checksTotal : ((st.checks ?: []) as List).size()]
         }.sort(false) { Map a, Map b -> stepOrder(stepOf, a.id as String, b.id as String) }
 

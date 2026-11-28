@@ -418,35 +418,52 @@ class AuditAutomationSmokeTests {
                 two.collect { [it.statementCode, it.recordKey, it.ruleText, it.headline] })
     }
 
-    // F-E5 (Aditi 2026-11-28): a retry from a failed execution's extracts records them at the time they were read, and is
-    // refused when a later run of the check has already recorded; the failed execution's own run does not count as later.
+    // F-E5 (Aditi 2026-11-28): a retry from a failed execution's extracts records them at the time they were read; the failed
+    // execution's own run is replaced, never counted as later.
     @Test
-    void aReplayRecordsItsOwnReadTimeAndNeverOverwritesALaterRun() {
+    void aReplayRecordsItsOwnReadTimeAndReplacesTheFailedRun() {
         // Now: every run other tests of this class recorded is stamped before it, so none counts as later.
         Timestamp readAt = new Timestamp(System.currentTimeMillis())
         execution("TAUTO_EXF", readAt)
-        // The failed attempt recorded its own partial run.
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", [], []), omsSource, nsSource,
                 [recordCount: 1], null, null, new IllegalStateException("NetSuite timed out"), "TAUTO_EXF")
         assertEquals("AUDCS_PARTIAL", checkRun("2026-09-14").statusEnumId)
-
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", ["P1"], []), omsSource, nsSource,
                 [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"], [recordCount: 0, replayedFromExecutionId: "TAUTO_EXF"],
                 [diffLocation: diff("p1", [row("MISSING_IN_FILE_2", "P1", "missing in NetSuite")])], null, "TAUTO_EXR1")
         Map replayed = checkRun("2026-09-14")
         assertEquals(["AUDCS_RAN", "TAUTO_EXR1"], [replayed.statusEnumId, replayed.automationExecutionId], "the replay replaces the failed run")
         assertEquals([readAt, readAt], reads(replayed.checkRunId as String)*.readStamp, "read when the failed execution read, not now")
-        assertEquals("AUDFS_OPEN", finding("P1").stateEnumId)
-
-        // A later run records; a second replay of the same old read is refused and changes nothing.
-        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-15", [], []), omsSource, nsSource,
-                [recordCount: 0], [recordCount: 0], null, null, "TAUTO_EXLATER")
-        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-14", ["P1"], ["P1"]), omsSource, nsSource,
-                [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"], [recordCount: 1, replayedFromExecutionId: "TAUTO_EXF"],
-                [diffLocation: diff("p2", [])], null, "TAUTO_EXR2")
-        assertEquals("TAUTO_EXR1", checkRun("2026-09-14").automationExecutionId, "refused: the later run stands")
-        assertEquals("AUDFS_OPEN", finding("P1").stateEnumId, "an old read never closes what a later run judged")
         assertTrue(AuditAutomationSupport.laterRunRecorded(ec, TENANT, [CHECK], null, "TAUTO_EXF"), "an unknown read time is refused")
+    }
+
+    // F-E5: a replay of an old read never overwrites a LATER run of the check, recorded on another day, and never reopens a
+    // finding a later verify closed (a verify writes no run). Each case has its own failed execution, so nothing else refuses it.
+    @Test
+    void aReplayNeverOverwritesALaterRunOrALaterClose() {
+        Timestamp readAt = new Timestamp(System.currentTimeMillis())
+        execution("TAUTO_EXG", readAt)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-16", [], []), omsSource, nsSource,
+                [recordCount: 0], [recordCount: 0], null, null, "TAUTO_EXLATER")
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-17", ["P2"], []), omsSource, nsSource,
+                [recordCount: 1, replayedFromExecutionId: "TAUTO_EXG"], [recordCount: 0, replayedFromExecutionId: "TAUTO_EXG"],
+                [diffLocation: diff("p2", [row("MISSING_IN_FILE_2", "P2", "missing in NetSuite")])], null, "TAUTO_EXR2")
+        assertEquals(0L, ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", CHECK).condition("reportDate", Date.valueOf("2026-09-17")).count(),
+                "refused: a run on 2026-09-16 recorded after the replayed read")
+        assertEquals(0L, count("P2"))
+
+        // A verify closes V9 after the next replayed read; it records no run, so only the close can refuse the replay.
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-24", ["V9"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("v9a", [row("MISSING_IN_FILE_2", "V9", "missing in NetSuite")])], null)
+        Timestamp readAtH = new Timestamp(System.currentTimeMillis())
+        execution("TAUTO_EXH", readAtH)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-24", ["V9"], ["V9"]) + [auditVerifyKeys: ["V9"]],
+                omsSource, nsSource, [recordCount: 1], [recordCount: 1], [diffLocation: diff("v9b", [])], null)
+        assertEquals("AUDFS_FIXED", finding("V9").stateEnumId)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-24", ["V9"], []), omsSource, nsSource,
+                [recordCount: 1, replayedFromExecutionId: "TAUTO_EXH"], [recordCount: 0, replayedFromExecutionId: "TAUTO_EXH"],
+                [diffLocation: diff("v9c", [row("MISSING_IN_FILE_2", "V9", "missing in NetSuite")])], null, "TAUTO_EXR3")
+        assertEquals("AUDFS_FIXED", finding("V9").stateEnumId, "an older read never reopens what a later verify closed")
     }
 
     // OC33 (F-E3): closing is by finding, not by record. K1 was missing in NetSuite (R4); now it is missing in HotWax (R8).
@@ -484,6 +501,16 @@ class AuditAutomationSmokeTests {
         assertEquals(["TAUTO_RGONE"] as Set, unjudged)
         assertEquals([["RLIVE", "G1"]], found.collect { [it.statementCode, it.recordKey] }, "a raw DRL name is still a rule of the run")
         assertFalse(AuditAutomationSupport.namesNoRuleOfTheRun(null, [:]), "a blank ruleIds takes any rule")
+
+        // QA: through the close. RGONE's open finding on G2 stays open on a run that examined G2 and reported nothing for it.
+        ec.service.sync().name("audit.AuditLedgerServices.record#CheckFindings").parameters([companyUserGroupId: TENANT, checkId: "TAUTO_GONE",
+                reportDate: Date.valueOf("2026-09-09"), period: "2026-09", findings: [[statementCode: "RGONE", recordKey: "G2", headline: "G2"]]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        Map gone = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAUTO_GONE").useCache(false).one().getMap()
+        AuditAutomationSupport.recordWindow(ec, automation, [gone], window("2026-09-10", ["G2"], ["G2"]), nsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: diff("gone2", [])], null)
+        assertEquals("AUDFS_OPEN", ec.entity.find("darpan.audit.AuditFinding").condition("checkId", "TAUTO_GONE")
+                .condition("recordKey", "G2").useCache(false).one().stateEnumId, "a statement the run cannot judge closes nothing")
     }
 
     // OC47 (S21a) wired: a result file cut off mid-rows, or with no differences section, reads as fewer rows (or none). Judged
@@ -562,6 +589,12 @@ class AuditAutomationSmokeTests {
                 .condition("reportDate", Date.valueOf("2026-09-02")).useCache(false).one().getMap()
         assertEquals(["AUDCS_RAN", 1], [run.statusEnumId, run.outsideRulesCount as Integer])
         assertTrue((run.outsideRulesJson as String).contains('"M1"'), run.outsideRulesJson as String)
+
+        // QA (I3): a verify the same morning writes no run, so it leaves the morning's outside-rules group as it was.
+        AuditAutomationSupport.recordWindow(ec, automation, [r8c], window("2026-09-02", ["P1"], ["P1"]) + [auditVerifyKeys: ["P1"]],
+                omsSource, nsSource, [recordCount: 1], [recordCount: 1], [diffLocation: diff("r8verify", [])], null)
+        assertEquals(1, ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", "TAUTO_R8C")
+                .condition("reportDate", Date.valueOf("2026-09-02")).useCache(false).one().outsideRulesCount as Integer)
     }
 
     // OC98 (QA refute, HIGH): a single-sided (evaluate) check has no second read. When its rule fails after a complete read,
@@ -576,6 +609,47 @@ class AuditAutomationSmokeTests {
         Map run = checkRun("2026-08-21")
         assertEquals(["AUDCS_NOT_RUN", "The compare failed: A rule failed to build or evaluate."], [run.statusEnumId, run.reason])
         assertEquals("AUDFS_OPEN", finding("E1").stateEnumId, "listed at load, never judged: still open")
+    }
+
+    // DAR-BE-116 (QA: no test). A row only the other system holds, dated before the recent OMS read (or with no date to judge
+    // by), may simply be older than the read: it raises no finding, and an open finding on it neither closes nor refreshes.
+    @Test
+    void aRowOlderThanTheRecentReadIsNotJudged() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-10", [], ["U8"]), omsSource, nsSource,
+                [recordCount: 0], [recordCount: 1], [diffLocation: diff("u8a", [row("MISSING_IN_FILE_1", "U8", "missing in HotWax")])], null)
+        assertEquals("AUDFS_OPEN", finding("U8").stateEnumId)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-11", [], ["U8", "U9"]) +
+                [auditRecentReadStartDate: at("2026-08-10", "00:00:00")], omsSource, nsSource, [recordCount: 0], [recordCount: 2],
+                [diffLocation: diff("u8b", [row("MISSING_IN_FILE_1", "U8", "missing in HotWax"), row("MISSING_IN_FILE_1", "U9", "missing in HotWax")])], null)
+        assertEquals("AUDFS_OPEN", finding("U8").stateEnumId, "U8 was not judged: it must not close")
+        assertEquals(1L, finding("U8").timesSeen as Long, "nor is it seen again")
+        assertEquals(0L, count("U9"), "an other-side-only row older than the read raises no finding")
+    }
+
+    // DAR-BE-393 (QA: the quiet-day test passed empty keys). forgetExaminedKeys is what keeps a quiet day from closing: without
+    // it, a day that compared nothing would examine Q1 and close it.
+    @Test
+    void aQuietDayForgetsTheKeysItListedSoNothingCloses() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-14", ["Q1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("q1", [row("MISSING_IN_FILE_2", "Q1", "missing in NetSuite")])], null)
+        Map quiet = window("2026-08-15", ["Q1"], ["Q1"])
+        AuditAutomationSupport.forgetExaminedKeys(quiet)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), quiet, omsSource, nsSource,
+                [recordCount: 0, readCount: 0], [recordCount: 0, readCount: 0], null, null)
+        assertEquals("AUDCS_RAN", checkRun("2026-08-15").statusEnumId)
+        assertEquals("AUDFS_OPEN", finding("Q1").stateEnumId)
+    }
+
+    // QA (I5): two rows for one record that differ only in what they carry beside the message (here their ids) keep the same
+    // row whatever order the compare wrote them in.
+    @Test
+    void aTieOnTheMessageStillKeepsOneRowWhateverTheOrder() {
+        Map one = row("MISSING_IN_FILE_2", "T1", "missing in NetSuite") + [ids: [file2: [tranId: "SO-A"]]]
+        Map two = row("MISSING_IN_FILE_2", "T1", "missing in NetSuite") + [ids: [file2: [tranId: "SO-B"]]]
+        Map check = checks()[0]
+        List<Map> ab = AuditAutomationSupport.findingsFrom(ec, TENANT, check, new File(diff("tab", [one, two])), omsSource, nsSource, [:])
+        List<Map> ba = AuditAutomationSupport.findingsFrom(ec, TENANT, check, new File(diff("tba", [two, one])), omsSource, nsSource, [:])
+        assertEquals(ab*.records, ba*.records)
     }
 
     @Test

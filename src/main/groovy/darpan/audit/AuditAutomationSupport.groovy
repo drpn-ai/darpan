@@ -397,7 +397,9 @@ class AuditAutomationSupport {
             findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds,
                     unjudgedStatementIds, outsideRules, unjudged).findAll { !unjudged.contains(it.recordKey as String) } : []
             // D11: the outside-rules group rides with the findings; the ledger stores it on the morning's run (S13).
-            recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings, outsideRules: outsideRules])
+            // A verify writes no run, so it never replaces the morning run's group.
+            recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings] +
+                    (window.auditVerifyKeys ? [:] : [outsideRules: outsideRules]))
         } catch (IncompleteResultException e) {
             logger.error("Audit check ${check.checkId} (${window.auditPeriod}): ${e.message} Nothing judged.")
             notRecordedReason = truncate(e.message, REASON_MAX)
@@ -450,14 +452,18 @@ class AuditAutomationSupport {
 
     /**
      * F-E5 (Aditi 2026-11-28). Whether a run of any of these checks recorded after readAt, other than the run the replayed
-     * execution itself recorded: a replay of an older read must not overwrite it. An unknown readAt counts as recorded.
+     * execution itself recorded, or one of their findings closed after it (a verify writes no run): a replay of an older read
+     * must not overwrite either. An unknown readAt counts as recorded.
      */
     static boolean laterRunRecorded(def ec, String tenantId, List<String> checkIds, Timestamp readAt, String replayedFromExecutionId) {
         if (readAt == null) return true
         if (!checkIds) return false
-        return tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checkIds)
+        boolean laterRun = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checkIds)
                 .condition("runStamp", EntityCondition.GREATER_THAN, readAt).list()
                 .any { normalize(it.automationExecutionId) != replayedFromExecutionId }
+        // A verify closes findings and writes no run: a finding of the check closed after the read is as later as a run.
+        return laterRun || tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("checkId", EntityCondition.IN, checkIds)
+                .condition("closedStamp", EntityCondition.GREATER_THAN, readAt).count() > 0
     }
 
     /** One ledger call; on an error, log it and answer null so the next step for this check is skipped. */
@@ -641,11 +647,19 @@ class AuditAutomationSupport {
         return byKey.keySet().sort().collect { byKey.get(it) } as List<Map>
     }
 
-    /** H5. A diff row's content as one comparable text: type, rule, note, the two values, cause, then its record. */
+    /**
+     * H5. A diff row's content as one comparable text: its type first, then the whole row with every map's keys in order, so
+     * two rows that differ anywhere (ids, side records, a conclusion check's value) never tie.
+     */
     static String rowRank(Map raw) {
-        Map conclusion = raw.conclusion instanceof Map ? (Map) raw.conclusion : [:]
-        return [raw.diffType ?: raw.type, raw.ruleId, raw.message ?: raw.note, raw.file1Value, raw.file2Value,
-                conclusion.code, conclusion.label, raw.data].collect { it == null ? "" : it.toString() }.join("\u001F")
+        return ((raw.diffType ?: raw.type ?: "") as String) + "\u001F" + groovy.json.JsonOutput.toJson(canonical(raw))
+    }
+
+    /** H5. A value with every map's keys sorted, so equal content prints equal whatever order it was written in. */
+    private static Object canonical(Object value) {
+        if (value instanceof Map) return new TreeMap(((Map) value).collectEntries { k, v -> [(k as String): canonical(v)] })
+        if (value instanceof List) return ((List) value).collect { canonical(it) }
+        return value
     }
 
     /** H5. True, and remembered, when rank comes before the rank kept for key (or none is kept yet). */

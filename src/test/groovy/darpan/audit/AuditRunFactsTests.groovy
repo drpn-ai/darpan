@@ -67,6 +67,19 @@ class AuditRunFactsTests {
         assertEquals(["R5", "R2", "R1"], ["R1", "R2", "R5"].sort(false) { String a, String b -> AuditRunFacts.stepOrder(steps, a, b) })
     }
 
+    // OC99 (QA I7): a partial check (one or both reads failed) is not a check that ran: its rule lists it as not checked, so
+    // the email never reads it clean and the alerts room hears of it.
+    @Test
+    void aPartialCheckIsListedAsNotChecked() {
+        Map partial = report()
+        partial.categories.returns.statements.R10.checks = [[id: "returns-credited", status: "partial"]]
+        partial.categories.returns.statements.R10.counts = [open: 0, newToday: 0, fixedToday: 0]
+        Map facts = AuditRunFacts.build(partial, []) { String rule, String cause, String id -> null }
+        assertEquals(["returns-credited"], (facts.rules as List<Map>).find { it.id == "R10" }.checksNotRun)
+        assertFalse(AuditRunMessage.emailText(facts, [:], null, COPY).contains("R10  Every return is credited: clean"))
+        assertTrue(AuditRunMessage.alertText(facts, null, COPY).contains("R10"))
+    }
+
     @Test
     void csvEscapesAsRfc4180AndNeverHandsASpreadsheetAFormula() {
         assertEquals('"a,b"', AuditRunFacts.csvField("a,b"))

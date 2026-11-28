@@ -1,6 +1,7 @@
 package darpan.facade.settings
 
 import darpan.reconciliation.support.SharedMoqui
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -20,6 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 @SharedMoqui
 class UserNotificationDefaultFacadeSmokeTests {
     static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/AAAA1234ZZZZ/messages?key=k&token=t"
+    // seedCompanyScope makes KREWE the active tenant; the other tenant owns a real, active space.
+    static final String TENANT = "KREWE"
+    static final String OTHER_TENANT = "GORJANA"
+    static final String OTHER_SPACE = "OTHER_TENANT_DEFAULT_SPACE"
 
     private ExecutionContext ec
 
@@ -42,12 +47,26 @@ class UserNotificationDefaultFacadeSmokeTests {
         // seedCompanyScope logs in as the KREWE-tenant test user, seeds the KREWE UserGroup with
         // editor permission, sets it as the active tenant, and clears any prior message state.
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+        ec.message.clearErrors()
+        // The default is a user preference, not tenant data: clear it so no test reads another's default.
+        ec.user.setPreference(UserNotificationPreferenceSupport.PREFERENCE_KEY, null)
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([
+                userGroupId    : OTHER_TENANT, description: "Gorjana",
+                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+        ]).createOrUpdate()
+        ec.entity.makeValue("darpan.reconciliation.TenantChatSpace").setAll([
+                chatSpaceId       : OTHER_SPACE,
+                companyUserGroupId: OTHER_TENANT,
+                spaceName         : "Other tenant space",
+                webhookUrl        : WEBHOOK,
+                isActive          : "Y",
+        ]).createOrUpdate()
     }
 
     @Test
     void saveAndGetDefaultRoundTrip() {
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "My space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "My space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
 
@@ -66,7 +85,7 @@ class UserNotificationDefaultFacadeSmokeTests {
     @Test
     void clearingAndStaleDefaults() {
         def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
-                [spaceName: "Clearable space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+                [spaceName: "Clearable space", webhookUrl: WEBHOOK, isActive: true])
         assertTrue(save.ok as boolean)
         String chatSpaceId = save.chatSpace.chatSpaceId
 
@@ -100,10 +119,22 @@ class UserNotificationDefaultFacadeSmokeTests {
 
     @Test
     void rejectsSpaceFromOtherTenant() {
+        // Positive control: the caller can set their OWN space, so the refusal below is containment,
+        // not a setup problem refusing everything.
+        def own = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [spaceName: "Own space ${System.nanoTime()}".toString(), webhookUrl: WEBHOOK, isActive: true])
+        assertTrue(own.ok as boolean, own.errors?.toString())
+        String ownId = own.chatSpace.chatSpaceId as String
+        assertTrue(callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault", [chatSpaceId: ownId]).ok as boolean)
+
         def saveDefault = callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault",
-                [chatSpaceId: "NOT_A_REAL_CHAT_SPACE"])
+                [chatSpaceId: OTHER_SPACE])
         assertFalse(saveDefault.ok as boolean)
-        assertTrue((saveDefault.errors ?: []).join(" ").contains("not found"))
+        assertTrue((saveDefault.errors ?: []).join(" ").contains("Chat space '${OTHER_SPACE}' was not found or is inactive.".toString()),
+                saveDefault.errors?.toString())
+        assertNull(saveDefault.userNotificationDefault)
+        assertEquals(ownId, UserNotificationPreferenceSupport.getDefaultChatSpaceId(ec, TENANT),
+                "a refused save must leave the stored default untouched")
 
         // ServiceCallSyncImpl.ignorePreviousError defaults to false, so a prior-call error blocks the
         // next service invocation outright unless cleared (same convention as
@@ -112,7 +143,7 @@ class UserNotificationDefaultFacadeSmokeTests {
 
         def get = callFacade("facade.SettingsFacadeServices.get#UserNotificationDefault", [:])
         assertTrue(get.ok as boolean)
-        assertNull(get.userNotificationDefault)
+        assertEquals(ownId, get.userNotificationDefault?.chatSpaceId)
     }
 
     private Map<String, Object> callFacade(String serviceName, Map<String, Object> parameters) {

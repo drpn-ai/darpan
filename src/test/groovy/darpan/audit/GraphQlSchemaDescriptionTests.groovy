@@ -71,12 +71,17 @@ class GraphQlSchemaDescriptionTests {
     void everythingThePublishedSchemaPrintsIsDescribed() {
         def schema = ec.factory.getToolFactory("GraphQL").getInstance().schema
         List<String> missing = []
-        schema.allTypesAsList.each { type ->
+        List allTypes = schema.allTypesAsList as List
+        int typesChecked = 0
+        int objectTypesChecked = 0
+        allTypes.each { type ->
             String name = type.name
             if (name.startsWith("__") || name in ["String", "Int", "Boolean", "ID", "Float"]) return
+            typesChecked++
             if (!type.description) missing << "type ${name}"
             // graphql-java loads through Moqui's classloader, not darpan's compile classpath: match by class name.
             if (type.class.simpleName == "GraphQLObjectType") {
+                objectTypesChecked++
                 type.fieldDefinitions.each { f ->
                     if (!f.description) missing << "field ${name}.${f.name}"
                     f.arguments.each { a -> if (!a.description) missing << "argument ${name}.${f.name}(${a.name})" }
@@ -85,6 +90,11 @@ class GraphQlSchemaDescriptionTests {
                 type.values.each { v -> if (!v.description) missing << "enum value ${name}.${v.name}" }
             }
         }
+        // 41 gql-types are declared in moqui-gql's DarpanSchema.gql.xml today, each an object type, plus Query and the
+        // generated connection and PageInfo types: a schema that did not build, or a renamed class the branch above
+        // misses, would check nothing and pass.
+        assertTrue(typesChecked >= 40, "the built schema prints its types (${typesChecked} of ${allTypes.size()} checked)")
+        assertTrue(objectTypesChecked >= 30, "the object-type branch checked ${objectTypesChecked} types")
         assertEquals([], missing - ["type Query"], "${missing.size()} printed items have no description")
     }
 }

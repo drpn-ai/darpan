@@ -87,6 +87,10 @@ class RuleEngineServiceSmokeTests {
 
         assertTrue(ec.message.hasError())
         assertTrue(ec.message.errorsString.contains("ruleSetId contains invalid characters: RS BAD!"))
+        assertEquals(null, ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "RS BAD!")
+                .disableAuthz().useCache(false).one(), "a refused id must not be written")
+        assertEquals(0L, ec.entity.find("darpan.rule.RuleSet").condition("ruleSetName", "Invalid RuleSet")
+                .disableAuthz().useCache(false).count(), "a refused save must not create the rule set under another id")
     }
 
     @Test
@@ -105,7 +109,10 @@ class RuleEngineServiceSmokeTests {
         assertFalse(ec.message.hasError())
         assertEquals("DARPAN_TEST_COMPARE_RS", created.ruleSetId)
         assertEquals(10L, ((Number) created.sequenceNum).longValue())
-        assertTrue(((List) (created.warnings ?: [])).isEmpty())
+        // save#Rule always returns warnings as a List (set to compile#RuleSet's warnings when validateOnSave
+        // compiles); an empty List is the compiled-clean marker, a missing key is not.
+        assertTrue(created.warnings instanceof List, "save#Rule returned no warnings List: ${created}")
+        assertTrue(((List) created.warnings).isEmpty(), "compile warnings: ${created.warnings}")
 
         String ruleId = created.ruleId as String
         assertNotNull(ruleId)

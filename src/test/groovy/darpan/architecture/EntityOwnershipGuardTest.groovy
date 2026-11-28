@@ -50,8 +50,11 @@ class EntityOwnershipGuardTest {
         List<String> duplicates = []
         COMPONENTS.each { String component ->
             Path entityDir = componentRoot.resolve(component).resolve("entity")
-            if (!Files.isDirectory(entityDir)) return
-            Files.list(entityDir).filter { it.toString().endsWith(".xml") }.forEach { Path xml ->
+            // A missing component would silently shrink the ownership map (and hide its entities from the ratchet).
+            // The dir must exist; its file count may be small (netsuite-darpan holds one file today).
+            assertTrue(Files.isDirectory(entityDir), "${component}/entity not found under ${componentRoot}; are sibling components checked out?")
+            List<Path> xmls = Files.list(entityDir).withCloseable { stream -> stream.filter { Path p -> p.toString().endsWith(".xml") }.toList() }
+            xmls.each { Path xml ->
                 def root = new XmlParser().parse(xml.toFile())
                 (root.entity + root."view-entity").each { e ->
                     String full = "${e.@package}.${e.@"entity-name"}"
@@ -76,9 +79,11 @@ class EntityOwnershipGuardTest {
             Path serviceRoot = componentRoot.resolve(component).resolve("service")
             [groovyRoot, serviceRoot].each { Path root ->
                 if (Files.isDirectory(root)) {
-                    Files.walk(root).filter { Path p ->
-                        String s = p.toString(); s.endsWith(".groovy") || s.endsWith(".xml")
-                    }.forEach { sources << it }
+                    Files.walk(root).withCloseable { stream ->
+                        stream.filter { Path p ->
+                            String s = p.toString(); s.endsWith(".groovy") || s.endsWith(".xml")
+                        }.forEach { Path p -> sources << p }
+                    }
                 }
             }
             sources.each { Path src ->
@@ -99,7 +104,6 @@ class EntityOwnershipGuardTest {
 
         Set<String> newViolations = coreToPlugin - CORE_TO_PLUGIN_BASELINE
         Set<String> resolved = CORE_TO_PLUGIN_BASELINE - coreToPlugin
-        System.out.println("[EntityOwnershipGuardTest] core->plugin refs: ${coreToPlugin.size()}/${CORE_TO_PLUGIN_BASELINE.size()} baseline")
         assertTrue(newViolations.isEmpty(),
                 "NEW core->plugin entity references (inverted ownership — publish an owner-side service instead): ${newViolations}")
         assertTrue(resolved.isEmpty(),

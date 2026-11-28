@@ -178,7 +178,7 @@ class NsAuthConfigDeleteSmokeTests {
     }
 
     private void upsert(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
-        ec.artifactExecution.disableAuthz()
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
         ArtifactExecutionInfo aei = ec.artifactExecution.push("seedNsAuthDeleteFixtures", ArtifactExecutionInfo.AT_OTHER,
                 ArtifactExecutionInfo.AUTHZA_ALL, false)
         ec.artifactExecution.setAnonymousAuthorizedAll()
@@ -187,7 +187,7 @@ class NsAuthConfigDeleteSmokeTests {
             ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, pkFields + fields)
         } finally {
             ec.artifactExecution.pop(aei)
-            ec.artifactExecution.enableAuthz()
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
     }
 }

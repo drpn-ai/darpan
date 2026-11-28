@@ -150,11 +150,15 @@ class SftpServerCrossTenantSmokeTests {
     @Test
     void aNewKeyDoesNotCarryTheStoredPasswordToAMovedServer() {
         ownServer("MIX_SFTP")
-        withProductionAuthz {
+        // A new secret was sent, so the move is allowed (DAR-BE-080 refuses only a move with nothing sent),
+        // and the stored password of the other kind is dropped, not carried to the new host.
+        Map<String, Object> out = withProductionAuthz {
             callService(SAVE_SERVICE, [sftpServerId: "MIX_SFTP", host: "attacker.sftp.test", port: 22, username: "krewe-user", privateKey: "KEY-DECOY"])
         }
+        assertTrue(out.ok as Boolean, "a moved server with a new key must save: ${out.errors}")
         def row = findRow("MIX_SFTP")
-        assertFalse(row.host == "attacker.sftp.test" && row.password == "krewe-secret", "the stored password went along to the moved server")
+        assertEquals("attacker.sftp.test", row.host, "the move was saved")
+        assertNull(row.password, "the stored password went along to the moved server")
     }
 
     /** DAR-BE-082: a moved server is another server, so its saved key goes; Reset key clears it on purpose; the list shows it. */
@@ -168,16 +172,19 @@ class SftpServerCrossTenantSmokeTests {
         Map<String, Object> list = withProductionAuthz { callService("facade.SettingsFacadeServices.list#SftpServers", [pageIndex: 0, pageSize: 50, query: ""]) }
         assertEquals("SHA256:saved", ((list.servers ?: []) as List<Map>).find { it.sftpServerId == "KEY_SFTP" }?.hostKeyFingerprint)
 
-        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2"]) }
+        Map<String, Object> same = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2"]) }
+        assertTrue(same.ok as Boolean, "same-server save failed: ${same.errors}")
         assertEquals("SHA256:saved", findRow("KEY_SFTP").hostKeyFingerprint, "same server keeps its key")
 
-        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2", resetHostKey: true]) }
+        Map<String, Object> reset = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2", resetHostKey: true]) }
+        assertTrue(reset.ok as Boolean, "reset save failed: ${reset.errors}")
         assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "reset clears it")
 
         was = ec.artifactExecution.disableAuthz()
         try { findRow("KEY_SFTP").setAll([hostKeyFingerprint: "SHA256:saved"]).update() }
         finally { if (!was) ec.artifactExecution.enableAuthz() }
-        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe3.sftp.test", port: 22, username: "krewe-user2", password: "new"]) }
+        Map<String, Object> moved = withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe3.sftp.test", port: 22, username: "krewe-user2", password: "new"]) }
+        assertTrue(moved.ok as Boolean, "moved save failed: ${moved.errors}")
         assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "a moved server is a new server")
     }
 

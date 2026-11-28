@@ -49,17 +49,23 @@ class JsonSchemaUtilTests {
 
     @Test
     void validateJsonTextAndResolveSchemaRecordCoverFacadeHelpers() {
+        // DAR-OPS-029 S31: schemas resolve only within the active tenant (here a system tenant, as a scheduled run has).
         EntityFacadeStub entity = new EntityFacadeStub(finders: ["darpan.reconciliation.JsonSchema": new SchemaResolverFinderStub(
-                byId: ["JS_1": [jsonSchemaId: "JS_1", schemaName: "orders"]],
-                byName: ["orders_v2": [jsonSchemaId: "JS_2", schemaName: "orders_v2"], "orders_legacy": [jsonSchemaId: "JS_3", schemaName: "orders_legacy"]]
+                byId: ["JS_1": [jsonSchemaId: "JS_1", schemaName: "orders", companyUserGroupId: "KREWE"],
+                       "JS_ACME": [jsonSchemaId: "JS_ACME", schemaName: "acme", companyUserGroupId: "ACME"]],
+                byName: ["orders_v2": [jsonSchemaId: "JS_2", schemaName: "orders_v2", companyUserGroupId: "KREWE"],
+                         "orders_legacy": [jsonSchemaId: "JS_3", schemaName: "orders_legacy", companyUserGroupId: "KREWE"]]
         )])
         def ec = new Expando(entity: entity)
 
         assertNull(JsonSchemaUtil.validateJsonText('{"id":1}', "jsonText"))
         assertTrue(JsonSchemaUtil.validateJsonText('{"id"', "jsonText")?.startsWith("jsonText is invalid JSON:"))
-        assertEquals("JS_1", JsonSchemaUtil.resolveSchemaRecord(ec, "JS_1", null, null, false)?.jsonSchemaId)
-        assertEquals("JS_2", JsonSchemaUtil.resolveSchemaRecord(ec, null, "orders_v2", null, false)?.jsonSchemaId)
-        assertEquals("JS_3", JsonSchemaUtil.resolveSchemaRecord(ec, null, null, "orders_legacy", false)?.jsonSchemaId)
+        darpan.facade.common.TenantAccessSupport.withSystemTenant("KREWE") {
+            assertEquals("JS_1", JsonSchemaUtil.resolveSchemaRecord(ec, "JS_1", null, null, false)?.jsonSchemaId)
+            assertEquals("JS_2", JsonSchemaUtil.resolveSchemaRecord(ec, null, "orders_v2", null, false)?.jsonSchemaId)
+            assertEquals("JS_3", JsonSchemaUtil.resolveSchemaRecord(ec, null, null, "orders_legacy", false)?.jsonSchemaId)
+            assertNull(JsonSchemaUtil.resolveSchemaRecord(ec, "JS_ACME", null, null, false), "another tenant's schema resolved by id")
+        }
     }
 
     @Test
@@ -117,6 +123,10 @@ class JsonSchemaUtilTests {
 
         FinderStub useCache(boolean useCache) {
             useCacheValue = useCache
+            return this
+        }
+
+        FinderStub disableAuthz() {
             return this
         }
 

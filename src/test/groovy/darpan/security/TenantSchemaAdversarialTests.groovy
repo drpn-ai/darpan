@@ -102,6 +102,52 @@ class TenantSchemaAdversarialTests {
         assertEquals('{"title":"B"}', text, "tenant B's run loaded tenant A's schema by name")
     }
 
+    /**
+     * DAR-OPS-029 S31 (security review of 952ef9ab). A schema id that is not the active tenant's is refused outright, never
+     * swapped for a schema found by name: save#RefinedSchema passes the caller's id on to the write, so a fallback would
+     * have checked one schema and written another. Harness frame: authz disabled, where no entity filter helps.
+     */
+    @Test
+    void aForeignSchemaIdIsRefusedNotSwappedForANameMatch() {
+        h.insert("darpan.reconciliation.JsonSchema", [jsonSchemaId: "ADV_RS_B", schemaName: "adv_rs_b.json", companyUserGroupId: B,
+                schemaText: '{"title":"B"}'])
+        h.insert("darpan.reconciliation.JsonSchema", [jsonSchemaId: "ADV_RS_A", schemaName: "adv_rs_a.json", companyUserGroupId: A,
+                schemaText: '{"title":"A"}'])
+        h.ec.message.clearErrors()
+        assertEquals(null, JsonSchemaUtil.findTenantSchema(h.ec, "ADV_RS_B", "adv_rs_a.json"), "a foreign id resolved to a schema")
+        assertEquals(["Schema not found"], new ArrayList(h.ec.message.errors))
+        h.ec.message.clearErrors()
+        assertEquals("ADV_RS_A", JsonSchemaUtil.findTenantSchema(h.ec, null, "adv_rs_a.json")?.jsonSchemaId, "own schema by name")
+        assertEquals("ADV_RS_A", JsonSchemaUtil.findTenantSchema(h.ec, "ADV_RS_A", null)?.jsonSchemaId, "own schema by id")
+    }
+
+    /** The write itself loads the schema by id through the tenant finder: another tenant's schema is never overwritten. */
+    @Test
+    void refinedSaveNeverWritesAnotherTenantsSchema() {
+        h.insert("darpan.reconciliation.JsonSchema", [jsonSchemaId: "ADV_RS_WRITE_B", schemaName: "adv_rs_write_b.json",
+                companyUserGroupId: B, schemaText: '{"title":"B untouched"}'])
+        h.ec.message.clearErrors()
+        h.ec.service.sync().name("jsonschema.JsonSchemaServices.save#RefinedSchema")
+                .parameters([jsonSchemaId: "ADV_RS_WRITE_B", fieldList: [[fieldPath: "attackerField", type: "string"]]]).call()
+        h.ec.message.clearErrors()
+        assertEquals('{"title":"B untouched"}', h.ec.entity.find("darpan.reconciliation.JsonSchema")
+                .condition("jsonSchemaId", "ADV_RS_WRITE_B").disableAuthz().useCache(false).one().schemaText,
+                "tenant A's refined save rewrote tenant B's schema")
+    }
+
+    /** resolveSchemaRecord (saved-run and mapping saves) reads the caller's own schema when two tenants share a name. */
+    @Test
+    void resolveSchemaRecordReturnsTheActiveTenantsSchemaForASharedName() {
+        String name = "adv_resolve_dup.json"
+        h.insert("darpan.reconciliation.JsonSchema", [jsonSchemaId: "ADV_RESOLVE_A", schemaName: name, companyUserGroupId: A,
+                schemaText: '{"title":"A"}'])
+        h.insert("darpan.reconciliation.JsonSchema", [jsonSchemaId: "ADV_RESOLVE_B", schemaName: name, companyUserGroupId: B,
+                schemaText: '{"title":"B"}'])
+        assertEquals("ADV_RESOLVE_A", JsonSchemaUtil.resolveSchemaRecord(h.ec, null, name, name, false)?.jsonSchemaId,
+                "tenant A resolved another tenant's schema (or threw on the shared name)")
+        assertEquals(null, JsonSchemaUtil.resolveSchemaRecord(h.ec, "ADV_RESOLVE_B", null, null, false), "tenant A resolved B's by id")
+    }
+
     /** A legacy shared file left behind after its schema was deleted is no one's to read. */
     @Test
     void schemaLookupNeverReadsAnOrphanedSharedFile() {

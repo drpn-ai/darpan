@@ -194,12 +194,17 @@ class JsonSchemaUtil {
     static def findTenantSchema(def ec, Object rawJsonSchemaId, Object rawSchemaName) {
         String jsonSchemaId = ((rawJsonSchemaId)?.toString()?.trim())
         String schemaName = ((rawSchemaName)?.toString()?.trim())
-        def schema = jsonSchemaId ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, JSON_SCHEMA_ENTITY_NAME, "jsonSchemaId", jsonSchemaId) : null
-        if (schema == null && schemaName) {
-            schema = TenantScopedFinder.findTenantScoped(ec, JSON_SCHEMA_ENTITY_NAME).condition("schemaName", schemaName).useCache(false).one()
-        }
+        // A given id decides alone: one that is not the active tenant's is refused, never swapped for a schema found by
+        // name (save#RefinedSchema passes the caller's id on to the write; a fallback checked one schema and wrote another).
+        def schema = jsonSchemaId ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, JSON_SCHEMA_ENTITY_NAME, "jsonSchemaId", jsonSchemaId) :
+                (schemaName ? tenantSchemaByName(ec, schemaName) : null)
         if (schema == null) ec.message.addError("Schema not found")
         return schema
+    }
+
+    /** The active tenant's schema of this name ((companyUserGroupId, schemaName) is unique), or null. */
+    private static def tenantSchemaByName(def ec, String schemaName) {
+        return TenantScopedFinder.findTenantScoped(ec, JSON_SCHEMA_ENTITY_NAME).condition("schemaName", schemaName).useCache(false).one()
     }
 
     static def resolveSchemaRecord(def ec, Object rawJsonSchemaId, Object rawSchemaName = null,
@@ -208,21 +213,11 @@ class JsonSchemaUtil {
         String schemaName = ((rawSchemaName)?.toString()?.trim())
         String filename = ((rawFilename)?.toString()?.trim())
 
-        if (jsonSchemaId) {
-            def schema = ec?.entity?.find(JSON_SCHEMA_ENTITY_NAME)
-                    ?.condition("jsonSchemaId", jsonSchemaId)
-                    ?.useCache(useCache)
-                    ?.one()
-            if (schema != null) return schema
-        }
-
+        // DAR-OPS-029 S31: the active tenant's schema only, read with an explicit tenant condition. A bare find by
+        // schemaName matched another tenant's same-named schema (or threw on several) wherever the entity filter was off.
+        if (jsonSchemaId) return TenantScopedFinder.findTenantScopedByIdQuiet(ec, JSON_SCHEMA_ENTITY_NAME, "jsonSchemaId", jsonSchemaId)
         String lookupName = schemaName ?: filename
-        if (!lookupName) return null
-
-        return ec?.entity?.find(JSON_SCHEMA_ENTITY_NAME)
-                ?.condition("schemaName", lookupName)
-                ?.useCache(useCache)
-                ?.one()
+        return lookupName ? tenantSchemaByName(ec, lookupName) : null
     }
 
     /**

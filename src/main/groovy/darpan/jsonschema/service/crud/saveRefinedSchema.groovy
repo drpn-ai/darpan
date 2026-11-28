@@ -161,9 +161,9 @@ if (hasSystemEnumIdInput && requestedSystemEnumId && !JsonSchemaUtil.findSystemE
 
 def existingSchema = null
 if (jsonSchemaId) {
-    existingSchema = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
-        .condition("jsonSchemaId", jsonSchemaId)
-        .one()
+    // DAR-OPS-029 S31: only the active tenant's schema is ever rewritten (the facade checks it too; this holds with authz off).
+    existingSchema = darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME,
+        "jsonSchemaId", jsonSchemaId)
     if (!existingSchema) {
         ec.message.addError("Schema not found for ID '${jsonSchemaId}'")
         return

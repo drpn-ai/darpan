@@ -176,6 +176,11 @@ class ReconciliationMappingSupportTests {
             return this
         }
 
+        // DAR-OPS-029 S31: schema reads go through TenantScopedFinder, which disables authz on its own explicit tenant condition.
+        FinderStub disableAuthz() {
+            return this
+        }
+
         FinderStub useCache(boolean useCache) {
             return this
         }

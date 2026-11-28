@@ -1126,34 +1126,26 @@ class SftpAutomationSupportTests {
         String resultUrl = TenantNotificationSupport.buildRunResultUrl(ec, params)
         String file1SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file1", null)
         String file2SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file2", null)
-        Closure<String> displayCount = { Object value ->
-            value == null ? "0" :
-                    value instanceof Number ? ((Number) value).intValue().toString() :
-                            (((value)?.toString()?.trim()) ?: "0")
-        }
-        // Task 2d fix round 1: mirror the real build#RunCompletedPayload template's FAILURE rendering
-        // (see ReconciliationNotificationServices.xml, and the identical harness in
-        // AutomationExecutionSupportTests) so the new SFTP failure-alert tests can assert that what got
-        // delivered is genuinely the failure payload — carrying the reason — and not a success one.
-        boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == SftpAutomationSupport.AUTOMATION_STATUS_FAILED
-        // Delegates to the real renderer instead of reimplementing it. This fake previously built its
-        // own line stack, so this suite stayed green against its own copy no matter what
-        // build#RunCompletedPayload actually produced — hollow green that hid a whole redesign.
+        // DAR-OPS-029 S99-207: the same lines, in the same order, as build#RunCompletedPayload
+        // (ReconciliationNotificationServices.xml), through the real RunNotificationVoice. A failed run never reaches that
+        // service (it goes down the error path, and the failure tests assert it is never called), so there is no FAILED or
+        // termination-reason line to copy. Left out because FakeEc has no store for them: the streak facts, the
+        // completed moment and the celebration.
+        List<String> warningList = TenantNotificationSupport.partitionAuditNotes(params.processingWarnings).warnings
         Map<String, Object> voiceModel = RunNotificationVoice.classify([
-                onlyInFile1Count   : params.onlyInFile1Count,
-                onlyInFile2Count   : params.onlyInFile2Count,
-                ruleDifferenceCount: params.ruleDifferenceCount,
-                runFailed          : runFailed,
-                hasWarnings        : false,
+                onlyInFile1Count        : params.onlyInFile1Count,
+                onlyInFile2Count        : params.onlyInFile2Count,
+                ruleDifferenceCount     : params.ruleDifferenceCount,
+                differenceCount         : params.differenceCount,
+                duplicateDifferenceCount: params.duplicateDifferenceCount,
+                hasWarnings             : warningList ? true : false,
         ]) + [runName         : runName, file1SystemLabel: file1SystemLabel,
-              file2SystemLabel: file2SystemLabel, completedMoment: null]
+              file2SystemLabel: file2SystemLabel, mismatchFields: params.ruleDifferenceFields, completedMoment: null]
         List<String> lines = RunNotificationVoice.renderLines(voiceModel)
-        if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
-        String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
-        if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
-        if (resultId) lines << "Result ID: ${resultId}".toString()
+        if (resultId && !resultUrl) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
+        if (warningList) lines << "Warnings (${warningList.size()}): details on the run result.".toString()
         return [payload: [text: lines.join("\n")]]
     }
 

@@ -354,6 +354,11 @@
             <description>DAR-BE-318. The rule of causeRuleSetId that matched first. Blank with causeRuleSetId set: no rule
                 matched, so the cause is UNEXPLAINED.</description>
         </field>
+        <field name="orderLinesOmittedJson" type="text-intermediate">
+            <description>DAR-OPS-029 S13 (for S10/S11). Lines of this finding's order that the check left out, as JSON
+                {rootSystemEnumId: count}, keys in order, counts above 0. Blank: none left out, or the read predates it. Like
+                the other evidence, the latest read replaces it. VARCHAR(1023), not 255: systems are data, so more can come.</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDF_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

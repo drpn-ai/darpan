@@ -94,12 +94,12 @@ class AuditLedgerBackdatedPlaySmokeTests {
     @Test
     void aBackdatedSightingKeepsTheNewerEvidenceAndOnlyWidensTheDates() {
         String id = (record("2026-10-20", "BD-3", "Read on the 20th").findingIds as List)[0]
-        record("2026-10-22", "BD-3", "Read on the 22nd")
+        record("2026-10-22", "BD-3", "Read on the 22nd", [orderLinesOmitted: [OMS: 2]])
 
-        record("2026-10-21", "BD-3", "Read on the 21st")
+        record("2026-10-21", "BD-3", "Read on the 21st", [orderLinesOmitted: [OMS: 5]])
         Map f = row(id)
-        assertEquals(["Read on the 22nd", Date.valueOf("2026-10-22"), Date.valueOf("2026-10-20"), 3L],
-                [f.headline, f.lastSeenDate, f.firstFoundDate, f.timesSeen as Long])
+        assertEquals(["Read on the 22nd", '{"OMS":2}', Date.valueOf("2026-10-22"), Date.valueOf("2026-10-20"), 3L],
+                [f.headline, f.orderLinesOmittedJson, f.lastSeenDate, f.firstFoundDate, f.timesSeen as Long])
         assertEquals([["AUDFE_FOUND", "2026-10-20"], ["AUDFE_STILL_OPEN", "2026-10-21"], ["AUDFE_STILL_OPEN", "2026-10-22"]], history(id))
 
         record("2026-10-19", "BD-3", "Read on the 19th")
@@ -110,11 +110,11 @@ class AuditLedgerBackdatedPlaySmokeTests {
 
     // -----------------------------------------------------------------------------------------
 
-    private Map record(String day, String recordKey, String headline) {
+    private Map record(String day, String recordKey, String headline, Map extra = [:]) {
         Map out = ec.service.sync().name("${SVC}.record#CheckFindings").parameters([companyUserGroupId: TENANT, checkId: CHECK,
                 reportDate: Date.valueOf(day), period: "2026-10", checkStamp: nextStamp(),
                 findings: [[statementCode: "R4", recordKey: recordKey, headline: headline,
-                            records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "return", recordId: recordKey]]]]]).call()
+                            records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "return", recordId: recordKey]]] + extra]]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         return out
     }

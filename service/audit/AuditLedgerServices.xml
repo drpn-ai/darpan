@@ -39,7 +39,8 @@
                     ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
                     conclusionEnumId, diagnosisText; claimRuleSetId, claimRuleId, causeRuleSetId, causeRuleId (DAR-BE-318:
                     the rules that judged it; blank when not given); records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
-                    checks [{label, passed (Boolean), value}].</description></parameter>
+                    checks [{label, passed (Boolean), value}]; orderLinesOmitted {systemEnumId: count above 0} (DAR-OPS-029 S13:
+                    the order's lines the check left out; an endpoint counts toward its root system; absent or empty: none).</description></parameter>
             <parameter name="outsideRules" type="Map">
                 <description>DAR-OPS-029 D11. The run's rows no statement owns: {count (Integer, the true total), rows
                     [{recordKey, diffType, bucket, note, records (AuditFindingRecord-shaped: systemEnumId, recordType, recordId,
@@ -67,6 +68,7 @@
             <set field="findings" from="findings ?: []"/>
 
             <!-- Validate everything first: a bad row writes nothing. -->
+            <set field="omittedJsonByFinding" from="new IdentityHashMap()"/>
             <iterate list="findings" entry="f">
                 <if condition="!f.statementCode || !f.recordKey || !f.headline">
                     <return error="true" message="Every finding needs statementCode, recordKey and headline (check ${checkId})"/></if>
@@ -81,6 +83,23 @@
                     <if condition="systemEnum?.enumTypeId != 'DarpanSystemSource'">
                         <return error="true" message="Unknown system ${r.systemEnumId} on finding ${f.recordKey}"/></if>
                 </iterate>
+                <if condition="f.get('orderLinesOmitted') != null">
+                    <!-- Root system -> count, keys in order so every database stores the same text. -->
+                    <script><![CDATA[
+                        def omitted = f.get("orderLinesOmitted")
+                        def roots = new TreeMap<String, Long>()
+                        omittedBad = omitted instanceof Map ? omitted.find { k, v ->
+                            def e = k ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", k as String).useCache(true).one() : null
+                            if (e?.enumTypeId != "DarpanSystemSource" || !((v instanceof Integer || v instanceof Long) && v > 0)) return true
+                            String root = e.parentEnumId ?: e.enumId
+                            roots[root] = (roots[root] ?: 0L) + (v as Long)
+                            return false
+                        } : omitted
+                        omittedJsonByFinding.put(f, roots ? groovy.json.JsonOutput.toJson(roots) : null)
+                    ]]></script>
+                    <if condition="omittedBad != null">
+                        <return error="true" message="Finding ${f.recordKey}: orderLinesOmitted takes a count above 0 per known system (${omittedBad})"/></if>
+                </if>
             </iterate>
             <if condition="outsideRules != null">
                 <set field="outsideCount" from="outsideRules.count instanceof Number ? (outsideRules.count as Long) : null"/>
@@ -222,6 +241,7 @@
                 <set field="finding.claimRuleId" from="f.claimRuleId"/>
                 <set field="finding.causeRuleSetId" from="f.causeRuleSetId"/>
                 <set field="finding.causeRuleId" from="f.causeRuleId"/>
+                <set field="finding.orderLinesOmittedJson" from="omittedJsonByFinding.get(f)"/>
                 <set field="finding.lastCheckedStamp" from="checkStamp"/>
                 <entity-create value-field="finding" or-update="true"/>
 

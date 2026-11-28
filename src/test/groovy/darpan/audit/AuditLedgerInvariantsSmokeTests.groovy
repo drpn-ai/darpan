@@ -16,6 +16,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -233,6 +234,34 @@ class AuditLedgerInvariantsSmokeTests {
         checkRun("2026-10-18", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE")])
         record(CHECK, "2026-10-18", [])
         assertEquals(null, morningRun("2026-10-18").outsideRulesCount, "an old caller leaves it null")
+    }
+
+    // ---- orderLinesOmitted: lines of the finding's order the check left out, per root system (S10/S11) -------------
+
+    @Test
+    void omittedOrderLinesAreKeptPerRootSystemAndEachReadReplacesThem() {
+        Map f = finding("R4", "OLO-1")
+        String id = (record(CHECK, "2026-10-20", [f + [orderLinesOmitted: [SHOPIFY: 2, OMS_RETURNS_GQL: 3, OMS: 1]]]).findingIds as List)[0]
+        assertEquals('{"OMS":4,"SHOPIFY":2}', row(id).orderLinesOmittedJson,
+                "keyed by the ROOT system (an endpoint adds to its root), in key order so every database writes the same text")
+
+        record(CHECK, "2026-10-21", [f + [orderLinesOmitted: [OMS: 1]]])
+        assertEquals('{"OMS":1}', row(id).orderLinesOmittedJson, "the latest read replaces the last, never adds to it")
+
+        record(CHECK, "2026-10-22", [f])
+        assertNull(row(id).orderLinesOmittedJson, "a read that omitted nothing clears it")
+        record(CHECK, "2026-10-23", [f + [orderLinesOmitted: [:]]])
+        assertNull(row(id).orderLinesOmittedJson, "an empty map is none too")
+    }
+
+    @Test
+    void aBadOmittedLineCountIsRefusedAndNothingIsWritten() {
+        [[OMS: 0], [OMS: -1], [OMS: "2"], [OMS: 1.5], [NOT_A_SYSTEM: 1], [(""): 1], ["OMS"]].eachWithIndex { bad, i ->
+            String key = "OLOBAD-${i}".toString()
+            callExpectingError("record#CheckFindings", base("2026-10-24") + [findings: [finding("R4", key) + [orderLinesOmitted: bad]]],
+                    "orderLinesOmitted")
+            assertEquals(0L, countByKey(key), "validated before any finding is written: ${bad}")
+        }
     }
 
     // ---- record#CheckRun: the status every close is gated on ----------------------------------

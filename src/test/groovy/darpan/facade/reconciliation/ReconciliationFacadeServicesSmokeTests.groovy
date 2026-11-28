@@ -111,6 +111,27 @@ class ReconciliationFacadeServicesSmokeTests {
         }
     }
 
+    @Test
+    void savingARunDeletesARuleTheEditorRemovedEvenWhenItIsUnstamped() {
+        String runName = "S22 unstamped rule"
+        String savedRunId = createRun(runName, [rule("S22_KEEP", 10), rule("S22_DROP", 20)])
+        List rules = ec.entity.find("darpan.rule.Rule").condition("ruleSetId", savedRunId).orderBy("sequenceNum")
+                .disableAuthz().useCache(false).list()
+        assertEquals(2, rules.size(), "test precondition: two rules")
+        String keepId = rules[0].ruleId as String
+        rules[1].set("companyUserGroupId", null).update()   // a row from before rules carried a stamp
+
+        Map<String, Object> saved = withProductionAuthz {
+            ec.service.sync().name(F + "save#RuleSetRun")
+                    .parameters(ruleSetParams(runName) + [savedRunId: savedRunId, rules: [rule("S22_KEEP", 10) + [ruleId: keepId]]])
+                    .call()
+        }
+
+        assertTrue(saved?.ok == true, "save#RuleSetRun failed under production authz: ${saved?.errors ?: ec.message.errors}")
+        List remaining = ec.entity.find("darpan.rule.Rule").condition("ruleSetId", savedRunId).disableAuthz().useCache(false).list()
+        assertEquals([keepId], remaining*.ruleId, "the rule the editor removed is deleted, stamped or not")
+    }
+
     private Map<String, Object> saveSftpAutomation(Map<String, Object> params) {
         Map<String, Object> sources = [FILE_1: ["OMS", "OMS_TEST_SFTP"], FILE_2: ["SHOPIFY", "SHOPIFY_TEST_SFTP"]]
         return ec.service.sync().name(F + "save#Automation").parameters([

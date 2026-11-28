@@ -1309,7 +1309,10 @@
                 <if condition="rulesProvided">
                     <!-- Audit 2026-06-11 #1 (durable fix): regenerate FIELD_COMPARISON ruleLogic server-side. -->
                     <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.regenerateFieldComparisonRuleLogic(ruleEntries, file1PrimaryIdExpressionsValue ? file1PrimaryIdExpressionsValue[0] : file1PrimaryIdExpressionValue, file2PrimaryIdExpressionsValue ? file2PrimaryIdExpressionsValue[0] : file2PrimaryIdExpressionValue)"/>
-                    <set field="existingRuleList" from="ec.entity.find('darpan.rule.Rule').condition('ruleSetId', savedRunIdValue).useCache(false).list() ?: []"/>
+                    <!-- DAR-OPS-029 OC38 (DAR-BE-076 class): children of the tenant-gated RuleSet, not a plain find. Rule is under
+                         the active-tenant entity filter, which hides an unstamped row; a hidden rule escaped the delete pass below
+                         and a rule the editor removed kept running. -->
+                    <set field="existingRuleList" from="darpan.facade.common.TenantScopedFinder.findTenantScopedChildren(ec, 'darpan.rule.Rule', 'darpan.rule.RuleSet', 'ruleSetId', savedRunIdValue, 'ruleSetId')?.useCache(false)?.list() ?: []"/>
                     <set field="savedRuleIds" from="[]"/>
                     <iterate list="ruleEntries" entry="ruleEntry">
                         <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"

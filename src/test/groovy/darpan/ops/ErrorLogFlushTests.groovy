@@ -64,6 +64,16 @@ class ErrorLogFlushTests {
                 .condition("logDay", SqlDate.valueOf(day)).useCache(false).disableAuthz().one()
     }
 
+    /**
+     * S99-212: log4j's AsyncLog thread hands a line to the subscriber a moment later. Waits for it, up to 10 s on a busy
+     * machine, and fails here, naming the line, rather than as a wrong count further down. A wait, never a timing bound.
+     */
+    private static void awaitHeld(String fingerprint) {
+        long deadline = System.nanoTime() + 10_000_000_000L
+        while (!ErrorLogCapture.INSTANCE.holds(fingerprint) && System.nanoTime() < deadline) Thread.sleep(10)
+        assertTrue(ErrorLogCapture.INSTANCE.holds(fingerprint), "the subscriber never received '${fingerprint}'")
+    }
+
     @Test
     void theToolFactoryRegistersTheSubscriberOnce() {
         assertEquals(1, ec.factory.getLogEventSubscribers().count { it.is(ErrorLogCapture.INSTANCE) })
@@ -73,8 +83,7 @@ class ErrorLogFlushTests {
     void aLoggedErrorReachesItsRowThroughTheSubscriber() {
         String fp = "darpan.ops.ErrorLogFlushProbe Probe # failed"
         LoggerFactory.getLogger("darpan.ops.ErrorLogFlushProbe").error("Probe 4711 failed")
-        // log4j's AsyncLog thread hands the line to the subscriber a moment later
-        for (int i = 0; i < 500 && !ErrorLogCapture.INSTANCE.holds(fp); i++) Thread.sleep(10)
+        awaitHeld(fp)
         ErrorLogCapture.flush(ec)
         List<EntityValue> rows = ec.entity.find("darpan.ops.ErrorLogEntry").condition("fingerprint", fp).useCache(false).disableAuthz().list()
         assertEquals(1, rows.size())
@@ -136,7 +145,7 @@ class ErrorLogFlushTests {
         // AsyncLog delivers in order: once a later line is held, the store's line has been seen (and must have been dropped)
         String sentinel = "darpan.ops.ErrorLogStoreProbe Sentinel # after"
         LoggerFactory.getLogger("darpan.ops.ErrorLogStoreProbe").error("Sentinel 1 after")
-        for (int i = 0; i < 200 && !ErrorLogCapture.INSTANCE.holds(sentinel); i++) Thread.sleep(10)
+        awaitHeld(sentinel)
         List<Map> kept = ErrorLogCapture.INSTANCE.drain()
         assertEquals(["darpan.F4 Run # failed", sentinel] as Set, kept.collect { it.fingerprint } as Set)
         assertEquals(1L, kept.find { it.fingerprint == "darpan.F4 Run # failed" }.count)

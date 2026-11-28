@@ -2,6 +2,7 @@ package darpan.ops
 
 import darpan.config.DarpanSettings
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -20,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
+// S99-212: shares the Moqui JVM; both seams it swaps (postHook, DarpanSettings.rowLoader) are reset after every test.
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ErrorChatSupportTests {
     private static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/AAAA1234ZZZZ/messages?key=k&token=t"

@@ -3,6 +3,8 @@ package darpan.reconciliation.automation
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.reconciliation.notification.TenantNotificationSupport
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -18,8 +20,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class SftpAutomationSupportTests {
     // Audit H11.2 removed the hardcoded dev fallback (https://hotwax-darpan-dev.web.app) for the app
     // base URL; tests must set their own so the run-result link assertion below has something to match.
-    static {
-        System.setProperty("darpan.app.baseUrl", "https://hotwax-darpan-dev.web.app")
+    // S99-206: set for this class only and restored after it; a static block set it for the whole JVM.
+    private static String priorAppBaseUrl
+
+    @BeforeAll
+    static void pinAppBaseUrl() {
+        priorAppBaseUrl = System.getProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY)
+        System.setProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY, "https://hotwax-darpan-dev.web.app")
+    }
+
+    @AfterAll
+    static void restoreAppBaseUrl() {
+        if (priorAppBaseUrl == null) System.clearProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY)
+        else System.setProperty(TenantNotificationSupport.APP_BASE_URL_PROPERTY, priorAppBaseUrl)
     }
 
     private static final Timestamp NOW = Timestamp.valueOf("2026-05-01 10:00:00")

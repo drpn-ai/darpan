@@ -35,8 +35,10 @@ class AuditFindingQuerySource {
             Map<String, String> checkLabel = [:]
             Map<String, String> conclusionText = [:]
 
+            // OC155: one order (a query's own orderBy still wins, applied after): a scheduled query's rows keep their order
             def find = ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
-                    .condition("statementId", EntityCondition.IN, statementText.keySet()).useCache(false)
+                    .condition("statementId", EntityCondition.IN, statementText.keySet()).orderBy(["statementId", "recordKey", "findingId"])
+                    .useCache(false)
             if (!input.includeClosed) find.condition("closedStamp", null)
             Map windowCondition = input.window ? ReadConditions.windowCondition([field: "firstFoundDate", lastDays: ((Map) input.window).lastDays],
                     runDate, params.timeZone as String) : null

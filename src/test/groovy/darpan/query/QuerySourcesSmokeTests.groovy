@@ -190,6 +190,27 @@ class QuerySourcesSmokeTests {
         assertEquals(["SO-1", "SO-2", "SO-3"], read("read#AuditFindingSource", findings(includeClosed: true, orderBy: ["recordKey"])).rows*.recordKey)
     }
 
+    /** OC155: with no orderBy of its own, a findings read comes in statement, record key, finding id order, so a scheduled
+     *  query's CSV keeps its row order from run to run. The finding ids here run against their record keys. */
+    @Test
+    void findingsWithNoOrderByComeInStatementThenRecordKeyOrder() {
+        String id = "QS_AUD_O"
+        insert(ec, "darpan.audit.Audit", [auditId: id, companyUserGroupId: KREWE, auditCode: id, auditName: "Order", periodEnumId: "QS_PER"])
+        insert(ec, "darpan.audit.AuditStatement", [statementId: id + "_S1", companyUserGroupId: KREWE, auditId: id, statementCode: "R1",
+                categoryEnumId: "QS_CAT", weightEnumId: "QS_WT", statementText: "Ordered", isActive: "Y"])
+        [["1", "SO-9"], ["2", "SO-1"], ["3", "SO-5"]].each { List f ->
+            insert(ec, "darpan.audit.AuditFinding", [findingId: id + "_F" + f[0], companyUserGroupId: KREWE, statementId: id + "_S1",
+                    checkId: "QS_AUD_K_C1", recordKey: f[1], period: "2026-11", stateEnumId: "QS_OPEN", headline: f[1],
+                    firstFoundDate: java.sql.Date.valueOf("2026-11-20"), lastSeenDate: java.sql.Date.valueOf("2026-11-20"), timesSeen: 1])
+        }
+        Map input = [name: "findings", source: "auditFindings", auditId: id, fields: ["recordKey"]]
+        Map out = read("read#AuditFindingSource", input)
+        assertNull(out.error, "${out.error}")
+        assertEquals(["SO-1", "SO-5", "SO-9"], out.rows*.recordKey)
+        assertEquals(["SO-9", "SO-5", "SO-1"], read("read#AuditFindingSource", input + [orderBy: ["-recordKey"]]).rows*.recordKey,
+                "a query's own orderBy still wins")
+    }
+
     @Test
     void aFieldOutsideTheListIsRefused() {
         Map out = read("read#AuditFindingSource", findings(fields: ["recordKey", "diagnosisText"]))

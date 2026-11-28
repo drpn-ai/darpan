@@ -40,7 +40,7 @@ class ReconciliationOutputSupportTests {
                 ]
         ]
 
-        String csv = ReconciliationOutputSupport.renderDifferencesCsv(diffDocument)
+        String csv = OutputDescriptorSupport.renderDifferencesCsv(diffDocument)
         List<String> lines = csv.readLines()
 
         assertEquals("type,id,presentIn,missingIn,note,data", lines.first())
@@ -79,7 +79,7 @@ class ReconciliationOutputSupportTests {
                 ]
         ]
 
-        String csv = ReconciliationOutputSupport.renderDifferencesCsv(diffDocument)
+        String csv = OutputDescriptorSupport.renderDifferencesCsv(diffDocument)
         List<String> lines = csv.readLines()
 
         assertEquals("diffType,primaryId,field,file1Value,file2Value,presentIn,missingIn,ruleId,severity,message,data", lines.first())
@@ -168,7 +168,7 @@ class ReconciliationOutputSupportTests {
 
     @Test
     void buildRunResultDescriptorExposesRunningStatusWithoutResultFile() {
-        Map<String, Object> row = ReconciliationOutputSupport.buildRunResultDescriptor(null, [
+        Map<String, Object> row = OutputDescriptorSupport.buildRunResultDescriptor(null, [
                 reconciliationRunResultId: "RUN_RESULT_1",
                 savedRunId               : "RS_PRODUCTION_ORDERS",
                 savedRunType             : "ruleset",
@@ -197,7 +197,7 @@ class ReconciliationOutputSupportTests {
 
     @Test
     void buildRunResultDescriptorLeavesLiveFieldsNullWhenAbsent() {
-        Map<String, Object> row = ReconciliationOutputSupport.buildRunResultDescriptor(null, [
+        Map<String, Object> row = OutputDescriptorSupport.buildRunResultDescriptor(null, [
                 reconciliationRunResultId: "RUN_RESULT_LEGACY",
                 statusEnumId             : "AUT_STAT_DONE",
         ], null, [:])
@@ -217,17 +217,17 @@ class ReconciliationOutputSupportTests {
                 reconciliationType     : "JSON"
         ]
 
-        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
+        assertTrue(OutputDescriptorSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 null
         ))
-        assertFalse(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
+        assertFalse(OutputDescriptorSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation",
                 null
         ))
-        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
+        assertTrue(OutputDescriptorSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 "shopify"
@@ -243,12 +243,12 @@ class ReconciliationOutputSupportTests {
                 reconciliationMappingId: null
         ]
 
-        assertFalse(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
+        assertFalse(OutputDescriptorSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 null
         ))
-        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
+        assertTrue(OutputDescriptorSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
     }
 
     @Test
@@ -266,11 +266,11 @@ class ReconciliationOutputSupportTests {
     void safeReadableArtifactPathAllowsResultFilesWithoutManifestLookup() {
         def ecWithoutManifest = [entity: [find: { String entityName -> null }]]
 
-        assertTrue(ReconciliationOutputSupport.isSafeReadableArtifactPath(
+        assertTrue(OutputPathSupport.isSafeReadableArtifactPath(
                 ecWithoutManifest,
                 "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/RS_API_ORDER_SYNC_result.json"
         ))
-        assertFalse(ReconciliationOutputSupport.isSafeReadableArtifactPath(
+        assertFalse(OutputPathSupport.isSafeReadableArtifactPath(
                 ecWithoutManifest,
                 "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/file1-api/shopify-orders.json"
         ))
@@ -283,9 +283,9 @@ class ReconciliationOutputSupportTests {
                 end  : Timestamp.valueOf("2026-04-30 17:00:00")
         ]
 
-        assertTrue(ReconciliationOutputSupport.isApiSourceDetailsMode([:], dateRange))
-        assertTrue(ReconciliationOutputSupport.isApiSourceDetailsMode([sourceMode: "api"], null))
-        assertFalse(ReconciliationOutputSupport.isApiSourceDetailsMode([sourceMode: "files"], null))
+        assertTrue(OutputDescriptorSupport.isApiSourceDetailsMode([:], dateRange))
+        assertTrue(OutputDescriptorSupport.isApiSourceDetailsMode([sourceMode: "api"], null))
+        assertFalse(OutputDescriptorSupport.isApiSourceDetailsMode([sourceMode: "files"], null))
     }
 
     @Test
@@ -315,7 +315,7 @@ class ReconciliationOutputSupportTests {
                 ])
         )
 
-        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
                 metadata: [
                         sourceMode: "api",
                         file1Label: "HotWax",
@@ -337,7 +337,7 @@ class ReconciliationOutputSupportTests {
         assertEquals("SHOPIFY-orders-api.json", sourceDetails.files[1].fileName)
         assertEquals(shopifyPath, sourceDetails.files[1].filePath)
         assertFalse(sourceDetails.files[1].canDownload as Boolean, "a purged extract must not be offered for download")
-        assertEquals("HotWax-orders-api.json", ReconciliationOutputSupport.sourceArtifactDisplayName(ec, hotwaxPath))
+        assertEquals("HotWax-orders-api.json", OutputPathSupport.sourceArtifactDisplayName(ec, hotwaxPath))
         dataManagerRoot.deleteDir()
     }
 
@@ -457,7 +457,7 @@ class ReconciliationOutputSupportTests {
                 ])
         )
 
-        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
                 metadata: [file1Label: "SHOPIFY", file2Label: "HotWax"],
         ])
 
@@ -496,7 +496,7 @@ class ReconciliationOutputSupportTests {
                 ])
         )
 
-        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
                 metadata: [file1Label: "SHOPIFY"],
         ])
 
@@ -524,7 +524,7 @@ class ReconciliationOutputSupportTests {
                 ])
         )
 
-        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
                 metadata: [
                         file1Label: "SHOPIFY",
                         file2Label: "HotWax",
@@ -580,13 +580,13 @@ class ReconciliationOutputSupportTests {
                 ])
         )
 
-        assertNotNull(ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+        assertNotNull(OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
                 metadata: [sourceMode: "api", file1Label: "SHOPIFY", file2Label: "HotWax"],
         ])?.files?.find { Map<String, Object> file -> file.filePath == sourcePath })
-        assertTrue(ReconciliationOutputSupport.isSafeReadableArtifactPath(ec, "runtime://datamanager/${sourcePath}"))
+        assertTrue(OutputPathSupport.isSafeReadableArtifactPath(ec, "runtime://datamanager/${sourcePath}"))
         assertEquals(
                 sourceFile.canonicalPath,
-                ReconciliationOutputSupport.resolveGeneratedOutputArtifactFile(ec, "runtime://datamanager/${sourcePath}").canonicalPath
+                OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, "runtime://datamanager/${sourcePath}").canonicalPath
         )
         assertEquals("GORJANA", ReconciliationOutputSupport.resolveGeneratedOutputTenantUserGroupId(ec, sourceFile, sourcePath))
         assertTrue(ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, sourceFile, sourcePath))

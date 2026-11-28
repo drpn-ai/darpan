@@ -224,7 +224,7 @@ class ReconciliationOutputSupport {
                         ])
                     }
                 }
-        }
+            }
         }
 
         File legacyOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
@@ -449,7 +449,7 @@ class ReconciliationOutputSupport {
     }
 
     /** Accept the buckets filter as a comma-separated string or a list; null/empty means "all buckets". */
-    static List<String> parseBucketSelection(Object buckets) {
+    private static List<String> parseBucketSelection(Object buckets) {
         if (buckets == null) return null
         List<String> values = []
         if (buckets instanceof CharSequence) {
@@ -675,7 +675,7 @@ class ReconciliationOutputSupport {
         ]
     }
 
-    static boolean isActiveRunResultStatus(Object rawStatusEnumId) {
+    private static boolean isActiveRunResultStatus(Object rawStatusEnumId) {
         ACTIVE_STATUSES.contains(normalize(rawStatusEnumId))
     }
 
@@ -695,40 +695,22 @@ class ReconciliationOutputSupport {
     }
 
     // ==================================================================================================
-    // Compatibility delegates — methods below moved to OutputPathSupport / OutputDescriptorSupport in
-    // the MACH P1 decomposition but keep thin static delegates here because they have external callers
-    // (runSavedRunDiff.groovy, runGenericDiff.groovy, NavigationSearchSupport.groovy,
-    // ReconciliationFacadeServices.xml) and/or are exercised on this class by the characterization
-    // harness ReconciliationOutputSupportTests (which must pass unchanged). Signatures are exact copies.
+    // Compatibility delegates: these moved to OutputPathSupport / OutputDescriptorSupport in the MACH P1 decomposition and
+    // are kept only for callers in other slices (runSavedRunDiff.groovy, NavigationSearchSupport.groovy,
+    // ReconciliationFacadeServices.xml, KeptCopySupportTests). DAR-OPS-029 S21a: the ones only this class's tests called are
+    // gone; S99 points the rest at their real homes and deletes these.
     // ==================================================================================================
 
     static boolean isSafeOutputPath(Object rawFileName) { return OutputPathSupport.isSafeOutputPath(rawFileName) }
-
-    static boolean isSafeReadableArtifactPath(def ec, Object rawFileName) { return OutputPathSupport.isSafeReadableArtifactPath(ec, rawFileName) }
 
     static String sourceFormatForFile(String fileName) { return OutputPathSupport.sourceFormatForFile(fileName) }
 
     static File resolveGeneratedOutputFile(def ec, Object rawFileName) { return OutputPathSupport.resolveGeneratedOutputFile(ec, rawFileName) }
 
-    static File resolveGeneratedOutputArtifactFile(def ec, Object rawFileName) { return OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, rawFileName) }
-
     static String sanitizeUploadFileName(String rawName, String fallbackBase = "file") { return OutputPathSupport.sanitizeUploadFileName(rawName, fallbackBase) }
-
-    protected static String sourceArtifactDisplayName(def ec, Object rawPath) { return OutputPathSupport.sourceArtifactDisplayName(ec, rawPath) }
 
     static Map<String, Object> parseGeneratedOutputText(String rawText) { return OutputDescriptorSupport.parseGeneratedOutputText(rawText) }
 
     static Map<String, Object> buildGeneratedOutputDescriptor(String fileName, Map<String, Object> diffDocument,
             long sizeBytes, Timestamp createdDate) { return OutputDescriptorSupport.buildGeneratedOutputDescriptor(fileName, diffDocument, sizeBytes, createdDate) }
-
-    static Map<String, Object> buildRunResultDescriptor(def ec, def runResult, File resultFile,
-            Map<String, Object> outputDocument) { return OutputDescriptorSupport.buildRunResultDescriptor(ec, runResult, resultFile, outputDocument) }
-
-    static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String savedRunId, String search) { return OutputDescriptorSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunId, search) }
-
-    static Map<String, Object> buildGeneratedOutputSourceDetails(def ec, Object rawFileName, Map<String, Object> outputDocument) { return OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, rawFileName, outputDocument) }
-
-    protected static boolean isApiSourceDetailsMode(Map<String, Object> metadata, Map<String, Object> dateRange) { return OutputDescriptorSupport.isApiSourceDetailsMode(metadata, dateRange) }
-
-    static String renderDifferencesCsv(Map<String, Object> diffDocument) { return OutputDescriptorSupport.renderDifferencesCsv(diffDocument) }
 }

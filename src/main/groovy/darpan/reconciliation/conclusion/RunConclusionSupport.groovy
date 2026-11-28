@@ -334,26 +334,32 @@ class RunConclusionSupport {
     }
 
     /**
-     * Aditi D7 (2026-11-28): per repeating side (DUPLICATE_IN_FILE_1 / _2), the keys a HIDE rule hid at least one repeat of,
-     * each with the code that hid it. A read-only pass over the repeated-key rows alone, before the rewrite, because a
+     * Aditi D7 / D7' (2026-11-28, "EVERY repeat hidden"): per repeating side (DUPLICATE_IN_FILE_1 / _2), the keys whose
+     * every repeat a HIDE rule hid, each with the first code that hid one. A key with a repeat still shown is not listed,
+     * so its partner row stays with it. A read-only pass over the repeated-key rows alone, before the rewrite, because a
      * partner row may come before its repeats in the document.
      */
     private static Map<String, Map<String, String>> hiddenRepeatedKeys(File diffFile, Closure<Map> finding, Closure<Map> concludeRow,
                                                                       Set<String> hiddenCodes) {
-        Map<String, Map<String, String>> bySide = [:]
+        Map<String, Map<String, String>> hidingCode = [:]
+        Map<String, Set<String>> shown = [:]
         DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
             String bucket = (String) finding(row).bucket
             String key = row.get("primaryId")?.toString()
             if (!key || !(bucket in ["DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2"])) return
             String code = ((Map) concludeRow(row).conclusion).code?.toString()
-            if (hiddenCodes.contains(code)) bySide.computeIfAbsent(bucket) { [:] }.putIfAbsent(key, code)
+            if (hiddenCodes.contains(code)) hidingCode.computeIfAbsent(bucket) { [:] }.putIfAbsent(key, code)
+            else shown.computeIfAbsent(bucket) { new HashSet<String>() }.add(key)
         }
-        return bySide
+        return hidingCode.collectEntries { String bucket, Map<String, String> byKey ->
+            Set<String> stillShown = shown.get(bucket) ?: ([] as Set<String>)
+            [(bucket): byKey.findAll { String key, String code -> !stillShown.contains(key) }]
+        } as Map<String, Map<String, String>>
     }
 
     /**
      * Aditi D7: a DUPLICATE_IN_FILE_y_PAIRED row is the other side's partner of a key repeated on side x (x != y). When a
-     * HIDE rule hid that key's repeats, the partner goes too: the code that hid them; null otherwise.
+     * HIDE rule hid every one of that key's repeats (D7'), the partner goes too: the code that hid them; null otherwise.
      */
     static String pairedHiddenBy(String bucket, String key, Map<String, Map<String, String>> hiddenRepeats) {
         if (!key || !hiddenRepeats) return null

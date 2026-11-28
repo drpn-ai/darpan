@@ -710,6 +710,21 @@ class RunConclusionSupportTests {
         assertEquals(3, d.summary.totalDifferences)
     }
 
+    // Aditi D7' (2026-11-28, "EVERY repeat hidden"): while any repeat of a key is still shown, its partner row stays with it.
+    @Test
+    void aPartnerRowStaysWhileAnyRepeatOfItsKeyIsShown() {
+        File doc = writeDiffDocument([repeatRow("DUPLICATE_IN_FILE_1_PAIRED", "K", FILE1, [omsOrderId: "K"]),
+                                      repeatRow("DUPLICATE_IN_FILE_2", "K", FILE2, [orderId: "K", reason: "split", rma: "K-A"]),
+                                      repeatRow("DUPLICATE_IN_FILE_2", "K", FILE2, [orderId: "K", reason: "other", rma: "K-B"])],
+                [totalDifferences: 3])
+        Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
+        Map d = parse(doc)
+        assertEquals([["DUPLICATE_IN_FILE_1_PAIRED", null], ["DUPLICATE_IN_FILE_2", "K-B"]],
+                ((List<Map>) d.differences).collect { [it.diffType, new JsonSlurper().parseText((String) it.data).rma] })
+        assertEquals([DUPLICATE_IN_FILE_2: 1], out.hiddenByBucket, "only the repeat the rule explains is hidden")
+        assertEquals(2, d.summary.totalDifferences)
+    }
+
     // A DUPLICATE_IN_FILE_2_PAIRED row is FILE_2's record: a rule reading FILE_2's field on it holds (read as FILE_1's, FILE_2
     // would be looked up instead and the rule could not hold).
     @Test

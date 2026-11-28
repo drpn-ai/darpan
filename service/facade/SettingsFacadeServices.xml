@@ -642,11 +642,8 @@
             <set field="sftpServerFinder" from="ec.entity.find('darpan.reconciliation.SftpServer').orderBy('description,sftpServerId').useCache(false)"/>
             <set field="rows" from="(activeTenantUserGroupId ? sftpServerFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false, hostKeyFingerprint: item.hostKeyFingerprint, hostKeyPinnedDate: item.hostKeyPinnedDate] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.sftpServerId, row.description, row.host, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
-            <set field="totalCount" from="filteredRows.size()"/>
-            <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
-            <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
-            <set field="servers" from="filteredRows.subList(fromIndex, toIndex)"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            <set field="servers" from="darpan.facade.common.PaginationSupport.pageRows(filteredRows, pageIndexSafe, pageSizeSafe)"/>
+            <set field="pagination" from="darpan.facade.common.PaginationSupport.pagination(pageIndexSafe, pageSizeSafe, filteredRows.size())"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -811,11 +808,8 @@
             <set field="accessibleRows" from="darpan.facade.common.SharedConfigAccessSupport.listAccessibleConfigRows(ec, 'SCFG_NS_AUTH')"/>
             <set field="rows" from="accessibleRows.collect { item -> [nsAuthConfigId: item.nsAuthConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), authType: item.authType ?: 'NONE', username: item.username, tokenUrl: item.tokenUrl, clientId: item.clientId, certId: item.certId, scope: item.scope ?: 'restlets rest_webservices', isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false, hasApiToken: item.apiToken ? true : false, hasPrivateKeyPem: item.privateKeyPem ? true : false, isShared: item.companyUserGroupId != activeTenantUserGroupId] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsAuthConfigId, row.description, row.authType, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
-            <set field="totalCount" from="filteredRows.size()"/>
-            <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
-            <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
-            <set field="authConfigs" from="filteredRows.subList(fromIndex, toIndex)"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            <set field="authConfigs" from="darpan.facade.common.PaginationSupport.pageRows(filteredRows, pageIndexSafe, pageSizeSafe)"/>
+            <set field="pagination" from="darpan.facade.common.PaginationSupport.pagination(pageIndexSafe, pageSizeSafe, filteredRows.size())"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

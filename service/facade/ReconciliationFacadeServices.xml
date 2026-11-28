@@ -3926,7 +3926,7 @@
             <set field="sftpServers" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSftpServerOptions(ec)"/>
             <set field="sourceConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSourceConfigOptions(ec)"/>
             <set field="nsRestletConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listNsRestletOptions(ec)"/>
-            <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listOmsRestSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listShopifySourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listSystemRemoteOptions(ec)"/>
+            <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listOmsRestSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listShopifySourceRemoteOptions(ec)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

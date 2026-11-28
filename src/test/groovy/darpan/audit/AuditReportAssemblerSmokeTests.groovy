@@ -777,18 +777,18 @@ class AuditReportAssemblerSmokeTests {
 
     @Test
     void moneyAndTemplatesFollowTheConventions() {
-        assertEquals([amount: "-0.01", currency: "USD"], AuditReportAssembler.money(new BigDecimal("-0.010000"), "USD"))
-        assertEquals([amount: "1500", currency: "JPY"], AuditReportAssembler.money(new BigDecimal("1500.00"), "JPY"))
-        assertNull(AuditReportAssembler.money(null, "USD"))
+        assertEquals([amount: "-0.01", currency: "USD"], AuditRecordFacts.money(new BigDecimal("-0.010000"), "USD"))
+        assertEquals([amount: "1500", currency: "JPY"], AuditRecordFacts.money(new BigDecimal("1500.00"), "JPY"))
+        assertNull(AuditRecordFacts.money(null, "USD"))
         assertEquals('Fix CM-1 by {unknown}; ${x} stays text',
                 AuditReportAssembler.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
         // DAR-BE-093: a composite compare key (order id + item seq id) is joined by an invisible unit separator; people
         // and agents read it as order/item.
-        assertEquals("M1137118/01", AuditReportAssembler.displayKey("M1137118\u001F01"))
-        assertEquals("INV1", AuditReportAssembler.displayKey("INV1"))
-        assertNull(AuditReportAssembler.displayKey(null))
-        assertEquals("NetSuite", AuditReportAssembler.systemKey("NETSUITE"))
-        assertEquals("AMAZON", AuditReportAssembler.systemKey("AMAZON"), "an unmapped root keeps its enumId")
+        assertEquals("M1137118/01", AuditRecordFacts.displayKey("M1137118\u001F01"))
+        assertEquals("INV1", AuditRecordFacts.displayKey("INV1"))
+        assertNull(AuditRecordFacts.displayKey(null))
+        assertEquals("NetSuite", AuditRecordFacts.systemKey("NETSUITE"))
+        assertEquals("AMAZON", AuditRecordFacts.systemKey("AMAZON"), "an unmapped root keeps its enumId")
     }
 
     // -----------------------------------------------------------------------------------------------------------------
@@ -1148,7 +1148,7 @@ class AuditReportAssemblerSmokeTests {
                           [systemEnumId: "NETSUITE", recordType: "salesOrderLine", recordId: "SO7330484", recordStatus: "Pending Billing", recordData: JsonOutput.toJson(line)],
                           [systemEnumId: "SHOPIFY", recordType: "order", recordId: "18954083434627", recordData: JsonOutput.toJson(shopify)],
                           [systemEnumId: "NETSUITE", recordType: "rma", recordId: "RMA1", recordData: "not json"]]
-        Map report = AuditReportAssembler.recordsJson(rows)
+        Map report = AuditRecordFacts.recordsJson(rows)
         // Aditi: "order and return totals are missing": an item names its order's total, a return its own and its order's.
         assertEquals([id: "M1167975/01", internalId: null, status: "Completed", orderName: "#GOR195470263", orderStatus: "Completed",
                       orderTotal: [amount: "324.89", currency: null]], report.OMS.orderItem[0])
@@ -1166,44 +1166,44 @@ class AuditReportAssemblerSmokeTests {
         // DAR-UI-081 (R8 F-104639): a return held behind another names it and its exchange order, which has no NetSuite id.
         Map held = [returnId: "M259806", statusId: "RETURN_COMPLETED", exchangeOrderId: "M1147567", exchangeOrderName: "EXC-#GOR196740771-3",
                     openReturnOnOrderId: "M192313", openReturnOnOrderStatus: "RETURN_REQUESTED"]
-        Map heldReport = AuditReportAssembler.recordsJson([[systemEnumId: "OMS", recordType: "return", recordId: "M259806", recordData: JsonOutput.toJson(held)]])
+        Map heldReport = AuditRecordFacts.recordsJson([[systemEnumId: "OMS", recordType: "return", recordId: "M259806", recordData: JsonOutput.toJson(held)]])
         assertEquals([id: "M259806", internalId: null, status: "Completed", heldBy: [id: "M192313", status: "Requested"],
                       exchange: [id: "EXC-#GOR196740771-3", netsuiteId: null]], heldReport.OMS['return'][0])
 
         // DAR-UI-080 (Aditi: "add order date and return date"), as the tenant's day: 2026-10-22 00:30Z is still the 21st in LA.
         ZoneId la = ZoneId.of("America/Los_Angeles")
-        Map dated = AuditReportAssembler.recordFacts([returnDate: 1792187864000L, orderDate: "2026-10-22T00:30:00Z"], "return", la)
+        Map dated = AuditRecordFacts.recordFacts([returnDate: 1792187864000L, orderDate: "2026-10-22T00:30:00Z"], "return", la)
         assertEquals(["2026-10-21", "2026-10-16"], [dated.orderDate, dated.returnDate])
-        assertEquals("2026-10-21", AuditReportAssembler.recordFacts([omsOrderDate: "2026-10-21T18:22:10Z"], "orderItem", la).orderDate)
-        assertEquals("2026-10-20", AuditReportAssembler.recordFacts([createdAt: "2026-10-20T10:00:00-07:00"], "order", la).orderDate)
-        assertEquals("2026-10-21", AuditReportAssembler.recordFacts([orderDate: "2026-10-21 18:22:10.0"], "order", la).orderDate)
+        assertEquals("2026-10-21", AuditRecordFacts.recordFacts([omsOrderDate: "2026-10-21T18:22:10Z"], "orderItem", la).orderDate)
+        assertEquals("2026-10-20", AuditRecordFacts.recordFacts([createdAt: "2026-10-20T10:00:00-07:00"], "order", la).orderDate)
+        assertEquals("2026-10-21", AuditRecordFacts.recordFacts([orderDate: "2026-10-21 18:22:10.0"], "order", la).orderDate)
         // DAR-BE-372: NetSuite's M/d/yyyy is a day (it was read as none, so an R10 card said Day "—").
-        assertEquals("2026-10-21", AuditReportAssembler.recordFacts([orderDate: "10/21/2026", createdAt: "2026-10-20T10:00:00Z"], "salesOrderLine", la).orderDate)
+        assertEquals("2026-10-21", AuditRecordFacts.recordFacts([orderDate: "10/21/2026", createdAt: "2026-10-20T10:00:00Z"], "salesOrderLine", la).orderDate)
 
         // DAR-UI-081 (Aditi: "show item as a subheading with SKU", "add customer name", "add location ID to the line box").
-        Map unit = AuditReportAssembler.recordFacts([sku: "263-203-186-G", customerName: "Ada Lovelace", facilityId: "71", facilityName: "Portland"], "orderItem", la)
+        Map unit = AuditRecordFacts.recordFacts([sku: "263-203-186-G", customerName: "Ada Lovelace", facilityId: "71", facilityName: "Portland"], "orderItem", la)
         assertEquals(["263-203-186-G", "Ada Lovelace", "71", "Portland"], [unit.sku, unit.customer, unit.location, unit.locationName])
-        assertEquals("28", AuditReportAssembler.recordFacts([lineLocation: "28"], "salesOrderLine", la).location)
-        Map nsLine = AuditReportAssembler.recordFacts([salesChannel: "POS Channel", fulfillments: ["IF7456843"]], "salesOrderLine", la)
+        assertEquals("28", AuditRecordFacts.recordFacts([lineLocation: "28"], "salesOrderLine", la).location)
+        Map nsLine = AuditRecordFacts.recordFacts([salesChannel: "POS Channel", fulfillments: ["IF7456843"]], "salesOrderLine", la)
         assertEquals(["POS Channel", ["IF7456843"]], [nsLine.salesChannel, nsLine.fulfillments])
-        assertEquals("STANDARD", AuditReportAssembler.recordFacts([shipmentMethodTypeId: "STANDARD"], "orderItem", la).shipMethod)
-        assertEquals(null, AuditReportAssembler.recordFacts([fulfillments: []], "salesOrderLine", la).fulfillments)
+        assertEquals("STANDARD", AuditRecordFacts.recordFacts([shipmentMethodTypeId: "STANDARD"], "orderItem", la).shipMethod)
+        assertEquals(null, AuditRecordFacts.recordFacts([fulfillments: []], "salesOrderLine", la).fulfillments)
 
         // Aditi: "all findings should have basic order info... maintain some consistency": the same facts from each
         // system's own fields (R20 pairs a Shopify order with a HotWax order).
-        Map shopifyOrder = AuditReportAssembler.recordFacts([name: "#GOR197395673", createdAt: "2026-10-24T17:02:11Z", totalPrice: "118.00",
+        Map shopifyOrder = AuditRecordFacts.recordFacts([name: "#GOR197395673", createdAt: "2026-10-24T17:02:11Z", totalPrice: "118.00",
                 currencyCode: "USD", sourceName: "pos", displayFinancialStatus: "PAID", displayFulfillmentStatus: "UNFULFILLED"], "order", la)
         assertEquals(["#GOR197395673", "2026-10-24", "POS", [amount: "118.00", currency: "USD"], "Unfulfilled", "Paid"],
                 [shopifyOrder.orderName, shopifyOrder.orderDate, shopifyOrder.salesChannel, shopifyOrder.orderTotal, shopifyOrder.status,
                  shopifyOrder.paymentStatus])
-        Map hotwaxOrder = AuditReportAssembler.recordFacts([orderName: "#GOR197395673", statusId: "ORDER_COMPLETED", grandTotal: 118,
+        Map hotwaxOrder = AuditRecordFacts.recordFacts([orderName: "#GOR197395673", statusId: "ORDER_COMPLETED", grandTotal: 118,
                 currencyUomId: "USD", billToCustomer: [firstName: "Ada", lastName: "Lovelace"],
                 shipGroups: [[shipGroupSeqId: "00001", shipmentMethodTypeId: "STANDARD"], [shipGroupSeqId: "00002", shipmentMethodTypeId: "STANDARD"]]], "order", la)
         assertEquals(["Completed", "Ada Lovelace", "STANDARD", [amount: "118.00", currency: "USD"]],
                 [hotwaxOrder.status, hotwaxOrder.customer, hotwaxOrder.shipMethod, hotwaxOrder.orderTotal])
-        assertEquals("Web", AuditReportAssembler.recordFacts([salesChannelEnumId: "WEB_SALES_CHANNEL"], "orderItem", la).salesChannel)
+        assertEquals("Web", AuditRecordFacts.recordFacts([salesChannelEnumId: "WEB_SALES_CHANNEL"], "orderItem", la).salesChannel)
 
-        Map document = AuditReportAssembler.recordsJson(rows, true)
+        Map document = AuditRecordFacts.recordsJson(rows, true)
         assertEquals(shopify, document.Shopify.order[0].data)
         assertEquals(line, document.NetSuite.salesOrderLine[0].data)
         assertFalse(report.Shopify.order[0].containsKey("data"))

@@ -22,13 +22,13 @@ class ShopifyReturnRecordFactsTests {
     @Test
     void aStoredReturnWithOnlyItsClosedAtStillHasItsDay() {
         // 23:43Z on the 2nd is still the 2nd in LA; nothing else was read, so nothing else is said.
-        Map facts = AuditReportAssembler.recordFacts(STORED, "return", LA)
+        Map facts = AuditRecordFacts.recordFacts(STORED, "return", LA)
         assertEquals(["2026-11-02", null, null, null], [facts.returnDate, facts.orderDate, facts.orderTotal, facts.status])
     }
 
     @Test
     void theWidenedReadGivesStatusTotalAndOrderDay() {
-        Map facts = AuditReportAssembler.recordFacts(STORED + [orderDate: "2026-10-29T17:05:00Z", displayFinancialStatus: "REFUNDED",
+        Map facts = AuditRecordFacts.recordFacts(STORED + [orderDate: "2026-10-29T17:05:00Z", displayFinancialStatus: "REFUNDED",
                 displayFulfillmentStatus: "FULFILLED", totalPrice: "182.3", currencyCode: "CAD", totalRefunded: "182.3"], "return", LA)
         // DAR-BE-360: the financial status is the record's payment status, no longer folded into its status.
         assertEquals(["Fulfilled", "Refunded"], [facts.status, facts.paymentStatus])
@@ -38,6 +38,6 @@ class ShopifyReturnRecordFactsTests {
 
     @Test
     void anOmsReturnsOwnDateStillWinsOverClosedAt() {
-        assertEquals("2026-10-16", AuditReportAssembler.recordFacts([returnDate: 1792187864000L, closedAt: "2026-11-02T23:43:37Z"], "return", LA).returnDate)
+        assertEquals("2026-10-16", AuditRecordFacts.recordFacts([returnDate: 1792187864000L, closedAt: "2026-11-02T23:43:37Z"], "return", LA).returnDate)
     }
 }

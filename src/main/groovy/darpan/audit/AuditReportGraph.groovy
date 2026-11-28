@@ -58,7 +58,7 @@ class AuditReportGraph {
         return [["FILE_1", "file1"], ["FILE_2", "file2"]].collect { String side, String field ->
             String path = execution.get("${field}DataManagerPath".toString()) as String
             String system = systemBySide[side]
-            path ? [system  : system ? AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(system)) : null,
+            path ? [system  : system ? AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(system)) : null,
                     records : execution.get("${field}RecordCount".toString()),
                     filePath: path] : null
         }.findAll() as List<Map>

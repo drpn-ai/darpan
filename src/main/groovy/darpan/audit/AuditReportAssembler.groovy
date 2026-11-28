@@ -2,16 +2,12 @@ package darpan.audit
 
 import darpan.config.DarpanSettings
 import darpan.facade.common.TenantScopedFinder
-import darpan.reconciliation.core.ReconciliationServices
 import org.moqui.entity.EntityCondition
 
-import java.math.RoundingMode
 import java.sql.Date
 import java.sql.Timestamp
-import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
-import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeParseException
 import java.util.regex.Matcher
@@ -40,8 +36,6 @@ class AuditReportAssembler {
     static final String REPORT_SCHEMA = "darpan.audit.report/v1"
     static final String FINDING_SCHEMA = "darpan.audit.finding/v1"
 
-    static final Map<String, String> SYSTEM_KEYS = [OMS: "OMS", NETSUITE: "NetSuite", SHOPIFY: "Shopify"].asImmutable()
-
     static final String OPEN = "AUDFS_OPEN"
     static final String FIXED = "AUDFS_FIXED"
     static final String RAN = "AUDCS_RAN"
@@ -66,11 +60,6 @@ class AuditReportAssembler {
     private static final List<String> ENUM_TYPES = ["AuditCategory", "AuditStatementWeight", "AuditFindingState",
             "AuditCheckStatus", "AuditSourceRead", "AuditFindingEvent", "AuditActorType", "AuditPeriod"].asImmutable()
     private static final String WHY = "audit assembler: explicit companyUserGroupId condition applied"
-
-    /** The JSON key for a ROOT system enum (OMS, NETSUITE, SHOPIFY); an unmapped root uses its enumId. */
-    static String systemKey(String rootEnumId) {
-        return SYSTEM_KEYS[rootEnumId] ?: rootEnumId
-    }
 
     // ---------------------------------------------------------------------------------------------------------
     // The report
@@ -262,7 +251,7 @@ class AuditReportAssembler {
             Map run = runByCheck[checkId]
             if (run == null) return
             readsByRun[run.checkRunId as String].each { Map read ->
-                String key = systemKey(read.systemEnumId as String)
+                String key = AuditRecordFacts.systemKey(read.systemEnumId as String)
                 readsBySystem.computeIfAbsent(key) { [] } << read
                 if (read.statusEnumId != READ_COMPLETE) badChecksBySystem[key] << checkId
             }
@@ -876,7 +865,7 @@ class AuditReportAssembler {
                 firstFound: isoDate(row.firstFoundDate as Date),
                 ageDays   : days(row.firstFoundDate as Date, day),
                 records   : records,
-                difference: money(row.differenceAmount as BigDecimal, row.currencyUomId as String),
+                difference: AuditRecordFacts.money(row.differenceAmount as BigDecimal, row.currencyUomId as String),
                 next      : "darpan findings show ${row.findingId}".toString()]
     }
 
@@ -1064,7 +1053,7 @@ class AuditReportAssembler {
         unnamed.findAll { it.automationId }.each { Map check ->
             out[check.checkId as String] = (byAutomation[check.automationId as String] ?: []).collect { Map source ->
                 String enumId = source.systemEnumId as String
-                enumId ? systemKey(AuditAutomationSupport.rootSystem(enumId)) : null
+                enumId ? AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(enumId)) : null
             }.findAll { it }.unique()
         }
         return out
@@ -1083,7 +1072,7 @@ class AuditReportAssembler {
 
     private static Map compared(List<Map> reads) {
         Map<String, Object> out = new LinkedHashMap<>()
-        reads.groupBy { systemKey(it.systemEnumId as String) }.each { String key, List<Map> rs ->
+        reads.groupBy { AuditRecordFacts.systemKey(it.systemEnumId as String) }.each { String key, List<Map> rs ->
             List counted = rs*.recordCount.findAll { it != null }
             out[key] = counted ? (counted.sum { it as long } as long) : null
         }
@@ -1117,7 +1106,7 @@ class AuditReportAssembler {
                 .orderBy("sequenceNum").list()*.getMap()
         List<Map> recordRows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", findingId)
                 .orderBy("recordSeqId").list()*.getMap()
-        Map records = recordsJson(recordRows, true, zone)
+        Map records = AuditRecordFacts.recordsJson(recordRows, true, zone)
 
         String state = f.stateEnumId
         Date firstFound = f.firstFoundDate as Date
@@ -1128,14 +1117,14 @@ class AuditReportAssembler {
         Map<String, String> checkCodes = [(check.checkId as String): check.checkCode as String]
 
         String currency = f.currencyUomId
-        Map expected = f.expectedAmount == null ? null : money(f.expectedAmount as BigDecimal, currency) + [source: f.expectedSource]
-        Map actual = f.actualAmount == null ? null : money(f.actualAmount as BigDecimal, currency) + [source: f.actualSource]
+        Map expected = f.expectedAmount == null ? null : AuditRecordFacts.money(f.expectedAmount as BigDecimal, currency) + [source: f.expectedSource]
+        Map actual = f.actualAmount == null ? null : AuditRecordFacts.money(f.actualAmount as BigDecimal, currency) + [source: f.actualSource]
         def conclusion = f.conclusionEnumId ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", f.conclusionEnumId).useCache(true).one() : null
         Map levels = priorityLevels(ec, tenantId, [statement])
         Map level = unitPriority([row: f, state: state], levels.statementLevels as Map, levels.overrides as Map)
         Map<String, String> fill = templateValues(f, recordRows)
         Map<String, String> recordFields = recordFieldValues(recordRows)
-        String fixWhere = check.fixWhereEnumId ? systemKey(check.fixWhereEnumId as String) : (records ? records.keySet().first() as String : null)
+        String fixWhere = check.fixWhereEnumId ? AuditRecordFacts.systemKey(check.fixWhereEnumId as String) : (records ? records.keySet().first() as String : null)
 
         // DAR-BE-361: a person's event (an acknowledgement) is not a check looking at the record.
         Timestamp lastChecked = (f.lastCheckedStamp ?: events.findAll { it.byTypeEnumId != USER_ACTOR }
@@ -1173,7 +1162,7 @@ class AuditReportAssembler {
                                 rule      : f.ruleText ?: statement.statementText,
                                 expected  : expected,
                                 actual    : actual,
-                                difference: expected != null && actual != null ? money(f.differenceAmount as BigDecimal, currency) : null,
+                                difference: expected != null && actual != null ? AuditRecordFacts.money(f.differenceAmount as BigDecimal, currency) : null,
                                 checks    : evidenceChecks.collect { [label: it.label, passed: it.passed == "Y", value: it.checkValue ?: null] }],
                         diagnosis: [
                                 conclusion : conclusion == null ? null : [code: conclusion.enumCode ?: conclusion.enumId, label: conclusion.description],
@@ -1189,7 +1178,7 @@ class AuditReportAssembler {
                                         // The check's schedule arrives with DAR-BE-092 (automation linked to the check).
                                         nextCheck : null,
                                         passesWhen: fillTemplate(check.passesWhenTemplate as String, recordFields + fill) ?:
-                                                "The check looks at ${displayKey(f.recordKey as String)} and no longer reports it.".toString()],
+                                                "The check looks at ${AuditRecordFacts.displayKey(f.recordKey as String)} and no longer reports it.".toString()],
                                 darpanChanges: DARPAN_CHANGES],
                         history  : events.collect { Map e ->
                             [at: isoDateTime(e.eventStamp as Timestamp, zone), event: codes[e.eventTypeEnumId as String],
@@ -1224,22 +1213,13 @@ class AuditReportAssembler {
      */
     private static Map<String, String> templateValues(Map f, List<Map> recordRows) {
         String currency = f.currencyUomId
-        Map<String, String> values = [recordKey: displayKey(f.recordKey as String), headline: f.headline as String, currency: currency]
+        Map<String, String> values = [recordKey: AuditRecordFacts.displayKey(f.recordKey as String), headline: f.headline as String, currency: currency]
         ["expectedAmount", "actualAmount", "differenceAmount"].each { String k ->
-            if (f[k] != null) values[k] = amountText(f[k] as BigDecimal, currency)
+            if (f[k] != null) values[k] = AuditRecordFacts.amountText(f[k] as BigDecimal, currency)
         }
-        if (f.differenceAmount != null) values.differenceAbs = amountText((f.differenceAmount as BigDecimal).abs(), currency)
+        if (f.differenceAmount != null) values.differenceAbs = AuditRecordFacts.amountText((f.differenceAmount as BigDecimal).abs(), currency)
         recordRows.each { Map r -> values.putIfAbsent(r.recordType as String, r.recordId as String) }
         return values
-    }
-
-    /**
-     * A record key as people and agents read it. A composite compare key (order id + item seq id) is joined by an
-     * invisible unit separator; it reads as order/item. The ledger keeps the raw key, which closing matches against the
-     * examined keys.
-     */
-    static String displayKey(String key) {
-        return key?.replace(ReconciliationServices.COMPOSITE_KEY_DELIMITER, "/")
     }
 
     /**
@@ -1293,7 +1273,7 @@ class AuditReportAssembler {
     static Map<String, String> recordFieldValues(List<Map> recordRows) {
         Map<String, String> out = [:]
         recordRows.each { Map r ->
-            recordData(r.recordData)?.each { k, v ->
+            AuditRecordFacts.recordData(r.recordData)?.each { k, v ->
                 if (v != null && !(v instanceof Map) && !(v instanceof Collection)) out.putIfAbsent(k as String, v.toString())
             }
         }
@@ -1304,237 +1284,6 @@ class AuditReportAssembler {
     // Shared shapes and reads
     // ---------------------------------------------------------------------------------------------------------
 
-    /**
-     * records.<System>.<recordType>: [ {id, internalId, status} ], systems and types in stored order. DAR-UI-080: plus what
-     * it takes to see what happened, from the record's data (recordFacts), when known; and, in a finding's own document
-     * (withData), the data itself: every field the reads gave.
-     */
-    static Map recordsJson(List<Map> recordRows, boolean withData = false, ZoneId zone = ZoneId.of("UTC")) {
-        Map<String, Map<String, List>> out = new LinkedHashMap<>()
-        recordRows.each { Map r ->
-            Map<String, List> byType = out.computeIfAbsent(systemKey(r.systemEnumId as String)) { new LinkedHashMap<>() }
-            Map data = recordData(r.recordData)
-            Map facts = recordFacts(data, r.recordType as String, zone)
-            Object factStatus = facts.remove("status")
-            Map record = [id: r.recordId, internalId: r.internalId ?: null, status: r.recordStatus ?: factStatus ?: null]
-            record.putAll(facts.findAll { it.value != null })
-            if (withData && data) record.data = data
-            byType.computeIfAbsent(r.recordType as String) { [] } << record
-        }
-        return out
-    }
-
-    /** AuditFindingRecord.recordData: the record's fields as JSON; anything else reads as none. */
-    static Map recordData(Object stored) {
-        if (stored instanceof Map) return (Map) stored
-        String text = stored?.toString()?.trim()
-        if (!text) return null
-        try {
-            Object parsed = new groovy.json.JsonSlurper().parseText(text)
-            return parsed instanceof Map ? (Map) parsed : null
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
-    /**
-     * DAR-UI-080 (Aditi: "the minimal amount of information needed to draw a meaningful conclusion"). A record's facts
-     * from its data, under the fields Darpan's reads give them: its order's name and HotWax status (a HotWax item's
-     * omsOrderName and omsOrderStatusId, a return's orderName), a return's channel and AfterShip warranty, its order's total
-     * (an order's grandTotal in HotWax, totalPrice in Shopify, else the orderGrandTotal an item or return carries) and a
-     * return's own (returnTotal), a NetSuite order's customer
-     * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's fulfillment status when its read
-     * gave one, else the record's own (statusId), with its payment status apart (paymentStatus, DAR-BE-360); its order's date and a return's own (a
-     * Shopify return's closedAt when it has no other, DAR-BE-359), as the tenant's calendar day (zone); its customer, an
-     * item's SKU and its location (HotWax facilityId and its name, NetSuite lineLocation). DAR-UI-081: a return held behind
-     * another (R8 "Exchange held by open return") names the return holding it (heldBy) and its exchange order, with
-     * whether that order reached NetSuite. Codes read as words (ORDER_COMPLETED -> Completed); data keeps them.
-     */
-    /**
-     * DAR-BE-372 rule 2. Every read field that looks like a status, an amount or a date, by what the finding card makes of
-     * it. recordFacts reads the fed ones; `notOnCard` ones are known and left off on purpose. FindingCardRulesTests fails on
-     * a field in a sample read that is in neither, so a new read field is placed before a card can drop it.
-     */
-    static final Map<String, List<String>> CARD_FIELDS = [
-            status      : ["displayFulfillmentStatus", "statusId", "lineState", "displayFinancialStatus"],
-            hotwaxStatus: ["omsItemStatusId", "omsOrderStatusId"],   // an item's own, else its order's (orderStatus)
-            amount      : ["grandTotal", "totalPrice", "orderGrandTotal", "returnTotal", "lineAmount", "returnCredit"],
-            day         : ["omsOrderDate", "orderDate", "createdAt", "tranDate", "returnDate", "entryDate", "closedAt"],
-            notOnCard   : ["status", "cancelledAt", "processedAt", "updatedAt", "currentTotalPriceSet", "currentTotalTaxSet",
-                           "subtotalPriceSet", "totalPriceSet", "totalRefunded", "openReturnOnOrderStatus"],
-    ].asImmutable()
-
-    static Map recordFacts(Map data, String recordType, ZoneId zone = ZoneId.of("UTC")) {
-        if (!data) return [:]
-        Closure<String> text = { String field -> data.get(field) instanceof Map || data.get(field) instanceof List ? null : (data.get(field)?.toString()?.trim() ?: null) }
-        Closure<Map> amount = { String value ->
-            BigDecimal number = null
-            try { number = value ? new BigDecimal(value) : null } catch (NumberFormatException ignored) { }
-            number != null ? money(number, text("currencyUomId") ?: text("currencyCode")) : null
-        }
-        String fulfilled = text("displayFulfillmentStatus")
-        List<Map> deposits = ((data.get("deposits") instanceof List ? data.get("deposits") : []) as List).findAll { it instanceof Map }
-                .collect { Map d -> [id: d.tranId, amount: d.amount, status: d.status?.toString()?.replaceFirst(/^.* : /, '')] }
-        String heldBy = text("openReturnOnOrderId")
-        String exchange = text("exchangeOrderName") ?: text("exchangeOrderId")
-        return [status     : fulfilled ? words(fulfilled) : statusWords(text("statusId")),
-                paymentStatus: paymentStatus(data, text, deposits),
-                orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : recordType == "order" ? text("name") : null),
-                orderStatus: statusWords(text("omsOrderStatusId")),
-                // DAR-BE-372 rule 2. HotWax's own word for this record, carried on another system's row (an R10 NetSuite
-                // line's omsItemStatusId), so the HotWax cell says it although no HotWax record was kept.
-                hotwaxStatus: statusWords(text("omsItemStatusId")),
-                customer   : text("customerName") ?: personName(data.get("billToCustomer")),
-                sku        : text("sku"),
-                location   : text("facilityId") ?: text("lineLocation"),
-                locationName: text("facilityName"),
-                // DAR-UI-081 (Aditi: "add order sales channel and shipping method", "add the IF id"): NetSuite's channel
-                // (custbody_hc_sales_channel), HotWax's ship group method, a NetSuite line's item fulfillments.
-                salesChannel: text("salesChannel") ?: channelWords(text("sourceName") ?: text("salesChannelEnumId")),
-                // DAR-BE-372: an R10 NetSuite line carries its HotWax item's method (omsItemShipmentMethodTypeId).
-                shipMethod : text("shipmentMethodTypeId") ?: text("omsItemShipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
-                fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
-                orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null) ?:
-                        text("tranDate"), zone),
-                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate") ?: text("closedAt"), zone) : null,
-                heldBy     : heldBy ? [id: heldBy, status: statusWords(text("openReturnOnOrderStatus"))] : null,
-                exchange   : exchange ? [id: exchange, netsuiteId: text("exchangeOrderNetsuiteId")] : null,
-                channel    : text("returnChannelEnumId"),
-                warrantyId : text("warrantyId"),
-                // Aditi: "order and return totals are missing": an order's own total, else the one its item or return carries.
-                orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
-                returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
-                // DAR-BE-372 rule 2. A line's own amount (NetSuite lineAmount), for a finding about one line.
-                lineTotal  : amount(text("lineAmount")),
-                deposits   : deposits ?: null,
-                lines      : orderLines(data)] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
-    }
-
-    /**
-     * DAR-BE-360 (Aditi 2026-11-25: "add payment status to all orders and refunds", in each system's own words), from what
-     * the record's read gave, never a lookup: Shopify's financial status; a HotWax order's payment preferences, each status
-     * once ("Settled, Refunded"), "No payment" when it has none; a HotWax return's credit (read when the run asks it,
-     * DAR-BE-192), "Refunded" above zero; a NetSuite order's or line's customer deposits, each status once. Else none.
-     */
-    private static String paymentStatus(Map data, Closure<String> text, List<Map> deposits) {
-        if (text("displayFinancialStatus")) return words(text("displayFinancialStatus"))
-        Object opps = data.get("paymentPreferences")
-        if (opps instanceof List && opps) {
-            String said = ((List) opps).findAll { it instanceof Map && it.statusId }
-                    .collect { words(((Map) it).statusId.toString().replaceFirst(/^PAYMENT_/, '')) }.unique().join(", ")
-            if (said) return said
-        }
-        if (text("hasPaymentPreference") == "N") return "No payment"
-        if (text("returnCredit")) {
-            try { return new BigDecimal(text("returnCredit")) > 0 ? "Refunded" : "Not refunded" } catch (NumberFormatException ignored) { }
-        }
-        return deposits.collect { it.status }.findAll().unique().join(", ") ?: null
-    }
-
-    /**
-     * DAR-UI-099. Another line of the finding's order: how many units the read held of it, whether the run set it aside
-     * (a filter: an item not yet completed, a NetSuite payment line), and for a line with no HotWax line id its item, type
-     * and amount (NetSuite "Store Credit - Redemption", Payment, -89.30). A NetSuite line's status is its line state.
-     */
-    private static Map orderLineFacts(Map data, Closure<String> text, Closure<Map> amount) {
-        Map facts = [quantity: data.get("units") instanceof Number ? data.get("units") : null,
-                     setAside: text("presence") == "EXCLUDED",
-                     item    : text("itemName"),
-                     itemType: text("itemType"),
-                     amount  : amount(text("lineAmount"))]
-        if (!text("statusId") && text("lineState")) facts.status = words(text("lineState"))
-        return facts
-    }
-
-    /**
-     * DAR-UI-080. A record's date as the tenant's calendar day (2026-10-21): epoch millis (an OMS return's returnDate), an
-     * ISO instant (GraphQL orderDate, Shopify createdAt), a date already written as one, or NetSuite's M/d/yyyy (DAR-BE-372). Anything else is no date.
-     */
-    static String dayOf(String text, ZoneId zone) {
-        if (!text) return null
-        try {
-            if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate().toString()
-            if (text ==~ /\d{4}-\d{2}-\d{2}T.+/) return OffsetDateTime.parse(text).atZoneSameInstant(zone).toLocalDate().toString()
-            if (text ==~ /\d{4}-\d{2}-\d{2}.*/) return text.substring(0, 10)
-            // DAR-BE-372. NetSuite's tranDate as its SuiteQL gives it: 11/7/2026 (M/d/yyyy).
-            def us = text =~ /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
-            if (us.find()) return LocalDate.of(us.group(3) as int, us.group(1) as int, us.group(2) as int).toString()
-        } catch (DateTimeException ignored) { }
-        return null
-    }
-
-    /**
-     * DAR-UI-081 (Aditi: "all findings should have basic order info... maintain some consistency"). The same facts
-     * under each system's own names: a customer as HotWax's billToCustomer {firstName, lastName}; a sales channel as
-     * Shopify's sourceName (pos, web) or HotWax's salesChannelEnumId (POS_SALES_CHANNEL); a ship method from HotWax's
-     * ship groups.
-     */
-    private static String personName(Object person) {
-        if (!(person instanceof Map)) return null
-        String name = [((Map) person).firstName, ((Map) person).lastName].collect { it?.toString()?.trim() }.findAll().join(" ")
-        return name ?: null
-    }
-
-    private static String channelWords(String code) {
-        String bare = code?.replaceFirst(/(?i)_?(SALES_)?CHANNEL$/, '')?.trim()
-        if (!bare) return null
-        return bare.equalsIgnoreCase("pos") ? "POS" : words(bare)
-    }
-
-    private static String shipMethods(Object shipGroups) {
-        List<String> methods = ((shipGroups instanceof List ? shipGroups : []) as List).findAll { it instanceof Map }
-                .collect { ((Map) it).shipmentMethodTypeId?.toString()?.trim() }.findAll().unique()
-        return methods ? methods.join(", ") : null
-    }
-
-    /** ORDER_COMPLETED, RETURN_REQUESTED, ITEM_COMPLETED -> "Completed", "Requested"; null stays null. */
-    /**
-     * DAR-BE-368 (Aditi: "include the line item details, expecially the SKU", "show both shopify and HW"). An order's lines
-     * as its read gave them, each {id, sku, name, quantity, status}: a Shopify order's lineItems (the read asked
-     * withLineItems), id its line id; a HotWax order's orderItems (the read asked orderItems), id the Shopify line id HotWax
-     * keeps as the item's externalId, so one line pairs across the two. Null when the read gave none.
-     */
-    static List<Map> orderLines(Map data) {
-        if (data?.get("lineItems") instanceof List) {
-            return ((List) data.get("lineItems")).findAll { it instanceof Map }.collect { Map l ->
-                [id: l.id?.toString(), sku: l.sku ?: null, name: l.name ?: null, quantity: l.quantity,
-                 status: shopifyLineStatus(l.unfulfilledQuantity, l.currentQuantity != null ? l.currentQuantity : l.quantity)]
-            }
-        }
-        if (data?.get("orderItems") instanceof List) {
-            return ((List) data.get("orderItems")).findAll { it instanceof Map }.collect { Map i ->
-                [id: (i.externalId ?: i.orderItemSeqId)?.toString(), sku: i.sku ?: null, name: null, quantity: i.quantity,
-                 status: statusWords(i.statusId as String)]
-            }
-        }
-        return null
-    }
-
-    /** A Shopify line's state from its quantities: Removed (none left), Fulfilled, Unfulfilled, or "1 of 2 unfulfilled". */
-    private static String shopifyLineStatus(Object unfulfilled, Object current) {
-        BigDecimal u = decimalOrNull(unfulfilled)
-        BigDecimal q = decimalOrNull(current)
-        if (u == null || q == null) return null
-        if (q.signum() == 0) return "Removed"
-        if (u.signum() == 0) return "Fulfilled"
-        if (u >= q) return "Unfulfilled"
-        return "${u.stripTrailingZeros().toPlainString()} of ${q.stripTrailingZeros().toPlainString()} unfulfilled".toString()
-    }
-
-    private static BigDecimal decimalOrNull(Object value) {
-        try { return value == null ? null : new BigDecimal(value.toString()) } catch (NumberFormatException ignored) { return null }
-    }
-
-    private static String statusWords(String code) {
-        return code ? words(code.replaceFirst(/^(ORDER|RETURN|ITEM)_/, '')) : null
-    }
-
-    /** PARTIALLY_REFUNDED -> "Partially refunded". */
-    private static String words(String code) {
-        String w = code.replace('_', ' ').toLowerCase()
-        return w.substring(0, 1).toUpperCase() + w.substring(1)
-    }
-
     private static Map<String, Map> recordsFor(def ec, String tenantId, List<String> findingIds) {
         if (!findingIds) return [:]
         // DAR-UI-075: a statement's every line now, so in chunks rather than one IN of every id.
@@ -1543,19 +1292,7 @@ class AuditReportAssembler {
                     .orderBy(["findingId", "recordSeqId"]).list()*.getMap()
         }
         ZoneId zone = (loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId
-        return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): recordsJson(v, false, zone)] }
-    }
-
-    /** Money: amount at the currency's scale as a string, sign included. Null when there is no amount. */
-    static Map money(BigDecimal amount, String currency) {
-        if (amount == null) return null
-        return [amount: amountText(amount, currency), currency: currency]
-    }
-
-    private static String amountText(BigDecimal amount, String currency) {
-        int scale = 2
-        try { if (currency) scale = Currency.getInstance(currency).defaultFractionDigits } catch (IllegalArgumentException ignored) { }
-        return amount.setScale(Math.max(scale, 0), RoundingMode.HALF_UP).toPlainString()
+        return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): AuditRecordFacts.recordsJson(v, false, zone)] }
     }
 
     /** Oldest first: firstFound ascending, then id ascending with F-99 before F-100. */
@@ -1711,4 +1448,14 @@ class AuditReportAssembler {
         if (items.size() <= 1) return items.join("")
         return "${items[0..-2].join(', ')} and ${items[-1]}".toString()
     }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // DAR-OPS-029 S10: delegates for callers outside S10 until S99 repoints them to the class that owns each one.
+    // ---------------------------------------------------------------------------------------------------------
+
+    static final Map<String, List<String>> CARD_FIELDS = AuditRecordFacts.CARD_FIELDS
+    static String systemKey(String rootEnumId) { AuditRecordFacts.systemKey(rootEnumId) }
+    static String displayKey(String key) { AuditRecordFacts.displayKey(key) }
+    static Map recordsJson(List<Map> rows, boolean withData = false, ZoneId zone = ZoneId.of("UTC")) { AuditRecordFacts.recordsJson(rows, withData, zone) }
+    static Map recordFacts(Map data, String recordType, ZoneId zone = ZoneId.of("UTC")) { AuditRecordFacts.recordFacts(data, recordType, zone) }
 }

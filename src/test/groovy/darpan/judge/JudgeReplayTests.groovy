@@ -281,6 +281,9 @@ class JudgeReplayTests {
             assertArrayEquals(a, b, "${name} differs with the judge on")
         }
         assertTrue(new File(onDir, "judged-findings.json").isFile())
+        // Invariant 3 (DAR-OPS-029 S04): two replays of one capture write the same judged findings, byte for byte.
+        assertArrayEquals(new File(replayDir(replayed().replayFolder as String), "judged-findings.json").bytes,
+                new File(onDir, "judged-findings.json").bytes, "judged-findings.json differs between two replays of one capture")
         assertFalse(new File(offDir, "judged-findings.json").exists(), "the judge off writes no judged findings")
         assertEquals(on.out.oldFindings, off.out.oldFindings)
         assertEquals([], off.out.judgedFindings)
@@ -312,6 +315,11 @@ class JudgeReplayTests {
         assertTrue((result.duplicateDifferenceCount as int) > 0, "SR-1011 twice in NetSuite")
         assertEquals((result.missingObjectDifferenceCount as int) + (result.duplicateDifferenceCount as int), result.differenceCount)
         Map diff = new JsonSlurper().parse(new File(dir, "diff.json")) as Map
+        // OC42: the replay names the captured side-1 folder, so the brain reads the orders' age as of the capture (readAtOf).
+        assertEquals("${RUN_FOLDER_A}/20261101-060000000".toString(), result.replayOfRunFolder)
+        assertEquals(result.replayOfRunFolder, ((Map) diff.metadata).replayOfRunFolder)
+        assertEquals(java.time.Instant.parse("2026-11-01T06:00:00Z").toEpochMilli(), RunConclusionStep.readAtOf((Map) diff.metadata),
+                "the capture's time, not the replay's")
         Map<String, String> codes = ((List<Map>) diff.differences).findAll { it.diffType == "MISSING_IN_FILE_2" }
                 .collectEntries { [(it.primaryId): ((Map) it.conclusion).code] }
         assertEquals("DKR5T_SET_ASIDE", codes["SR-1004"], "today's conclude pass ran on the replay's own document")
@@ -369,6 +377,32 @@ class JudgeReplayTests {
             assertEquals([], new File(bareDir, "lookups").list() as List)
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(SourceSystemConnectorSupport)
+        }
+    }
+
+    /**
+     * OC28 (handoff from S03a): a HIDE rule's rows come off every count the replay reports, as they do a live run's, so the
+     * total stays the sum of its buckets. Here the rule hides every repeat of SR-1011 in NetSuite.
+     */
+    @Test
+    void aHideRuleTakesItsRowsOffEveryCountTheReplayReports() {
+        String tail = darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+        Map before = new JsonSlurper().parse(new File(replayDir(replayed().replayFolder as String), "result.json")) as Map
+        assertTrue((before.duplicateDifferenceCount as int) > 0, "test precondition: SR-1011 repeats in NetSuite")
+        assertTrue(((List) before.processingWarnings).any { it.toString().endsWith(tail) }, "test precondition: ${before.processingWarnings}")
+        Map pk = [compareScopeId: "JRT_SCOPE", sequenceNum: 5]
+        insert("darpan.rule.RuleSetConclusionRule", pk + [conclusionEnumId: "DKR5T_SET_ASIDE", appliesToBucket: "DUPLICATE_IN_FILE_2",
+                outcome: "HIDE", companyUserGroupId: A])
+        try {
+            Map out = ok(replay(checkA, RUN_FOLDER_A, false))
+            Map result = new JsonSlurper().parse(new File(replayDir(out.replayFolder as String), "result.json")) as Map
+            assertTrue((result.differenceCount as int) < (before.differenceCount as int), "test precondition: the rule hid rows")
+            assertEquals(0, result.duplicateDifferenceCount, "every repeat of SR-1011 was hidden")
+            assertEquals((result.missingObjectDifferenceCount as int) + (result.duplicateDifferenceCount as int) + (result.ruleDifferenceCount as int),
+                    result.differenceCount, "the total is the sum of its buckets")
+            assertFalse(((List) result.processingWarnings).any { it.toString().endsWith(tail) }, "the repeat warning goes with the rows it named")
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition(pk).disableAuthz().deleteAll()
         }
     }
 
@@ -694,6 +728,46 @@ class JudgeReplayTests {
         List<String> warnings = []
         assertSame(spark, JudgeReplaySupport.sidePresence(extract, [keyReliable: false], false, "file1", spark, warnings).ids)
         assertEquals(["The file1 key cannot be rebuilt from its records, so nothing its side file set aside is judged"], warnings)
+    }
+
+    /**
+     * No hollow green (DAR-OPS-029 S04): a side file that proves less than it should says so. Truncated: what it left out reads
+     * as absent. Unreadable: what it set aside reads as absent. A record whose compare id cannot be rebuilt is not judged.
+     */
+    @Test
+    void aSideFileThatProvesLessSaysSo() {
+        Map keySpec = [keyFields: ["id"], keyReliable: true]
+        File dir = scratch("sidecar-warnings")
+        File extract = new File(dir, "x.json")
+        extract.text = '{"records":[]}'
+        new File(dir, "x.excluded.json").text = '{"sourceFileName":"x.json","truncated":true,"total":3,"records":[' +
+                '{"id":"A","_excludedBy":"1:id"},{"other":"no id","_excludedBy":"1:id"}]}'
+        List<String> warnings = []
+        Map read = JudgeReplaySupport.readSidecar(extract, keySpec, false, "file1", warnings)
+        assertEquals(["A"] as Set, read.ids)
+        assertEquals(["The file1 sidecar is truncated: what it left out reads as absent",
+                      "1 file1 records set aside have no compare id: they were not judged"], warnings)
+
+        new File(dir, "x.excluded.json").text = '{"sourceFileName":"x.json","records":[{"id":'
+        List<String> broken = []
+        assertEquals([] as Set, JudgeReplaySupport.readSidecar(extract, keySpec, false, "file1", broken).ids)
+        assertTrue(broken.contains("The file1 sidecar cannot be read: what it set aside reads as absent"), "${broken}")
+    }
+
+    /**
+     * No hollow green (DAR-OPS-029 S04, QA): on a promise side, a compare id Spark set aside whose record cannot be read back
+     * (here the rows file is missing) reads SET_ASIDE, never ABSENT, and says so.
+     */
+    @Test
+    void aPromiseSidesUnreadSetAsideIdsReadSetAsideAndSaySo() {
+        File dir = scratch("promise-unread")
+        File extract = new File(dir, "x.json")
+        extract.text = '{"records":[{"id":"K1"}]}'
+        List<String> warnings = []
+        Map read = JudgeReplaySupport.sidePresence(extract, [keyFields: ["id"], keyReliable: true], true, "file2", ["S9"] as Set, warnings)
+        assertEquals([:], read.records)
+        assertEquals(["S9"] as Set, read.ids, "Spark proved S9 was set aside")
+        assertEquals(["1 file2 records Spark set aside could not be read back: they read SET_ASIDE, not as kept"], warnings)
     }
 
     /**

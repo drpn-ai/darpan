@@ -224,7 +224,7 @@
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
                 <econdition field-name="presence" value="EXCLUDED"/>
             </entity-find>
-            <set field="promiseSides" from="excludedReadList.collect { it.subject == 'FILE_1' ? 'file1' : 'file2' } as Set"/>
+            <set field="promiseSides" from="excludedReadList.collect { [FILE_1: 'file1', FILE_2: 'file2'][it.subject] }.findAll { it } as Set"/>
 
             <set field="judged" from="darpan.judge.JudgeReplaySupport.judgeCompare(ec, [checkId: checkId, tenantId: tenantId,
                     matchedPairDf: matchedPairDf, missingDiffDf: missingDiffDf, keySpecs: keySpecs, systems: systems,

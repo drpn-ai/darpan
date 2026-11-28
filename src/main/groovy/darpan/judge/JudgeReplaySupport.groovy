@@ -144,12 +144,26 @@ class JudgeReplaySupport {
      *  - A promise side: records = Spark's set-aside records, streamed from the extract through the rows file
      *    (KeepArtifacts.forEachSetAsideRecord), then the extractor's side file, at most ExcludedRecordsSidecar.MAX_ENTRIES; what
      *    passes the cap reads as absent and says so in a warning.
+     *    A compare id Spark set aside that is not read back (its rows file is missing or names rows the extract lacks) reads
+     *    SET_ASIDE, never ABSENT, and says so in a warning: Spark proved the record, it just cannot be judged as kept.
      * The cost bound: a non-promise side holds no more than the compare already does (setAsideBySide, ~10-15 MB at 125k ids),
      * plus a union only when a side file names ids as well; a promise side holds at most MAX_ENTRIES records, as the side file did.
      */
     static Map sidePresence(File extractFile, Map keySpec, boolean promiseSide, String side, Collection<String> sparkIds, List<String> warnings) {
         Map read = readSidecar(extractFile, keySpec, promiseSide, side, warnings, sparkIds != null)
-        if (promiseSide || !sparkIds) return read
+        if (promiseSide) {
+            Map<String, Map> records = (Map<String, Map>) read.records
+            // Past the cap, an id missing from records was left out on purpose and already said so (readSidecar).
+            if (sparkIds && records.size() < ExcludedRecordsSidecar.MAX_ENTRIES) {
+                Set<String> unread = new TreeSet<String>(sparkIds.findAll { !records.containsKey(it) })
+                if (unread) {
+                    ((Set<String>) read.ids).addAll(unread)
+                    warnings.add("${unread.size()} ${side} records Spark set aside could not be read back: they read SET_ASIDE, not as kept".toString())
+                }
+            }
+            return read
+        }
+        if (!sparkIds) return read
         Set<String> fromSideFile = (Set<String>) read.ids
         if (fromSideFile.isEmpty()) return [records: read.records, ids: sparkIds]
         fromSideFile.addAll(sparkIds)
@@ -179,11 +193,12 @@ class JudgeReplaySupport {
         String normalizer = keySpec.idNormalizer as String
         int repeated = 0
         int overCap = 0
+        int keyless = 0
         Closure take = { Map record ->
             Map copy = new LinkedHashMap(record)
             copy.remove("_excludedBy")
             String id = ConclusionKeySupport.compareKey(copy, keyFields, normalizer)
-            if (!id) return
+            if (!id) { keyless++; return }
             if (!promiseSide) {
                 ids.add(id)
             } else if (records.containsKey(id)) {
@@ -207,6 +222,7 @@ class JudgeReplaySupport {
         if (head.present != true && new File(extractFile.parentFile, ExcludedRecordsSidecar.fileNameFor(extractFile.name)).exists()) {
             warnings.add("The ${side} sidecar cannot be read: what it set aside reads as absent".toString())
         }
+        if (keyless) warnings.add("${keyless} ${side} records set aside have no compare id: they were not judged".toString())
         if (repeated) warnings.add("${repeated} ${side} records set aside under a compare id already read back were not judged".toString())
         if (overCap) {
             warnings.add("${overCap} ${side} set-aside records past the first ${ExcludedRecordsSidecar.MAX_ENTRIES} were not read back: they read as absent".toString())
@@ -403,6 +419,10 @@ class JudgeReplaySupport {
         Map file1 = copyExtract(ec, (Map) files.FILE_1, folder, folderLocation, "FILE_1")
         Map file2 = copyExtract(ec, (Map) files.FILE_2, folder, folderLocation, "FILE_2")
         copyCapturedLookups((File) args.runDir, folder)
+        // OC42: the captured side-1 folder, <run>/<stamp> (ExtractReplaySupport.pickFromRunFolder picks only a folder named
+        // yyyyMMdd-HHmmssSSS). RunConclusionStep.readAtOf reads the capture time from it, so the brain ages orders as the live
+        // run did (its in-flight grace), never as of the replay.
+        String replayOf = "${args.runFolder}/${new File(((Map) files.FILE_1).fileLocation as String).parentFile.name}".toString()
 
         Map compareParams = [ruleSetId     : args.ruleSetId, compareScopeId: args.compareScopeId,
                              file1Location : file1.fileLocation, file2Location: file2.fileLocation,
@@ -422,7 +442,7 @@ class JudgeReplaySupport {
                      file1Type         : compared.file1Type, file2Type: compared.file2Type, reconciliation: "RULESET",
                      companyUserGroupId: tenantId, savedRunId: check.savedRunId, ruleSetId: args.ruleSetId,
                      compareScopeId    : args.compareScopeId, compareScopeDescription: compared.compareScopeDescription,
-                     replayOfRunFolder : args.runFolder],
+                     replayOfRunFolder : replayOf],
                     [totalDifferences            : compared.differenceCount, onlyInFile1Count: compared.missingInFile2Count,
                      onlyInFile2Count            : compared.missingInFile1Count,
                      missingObjectDifferenceCount: compared.missingObjectDifferenceCount, ruleDifferenceCount: compared.ruleDifferenceCount],
@@ -438,21 +458,25 @@ class JudgeReplaySupport {
         Map concluded = RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: args.compareScopeId, diffFile: diffFile,
                 file1Source: null, file2Source: null, file1Result: [fileLocation: file1.fileLocation],
                 file2Result: [fileLocation: file2.fileLocation], lookupFetcher: lookupFetcher]) ?: [:]
+        // OC28: every count a HIDE rule can take rows off goes through applyHidden, as on a live run, so the total stays the
+        // sum of its buckets; the repeat warning goes once its rows are all hidden.
         Map counts = [differenceCount             : compared.differenceCount, missingInFile1Count: compared.missingInFile1Count,
                       missingInFile2Count         : compared.missingInFile2Count,
-                      missingObjectDifferenceCount: compared.missingObjectDifferenceCount]
+                      missingObjectDifferenceCount: compared.missingObjectDifferenceCount,
+                      ruleDifferenceCount         : compared.ruleDifferenceCount, duplicateDifferenceCount: compared.duplicateDifferenceCount,
+                      processingWarnings          : (List) (compared.processingWarnings ?: [])]
         RunConclusionSupport.applyHidden(counts, (Map) concluded.hiddenByBucket)
         Map result = [checkId                : check.checkId, savedRunId: check.savedRunId, ruleSetId: args.ruleSetId,
                       compareScopeId         : args.compareScopeId, compareScopeDescription: compared.compareScopeDescription,
-                      replayOfRunFolder      : args.runFolder, file1Name: file1.fileName, file2Name: file2.fileName,
+                      replayOfRunFolder      : replayOf, file1Name: file1.fileName, file2Name: file2.fileName,
                       file1Label             : compared.file1Label, file2Label: compared.file2Label,
                       differenceCount        : counts.differenceCount, onlyInFile1Count: counts.missingInFile2Count,
                       onlyInFile2Count       : counts.missingInFile1Count,
                       missingObjectDifferenceCount: counts.missingObjectDifferenceCount,
-                      duplicateDifferenceCount: compared.duplicateDifferenceCount, ruleDifferenceCount: compared.ruleDifferenceCount,
+                      duplicateDifferenceCount: counts.duplicateDifferenceCount, ruleDifferenceCount: counts.ruleDifferenceCount,
                       ruleDifferenceFields   : compared.ruleDifferenceFields ?: [], ruleExecutionFailed: compared.ruleExecutionFailed == true,
                       ruleErrors             : compared.ruleErrors ?: [], validationErrors: compared.validationErrors ?: [],
-                      processingWarnings     : compared.processingWarnings ?: [], conclusionCounts: concluded.counts,
+                      processingWarnings     : counts.processingWarnings, conclusionCounts: concluded.counts,
                       concludeWarning        : concluded.warning]
         new File(folder, RESULT_FILE).setText(JsonOutput.toJson(result), StandardCharsets.UTF_8.name())
 

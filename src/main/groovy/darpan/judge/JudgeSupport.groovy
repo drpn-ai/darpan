@@ -28,7 +28,10 @@ class JudgeSupport {
      * factBatches: lists of facts as PairFactSupport.buildFact returns them ([factTypeId, recordId: compareId, fact]).
      * statementsByClaim: "mustHoldRuleSetId|outcomeId" to AuditStatement.statementCode (from claimRuleSetId/claimOutcomeId).
      * warnings: when given, gets one line per promise skipped for having no statement, and per outcome with no meaning
-     * (DecisionOutcome), each with its pair count; the same lines are logged at WARN.
+     * (DecisionOutcome), each with its pair count, and (OC30) one line counting the pairs with a side missing (SET_ASIDE or
+     * ABSENT) that broke no promise while the Must hold decision reads no presence field of that side: moqui-rules reads two
+     * missing fields as equal, so such a decision cannot see that side's missing record, and it must never pass as silently
+     * clean. The same lines are logged at WARN.
      *
      * Each finding: statementCode, recordKey (the compare id), headline (the promise's label), conclusionEnumId (null),
      * diagnosisText (the cause's label), claimRuleSetId, claimRuleId, claimOutcomeId, causeRuleSetId, causeRuleId (null when
@@ -51,6 +54,8 @@ class JudgeSupport {
         Map decisions = (config.decisions ?: [:]) as Map
         Map outcomes = (config.outcomes ?: [:]) as Map
         refuseWrongShape(checkId, mustHold, explains, decisions)
+        Set<String> readFields = new HashSet<String>((((decisions.get(mustHold) as Map).readFields ?: []) as List).collect { it as String })
+        int missingUnjudged = 0
 
         Map<String, Integer> unlinked = new TreeMap<>()
         Map<String, Integer> unmeant = new TreeMap<>()
@@ -63,18 +68,21 @@ class JudgeSupport {
             List<Map> failed = []
             batch.eachWithIndex { Map fact, int index ->
                 Map answer = promiseAnswers[index]
+                boolean brokePromise = false
                 for (Object outcome in (answer.outcomes ?: [])) {
                     String outcomeId = outcome as String
                     String key = mustHold + "|" + outcomeId
                     Map meaning = outcomes.get(key) as Map
                     if (meaning == null) { count(unmeant, key); continue }
                     if (meaning.outcomeKindEnumId != FINDING) continue
+                    brokePromise = true
                     String statementCode = statementsByClaim?.get(key) as String
                     if (!statementCode) { count(unlinked, key); continue }
                     Map claimRule = (answer.matchedRules as List<Map>)?.find { it.outcomeId == outcomeId }
                     failed.add([fact: fact, outcomeId: outcomeId, meaning: meaning, statementCode: statementCode,
                                 claimRuleId: claimRule?.ruleId])
                 }
+                if (!brokePromise && unreadMissingSide((Map) fact.fact, readFields)) missingUnjudged++
             }
             if (!failed) continue
 
@@ -106,6 +114,11 @@ class JudgeSupport {
         }
 
         List<String> lines = []
+        if (missingUnjudged) {
+            lines.add(("Must hold decision ${mustHold} of check ${checkId} does not read the presence of a missing side: " +
+                    "${missingUnjudged} ${missingUnjudged == 1 ? 'pair' : 'pairs'} with that side missing (ABSENT or SET_ASIDE) " +
+                    "broke no promise, so a missing record reads as clean").toString())
+        }
         unlinked.each { String key, Integer n ->
             lines.add("Promise ${key} of check ${checkId} has no statement: ${n} findings skipped".toString()) }
         unmeant.each { String key, Integer n ->
@@ -115,6 +128,19 @@ class JudgeSupport {
         if (warnings != null) warnings.addAll(lines)
         findings.sort(true, BY_COMPARE_ID)   // stable: a pair's findings keep their outcome order
         return findings
+    }
+
+    private static final String PRESENCE_SUFFIX = "_presence"
+
+    /**
+     * True when a side of the pair fact is SET_ASIDE or ABSENT and the decision reads no line on that side's presence field
+     * (PairFactSupport.buildFact names it <prefix>_presence; a side key named presence is renamed, so the name is the side's).
+     */
+    private static boolean unreadMissingSide(Map fact, Set<String> readFields) {
+        return (fact ?: [:]).any { Object k, Object v ->
+            String field = k as String
+            field.endsWith(PRESENCE_SUFFIX) && (v == PairFactSupport.ABSENT || v == PairFactSupport.SET_ASIDE) && !readFields.contains(field)
+        }
     }
 
     private static final Comparator<Map> BY_COMPARE_ID = { Map a, Map b -> (a.recordKey as String) <=> (b.recordKey as String) } as Comparator<Map>

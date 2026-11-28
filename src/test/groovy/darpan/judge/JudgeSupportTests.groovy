@@ -247,6 +247,66 @@ class JudgeSupportTests {
         assertEquals(forward.warnings, reversed.out.warnings)
     }
 
+    /**
+     * OC30 (F8, decided 2026-11-28 under the no-hollow-green rule). moqui-rules compares two missing fields as equal, so a Must
+     * hold decision that does not read a side's presence cannot see that side's missing record: such a pair breaks no promise.
+     * The judging says how many pairs with a side missing broke no promise while that side's presence went unread. P5 lacks
+     * file 2 (and is only NOTED, which is no promise); P6 lacks file 1.
+     */
+    @Test
+    void aMustHoldThatDoesNotReadAMissingSidesPresenceSaysHowManyPairsBrokeNoPromise() {
+        List<Map> missing = [[compareId: "P5", file1: [status: "closed", amount: "1"], file2: null],
+                             [compareId: "P6", file1: null, file2: [status: "open"]]]
+        assertEquals(["2 pairs"], presenceWarnings(checkA, missing), "the fixture's Must hold reads no presence at all")
+
+        // Reads file 2's presence only: P5 breaks its promise; P6's missing file 1 still goes unseen.
+        String file2Only = createDecision("N", ["NO_FILE_2"])
+        storeRule(file2Only, "no file 2", 10, [line("01", "file2_presence", "ABSENT")], "NO_FILE_2")
+        meaning(file2Only, "NO_FILE_2", "JOK_FINDING", "File 2 has no record")
+        String oneSide = seedCheck(A, "reads-file2-presence")
+        decide(A, oneSide, file2Only, explains)
+        assertEquals(["1 pair"], presenceWarnings(oneSide, missing), "a decision reading only file 2's presence does not see file 1 missing")
+
+        // Reads both sides' presence: nothing is said.
+        String bothSides = createDecision("N", ["NO_FILE_1", "NO_FILE_2"])
+        storeRule(bothSides, "no file 2", 10, [line("01", "file2_presence", "ABSENT")], "NO_FILE_2")
+        storeRule(bothSides, "no file 1", 20, [line("01", "file1_presence", "ABSENT")], "NO_FILE_1")
+        meaning(bothSides, "NO_FILE_2", "JOK_FINDING", "File 2 has no record")
+        meaning(bothSides, "NO_FILE_1", "JOK_FINDING", "File 1 has no record")
+        String guarded = seedCheck(A, "reads-both-presences")
+        decide(A, guarded, bothSides, explains)
+        assertEquals([], presenceWarnings(guarded, missing))
+    }
+
+    /** No hollow green: a cause that has no meaning (no DecisionOutcome row) is shown as a finding, never hidden, and said. */
+    @Test
+    void aCauseWithNoMeaningIsShownNotHiddenAndSaysSo() {
+        String unmeant = createDecision("Y", ["MYSTERY", "UNEXPLAINED"])
+        storeRule(unmeant, "mystery", 30, [line("01", "claim", "NOT_CLOSED")], "MYSTERY")
+        meaning(unmeant, "UNEXPLAINED", "JOK_FINDING", "Unexplained")
+        String check = seedCheck(A, "unmeant-cause")
+        decide(A, check, mustHold, unmeant)
+        Map out = judge(check)
+        assertEquals([], out.errors)
+        List<Map> mystery = out.out.findings.findAll { it.causeOutcomeId == "MYSTERY" }
+        assertEquals(["P1", "P2"], mystery*.recordKey, "both NOT_CLOSED pairs are shown")
+        assertEquals(["JOK_FINDING"], mystery*.outcomeKindEnumId.unique())
+        assertEquals(["MYSTERY"], mystery*.diagnosisText.unique(), "with the cause's id, as it has no label")
+        assertTrue(out.out.warnings.contains("Outcome ${unmeant}|MYSTERY of check ${check} has no meaning (DecisionOutcome), so it is shown as a finding: 2 findings".toString()),
+                "${out.out.warnings}")
+    }
+
+    /** The count in the presence warning for one check's judging of the fixture plus extra pairs; empty when there is none. */
+    private List<String> presenceWarnings(String checkId, List<Map> extra) {
+        Map out = judge(checkId, false, extra)
+        assertEquals([], out.errors)
+        return out.out.warnings.findAll { it.contains("does not read the presence of a missing side") }.collect { String w ->
+            assertTrue(w.startsWith("Must hold decision ") && w.contains(" of check ${checkId} ".toString()) &&
+                    w.endsWith("with that side missing (ABSENT or SET_ASIDE) broke no promise, so a missing record reads as clean"), w)
+            (w =~ /: (\d+ pairs?) with/)[0][1] as String
+        }
+    }
+
     @Test
     void judgedFindingsRecordWithTheirLineage() {
         List<Map> findings = judged().findings
@@ -263,18 +323,22 @@ class JudgeSupportTests {
 
     // ---------------------------------------------------------------------------------------
 
-    /** The fixture's four pairs through Task 6's batches (two per batch) and buildFact; reversed hands them over last first. */
-    private Iterator<List<Map>> facts(boolean reversed = false) {
+    /**
+     * The fixture's four pairs (and any extra) through Task 6's batches and buildFact: two per batch, or, reversed, last first
+     * three per batch, so the batch boundaries differ too.
+     */
+    private Iterator<List<Map>> facts(boolean reversed = false, List<Map> extra = []) {
         List<Map> pairs = [
                 [compareId: "P1", file1: [status: "open", amount: "5"], file2: [status: "pending"]],
                 [compareId: "P2", file1: [status: "open", amount: "9"], file2: [status: "open"]],
                 [compareId: "P3", file1: [status: "closed", amount: "9"], file2: [status: "open"]],
                 [compareId: "P4", file1: [status: "closed", amount: "5"], file2: [status: "hide"]]]
+        pairs = pairs + extra
         if (reversed) pairs = pairs.reverse()
         Map sideState = [factTypeId: factTypeId, file1: [prefix: "file1", setAside: [], keyNames: keyNames.file1],
                          file2: [prefix: "file2", setAside: [], keyNames: keyNames.file2]]
         List<List<Map>> batches = []
-        PairFactSupport.batches(pairs.iterator(), 2).each { List<Map> batch ->
+        PairFactSupport.batches(pairs.iterator(), reversed ? 3 : 2).each { List<Map> batch ->
             batches.add(batch.collect { PairFactSupport.buildFact(it, sideState, [:], [:]) })
         }
         return batches.iterator()
@@ -286,10 +350,10 @@ class JudgeSupportTests {
         return out.out
     }
 
-    private Map judge(String checkId, boolean reversed = false) {
+    private Map judge(String checkId, boolean reversed = false, List<Map> extra = []) {
         return underFacadeGrantDo {
             List<String> warnings = []
-            List<Map> findings = JudgeSupport.judge(ec, checkId, facts(reversed), statementsByClaim, warnings)
+            List<Map> findings = JudgeSupport.judge(ec, checkId, facts(reversed, extra), statementsByClaim, warnings)
             return [findings: findings, warnings: warnings]
         }
     }

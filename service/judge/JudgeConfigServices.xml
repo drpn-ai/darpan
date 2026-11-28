@@ -82,8 +82,9 @@
                 fixOwner, fixWhereEnumId.</description></parameter>
             <parameter name="parameterSets" type="List"><description>Each: parameterSetId, label, parameters (name to value).</description></parameter>
             <parameter name="decisions" type="Map"><description>Keyed by ruleSetId, for each of the two decisions that is the
-                active tenant's: firstMatchOnly and outcomeIds (the outcomes it lists). A decision of another tenant, or one
-                that does not exist, has no entry.</description></parameter>
+                active tenant's: firstMatchOnly, outcomeIds (the outcomes it lists) and readFields (every fact field its rules'
+                lines read, a piece's lines included, sorted). A decision of another tenant, or one that does not exist, has no
+                entry.</description></parameter>
             <parameter name="asks" type="List"><description>The check's CheckAsk rows by askName, as maps (AskSupport.fetchAsks
                 takes them): askName, subjectSide, idField, systemEnumId, sourceConfigId, keyField, many, keepRecordFields.</description></parameter>
         </out-parameters>
@@ -128,8 +129,29 @@
                         <econdition field-name="companyUserGroupId" from="tenantId"/>
                         <order-by field-name="outcomeId"/>
                     </entity-find>
+                    <!-- The fields its lines read: the judge warns when a Must hold decision reads no presence field (OC30). -->
+                    <set field="readFields" from="new java.util.TreeSet()"/>
+                    <entity-find entity-name="rules.RuleSetRule" list="ruleList">
+                        <econdition field-name="ruleSetId" from="decision.ruleSetId"/>
+                        <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    </entity-find>
+                    <if condition="ruleList">
+                        <entity-find entity-name="rules.RuleSetCondition" list="lineList">
+                            <econdition field-name="ruleId" operator="in" from="ruleList*.ruleId"/>
+                            <econdition field-name="companyUserGroupId" from="tenantId"/>
+                        </entity-find>
+                        <set field="pieceIds" from="lineList.findAll { it.conditionTypeId == 'RCT_PIECE' &amp;&amp; it.compareValue }*.compareValue"/>
+                        <set field="pieceLineList" from="[]"/>
+                        <if condition="pieceIds">
+                            <entity-find entity-name="rules.RulePieceCondition" list="pieceLineList">
+                                <econdition field-name="pieceId" operator="in" from="pieceIds"/>
+                                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                            </entity-find>
+                        </if>
+                        <script>(lineList + pieceLineList).each { line -> [line.fieldName, line.compareFieldName].findAll { it }.each { readFields.add(it) } }</script>
+                    </if>
                     <script>decisions.put(decision.ruleSetId, [firstMatchOnly: ruleSetList[0].firstMatchOnly,
-                            outcomeIds: listedList.collect { it.outcomeId }])</script>
+                            outcomeIds: listedList.collect { it.outcomeId }, readFields: readFields as List])</script>
                 </if>
             </iterate>
 

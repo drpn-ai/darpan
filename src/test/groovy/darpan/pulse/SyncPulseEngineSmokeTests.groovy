@@ -637,6 +637,41 @@ class SyncPulseEngineSmokeTests {
     }
 
     /** A sample write that throws (no SPS_* enums, FK SPSAMPLE_STATUS) leaves the claim stamped: no re-read every tick. */
+    /**
+     * DAR-OPS-029 S17a R1: two instances whose scans read the same lastPulseStamp pulse the pair once. busy() is per
+     * instance and the claim stamped the pair whatever it held, so both pulsed and each could open an order for one key.
+     */
+    @Test
+    void twoInstancesThatReadTheSameStampPulseThePairOnce() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        Map stale = pairMap(SP)
+        java.util.concurrent.CyclicBarrier start = new java.util.concurrent.CyclicBarrier(2)
+        List<Map> results = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Closure instance = { ->
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                start.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                results << (TenantAccessSupport.withSystemTenant(A) { -> SyncPulseSupport.runPulse(tec, new LinkedHashMap(stale), T0) } as Map)
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        List<Thread> threads = [Thread.start(instance), Thread.start(instance)]
+        threads*.join(60_000L)
+
+        assertTrue(failures.isEmpty(), "no pulse may throw: ${failures*.toString()}")
+        assertEquals(2, results.size(), "both instances answered")
+        assertEquals(1, results.count { it.status == "SPS_OK" }, "exactly one instance pulses: ${results*.status}")
+        assertEquals(1, results.count { it.skipped == true }, "the other skips silently, as busy() does")
+        assertEquals(1, upstreamCalls.size(), "the pair is read once")
+        assertEquals(1, samples().size(), "one sample")
+        assertEquals(1, orders("#A1").size(), "one open order for the key")
+    }
+
     @Test
     void aSampleWriteThatThrowsStillClaimsThePulse() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))

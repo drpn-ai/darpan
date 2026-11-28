@@ -441,7 +441,7 @@ class SyncPulseSupport {
             Map day = tenantDay(ec, tenantId, now)
             Map effective = effectiveValues(pair, day.windows as List<PeakWindow>, periodRows(ec, pair), day.date as LocalDate)
             allowance = effective.allowanceMinutes as Integer
-            claimPulse(ec, pair, now)
+            if (!claimPulse(ec, pair, now)) return empty
             open = openOrders(ec, pair)
             Map window = pulseWindow(now, allowance, effective.pulseEveryMinutes as Integer)
 
@@ -727,27 +727,34 @@ class SyncPulseSupport {
     }
 
     /**
-     * Claims the pulse: stamps lastPulseStamp in its OWN transaction before any read, so a sample write that fails later
-     * cannot roll the stamp back and leave the pair due on every tick.
+     * Claims the pulse: true for exactly one caller. The pair row is read FOR UPDATE in the claim's OWN transaction, and
+     * lastPulseStamp is stamped only while it still holds the value the caller's scan read (pair.lastPulseStamp). A second
+     * instance whose scan read the same stamp waits on the first's lock, then reads the new stamp and loses, so the pair is
+     * pulsed once (busy() guards only its own instance). Its own transaction means a sample write that fails later cannot
+     * roll the stamp back and leave the pair due on every tick. A missing pair is not claimed.
      */
-    private static void claimPulse(def ec, Map pair, Instant now) {
-        ec.transaction.runRequireNew(30, "Sync pulse ${pair.syncPairId} could not claim its pulse".toString()) {
-            def row = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
-                    .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", normalize(pair.companyUserGroupId))
-                    .useCache(false).list().find()
-            if (row == null) return
-            row.setAll([lastPulseStamp: Timestamp.from(now)])
+    private static boolean claimPulse(def ec, Map pair, Instant now) {
+        return (boolean) ec.transaction.runRequireNew(30, "Sync pulse ${pair.syncPairId} could not claim its pulse".toString()) {
+            def row = pairRow(ec, pair, true)
+            if (row == null || row.get("lastPulseStamp") != pair.get("lastPulseStamp")) return false
+            row.set("lastPulseStamp", Timestamp.from(now))
             row.update()
+            return true
         }
     }
 
     private static void stampPair(def ec, Map pair, Instant now, String status) {
-        def row = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
-                .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", normalize(pair.companyUserGroupId))
-                .useCache(false).list().find()
+        def row = pairRow(ec, pair, false)
         if (row == null) return
         row.setAll([lastPulseStamp: Timestamp.from(now), lastPulseStatusEnumId: status])
         row.update()
+    }
+
+    /** The pair's row, read uncached in the pair's tenant; forUpdate locks it until the transaction ends. */
+    private static def pairRow(def ec, Map pair, boolean forUpdate) {
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
+                .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", normalize(pair.companyUserGroupId))
+                .useCache(false).forUpdate(forUpdate).list().find()
     }
 
     // ------------------------------------------------------------------------------------------- chat posts

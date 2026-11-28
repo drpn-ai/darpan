@@ -34,6 +34,8 @@ class DataSourceRunner {
 
     static final int DEFAULT_BATCH_RECORDS = 1000
     static final int DEFAULT_MAX_RECORDS_IN_MEMORY = 1_000_000
+    /** OC183: the most slices a window read is cut into (about 13 months at 1-hour slices); a wider window is refused. */
+    static final long MAX_WINDOW_SLICES = 10_000L
     private int heldCap = 0
 
     private final Map definition
@@ -224,9 +226,18 @@ class DataSourceRunner {
         if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read by window.")
         long from = (request.from as Number).longValue(), thru = (request.thru as Number).longValue()
         long slice = ((b.sliceHours as Number).longValue()) * 3_600_000L
+        // OC183: counted before any piece is built, without overflow, so a window far wider than any run (or near the end of
+        // time) is refused instead of building billions of slices or looping on an overflowing start.
+        long span
+        try { span = Math.subtractExact(thru, from) } catch (ArithmeticException ignored) { span = Long.MAX_VALUE }
+        long count = span <= 0 ? 0L : span.intdiv(slice) + (span % slice == 0 ? 0L : 1L)
+        if (count > MAX_WINDOW_SLICES) {
+            throw new DataSourceCallException("TOO_MANY_SLICES", "Step '${step.id}': the window is ${count} slices of ${b.sliceHours}h, more than ${MAX_WINDOW_SLICES}.".toString())
+        }
         List<Map> pieces = []
-        for (long start = from; start < thru; start += slice) {
-            long end = Math.min(thru, start + slice)
+        for (long i = 0; i < count; i++) {
+            long start = from + i * slice
+            long end = thru - start <= slice ? thru : start + slice
             pieces << fill((Map) b.variables, [from: instant(start, (String) b.instantFormat), thru: instant(end, (String) b.instantFormat)] + optionTexts)
         }
         return pieces
@@ -266,7 +277,13 @@ class DataSourceRunner {
             if (set) page.each { Map r -> r.putAll(set) }
             take.call(page)
             pages++
-            if (JsonPathValues.value(connection, (String) step.hasNextAt) != true) return
+            // OC181: has-next must be true or false. Anything else (missing, null, "true", 1) used to end the read after this
+            // page with no error, so a definition path typo read only the first page of every slice.
+            Object hasNext = JsonPathValues.value(connection, (String) step.hasNextAt)
+            if (!(hasNext instanceof Boolean)) {
+                throw new DataSourceCallException("NO_PAGE_INFO", "Step '${step.id}': the answer's ${step.hasNextAt} is not true or false.".toString())
+            }
+            if (!hasNext) return
             // OC132: maxPages bounds the pages a read may need. A read that ends on page maxPages is complete; only another
             // page beyond it fails the run (never a truncated read).
             if (pages >= maxPages) throw new DataSourceCallException("TOO_MANY_PAGES", "Step '${step.id}' has more than ${maxPages} pages.".toString())

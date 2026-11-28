@@ -219,4 +219,58 @@ class DataSourceRunnerTests {
         }
         assertEquals("TOO_MANY_PAGES", e.code)
     }
+
+    /** The fixture's first step alone, answered by `answer` for every call. */
+    private static Map firstStepOnly() {
+        Map d = AcmeLedgerFixture.definition()
+        d.steps = [((List<Map>) d.steps)[0]]
+        d.record = [fields: ["invoiceNo"]]
+        return d
+    }
+
+    /**
+     * OC181 (DAR-OPS-029 S15a). A page whose has-next value is not a boolean (missing, null, "true", 1) used to end the read
+     * after page 1 with no error, so a definition path typo read only the first page of every slice. It fails now.
+     */
+    @Test
+    void aPageWhoseHasNextIsNotABooleanFailsInsteadOfEndingTheRead() {
+        [null, "true", 1].each { Object hasNext ->
+            def t = new Expando(execute: { String doc, Map v, int res ->
+                [invoices: [edges: [[node: [invoiceNo: "A1"]]], pageInfo: [hasNextPage: hasNext, endCursor: "c1"]]]
+            })
+            DataSourceCallException e = assertThrows(DataSourceCallException) {
+                new DataSourceRunner(firstStepOnly(), t).run([mode: "ids", keys: ["A1"], keyField: "invoiceNo"]) { }
+            }
+            assertEquals("NO_PAGE_INFO", e.code, "has-next ${hasNext}")
+        }
+    }
+
+    /**
+     * OC183 (DAR-OPS-029 S15a). A window is cut into slices up front; one far wider than any run (or near the end of time)
+     * used to build billions of slices, or loop on an overflow. Over 10,000 slices it is refused before any call.
+     */
+    @Test
+    void aWindowOfMoreThanTenThousandSlicesIsRefusedBeforeAnyCall() {
+        AcmeLedgerFixture.ScriptedTransport t = new AcmeLedgerFixture.ScriptedTransport()
+        long day = 86_400_000L
+        DataSourceCallException e = assertThrows(DataSourceCallException) {
+            new DataSourceRunner(firstStepOnly(), t).run([mode: "window", from: 0L, thru: 10_001L * day]) { }
+        }
+        assertEquals("TOO_MANY_SLICES", e.code)
+        assertEquals(0, t.calls.size(), "refused before any call")
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void aWindowAtTheEndOfTimeEndsAndAnOverflowingSpanIsRefused() {
+        // OC183: `start += slice` near Long.MAX_VALUE wrapped negative and looped forever; a span wider than a long refuses.
+        long day = 86_400_000L
+        Map r = new DataSourceRunner(firstStepOnly(), new AcmeLedgerFixture.ScriptedTransport())
+                .run([mode: "window", from: Long.MAX_VALUE - 3 * day, thru: Long.MAX_VALUE]) { }
+        assertEquals(0, r.rootRecords)
+        DataSourceCallException e = assertThrows(DataSourceCallException) {
+            new DataSourceRunner(firstStepOnly(), new AcmeLedgerFixture.ScriptedTransport()).run([mode: "window", from: Long.MIN_VALUE, thru: Long.MAX_VALUE]) { }
+        }
+        assertEquals("TOO_MANY_SLICES", e.code)
+    }
 }

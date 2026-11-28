@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * DAR-OPS-029 D11 (S13). AuditCheckRun.outsideRulesJson on MySQL, as prod has it: Moqui adds the column at startup
  * (entity_add_missing_startup), and it must be LONGTEXT, because 200 rows of JSON do not fit text-long's VARCHAR(4095)
  * (MySQL strict mode refuses the write). H2 has no such limit, so only this test can see it.
+ * Also AuditFinding.orderLinesOmittedJson (S13 for S11): VARCHAR(1023), and a map naming every root system fits it.
  * Opt-in: `./gradlew :runtime:component:darpan:mysqlTest` with DARPAN_TEST_DB_* as in MysqlLoginTestSupport.
  */
 @Tag("mysql")
@@ -54,7 +55,7 @@ class AuditCheckRunOutsideRulesMysqlTests {
 
     @Test
     void twoHundredOutsideRowsFitTheColumnOnMysql() {
-        assertEquals("longtext", columnType("OUTSIDE_RULES_JSON"), "added at startup as LONGTEXT, not VARCHAR(4095)")
+        assertEquals("longtext", columnType("darpan.audit.AuditCheckRun", "OUTSIDE_RULES_JSON"), "added at startup as LONGTEXT, not VARCHAR(4095)")
 
         Map base = [companyUserGroupId: TENANT, checkId: CHECK, reportDate: Date.valueOf("2026-10-14")]
         ec.service.sync().name("${SVC}.record#CheckRun").parameters(base + [sourceReads: [[systemEnumId: "OMS_RETURNS_GQL",
@@ -74,15 +75,34 @@ class AuditCheckRunOutsideRulesMysqlTests {
         assertEquals(200, (new groovy.json.JsonSlurper().parseText(json) as List).size(), "kept whole, not truncated")
     }
 
+    @Test
+    void omittedOrderLinesForEveryRootSystemFitTheColumnOnMysql() {
+        assertEquals("varchar(1023)", columnType("darpan.audit.AuditFinding", "ORDER_LINES_OMITTED_JSON"), "added at startup")
+
+        List roots = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "DarpanSystemSource")
+                .condition("parentEnumId", null).disableAuthz().list()*.enumId
+        Map omitted = roots.collectEntries { [(it): Long.MAX_VALUE] }
+        Map out = ec.service.sync().name("${SVC}.record#CheckFindings").parameters([companyUserGroupId: TENANT, checkId: CHECK,
+                reportDate: Date.valueOf("2026-10-15"), findings: [[statementCode: "R4", recordKey: "OLO-${RUN}".toString(),
+                headline: "Lines left out", orderLinesOmitted: omitted,
+                records: [[systemEnumId: "OMS", recordType: "order", recordId: "OLO-1"]]]]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+
+        String json = ec.entity.find("darpan.audit.AuditFinding").condition("findingId", (out.findingIds as List)[0])
+                .disableAuthz().useCache(false).one().orderLinesOmittedJson
+        assertEquals(new TreeMap(omitted), new groovy.json.JsonSlurper().parseText(json), "every root, kept whole: ${json}")
+    }
+
     private static void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 
-    private static String columnType(String column) {
-        String table = ec.entity.getEntityDefinition("darpan.audit.AuditCheckRun").getFullTableName()
-        Connection c = ec.entity.getConnection(ec.entity.getEntityGroupName("darpan.audit.AuditCheckRun"))
+    /** COLUMN_TYPE as MySQL reports it, e.g. longtext or varchar(1023). */
+    private static String columnType(String entityName, String column) {
+        String table = ec.entity.getEntityDefinition(entityName).getFullTableName()
+        Connection c = ec.entity.getConnection(ec.entity.getEntityGroupName(entityName))
         try {
-            def ps = c.prepareStatement("""SELECT DATA_TYPE FROM information_schema.COLUMNS
+            def ps = c.prepareStatement("""SELECT COLUMN_TYPE FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?""")
             ps.setString(1, table)
             ps.setString(2, column)

@@ -476,7 +476,9 @@ class KeepStepSupportTests {
                               sideKeep([], true)]
         notSpark.each { Map keep ->
             Map out = ingest(file, keep)
-            assertEquals(["dataDf", "idDf"], (out.keySet() as List).sort(), "${keep?.placement}")
+            // OC15 (773eb0c3): every ingest also counts the records it left out for a blank key.
+            assertEquals(["dataDf", "idDf", "keylessCount"], (out.keySet() as List).sort(), "${keep?.placement}")
+            assertEquals(today.keylessCount, out.keylessCount)
             assertEquals(ids(today.idDf), ids(out.idDf))
             assertEquals(((Dataset) today.dataDf).schema(), ((Dataset) out.dataDf).schema())
             assertEquals(((Dataset) today.dataDf).toJSON().collectAsList().sort(), ((Dataset) out.dataDf).toJSON().collectAsList().sort())

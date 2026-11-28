@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import org.moqui.util.ContextStack
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 
@@ -30,16 +31,19 @@ class OrderLineUnitKeyBlindnessTests {
     /** ASCII Unit Separator, the shipped composite-key delimiter. Never hardcode a visible one. */
     private static final String SEP = ReconciliationServices.COMPOSITE_KEY_DELIMITER
 
-    /** reconcileIdDataFrames reads only ec.contextStack (the inputs); the map-coerced stub carries just that (no getMessage, so an error path would fail on the stub). */
+    /** reconcileIdDataFrames reads only ec.context (the inputs); the map-coerced stub carries just that (no getMessage, so an error path would fail on the stub). */
     private Map<String, Object> contextStack = [:]
     private ExecutionContext ec
 
     private ExecutionContext stubEc() {
         Map<String, Object> stack = contextStack
-        ExecutionContext stub = ([:] as ExecutionContext)
-        // contextStack is an ExecutionContextImpl getter, not on the interface: per-instance metaClass supplies it.
-        stub.metaClass.getContextStack = { -> stack }
-        return stub
+        // S01a 256be44f reads ec.context (the interface's own getter, the same ContextStack real Moqui hands back), not
+        // the ExecutionContextImpl-only contextStack, so the map coercion supplies it: a ContextStack holding the inputs.
+        return ([getContext: { ->
+            ContextStack context = new ContextStack()
+            context.putAll(stack)
+            return context
+        }] as ExecutionContext)
     }
     private SparkSession spark
 
@@ -65,7 +69,7 @@ class OrderLineUnitKeyBlindnessTests {
 
     /**
      * Drives the real public entry point rather than a test-only shim: reconcileIdDataFrames reads
-     * its inputs from ec.contextStack (a plain map here, no Moqui).
+     * its inputs from ec.context (a plain map here, no Moqui).
      */
     private Map<String, Object> reconcile(Dataset<Row> df1, Dataset<Row> df2) {
         contextStack.clear()

@@ -49,6 +49,17 @@ class OrderLinesTests {
         assertEquals(null, AuditAutomationSupport.orderLinesOmittedOf([type: "MISSING_IN_FILE_2", id: "R1"], OMS, NS), "none left off: absent")
     }
 
+    // DAR-OPS-029 S99-012 (S10's read side). The ledger keeps them by root system; the report names them by its keys, and an
+    // order of several lines says the most any line saw (each line's read of the order cut the same lines off).
+    @Test
+    void anOrderSaysTheMostLinesAnyOfItsLinesSawLeftOffPerSystem() {
+        assertEquals([NetSuite: 2, OMS: 7], AuditOrderUnits.linesOmitted([[orderLinesOmittedJson: '{"NETSUITE":2,"OMS":4}'],
+                [orderLinesOmittedJson: '{"OMS":7}'], [orderLinesOmittedJson: null]]))
+        assertEquals([OMS: 4], AuditOrderUnits.linesOmitted([[orderLinesOmittedJson: '{"OMS":4}']]), "one line: its own")
+        assertEquals(null, AuditOrderUnits.linesOmitted([[orderLinesOmittedJson: null], [findingId: "F1"]]), "none left off: absent")
+        assertEquals(null, AuditOrderUnits.linesOmitted([]))
+    }
+
     @Test
     void aRowWithoutOrderLinesAddsNone() {
         assertEquals([], AuditAutomationSupport.orderLineRecords([type: "MISSING_IN_FILE_2", id: "R1"], OMS, NS))

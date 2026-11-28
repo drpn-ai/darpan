@@ -502,6 +502,8 @@ class AuditReportAssembler {
                 lines.size() == 1 ? "Order ${order}: ${AuditOrderUnits.oneLine(order, lines[0])}" :
                 "Order ${order}: ${lines.size()} lines${cause ? ', ' + AuditOrderUnits.lowerFirst(cause) : ''}"
         Map first = lines[0]
+        // DAR-OPS-029 S99-012: the order's lines the read left off past the cap, per system, the most any line saw.
+        Map omitted = AuditOrderUnits.linesOmitted((unit.entries as List<Map>)*.row as List<Map>)
         return [id        : order,
                 kind      : "order",
                 order     : order,
@@ -515,7 +517,8 @@ class AuditReportAssembler {
                 stuck     : stuck*.id,
                 lines     : lines,
                 orderLines: AuditOrderUnits.orderLines(order, lines, context),
-                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes) + acknowledgement
+                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes) + acknowledgement +
+                (omitted ? [orderLinesOmitted: omitted] : [:])
     }
 
     /**
@@ -666,6 +669,8 @@ class AuditReportAssembler {
 
     static Map briefFinding(Map entry, LocalDate day, Map records, Map<String, String> codes) {
         Map row = entry.row as Map
+        // DAR-OPS-029 S99-012: lines of its order the read left off, per system; absent when none were.
+        Map omitted = AuditOrderUnits.linesOmitted([row])
         return [id        : row.findingId,
                 headline  : row.headline,
                 state     : codes[entry.state as String],
@@ -673,7 +678,7 @@ class AuditReportAssembler {
                 ageDays   : days(row.firstFoundDate as Date, day),
                 records   : records,
                 difference: AuditRecordFacts.money(row.differenceAmount as BigDecimal, row.currencyUomId as String),
-                next      : "darpan findings show ${row.findingId}".toString()]
+                next      : "darpan findings show ${row.findingId}".toString()] + (omitted ? [orderLinesOmitted: omitted] : [:])
     }
 
     /**

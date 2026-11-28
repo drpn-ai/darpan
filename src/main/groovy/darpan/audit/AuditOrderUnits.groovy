@@ -1,5 +1,7 @@
 package darpan.audit
 
+import groovy.json.JsonSlurper
+
 import static darpan.audit.AuditReportAssembler.FIXED
 import static darpan.audit.AuditReportAssembler.OPEN
 
@@ -105,6 +107,23 @@ class AuditOrderUnits {
         List<String> picked = skus ?: ((finding?.lines ?: []) as List<Map>).collect { it.id as String }.findAll().unique()
         if (!picked) return null
         return picked.size() <= 2 ? picked.join(', ') : "${picked.take(2).join(', ')} and ${picked.size() - 2} more".toString()
+    }
+
+    /**
+     * DAR-OPS-029 S99-012 (S10's read side of S11 e462d3c9). The lines of an order left off past the 60-per-side read cap,
+     * per system (report key: OMS, NetSuite, Shopify), the most any of the given ledger rows saw; null when none were.
+     */
+    static Map<String, Integer> linesOmitted(List<Map> rows) {
+        Map<String, Integer> out = new TreeMap<String, Integer>()
+        (rows ?: []).each { Map row ->
+            String json = row?.orderLinesOmittedJson as String
+            if (!json) return
+            ((Map) new JsonSlurper().parseText(json)).each { String root, Object n ->
+                String key = AuditRecordFacts.systemKey(root)
+                out.put(key, Math.max(out.get(key) ?: 0, (n as Number).intValue()))
+            }
+        }
+        return out ?: null
     }
 
     /**

@@ -1196,6 +1196,30 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([P0: 1, P1: 0, P2: 0, KNOWN: 0], priorityStatement(PRI_B, "${PRI_B}_pri-tenant").counts.byPriority, "B's own override holds in B")
     }
 
+    // DAR-OPS-029 S99-012 (S10's read side of S11 e462d3c9 / S13 0694eab8). Lines of an order left off past the 60-per-side
+    // read cap: the order unit says how many per system (the most any of its lines saw), each line and its document its own;
+    // an order with none left off carries no such field.
+    @Test
+    void anOrderSaysHowManyOfItsLinesTheReadLeftOff() {
+        priorityAudit(PRI, "pri-cut", null)
+        Closure<Map> line = { String item, Map omitted ->
+            [statementCode: "S1", recordKey: item, headline: "Item ${item} is completed in HotWax and not billed in NetSuite".toString(),
+             records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: item, recordStatus: "Completed"]]] +
+                    (omitted ? [orderLinesOmitted: omitted] : [:])
+        }
+        List<String> ids = priorityFindings(PRI, "${PRI}_pri-cut_C", [line("M9000001/01", [OMS_RETURNS_GQL: 4, NETSUITE_SUITEQL: 2]),
+                line("M9000001/02", [OMS_RETURNS_GQL: 7]), line("M9000002/01", null)])
+        List<Map> units = priorityStatement(PRI, "${PRI}_pri-cut").findings as List<Map>
+        Map cut = units.find { it.id == "M9000001" }
+        assertEquals([NetSuite: 2, OMS: 7], cut.orderLinesOmitted, "per system, the most any of its lines saw")
+        assertEquals([[NetSuite: 2, OMS: 4], [OMS: 7]], (cut.lines as List<Map>)*.orderLinesOmitted, "each line its own")
+        Map whole = units.find { it.id == "M9000002" }
+        assertFalse(whole.containsKey("orderLinesOmitted") || ((whole.lines as List<Map>)[0]).containsKey("orderLinesOmitted"),
+                "none left off: absent")
+        assertEquals([NetSuite: 2, OMS: 4], finding(PRI, ids[0]).finding.orderLinesOmitted)
+        assertFalse((finding(PRI, ids[2]).finding as Map).containsKey("orderLinesOmitted"))
+    }
+
     @Test
     void findingDocumentSaysWhereLevelCameFrom() {
         String st = priorityAudit(PRI, "pri-doc", "AUDP_P1")

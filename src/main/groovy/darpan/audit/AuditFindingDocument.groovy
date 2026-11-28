@@ -77,6 +77,8 @@ class AuditFindingDocument {
         Timestamp lastChecked = (f.lastCheckedStamp ?: events.findAll { it.byTypeEnumId != USER_ACTOR }
                 .with { it ? it.last().eventStamp : null }) as Timestamp
         Map acknowledgement = state == OPEN ? findingAcknowledgement(ec, tenantId, findingId, zone) : null
+        // DAR-OPS-029 S99-012: lines of its order the read left off past the cap, per system; absent when none were.
+        Map omitted = AuditOrderUnits.linesOmitted([f])
         return [schema : FINDING_SCHEMA,
                 finding: [
                         id       : f.findingId,
@@ -131,7 +133,7 @@ class AuditFindingDocument {
                         history  : events.collect { Map e ->
                             [at: AuditReportAssembler.isoDateTime(e.eventStamp as Timestamp, zone), event: codes.get(e.eventTypeEnumId as String),
                              by: actor(e.byTypeEnumId as String, e.byId as String, e.eventStamp as Timestamp, zone, checkCodes, codes)]
-                        }],
+                        }] + (omitted ? [orderLinesOmitted: omitted] : [:]),
                 access : [mode: "read-only", note: ACCESS_NOTE]]
     }
 

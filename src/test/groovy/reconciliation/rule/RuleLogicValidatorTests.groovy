@@ -290,6 +290,28 @@ end'''
         assertNotNull(RuleLogicValidator.firstViolation('rule "x" when $m : Map() then Boolean.getBoolean("x"); end'))
     }
 
+    // ---- DAR-OPS-029 S02: unqualified java.lang types that hand out Class objects (DOTTED_REF never vets them) ----
+
+    @Test
+    void stackWalkerCallerClassReflectionIsRejected() {
+        // Passed before S02: StackWalker is unqualified, and none of these accessors were denied.
+        assertNotNull(RuleLogicValidator.firstViolation(
+                'rule "x" when $m : Map( eval( StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).getCallerClass() != null ) ) then end'))
+    }
+
+    @Test
+    void eachNewlyDeniedReflectionCallIsRejected() {
+        // Each on a plain local, so only the accessor itself can trip the validator.
+        ["getCallerClass()", "getDeclaredField(\"x\")", "getDeclaredFields()", "getField(\"x\")", "getFields()",
+         "setAccessible(true)", "findLoader(\"x\")", "getModule()", "getLayer()", "getKieBase()"].each { String call ->
+            String ruleLogic = 'rule "x" when $m : Map() then Object o = $m.' + call + '; end'
+            assertNotNull(RuleLogicValidator.firstViolation(ruleLogic), "accepted: ${call}")
+        }
+        ["ModuleLayer.boot()", "Class.forName(\"x\")", "Module m = null"].each { String code ->
+            assertNotNull(RuleLogicValidator.firstViolation('rule "x" when $m : Map() then ' + code + '; end'), "accepted: ${code}")
+        }
+    }
+
     @Test
     void validateReturnsListOfViolations() {
         List<String> v = RuleLogicValidator.validate('rule "x" when $m : Map() then Runtime.getRuntime(); end')

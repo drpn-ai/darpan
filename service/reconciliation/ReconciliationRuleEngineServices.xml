@@ -238,12 +238,10 @@
                 <if condition="ruleNameValue &amp;&amp; ruleNameValue.find('[&lt;&gt;|*~`]') != null">
                     <message error="true">Rule name cannot hold &lt; &gt; | * ~ or `.</message>
                 </if>
-                <!-- Audit 2026-06-11 #1/#6: ruleLogic flows verbatim into compiled+executed DRL. Gate
-                     the untrusted save boundary so a client bypassing the UI cannot submit arbitrary
-                     Java/MVEL (RCE). Accepts the UI-generated RuleDiffSupport/java.util shape only.
-                     System/seed rules load via the entity data facade and are unaffected. -->
+                <!-- Audit 2026-06-11 #1/#6: ruleLogic flows verbatim into compiled+executed DRL. The save boundary asks
+                     the same gate the compiler does (DAR-OPS-029 S02), so a rule that will never compile is refused here. -->
                 <if condition="!ec.message.hasError() &amp;&amp; ruleLogicValue">
-                    <set field="ruleLogicViolation" from="reconciliation.rule.RuleLogicValidator.firstViolation(ruleLogicValue)"/>
+                    <set field="ruleLogicViolation" from="reconciliation.rule.RuleLogicValidator.firstViolation(ruleLogicValue) ?: reconciliation.rule.RuleEngineSupport.compileGateViolation(requestedRuleIdValue ?: 'new rule', ruleLogicValue)"/>
                     <if condition="ruleLogicViolation">
                         <message error="true">ruleLogic rejected: ${ruleLogicViolation}</message>
                     </if>

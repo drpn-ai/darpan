@@ -73,6 +73,23 @@ class FieldComparisonRuleLogicGeneratorTests {
         assertNull(RuleLogicValidator.firstViolation(generated))
     }
 
+    /** DAR-OPS-029 S02: the compile gate's shape check accepts everything generate() emits, injected field text included. */
+    @Test
+    void everyGeneratedRuleHasTheGeneratedShape() {
+        goldens().each { Map g ->
+            String generated = FieldComparisonRuleLogicGenerator.generate(
+                    (String) g.expression, (String) g.file1PrimaryIdExpression, (String) g.file2PrimaryIdExpression,
+                    (String) g.ruleId, (String) g.severity, ((Number) g.index).intValue())
+            assertTrue(FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic(generated), "rejected golden '${g.name}':\n${generated}")
+            assertTrue(FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic((String) g.ruleLogic), "rejected UI golden '${g.name}'")
+        }
+        String evil = '{"type":"FIELD_COMPARISON","file1FieldPath":"$.a[*].x\\");} java.lang.Runtime.getRuntime().exec(\\"id\\");//","file2FieldPath":"$[*].y","operator":"="}'
+        assertTrue(FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic(
+                FieldComparisonRuleLogicGenerator.generate(evil, '$.a[*].id', '$[*].id', null, 'WARN', 0)))
+        assertTrue(!FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic(null))
+        assertTrue(!FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic('this["status"] == "Pending"'))
+    }
+
     /** DAR-BE-192: a tolerance on an equality compiles to differsByAtLeast and says so in the label; anything else is unchanged. */
     @Test
     void anEqualityMayTolerateADifferenceBelowAnAmount() {

@@ -63,14 +63,17 @@ class RuleLogicValidator {
 
     // Whole-identifier class names that grant code execution / process control (defense-in-depth; the
     // allow-list + FORBIDDEN_CONSTRUCT are the primary controls).
+    // DAR-OPS-029 S02: StackWalker, ModuleLayer, Module and Class are unqualified java.lang types (so DOTTED_REF never
+    // vets them) that hand out Class and ClassLoader objects: StackWalker.getInstance(RETAIN_CLASS_REFERENCE)
+    // .getCallerClass().getDeclaredFields() passed this validator.
     private static final Pattern FORBIDDEN_CLASS =
-            ~/(?i)\b(Runtime|ProcessBuilder|Process|System|Thread|ThreadGroup|ClassLoader|SecurityManager|Compiler|Unsafe|GroovyShell|GroovyClassLoader|ScriptEngineManager|ScriptEngine|ProcessHandle|Formatter|Scanner|FileWriter|FileReader|FileOutputStream|FileInputStream|RandomAccessFile|Files|Paths|Statement|Expression|URLClassLoader|DriverManager|InitialContext|MethodHandles|VarHandle|Timer|TimerTask)\b/
+            ~/(?i)\b(Runtime|ProcessBuilder|Process|System|Thread|ThreadGroup|ClassLoader|SecurityManager|Compiler|Unsafe|GroovyShell|GroovyClassLoader|ScriptEngineManager|ScriptEngine|ProcessHandle|Formatter|Scanner|FileWriter|FileReader|FileOutputStream|FileInputStream|RandomAccessFile|Files|Paths|Statement|Expression|URLClassLoader|DriverManager|InitialContext|MethodHandles|MethodHandle|VarHandle|Timer|TimerTask|StackWalker|ModuleLayer|Module|Class)\b/
 
     // Reflection / dynamic-execution method and property accessors, plus the system-property/env
     // readers reachable on default-imported java.lang types (Integer.getInteger / Boolean.getBoolean /
     // Long.getLong / System.getProperty / getenv) — an info leak a field-comparison rule never needs.
     private static final Pattern FORBIDDEN_ACCESS =
-            ~/(?i)(\.\s*(forName|newInstance|getClass|getMethod|getDeclaredMethod|getDeclaredMethods|getMethods|getConstructor|getDeclaredConstructor|invoke|loadClass|defineClass|getClassLoader|getKieRuntime|getKnowledgeRuntime|metaClass|getInteger|getBoolean|getLong|getProperty|getProperties|getenv)\s*\()|(\bexec\s*\()|(\.\s*class\b)|(\.\s*&)/
+            ~/(?i)(\.\s*(forName|newInstance|getClass|getMethod|getDeclaredMethod|getDeclaredMethods|getMethods|getConstructor|getDeclaredConstructor|invoke|loadClass|defineClass|getClassLoader|getKieRuntime|getKnowledgeRuntime|metaClass|getInteger|getBoolean|getLong|getProperty|getProperties|getenv|getField|getFields|getDeclaredField|getDeclaredFields|setAccessible|getCallerClass|findLoader|getModule|getLayer|getKieBase)\s*\()|(\bexec\s*\()|(\.\s*class\b)|(\.\s*&)/
 
     // Denial-of-service sinks usable with pure allow-listed tokens — defense-in-depth (a single hung
     // regex / unbounded allocation cannot be soundly bounded in-process; see the class header and the

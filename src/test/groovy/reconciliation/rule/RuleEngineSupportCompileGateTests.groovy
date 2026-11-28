@@ -3,6 +3,8 @@ package reconciliation.rule
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
+import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -11,16 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 // Executable and ThrowingSupplier overloads.
 
 /**
- * MACH P0 #5 — the rule-engine COMPILE path must fail closed on tenant-authored raw DRL.
+ * MACH P0 #5 — the rule-engine COMPILE path fails closed on tenant-authored rule logic.
  *
- * RuleLogicValidator historically gated only the save#Rule boundary
- * (ReconciliationRuleEngineServices.xml). A Rule row whose ruleLogic reached the DB by any
- * other path — data load, upgrade-data, a direct entity write, or creation predating the
- * validator — was compiled by RuleEngineSupport unvalidated (RCE-class residual). These tests
- * pin the compile-time backstop + default-OFF raw-DRL flag:
- *   (1) every ruleLogic is re-validated at compile time (throw on violation);
- *   (2) a raw `rule…end` block is rejected unless it is a platform rule (null companyUserGroupId,
- *       loaded by ops), a server-regenerable FIELD_COMPARISON rule, or darpan.rules.allowRawDrl=true.
+ * DAR-OPS-029 S02: a stored ruleLogic compiles only when it is exactly FieldComparisonRuleLogicGenerator's output (the
+ * only rule logic a tenant can author), or when darpan.rules.allowRawDrl=true. The gate used to trust ruleType=
+ * FIELD_COMPARISON beside any expression, any bare constraint, and a null tenant; each of those now fails.
+ * RuleLogicValidator runs first in every case, flag or not.
+ *
+ * NB: `eval(...)` below is Drools DRL syntax inside test-fixture strings, not a JS/Python eval; nothing is executed.
  */
 class RuleEngineSupportCompileGateTests {
 
@@ -40,9 +40,9 @@ then
     new java.io.FileWriter("/tmp/pwn").write("x");
 end'''
 
-    // NB: the `eval(...)` tokens below are Drools DRL constraint syntax inside test-fixture strings
-    // (mirroring FieldComparisonRuleLogicGenerator output), NOT a JS/Python eval — no code is executed here.
-    private static final String FIELD_COMPARISON_DRL = '''rule "FIELD_COMPARISON_1"
+    // Hand-written, validator-clean, and NOT what the generator emits. Before S02 the gate let it compile because the
+    // row said ruleType=FIELD_COMPARISON and carried an expression.
+    private static final String HAND_WRITTEN_FIELD_COMPARISON_DRL = '''rule "FIELD_COMPARISON_1"
 when
     $m : Map(this["file1"] != null, this["file2"] != null)
     eval(reconciliation.rule.RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku")))
@@ -50,8 +50,13 @@ then
     reconciliation.rule.RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "sku", ((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"), "WARN", "SKU mismatch");
 end'''
 
-    private static final String FIELD_COMPARISON_EXPRESSION =
-            '{"type":"FIELD_COMPARISON","file1FieldPath":"sku","file2FieldPath":"sku","operator":"="}'
+    private static String generated(String operator = "=", String preActions = "", String tolerance = "") {
+        String expression = '{"type":"FIELD_COMPARISON","file1FieldPath":"$.orders[*].sku","file2FieldPath":"$.items[*].sku",' +
+                '"operator":"' + operator + '"' + preActions + tolerance + '}'
+        String drl = FieldComparisonRuleLogicGenerator.generate(expression, '$.orders[*].id', '$.items[*].id', "R1", "WARN", 0)
+        assertNotNull(drl)
+        return drl
+    }
 
     @AfterEach
     void clearFlag() {
@@ -61,61 +66,106 @@ end'''
     @Test
     void tenantRawDrlRejectedWhenFlagOff() {
         def ex = assertThrows(IllegalArgumentException) {
-            RuleEngineSupport.assertCompilableRuleLogic("TENANT_MARK", BENIGN_TENANT_DRL, "DRL", null, "TENANT_A")
+            RuleEngineSupport.assertCompilableRuleLogic("TENANT_MARK", BENIGN_TENANT_DRL)
         }
-        assertTrue(ex.message?.toLowerCase()?.contains("raw drl"),
-                "expected a raw-DRL fail-closed message, got: ${ex.message}")
+        assertTrue(ex.message?.contains("not a generated field comparison"), "got: ${ex.message}")
     }
 
     @Test
     void dangerousPayloadRejectedAtCompileTimeEvenWithFlagOn() {
-        // The validator backstop rejects a forbidden construct regardless of tenant/platform or flag.
         System.setProperty(ALLOW_RAW_DRL_PROP, "true")
         assertThrows(IllegalArgumentException) {
-            RuleEngineSupport.assertCompilableRuleLogic("PWN", DANGEROUS_DRL, "DRL", null, null)
+            RuleEngineSupport.assertCompilableRuleLogic("PWN", DANGEROUS_DRL)
         }
     }
 
     @Test
-    void platformRawDrlAllowed() {
-        // companyUserGroupId == null => platform rule loaded by ops via data/*.xml; trusted. Must not throw.
-        RuleEngineSupport.assertCompilableRuleLogic("PLATFORM_MARK", BENIGN_TENANT_DRL, "DRL", null, null)
+    void generatedFieldComparisonCompilesForEveryViolationForm() {
+        // Each form generate() can emit: Objects.equals (=, !=), violatesOperator (ordering, presence, list, pre-actions),
+        // differsByAtLeast (tolerance). Must not throw.
+        [generated("="), generated("!="), generated(">="), generated("requires"), generated("all in"),
+         generated("=", ',"preActions":[{"fieldSide":"file1","action":"STRING_TO_NUMBER"},{"fieldSide":"file2","action":"STRING_TO_INT"}]'),
+         generated("=", ',"preActions":[{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]', ',"tolerance":"1.00"')
+        ].each { String drl -> RuleEngineSupport.assertCompilableRuleLogic("R1", drl) }
     }
 
     @Test
-    void fieldComparisonTenantRuleAllowed() {
-        // Server-regenerable FIELD_COMPARISON rule (the UI's only rule type). Must not throw.
-        RuleEngineSupport.assertCompilableRuleLogic(
-                "FIELD_COMPARISON_1", FIELD_COMPARISON_DRL, "FIELD_COMPARISON", FIELD_COMPARISON_EXPRESSION, "TENANT_A")
+    void handWrittenDrlLabelledFieldComparisonIsRejected() {
+        // The row's ruleType and expression are no longer consulted: only the logic itself is.
+        assertNotNull(RuleEngineSupport.compileGateViolation("FIELD_COMPARISON_1", HAND_WRITTEN_FIELD_COMPARISON_DRL))
+    }
+
+    @Test
+    void bareConstraintLogicIsRejectedWhenFlagOff() {
+        // A non-`rule` ruleLogic is pasted into Map(...) as an MVEL constraint; it is tenant-authored code too.
+        assertNotNull(RuleEngineSupport.compileGateViolation("C1", 'this["status"] == "Pending"'))
+    }
+
+    @Test
+    void nullTenantGetsNoExemption() {
+        // The old "platform rule" branch (null companyUserGroupId) is gone: such a rule set never reaches the compiler.
+        assertNotNull(RuleEngineSupport.compileGateViolation("PLATFORM_MARK", BENIGN_TENANT_DRL))
+    }
+
+    @Test
+    void tamperedGeneratorOutputIsRejected() {
+        String drl = generated(">")
+        List<String> tampered = [
+                drl.replace('    );\nend', '    );\n    results.add($m);\nend'),                       // extra consequence
+                drl.replace('eval(', 'eval(true || '),                                                  // altered condition
+                drl.replace('"WARN"', '"WARN" + $m.size()'),                                            // code beside a literal
+                drl.replace('Object _file1Value = ', 'Object _file1Value = $m.size() + '),              // altered value
+                drl.replace('reconciliation.rule.RuleDiffSupport.violatesOperator', 'reconciliation.rule.RuleDiffSupport.valuesDiffer'),
+                drl.replace('"sku"', '"sk\\u0075"'),                                                    // Unicode escape
+                drl + '\nrule "SECOND"\nwhen\n    $x : Map()\nthen\nend',                              // a second rule
+        ]
+        tampered.eachWithIndex { String t, int i ->
+            assertTrue(t != drl, "mutation ${i} did not change the fixture")
+            assertNotNull(RuleEngineSupport.compileGateViolation("R1", t), "mutation ${i} passed the gate:\n${t}")
+        }
+    }
+
+    @Test
+    void theRefusalNamesTheRuleAndQuotesNoneOfItsLogic() {
+        // A run's error reaches notifications: it names the rule, never the stored text (not even the validator's fragment).
+        System.setProperty(ALLOW_RAW_DRL_PROP, "true")
+        String validatorRefusal = RuleEngineSupport.compileGateViolation("PWN_RULE", DANGEROUS_DRL)
+        System.clearProperty(ALLOW_RAW_DRL_PROP)
+        String shapeRefusal = RuleEngineSupport.compileGateViolation("MARK_RULE", BENIGN_TENANT_DRL)
+        [[validatorRefusal, "PWN_RULE"], [shapeRefusal, "MARK_RULE"]].each { List pair ->
+            String refusal = pair[0] as String
+            assertTrue(refusal.contains(pair[1] as String), refusal)
+            ["FileWriter", "java.io", "/tmp/pwn", "REVIEW", "status", "\$m"].each { String fragment ->
+                assertTrue(!refusal.contains(fragment), "refusal quotes '${fragment}': ${refusal}")
+            }
+        }
     }
 
     @Test
     void tenantRawDrlAllowedWhenFlagOn() {
         System.setProperty(ALLOW_RAW_DRL_PROP, "true")
-        // Explicit opt-in for the environment. Must not throw.
-        RuleEngineSupport.assertCompilableRuleLogic("TENANT_MARK", BENIGN_TENANT_DRL, "DRL", null, "TENANT_A")
+        RuleEngineSupport.assertCompilableRuleLogic("TENANT_MARK", BENIGN_TENANT_DRL)
     }
 
     @Test
     void nullRuleLogicIsNoop() {
-        // No ruleLogic to gate. Must not throw.
-        RuleEngineSupport.assertCompilableRuleLogic("EMPTY", null, "DRL", null, "TENANT_A")
+        assertNull(RuleEngineSupport.compileGateViolation("EMPTY", null))
     }
 
     @Test
     void buildRuleSetDrlFailsClosedOnTenantRawDrl() {
-        List rules = [[ruleId: "TENANT_MARK", ruleLogic: BENIGN_TENANT_DRL, ruleType: "DRL", expression: null, sequenceNum: 10]]
-        List warnings = []
+        List rules = [[ruleId: "TENANT_MARK", ruleLogic: BENIGN_TENANT_DRL, sequenceNum: 10]]
         assertThrows(IllegalArgumentException) {
-            RuleEngineSupport.buildRuleSetDrl("RS1", "reconciliation.rules.tenant_a.rs1", rules, warnings, "TENANT_A")
+            RuleEngineSupport.buildRuleSetDrl("RS1", "reconciliation.rules.tenant_a.rs1", rules, [])
         }
     }
 
     @Test
-    void buildRuleSetDrlCompilesPlatformRawDrl() {
-        List rules = [[ruleId: "PLATFORM_MARK", ruleLogic: BENIGN_TENANT_DRL, ruleType: "DRL", expression: null, sequenceNum: 10]]
-        List warnings = []
-        String drl = RuleEngineSupport.buildRuleSetDrl("RS2", "reconciliation.rules.default.rs2", rules, warnings, null)
-        assertTrue(drl?.contains('rule "TENANT_MARK"'), "platform raw DRL should be emitted into the compiled package")
+    void buildRuleSetDrlEmitsGeneratedAndParsedRules() {
+        List rules = [[ruleId: "R1", ruleLogic: generated("="), sequenceNum: 10],
+                      [ruleId: "R2", ruleText: "status is Pending", sequenceNum: 20]]
+        String drl = RuleEngineSupport.buildRuleSetDrl("RS2", "reconciliation.rules.t.rs2", rules, [])
+        assertTrue(drl.contains('rule "R1"'), drl)
+        assertTrue(drl.contains('this["status"] == "Pending"'), drl)
     }
 }

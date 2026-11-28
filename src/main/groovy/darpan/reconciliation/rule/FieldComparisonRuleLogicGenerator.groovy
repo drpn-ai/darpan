@@ -2,6 +2,8 @@ package reconciliation.rule
 
 import groovy.json.JsonSlurper
 
+import java.util.regex.Pattern
+
 /**
  * Audit 2026-06-11 #1 (durable fix). Server-side generator for FIELD_COMPARISON rule DRL.
  *
@@ -25,6 +27,45 @@ class FieldComparisonRuleLogicGenerator {
     private static final Set<String> VALID_OPERATORS = ["=", "==", "!="] as Set + RULE_DIFF_OPERATORS
     private static final Set<String> VALID_PRE_ACTIONS = ["STRING_TO_INT", "STRING_TO_NUMBER"] as Set
     private static final JsonSlurper JSON = new JsonSlurper()
+
+    // DAR-OPS-029 S02: the shape generate() emits, with every string literal collapsed to "S", every map access to @A
+    // and every side's value expression to @V. Only string literals vary between two generated rules.
+    private static final Pattern DRL_STRING_LITERAL = ~/"(?:[^"\\\r\n]|\\.)*"/
+    private static final Pattern PRE_ACTION_CALL = Pattern.compile(
+            Pattern.quote('reconciliation.rule.RuleDiffSupport.applyPreActions(@A, java.util.Arrays.asList(') +
+                    '"S"(?:, "S")*' + Pattern.quote('))'))
+    private static final String VIOLATION_SHAPE =
+            '(?:' + Pattern.quote('reconciliation.rule.RuleDiffSupport.differsByAtLeast(@V, @V, "S")') +
+            '|' + Pattern.quote('reconciliation.rule.RuleDiffSupport.violatesOperator(@V, @V, "S")') +
+            '|!?' + Pattern.quote('java.util.Objects.equals(@V, @V)') + ')'
+    private static final Pattern GENERATED_SHAPE = Pattern.compile(
+            Pattern.quote('rule "S"\nwhen\n    $m : Map(this["S"] != null, this["S"] != null)\n    eval(') +
+                    VIOLATION_SHAPE +
+                    Pattern.quote(')\nthen\n    Object _file1Value = @V;\n    Object _file2Value = @V;\n' +
+                            '    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n' +
+                            '        kcontext.getRule().getName(),\n        "S",\n        _file1Value,\n        _file2Value,\n' +
+                            '        "S",\n        "S"\n    );\nend'))
+
+    /**
+     * DAR-OPS-029 S02. True only when {@code ruleLogic} is exactly what {@link #generate} emits for some expression: the
+     * fixed template, where everything that varies sits inside a string literal and so cannot run. The compile gate
+     * trusts a tenant's stored ruleLogic only on this proof, never on its ruleType or on an expression stored beside it.
+     * A Unicode escape anywhere, or an '@' outside a literal, fails it: either could change what the compiler reads.
+     */
+    static boolean isGeneratedRuleLogic(String ruleLogic) {
+        String text = ruleLogic?.replace("\r\n", "\n")?.trim()
+        if (!text || text.contains('\\u')) return false
+        String shape = DRL_STRING_LITERAL.matcher(text).replaceAll('"S"')
+        if (shape.contains('@')) return false
+        shape = shape.replace('$m.get("S")', '@A')
+        String previous = null
+        while (shape != previous) {
+            previous = shape
+            shape = shape.replace('((Map) @A).get("S")', '@A')
+        }
+        shape = PRE_ACTION_CALL.matcher(shape).replaceAll('@V').replace('@A', '@V')
+        return GENERATED_SHAPE.matcher(shape).matches()
+    }
 
     /**
      * Returns the regenerated ruleLogic for a FIELD_COMPARISON rule, or null if the expression is not a

@@ -45,13 +45,15 @@ class RetentionSupport {
     static final String AGENT_QUERY_LOG = "AGENT_QUERY_LOG"
     static final String SYNC_PULSE_SAMPLE = "SYNC_PULSE_SAMPLE"
 
-    /** Table key to the setting that holds its instance period in days (optional: unset = keep forever). */
+    /**
+     * Table key to the setting that holds its instance period in days (optional: unset = keep forever). SYNC_PULSE_SAMPLE's
+     * setting has a 30-day default in the settings catalog (DAR-BE-328), so samples never pile up unbounded.
+     */
     static final Map<String, String> TABLE_SETTINGS = [
             (AUDIT_FINDING)  : "darpan.retention.auditFinding.days",
             (RUN_RESULT)     : "darpan.retention.runResult.days",
             (AGENT_MESSAGE)  : "darpan.retention.agentMessage.days",
             (AGENT_QUERY_LOG): "darpan.retention.agentQueryLog.days",
-            // DAR-BE-328: 30 days by default (the catalog's default), so samples never pile up unbounded.
             (SYNC_PULSE_SAMPLE): "darpan.retention.syncPulseSample.days",
     ].asImmutable()
     static final String BATCH_SIZE_SETTING = "darpan.retention.batchSize"

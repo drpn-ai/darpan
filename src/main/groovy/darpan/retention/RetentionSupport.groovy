@@ -4,6 +4,7 @@ import darpan.admin.AdminAuditSupport
 import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.RunObservability
 import groovy.transform.CompileDynamic
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
@@ -65,7 +66,8 @@ class RetentionSupport {
     private static final String REASON = "retention sweep (DAR-BE-266): system job, explicit companyUserGroupId condition for the tenant swept"
     private static final String PERIOD_REASON = "retention sweep (DAR-BE-306): the tenant's own period rows, explicit tenantUserGroupId condition"
     private static final long DAY_MILLIS = 86_400_000L
-    private static final List<String> UNFINISHED_RUN_STATUSES = ["AUT_STAT_PENDING", "AUT_STAT_RUNNING"]
+    /** A run result still being written: never swept, however old (a run result's status is RunObservability's). */
+    private static final List<String> UNFINISHED_RUN_STATUSES = [RunObservability.STATUS_PENDING, RunObservability.STATUS_RUNNING]
 
     /**
      * The period of each table for one tenant (or, with no tenantId, for the instance): the tenant's own row when it has one,
@@ -192,7 +194,7 @@ class RetentionSupport {
         return [dryRun: dryRun, tenantCount: tenants.size(), batchSize: batch, tables: tables]
     }
 
-    static List<String> allTenants(def ec) {
+    private static List<String> allTenants(def ec) {
         return TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup", "retention sweep: list every tenant")
                 .condition("groupTypeEnumId", TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID)
                 .selectField("userGroupId").orderBy("userGroupId").useCache(false).list()*.userGroupId as List<String>

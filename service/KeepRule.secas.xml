@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-318 plan 3b-2b. A Keep decision (CheckDecision stage CDS_KEEP_FILE_1 / CDS_KEEP_FILE_2) is saved through
-  moqui-rules' store#Rule like any decision. Before it saves, judge.JudgeConfigServices.check#KeepRuleLines refuses a line Keep
-  cannot run (an exists, piece or field-to-field line, an ask, a date or list field, a field of the other side or one the
-  pair fact type lacks). The errors it adds stop store#Rule, so nothing is saved. A decision that is not a Keep decision passes.
+  DAR-BE-318, DAR-OPS-029 (Aditi D4, 2026-11-28). Before moqui-rules' store#Rule saves a rule, judge.JudgeConfigServices.check#KeepRuleLines
+  refuses one on a Keep decision (CheckDecision stage CDS_KEEP_FILE_1 / CDS_KEEP_FILE_2): no run reads a Keep decision, so a rule
+  saved there would be silently ignored. The error it adds stops store#Rule, so nothing is saved. Any other decision passes.
+  (The line checks this SECA once ran went with the Keep path; the rebuild is DAR-BE-318 plan 4.)
 -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
     <seca id="KeepRuleLinesCheck" service="moqui.rules.RuleServices.store#Rule" when="pre-service">
         <actions>
-            <service-call name="judge.JudgeConfigServices.check#KeepRuleLines" in-map="[ruleSetId: ruleSetId, conditions: conditions]"/>
+            <service-call name="judge.JudgeConfigServices.check#KeepRuleLines" in-map="[ruleSetId: ruleSetId]"/>
         </actions>
     </seca>
 </secas>

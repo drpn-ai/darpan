@@ -66,6 +66,12 @@
                 <set field="connectorProblem" from="darpan.dataset.DatasetRefreshSupport.datasetConnectorProblem(ec, systemEnumId)"/>
                 <if condition="connectorProblem">
                     <return error="true" message="A dataset of ${systemEnumId} cannot be kept: ${connectorProblem}"/></if>
+                <!-- DAR-OPS-029 S16a, OC164: an active dataset's connection must be the tenant's own or shared with it, active and
+                     enabled for the system (the gate a rule-set side passes, one message for missing and not-yours). A paused one
+                     may still be stored (I1), and switching it on comes back through here. Until now only each extractor's
+                     companyUserGroupId check stopped a read of another tenant's connection. -->
+                <script>darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'Dataset', systemEnumId, sourceConfigId, null)</script>
+                <check-errors/>
             </if>
             <set field="effectiveRule" from="readRuleEnumId ?: (existingList ? existingList[0].readRuleEnumId : null) ?: 'DRR_CHANGED_SINCE'"/>
             <set field="rolling" from="effectiveRule == 'DRR_ROLLING'"/>

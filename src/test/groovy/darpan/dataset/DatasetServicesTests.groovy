@@ -56,6 +56,11 @@ class DatasetServicesTests {
         insert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: B, userId: EDITOR_ID,
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM_DATE])
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
+        // DAR-OPS-029 S16a, OC164: a dataset reads through a connection the tenant owns (or was shared): each test's own
+        ["conn-1", "conn-2", "conn-3", "conn-4", "conn-lu", "conn-orders", "shared-conn"].each { String conn ->
+            insert("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: conn, companyUserGroupId: A, isActive: "Y"])
+        }
+        insert("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: "conn-b", companyUserGroupId: B, isActive: "Y"])
     }
 
     @AfterAll
@@ -115,10 +120,16 @@ class DatasetServicesTests {
 
         actAs(EDITOR_USERNAME, B)
         assertNull(call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "shared-conn", options: opts]).out.dataset)
-        String idB = call("store#Dataset", base("shared-conn", opts)).out.datasetId
+        // OC164: B cannot keep a copy of A's unshared connection; the refusal is the rule-set side's, word for word (no
+        // existence oracle), and nothing is stored
+        Map refused = call("store#Dataset", base("shared-conn", opts))
+        assertEquals(["Dataset Shopify auth config 'shared-conn' was not found."], refused.errors)
+        assertEquals(1L, ec.entity.find("darpan.dataset.Dataset").condition("sourceConfigId", "shared-conn").disableAuthz().count(),
+                "only A's dataset exists on A's connection")
+        String idB = call("store#Dataset", base("conn-b", opts)).out.datasetId
         assertNotEquals(idA, idB)
         assertEquals(B, find("darpan.dataset.Dataset", [datasetId: idB]).companyUserGroupId)
-        assertEquals(idB, call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "shared-conn", options: opts]).out.dataset.datasetId)
+        assertEquals(idB, call("find#ServingDataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-b", options: opts]).out.dataset.datasetId)
     }
 
     /**

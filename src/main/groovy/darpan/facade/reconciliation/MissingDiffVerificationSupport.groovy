@@ -79,9 +79,12 @@ class MissingDiffVerificationSupport {
         Map<String, Long> checkedCountBySide = positiveNumbersBySide(args.sideCheckedCounts)
         Map<String, Long> maxShareBySide = positiveNumbersBySide(args.sideMaxShares)
         List<String> warnings = []
+        // OC97b: a lookup's own words (exception text, service errors) go to Darpan's alerts room through the caller
+        // (RunVerificationSupport), never into warnings, which reach the result document and the client's notification.
+        List<String> failureDetails = []
         Map<String, Object> inert = [performed: false, rewritten: false, checkedCount: 0, removedCount: 0,
                 confirmedMissingCount: 0, unresolvedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
-                lookupFailed: false, warnings: warnings, auditNote: null] as Map<String, Object>
+                lookupFailed: false, warnings: warnings, auditNote: null, failureDetails: failureDetails] as Map<String, Object>
 
         Map<String, Map<String, Object>> sides = new LinkedHashMap<>()
         ((Map) (args.sideLookups ?: [:])).each { Object side, Object lookup ->
@@ -161,7 +164,8 @@ class MissingDiffVerificationSupport {
             if (!(lookupResult?.ok)) {
                 lookupFailed = true
                 List errors = lookupResult?.errors instanceof List ? (List) lookupResult.errors : []
-                warnings.add("Verification lookup for ${label} failed; ${ids.size()} missing differences left as reported. ${errors ? errors.join("; ") : ""}".toString().trim())
+                warnings.add("Verification lookup for ${label} failed; ${ids.size()} missing differences left as reported.".toString())
+                if (errors) failureDetails.add("Verification lookup for ${label}: ${errors.join('; ')}".toString())
                 outcome.failed = true
                 return
             }
@@ -187,7 +191,9 @@ class MissingDiffVerificationSupport {
             confirmedMissingCount += confirmedMissingHere
             unresolvedCount += unresolved.size()
             if (unresolved) {
-                warnings.add("Verification lookup for ${label} could not be checked for ${unresolved.size()} of ${ids.size()} missing difference(s); those are left as reported. ${lookupErrorsOf(lookupResult)}".toString().trim())
+                warnings.add("Verification lookup for ${label} could not be checked for ${unresolved.size()} of ${ids.size()} missing difference(s); those are left as reported.".toString())
+                String details = lookupErrorsOf(lookupResult)
+                if (details) failureDetails.add("Verification lookup for ${label}: ${details}".toString())
             }
             if (removable) {
                 removeIdsBySide.put(side, removable)
@@ -200,7 +206,8 @@ class MissingDiffVerificationSupport {
             return [performed: performed, rewritten: false, checkedCount: checkedCount, removedCount: 0,
                     confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                     removedMissingInFile1: 0, removedMissingInFile2: 0,
-                    lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes] as Map<String, Object>
+                    lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes,
+                    failureDetails: failureDetails] as Map<String, Object>
         }
 
         // Pass 2 — remove the confirmed rows by side; the summary drops by the rows actually removed.
@@ -212,6 +219,6 @@ class MissingDiffVerificationSupport {
                 confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                 removedMissingInFile1: removedMissingInFile1,
                 removedMissingInFile2: removedMissingInFile2, lookupFailed: lookupFailed,
-                warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes] as Map<String, Object>
+                warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes, failureDetails: failureDetails] as Map<String, Object>
     }
 }

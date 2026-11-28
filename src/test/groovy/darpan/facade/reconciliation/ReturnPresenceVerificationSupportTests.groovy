@@ -573,7 +573,10 @@ class ReturnPresenceVerificationSupportTests {
 
         assertEquals(0, result.cancelledRefundSuppressedCount)
         assertEquals(0, result.removedCount)
-        assertTrue(((List) result.warnings).any { it.toString().contains("OMS unreachable") })
+        // OC97b: the lookup's own words go to Darpan's alerts room, never into the run's warnings.
+        assertFalse(((List) result.warnings).any { it.toString().contains("OMS unreachable") }, "${result.warnings}")
+        assertTrue(((List) result.warnings).any { it.toString().contains("Cancellation-refund lookup failed") }, "${result.warnings}")
+        assertTrue(((List) result.failureDetails).any { it.toString().contains("OMS unreachable") }, "${result.failureDetails}")
     }
 
     @Test
@@ -619,7 +622,10 @@ class ReturnPresenceVerificationSupportTests {
         })
 
         assertEquals(50, result.cancelledRefundSuppressedCount)
-        assertTrue(((List) result.warnings).any { it.toString().contains("boom") })
+        // OC97b: the failed chunk is named in the warnings; the lookup's own words go to the alerts room.
+        assertTrue(((List) result.warnings).any { it.toString().contains("did not complete") }, "${result.warnings}")
+        assertFalse(((List) result.warnings).any { it.toString().contains("boom") }, "${result.warnings}")
+        assertTrue(((List) result.failureDetails).any { it.toString().contains("boom") }, "${result.failureDetails}")
         assertEquals(100, ((List) parseDocument(diff).differences).size())
     }
 
@@ -1128,7 +1134,9 @@ class ReturnPresenceVerificationSupportTests {
 
         assertEquals(0, result.linePairedCount)
         assertEquals(1, ((List) parseDocument(diff).differences).size())
-        assertTrue(((List) result.warnings).any { it.toString().contains("THROTTLED") }, "${result.warnings}")
+        assertFalse(((List) result.warnings).any { it.toString().contains("THROTTLED") }, "${result.warnings}")
+        assertTrue(((List) result.warnings).any { it.toString().contains("Order-line pairing lookup did not complete") }, "${result.warnings}")
+        assertTrue(((List) result.failureDetails).any { it.toString().contains("THROTTLED") }, "${result.failureDetails}")
     }
 
     @Test

@@ -578,4 +578,21 @@ class MissingDiffVerificationSupportTests {
         assertEquals(1, summary.missingObjectDifferenceCount)
         assertEquals(3, summary.duplicateDifferenceCount)
     }
+    /** OC97b: a lookup's own error text goes to Darpan's alerts room (failureDetails), never into the run's warnings. */
+    @Test
+    void aLookupsOwnErrorTextGoesToTheAlertsRoomNotTheWarnings() {
+        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2), missingRow("1002", FILE1, FILE2)])
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: PLENTY,
+                sideLookups      : [(SIDE2): { List<String> ids -> [ok: false, foundIds: [], missingIds: [], errors: ["GET /orders?token=s3cr3t: 401"]] }],
+        ])
+
+        List warnings = (List) result.warnings
+        assertFalse(warnings.any { it.toString().contains("s3cr3t") }, "${warnings}")
+        assertTrue(warnings.any { it.toString().contains("Verification lookup for ${FILE2} failed") }, "${warnings}")
+        assertTrue(((List) result.failureDetails).any { it.toString().contains("s3cr3t") }, "${result.failureDetails}")
+    }
 }

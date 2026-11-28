@@ -213,10 +213,12 @@ class ReturnPresenceVerificationSupport {
         String shopifySide = normalize(args?.shopifySide) ?: DiffDocumentStreamSupport.sideForLabel(shopifySideLabel, file1Label, file2Label)
 
         List<String> warnings = []
+        // OC97b: a lookup's own words go to Darpan's alerts room through the caller, never into warnings.
+        List<String> failureDetails = []
         Map<String, Object> inert = [performed: false, rewritten: false, pendingCount: 0,
                 preWindowSuppressedCount: 0, malformedCount: 0, removedCount: 0,
                 removedMissingInFile1: 0, removedMissingInFile2: 0, cancelledRefundSuppressedCount: 0,
-                warnings: warnings, auditNote: null] as Map<String, Object>
+                warnings: warnings, auditNote: null, failureDetails: failureDetails] as Map<String, Object>
         if (diffFile == null || !diffFile.isFile()) {
             warnings.add("Return presence check skipped: diff file was not available.")
             return inert
@@ -408,11 +410,13 @@ class ReturnPresenceVerificationSupport {
                 } catch (Throwable t) {
                     // `return` skips THIS chunk only — one failed chunk must not discard a
                     // succeeding one, since each chunk is an independent batch of orders.
-                    warnings.add("Cancellation-refund lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
+                    warnings.add("Cancellation-refund lookup failed for ${chunk.size()} order(s); those are left as reported.".toString())
+                    failureDetails.add("Cancellation-refund lookup: ${normalize(t.message) ?: t.class.simpleName}".toString())
                     return
                 }
                 if (chunkResult?.ok != true) {
-                    warnings.add("Cancellation-refund lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
+                    warnings.add("Cancellation-refund lookup did not complete for ${chunk.size()} order(s); those are left as reported.".toString())
+                    if (chunkResult?.errors) failureDetails.add("Cancellation-refund lookup: ${((List) chunkResult.errors).join('; ')}".toString())
                     return
                 }
                 ((Map) (chunkResult.ordersByExternalId ?: [:])).each { Object orderIdKey, Object group ->
@@ -440,7 +444,7 @@ class ReturnPresenceVerificationSupport {
         if (returnLinesLookup != null && !lineCandidates.isEmpty()) {
             Set<String> alreadyRemoved = removeIdsBySide.get(omsSide) ?: ([] as Set<String>)
             List<Map<String, Object>> open = lineCandidates.findAll { !alreadyRemoved.contains(it.rowId) }
-            Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings,
+            Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings, failureDetails,
                     ((args?.spentReturnLines ?: []) as List).collect { it?.toString() } as Set<String>)
             if (pairedRowIds) {
                 Set<String> omsRemovals = removeIdsBySide.computeIfAbsent(omsSide) { new LinkedHashSet<String>() }
@@ -457,7 +461,7 @@ class ReturnPresenceVerificationSupport {
             return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
                     malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
                     cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0, cancelledItemSuppressedCount: 0,
-                    linePairedCount: 0, warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                    linePairedCount: 0, warnings: warnings, auditNote: auditNote, failureDetails: failureDetails] as Map<String, Object>
         }
 
         // Pass 2 — remove by side; the counts are the rows actually removed, so a repeated id counts every row (S20 F6).
@@ -473,7 +477,7 @@ class ReturnPresenceVerificationSupport {
                 siblingReturnSuppressedCount: siblingReturnCount,
                 cancelledItemSuppressedCount: cancelledItemCount,
                 linePairedCount: linePairedCount,
-                warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                warnings: warnings, auditNote: auditNote, failureDetails: failureDetails] as Map<String, Object>
     }
 
     /**
@@ -483,7 +487,8 @@ class ReturnPresenceVerificationSupport {
      * coverage pairs nothing. A capped, failed, not-ok or throwing lookup pairs nothing for that chunk.
      */
     private static Set<String> pairByOrderLine(List<Map<String, Object>> candidates, Closure returnLinesLookup,
-                                               int maxOrderLookups, List<String> warnings, Set<String> alreadySpent = [] as Set) {
+                                               int maxOrderLookups, List<String> warnings, List<String> failureDetails,
+                                               Set<String> alreadySpent = [] as Set) {
         Set<String> paired = new LinkedHashSet<String>()
         List<String> orderIds = candidates.collect { it.orderId as String }.unique()
         if (orderIds.isEmpty()) return paired
@@ -498,11 +503,13 @@ class ReturnPresenceVerificationSupport {
             try {
                 chunkResult = (Map) returnLinesLookup.call(chunk)
             } catch (Throwable t) {
-                warnings.add("Order-line pairing lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
+                warnings.add("Order-line pairing lookup failed for ${chunk.size()} order(s); those are left as reported.".toString())
+                failureDetails.add("Order-line pairing lookup: ${normalize(t.message) ?: t.class.simpleName}".toString())
                 return
             }
             if (chunkResult?.ok != true) {
-                warnings.add("Order-line pairing lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
+                warnings.add("Order-line pairing lookup did not complete for ${chunk.size()} order(s); those are left as reported.".toString())
+                if (chunkResult?.errors) failureDetails.add("Order-line pairing lookup: ${((List) chunkResult.errors).join('; ')}".toString())
                 return
             }
             ((Map) (chunkResult.returnLinesByExternalId ?: [:])).each { Object key, Object lines ->

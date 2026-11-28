@@ -337,6 +337,10 @@ class RunVerificationSupport {
             verification.lookupFailed = true
             ec.message.clearErrors()
         }
+        // OC97b: a lookup's own words, kept out of the warnings by the pass, go to the alerts room.
+        if (verification.failureDetails) {
+            alertVerificationFailure(ec, args, "missing-diff", ((List) verification.failureDetails).join("; "))
+        }
         applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
         // DAR-BE-320 phase 1b: each side's lookup outcome (side FILE_1 / FILE_2 -> candidates, gate, looked up, found or why
         // skipped) travels with the compare result to the audit's source reads.
@@ -706,7 +710,7 @@ class RunVerificationSupport {
         return [omsLabel    : omsLabel,
                 shopifyLabel: shopifyLabel,
                 run         : {
-                    return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                    Map verification = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
                             diffFile            : diffFile,
                             file1Label          : normalize(args.get("file1Label")),
                             file2Label          : normalize(args.get("file2Label")),
@@ -721,6 +725,11 @@ class RunVerificationSupport {
                             cancelledOrderLookup: cancelledOrderLookup,
                             returnLinesLookup   : returnLinesLookup,
                     ])
+                    // OC97b: the lookups' own words go to the alerts room; the warnings the caller folds stay neutral.
+                    if (verification?.failureDetails) {
+                        alertVerificationFailure(ec, args, "return-presence", ((List) verification.failureDetails).join("; "))
+                    }
+                    return verification
                 }] as Map
     }
 

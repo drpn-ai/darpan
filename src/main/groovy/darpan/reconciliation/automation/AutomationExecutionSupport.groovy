@@ -2955,6 +2955,22 @@ class AutomationExecutionSupport {
         }
     }
 
+    /**
+     * The stored diff document's summary counts. DAR-OPS-029 (S01a/S03a/S02 conservation gap; runSavedRunDiff's F23):
+     * duplicateDifferenceCount is passed through whenever the compare reports it, so a stored document shows
+     * totalDifferences = onlyInFile1Count + onlyInFile2Count + ruleDifferenceCount + duplicateDifferenceCount.
+     */
+    static Map<String, Object> automationDiffSummary(Map<String, Object> reconcileResult) {
+        return [
+                totalDifferences             : reconcileResult.differenceCount,
+                onlyInFile1Count             : reconcileResult.missingInFile2Count ?: reconcileResult.onlyInFile1Count,
+                onlyInFile2Count             : reconcileResult.missingInFile1Count ?: reconcileResult.onlyInFile2Count,
+                missingObjectDifferenceCount : reconcileResult.missingObjectDifferenceCount,
+                ruleDifferenceCount          : reconcileResult.ruleDifferenceCount,
+                duplicateDifferenceCount     : reconcileResult.duplicateDifferenceCount,
+        ].findAll { it.value != null } as Map<String, Object>
+    }
+
     protected static Map<String, Object> ensureAutomationResultArtifact(def ec, def automation, def file1Source, def file2Source,
             Map<String, Object> reconcileResult, Map<String, Object> window, Map<String, Object> params) {
         if (!reconcileResult) return [:]
@@ -3006,13 +3022,7 @@ class AutomationExecutionSupport {
                         childWindowStart       : toTimestamp(window?.childWindowStartDate)?.toString(),
                         childWindowEnd         : toTimestamp(window?.childWindowEndDate)?.toString(),
                 ].findAll { it.value != null } as Map<String, Object>,
-                [
-                        totalDifferences             : reconcileResult.differenceCount,
-                        onlyInFile1Count             : reconcileResult.missingInFile2Count ?: reconcileResult.onlyInFile1Count,
-                        onlyInFile2Count             : reconcileResult.missingInFile1Count ?: reconcileResult.onlyInFile2Count,
-                        missingObjectDifferenceCount : reconcileResult.missingObjectDifferenceCount,
-                        ruleDifferenceCount          : reconcileResult.ruleDifferenceCount,
-                ].findAll { it.value != null } as Map<String, Object>,
+                automationDiffSummary(reconcileResult),
                 (List) (reconcileResult.validationErrors ?: []),
                 (List) (reconcileResult.processingWarnings ?: [])
         )

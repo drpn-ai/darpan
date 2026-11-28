@@ -4149,6 +4149,21 @@ class AutomationExecutionSupportTests {
         }
     }
 
+    // DAR-OPS-029 conservation (S01a/S03a/S02): the automation path's stored document carries every bucket of totalDifferences.
+    @Test
+    void theStoredDiffSummaryAccountsForEveryDifferenceIncludingDuplicates() {
+        Map<String, Object> summary = AutomationExecutionSupport.automationDiffSummary([differenceCount: 10L, missingInFile1Count: 3L,
+                missingInFile2Count: 2L, missingObjectDifferenceCount: 5L, ruleDifferenceCount: 4L, duplicateDifferenceCount: 1L])
+        assertEquals(1L, summary.duplicateDifferenceCount)
+        assertEquals(summary.totalDifferences, [summary.onlyInFile1Count, summary.onlyInFile2Count, summary.ruleDifferenceCount,
+                summary.duplicateDifferenceCount].sum(), "total = onlyIn1 + onlyIn2 + rule + duplicate on the stored document")
+
+        Map<String, Object> noDuplicates = AutomationExecutionSupport.automationDiffSummary([differenceCount: 6L, missingInFile1Count: 1L,
+                missingInFile2Count: 1L, ruleDifferenceCount: 4L])
+        assertFalse(noDuplicates.containsKey("duplicateDifferenceCount"), "an evaluate (no duplicate count) writes none")
+        assertEquals(noDuplicates.totalDifferences, [noDuplicates.onlyInFile1Count, noDuplicates.onlyInFile2Count, noDuplicates.ruleDifferenceCount].sum())
+    }
+
     // DAR-OPS-029 OC18 (DAR-BE-362): a verify check's raw error reaches Darpan's alerts room; the run's warnings, which a client's
     // completion message renders, carry only a neutral line.
     @Test

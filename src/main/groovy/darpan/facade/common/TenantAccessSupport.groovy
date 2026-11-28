@@ -496,13 +496,9 @@ class TenantAccessSupport {
             // ec.user.userAccount is populated once per request (UserFacadeImpl.setInfo), so
             // without an explicit refresh, buildSessionInfo's userTimeZone read (and timeZone's
             // userAccount fallback) would still see the pre-write value for the rest of this
-            // request/response cycle. respondsTo-guarded because unit-test stubs for userAccount
-            // don't all implement refresh().
+            // request/response cycle.
             def userAccount = ec?.user?.userAccount
-            if (!ec?.message?.hasError() && userAccount != null
-                    && userAccount.metaClass.respondsTo(userAccount, "refresh")) {
-                userAccount.refresh()
-            }
+            if (!ec?.message?.hasError() && userAccount != null) userAccount.refresh()
         }
         return !(ec?.message?.hasError() ?: false)
     }
@@ -829,16 +825,10 @@ class TenantAccessSupport {
                 .findAll { it } as Set<String>
     }
 
-    /**
-     * Apply disableAuthz, the fromDate/thruDate filter and useCache(false). DAR-OPS-029 S99-201: only conditionDate stays
-     * guarded, because ReconciliationOutputSupportTests' and CliAuthSupportTests' finder stubs lack it (S99-200 moves them
-     * onto the shared FakeEntityFind first).
-     */
+    /** Apply disableAuthz, the fromDate/thruDate filter and useCache(false). */
     private static void applyFinderDefaults(def finder, def ec, boolean includeDateFilter = true) {
         finder.disableAuthz()
-        if (includeDateFilter && finder.metaClass.respondsTo(finder, "conditionDate", String, String, java.sql.Timestamp)) {
-            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
-        }
+        if (includeDateFilter) finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
         finder.useCache(false)
     }
 
@@ -868,7 +858,7 @@ class TenantAccessSupport {
 
         finder.condition("userId", userId).condition("successfulLogin", "Y")
         applyFinderDefaults(finder, ec, false)
-        if (finder.metaClass.respondsTo(finder, "orderBy", String)) finder.orderBy("-fromDate")
+        finder.orderBy("-fromDate")
 
         def lastLogin = finder.one()
         return lastLogin instanceof Map ? lastLogin.fromDate : lastLogin?.fromDate
@@ -887,7 +877,7 @@ class TenantAccessSupport {
         if (!activeTenantUserGroupId) return null
         finder.condition("createdByUserId", userId).condition("companyUserGroupId", activeTenantUserGroupId)
         applyFinderDefaults(finder, ec, false)
-        if (finder.metaClass.respondsTo(finder, "orderBy", String)) finder.orderBy("-createdDate")
+        finder.orderBy("-createdDate")
 
         def lastRunResult = finder.one()
         if (lastRunResult == null) return null

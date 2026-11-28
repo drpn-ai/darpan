@@ -50,7 +50,8 @@ class FakeTenantEc {
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Map<String, Object> preferences = [:]
         Map<String, Object> context = [:]
-        Object userAccount = new Expando(timeZone: "UTC")
+        /** An EntityValue-like account: refresh() re-reads the row, as saveUserSettings does after writing it. */
+        Object userAccount = new Expando(timeZone: "UTC", refresh: {})
         /** Every setPreference() call in order, so a test can tell "never written" from "written back unchanged". */
         List<Map<String, Object>> preferenceCalls = []
 

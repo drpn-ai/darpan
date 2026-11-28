@@ -81,7 +81,26 @@ class SecretRedactorTests {
 
     @Test
     void aBearerHeaderIsMasked() {
-        assertEquals("Authorization: Bearer ***", masked("Authorization: Bearer eyJhbGciOi.payload.sig"))
+        assertEquals("Authorization: ***", masked("Authorization: Bearer eyJhbGciOi.payload.sig"))
+        assertEquals("sent Bearer *** twice", masked("sent Bearer eyJhbGciOi.payload.sig twice"), "a bare bearer token too")
+    }
+
+    /**
+     * OC83 (DAR-OPS-029 S29). An Authorization or Proxy-Authorization value of any scheme (Basic, Digest, NTLM, a token), in a
+     * header line, a header map and JSON (a connection's headersJson): masked whole, scheme and all, and never past its line.
+     */
+    @Test
+    void anAuthorizationValueOfAnySchemeIsMasked() {
+        assertEquals("Authorization: ***", masked("Authorization: Basic dXNlcjpwYXNz"))
+        assertEquals("Proxy-Authorization: ***", masked('Proxy-Authorization: Digest username="svc", realm="ns", response="6629fae4"'))
+        assertEquals('{"Authorization":"***","Accept":"application/json"}',
+                masked('{"Authorization":"Basic dXNlcjpwYXNz","Accept":"application/json"}'))
+        assertEquals("headers [authorization:***", masked("headers [authorization:Token t0k3n-v4lue, accept:json]"),
+                "a header map's value runs to its line end: over-masking is the safe side")
+        assertEquals("X-Authorization = ***\n    at darpan.X", masked("X-Authorization = NTLM TlRMTVNTUAAB\n    at darpan.X"))
+        assertEquals("authorization failed for svc", masked("authorization failed for svc"), "the word alone is no header")
+        assertEquals("RMA 7 is Return Authorization : Pending Refund, expected Closed",
+                masked("RMA 7 is Return Authorization : Pending Refund, expected Closed"), "NetSuite's record type is no header")
     }
 
     @Test

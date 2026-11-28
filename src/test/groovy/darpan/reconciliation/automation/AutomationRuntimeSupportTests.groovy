@@ -19,7 +19,15 @@ class AutomationRuntimeSupportTests {
     void aKeyValueSecretKeepsItsShape() {
         assertEquals("NetSuite 401 for apiToken=***, retry", masked("NetSuite 401 for apiToken=sk_live_secret, retry"))
         assertEquals("password=*** token=***", masked("password=hunter2 token=abc.def"))
-        assertEquals("access_token=***&x=1", masked("access_token=abc&x=1"), "the query string's other values stay")
+        assertEquals("access_token=***", masked("access_token=abc&x=1"), "a bare value runs to a space, comma or ')': over-masking is the safe side")
+        assertEquals("password=*** (retry)", masked("password=p&ss}w0rd (retry)"))
+    }
+
+    @Test
+    void aQuotedSecretIsMaskedUpToItsClosingQuote() {
+        assertEquals('{"secret":"***","next":1}', masked('{"secret":"a b, c&d}","next":1}'))
+        assertEquals('{"password":"***"}', masked('{"password":"x\\"y z"}'), "an escaped quote does not end the value")
+        assertEquals("token='***' ok", masked("token='a b' ok"))
     }
 
     @Test

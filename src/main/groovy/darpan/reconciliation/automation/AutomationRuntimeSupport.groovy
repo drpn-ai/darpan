@@ -16,11 +16,12 @@ import static darpan.common.ValueSupport.readField
 
 class AutomationRuntimeSupport {
     /**
-     * A secret's key, bare or quoted, then = or :, then its value (bare or quoted). The key, separator and quotes stay, so a
-     * JSON error body stays readable: "apiToken":"x" reads "apiToken":"***", apiToken=x reads apiToken=***.
+     * A secret's key, bare or quoted, then = or :, then its value: a quoted value up to its closing quote (escapes allowed,
+     * so spaces, commas and quotes inside it stay masked), a bare one up to a space, comma or ")". The key, separator and
+     * quotes stay, so a JSON error body stays readable: "apiToken":"x" reads "apiToken":"***", apiToken=x reads apiToken=***.
      */
     private static final Pattern SECRET_VALUE =
-            ~/(?i)(["']?)(password|privateKey|apiToken|apiKey|api_key|clientSecret|secret|token)\1(\s*[:=]\s*)(["']?)[^"'\s,&)}]+\4/
+            ~/(?i)(["']?)(password|privateKey|apiToken|apiKey|api_key|clientSecret|secret|token)\1(\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s)]+)/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     static def loadAutomation(def ec, String automationId) {
@@ -224,7 +225,8 @@ class AutomationRuntimeSupport {
 
     static String sanitizeText(String value) {
         if (value == null) return null
-        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String key, String separator, String valueQuote ->
+        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String key, String separator, String secret ->
+            String valueQuote = secret.startsWith('"') || secret.startsWith("'") ? secret.substring(0, 1) : ""
             "${quote}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
         }
         return keyed.replaceAll(BEARER_VALUE, '$1 ***')

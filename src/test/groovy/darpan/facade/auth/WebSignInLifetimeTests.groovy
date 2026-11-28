@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.reconciliation.support.FakeEntityFacade
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
@@ -251,48 +252,15 @@ class WebSignInLifetimeTests {
         void logoutLocal() { userId = null }
     }
 
-    static class EntityStub {
-        List<Map> keys = []
-        List<Map> cliSessions = []
-        List<Map> factors = []
+    /** The tables the sign-in lifetime reads, over the shared fake; writes counts the rows updateAll changed. */
+    static class EntityStub extends FakeEntityFacade {
+        void setKeys(List<Map> rows) { table("moqui.security.UserLoginKey", rows) }
+        List<Map> getKeys() { rows("moqui.security.UserLoginKey") ?: [] }
+        void setCliSessions(List<Map> rows) { table("darpan.auth.CliSession", rows) }
+        void setFactors(List<Map> rows) { table("darpan.auth.TwoFactorFactor", rows) }
         /** OC79: TwoFactorPolicy rows and the Darpan-wide roles it reads. */
-        List<Map> policies = []
-        List<Map> roles = []
-        int writes = 0
-        FinderStub find(String entityName) {
-            if (entityName == "moqui.security.UserLoginKey") return new FinderStub(rows: keys, owner: this)
-            if (entityName == "darpan.auth.CliSession") return new FinderStub(rows: cliSessions, owner: this)
-            if (entityName == "darpan.auth.TwoFactorFactor") return new FinderStub(rows: factors, owner: this)
-            if (entityName == TwoFactorPolicy.POLICY) return new FinderStub(rows: policies, owner: this)
-            if (entityName == "moqui.security.UserGroupMember") return new FinderStub(rows: roles, owner: this)
-            return new FinderStub(owner: this)
-        }
-    }
-
-    static class FinderStub {
-        List<Map> rows = []
-        EntityStub owner
-        Map<String, Object> conditions = [:]
-        FinderStub disableAuthz() { this }
-        FinderStub useCache(boolean ignored) { this }
-        FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        /** The policy's IN conditions: a collection value matches by membership. */
-        FinderStub condition(String field, Object operator, Object value) { conditions[field] = value; this }
-        FinderStub conditionDate(String fromField, String thruField, Object moment) { this }
-        private List<Map> matches() {
-            rows.findAll { Map row ->
-                conditions.every { k, v -> v instanceof Collection ? (row[k]?.toString() in v*.toString()) : row[k]?.toString() == v?.toString() }
-            }
-        }
-        long count() { matches().size() }
-        Map one() { matches() ? matches()[0] : null }
-        List<Map> list() { matches() }
-        long updateAll(Map fields) {
-            List<Map> hit = matches()
-            hit.each { it.putAll(fields) }
-            owner.writes += hit.size()
-            return hit.size()
-        }
+        void setPolicies(List<Map> rows) { table(TwoFactorPolicy.POLICY, rows) }
+        void setRoles(List<Map> rows) { table("moqui.security.UserGroupMember", rows) }
     }
 
     static class RequestStub {

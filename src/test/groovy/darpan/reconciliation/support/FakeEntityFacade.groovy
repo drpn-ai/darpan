@@ -14,6 +14,8 @@ class FakeEntityFacade {
     private final Map<String, List<Map>> rowsByEntity = [:]
     private final Map<String, RuntimeException> failures = [:]
     final Map<String, List<FakeEntityFind>> issued = [:]
+    /** Rows changed by every updateAll() and deleteAll() so far. */
+    long writes = 0
 
     /** Declares a table, its key read from the entity XML; returns this for chaining. The row list is shared, not copied. */
     FakeEntityFacade table(String entityName, List<Map> rows = []) {
@@ -52,6 +54,7 @@ class FakeEntityFacade {
         if (!pkByEntity.containsKey(entityName)) table(entityName, knownPk(entityName), new ArrayList<Map>())
         FakeEntityFind f = new FakeEntityFind(pkByEntity.get(entityName), rowsByEntity.get(entityName))
         f.failure = failures.get(entityName)
+        f.onWrite = { long n -> writes += n }
         issued.computeIfAbsent(entityName) { [] as List<FakeEntityFind> }.add(f)
         return f
     }

@@ -39,6 +39,8 @@ class FakeEntityFind {
     Boolean cacheUsed
     /** When set, one(), list(), count(), updateAll() and deleteAll() throw it: a read or write that failed. */
     RuntimeException failure
+    /** Called with the number of rows each updateAll() or deleteAll() changed (FakeEntityFacade counts them). */
+    Closure onWrite
 
     FakeEntityFind(List<String> pkFields, List<Map> rows = []) {
         if (!pkFields) throw new IllegalArgumentException("an entity has at least one primary key field")
@@ -121,12 +123,14 @@ class FakeEntityFind {
     long updateAll(Map<String, Object> fieldsToSet) {
         List<Map> found = matching(conditions)
         found.each { Map row -> row.putAll(fieldsToSet) }
+        onWrite?.call((long) found.size())
         return (long) found.size()
     }
 
     long deleteAll() {
         List<Map> found = matching(conditions)
         found.each { Map row -> rows.removeIf { it.is(row) } }
+        onWrite?.call((long) found.size())
         return (long) found.size()
     }
 

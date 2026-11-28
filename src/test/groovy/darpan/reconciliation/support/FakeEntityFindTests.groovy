@@ -113,12 +113,14 @@ class FakeEntityFindTests {
 
     @Test
     void theFacadeIssuesAFreshRecordedFinderPerFind() {
-        FakeEntityFacade entity = new FakeEntityFacade().table("TestOnlyChat", ["chatSpaceId"], new ArrayList<Map>(ROWS))
+        FakeEntityFacade entity = new FakeEntityFacade().table("TestOnlyChat", ["chatSpaceId"], ROWS.collect { new LinkedHashMap(it) as Map })
         assertEquals(1L, entity.find("TestOnlyChat").condition("companyUserGroupId", "TENANT_A").disableAuthz().count())
         assertEquals(3L, entity.find("TestOnlyChat").count(), "the first find's condition does not narrow the second")
         assertEquals([true, false], entity.issuedFor("TestOnlyChat")*.authzDisabled)
         entity.find("TestOnlyChat").condition("chatSpaceId", "CS_A").deleteAll()
         assertEquals(2, entity.rows("TestOnlyChat").size())
+        entity.find("TestOnlyChat").condition("companyUserGroupId", "TENANT_B").updateAll([name: "B"])
+        assertEquals(3L, entity.writes, "one delete and two updates")
     }
 
     // Keys come from the entity XML: an undeclared real entity is an empty table with its real key; an unknown name throws.

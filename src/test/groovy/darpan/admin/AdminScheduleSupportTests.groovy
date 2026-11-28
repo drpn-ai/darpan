@@ -1,6 +1,5 @@
 package darpan.admin
 
-import darpan.admin.AdminTestStubs.FinderStub
 import darpan.admin.AdminTestStubs.MessageFacadeStub
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import org.junit.jupiter.api.Test
@@ -35,18 +34,18 @@ class AdminScheduleSupportTests {
     @Test
     void fireTimesFromEveryTenantComeBackInOneTimeOrderedTimeline() {
         def ec = superAdminEc([
-                "darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [
+                "darpan.reconciliation.ReconciliationAutomation": [
                         [automationId: "AUT_G1", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
                          scheduleExpr: "PT1H", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T15:00:00Z")],
                         [automationId: "AUT_R1", automationName: "Returns recon", companyUserGroupId: "RAILS",
                          scheduleExpr: "0 30 14 * * ?", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T14:30:00Z")],
-                ]),
-                "moqui.security.UserGroup": new FinderStub(listResult: [
+                ],
+                "moqui.security.UserGroup": [
                         [userGroupId: "GORJANA", description: "gorjana"],
                         [userGroupId: "RAILS", description: "Rails"],
-                ]),
+                ],
         ])
 
         Map board = AdminScheduleSupport.getScheduleBoard(ec, 2, ts("2026-09-01T14:00:00Z"))
@@ -60,18 +59,18 @@ class AdminScheduleSupportTests {
     @Test
     void pausedAutomationsAreListedButNeverProjectedOntoTheTimeline() {
         def ec = superAdminEc([
-                "darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [
+                "darpan.reconciliation.ReconciliationAutomation": [
                         [automationId: "AUT_G1", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
                          scheduleExpr: "PT1H", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T15:00:00Z")],
                         [automationId: "AUT_M1", automationName: "Inventory sync", companyUserGroupId: "MEPHISTO",
                          scheduleExpr: "PT1H", windowTimeZone: "UTC", isActive: "N",
                          nextScheduledFireTime: ts("2026-09-01T15:00:00Z")],
-                ]),
-                "moqui.security.UserGroup": new FinderStub(listResult: [
+                ],
+                "moqui.security.UserGroup": [
                         [userGroupId: "GORJANA", description: "gorjana"],
                         [userGroupId: "MEPHISTO", description: "Mephisto"],
-                ]),
+                ],
         ])
 
         Map board = AdminScheduleSupport.getScheduleBoard(ec, 2, ts("2026-09-01T14:00:00Z"))
@@ -87,7 +86,7 @@ class AdminScheduleSupportTests {
         // so the scheduler starts all three together. Counting on the raw due time would show
         // three quiet minutes and hide the actual burst.
         def ec = superAdminEc([
-                "darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [
+                "darpan.reconciliation.ReconciliationAutomation": [
                         [automationId: "AUT_A", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
                          scheduleExpr: "0 1 15 * * ?", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T15:01:00Z")],
@@ -97,12 +96,12 @@ class AdminScheduleSupportTests {
                         [automationId: "AUT_C", automationName: "Inventory sync", companyUserGroupId: "MEPHISTO",
                          scheduleExpr: "0 5 15 * * ?", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T15:05:00Z")],
-                ]),
-                "moqui.security.UserGroup": new FinderStub(listResult: [
+                ],
+                "moqui.security.UserGroup": [
                         [userGroupId: "GORJANA", description: "gorjana"],
                         [userGroupId: "RAILS", description: "Rails"],
                         [userGroupId: "MEPHISTO", description: "Mephisto"],
-                ]),
+                ],
         ])
 
         Map board = AdminScheduleSupport.getScheduleBoard(ec, 1, ts("2026-09-01T15:00:00Z"))
@@ -115,20 +114,20 @@ class AdminScheduleSupportTests {
     @Test
     void executionsStillRunningAreReportedAgainstTheInstanceCap() {
         def ec = superAdminEc([
-                "darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [
+                "darpan.reconciliation.ReconciliationAutomation": [
                         [automationId: "AUT_G1", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
                          scheduleExpr: "PT1H", windowTimeZone: "UTC", isActive: "Y",
                          nextScheduledFireTime: ts("2026-09-01T15:00:00Z")],
-                ]),
-                "moqui.security.UserGroup": new FinderStub(listResult: [
+                ],
+                "moqui.security.UserGroup": [
                         [userGroupId: "GORJANA", description: "gorjana"],
-                ]),
-                "darpan.reconciliation.ReconciliationAutomationExecution": new FinderStub(listResult: [
+                ],
+                "darpan.reconciliation.ReconciliationAutomationExecution": [
                         [automationExecutionId: "EX_1", automationId: "AUT_G1", companyUserGroupId: "GORJANA",
                          statusEnumId: "AUT_STAT_RUNNING", startedDate: ts("2026-09-01T14:54:00Z")],
                         [automationExecutionId: "EX_0", automationId: "AUT_G1", companyUserGroupId: "GORJANA",
                          statusEnumId: "AUT_STAT_COMPLETED", startedDate: ts("2026-09-01T13:54:00Z")],
-                ]),
+                ],
         ])
 
         Map board = AdminScheduleSupport.getScheduleBoard(ec, 2, ts("2026-09-01T15:00:00Z"))
@@ -142,18 +141,18 @@ class AdminScheduleSupportTests {
     void submitsAtFollowsTheLiveScanCronAndIsEmptyWhileTheScanIsPaused() {
         Map automation = [automationId: "AUT_A", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
                           scheduleExpr: "0 2 15 * * ?", windowTimeZone: "UTC", isActive: "Y", nextScheduledFireTime: ts("2026-09-01T15:02:00Z")]
-        Map finders = ["darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [automation]),
-                       "moqui.security.UserGroup": new FinderStub(listResult: [[userGroupId: "GORJANA", description: "gorjana"]]),
-                       "moqui.service.job.ServiceJob": new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB,
-                               cronExpression: "0 0/10 * * * ?", paused: "N"])]
-        Map board = AdminScheduleSupport.getScheduleBoard(superAdminEc(finders), 1, ts("2026-09-01T15:00:00Z"))
+        Map<String, List<Map>> tables = ["darpan.reconciliation.ReconciliationAutomation": [automation],
+                       "moqui.security.UserGroup": [[userGroupId: "GORJANA", description: "gorjana"]],
+                       "moqui.service.job.ServiceJob": [[jobName: AdminScheduleSupport.SCAN_JOB,
+                               cronExpression: "0 0/10 * * * ?", paused: "N"]]]
+        Map board = AdminScheduleSupport.getScheduleBoard(superAdminEc(tables), 1, ts("2026-09-01T15:00:00Z"))
         assertEquals([ts("2026-09-01T15:10:00Z")], board.fires*.submitsAt)
         assertEquals("0 0/10 * * * ?", board.scanCron)
         assertEquals(false, board.scanPaused)
 
-        finders["moqui.service.job.ServiceJob"] = new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB,
-                cronExpression: "0 0/10 * * * ?", paused: "Y"])
-        Map paused = AdminScheduleSupport.getScheduleBoard(superAdminEc(finders), 1, ts("2026-09-01T15:00:00Z"))
+        tables["moqui.service.job.ServiceJob"] = [[jobName: AdminScheduleSupport.SCAN_JOB,
+                cronExpression: "0 0/10 * * * ?", paused: "Y"]]
+        Map paused = AdminScheduleSupport.getScheduleBoard(superAdminEc(tables), 1, ts("2026-09-01T15:00:00Z"))
         assertEquals([null], paused.fires*.submitsAt)
         assertEquals([null], paused.fires*.concurrentAtTick)
         assertEquals(true, paused.scanPaused)
@@ -161,9 +160,9 @@ class AdminScheduleSupportTests {
     }
 
     /** A super admin, with the scan job live on its default cron unless the test sets one. */
-    private static def superAdminEc(Map finders) {
-        finders["moqui.service.job.ServiceJob"] = finders["moqui.service.job.ServiceJob"] ?:
-                new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB, cronExpression: "0 0/5 * * * ?", paused: "N"])
-        return AdminTestStubs.superAdminEc(finders)
+    private static def superAdminEc(Map tables) {
+        tables["moqui.service.job.ServiceJob"] = tables["moqui.service.job.ServiceJob"] ?:
+                [[jobName: AdminScheduleSupport.SCAN_JOB, cronExpression: "0 0/5 * * * ?", paused: "N"]]
+        return AdminTestStubs.superAdminEc(tables)
     }
 }

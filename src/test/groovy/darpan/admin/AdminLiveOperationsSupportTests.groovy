@@ -1,6 +1,5 @@
 package darpan.admin
 
-import darpan.admin.AdminTestStubs.FinderStub
 import darpan.admin.AdminTestStubs.MessageFacadeStub
 import darpan.admin.AdminTestStubs.UserStub
 import darpan.peak.PeakWindow
@@ -49,19 +48,19 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void runningRowsAreClassifiedAsAuditAutomationOrManualRunAndNamed() {
-        def ec = superAdminEc(baseFinders() + [
-                "darpan.reconciliation.ReconciliationRunResult": new FinderStub(listResult: [
+        def ec = superAdminEc(baseTables() + [
+                "darpan.reconciliation.ReconciliationRunResult": [
                         runRow("RR_AUDIT", "GORJANA", "RS_A", "EXTRACT_FILE1", 5),
                         runRow("RR_AUTO", "RAILS", "RS_B", "COMPARE", 8),
                         runRow("RR_MANUAL", "RAILS", "RS_C", "RESOLVE", 1),
-                ]),
-                "darpan.reconciliation.ReconciliationAutomationExecution": new FinderStub(listResult: [
+                ],
+                "darpan.reconciliation.ReconciliationAutomationExecution": [
                         [automationExecutionId: "EX_A", automationId: "AUT_A", companyUserGroupId: "GORJANA",
                          statusEnumId: "AUT_STAT_RUNNING", reconciliationRunResultId: "RR_AUDIT", retryCount: 0],
                         [automationExecutionId: "EX_B", automationId: "AUT_B", companyUserGroupId: "RAILS",
                          statusEnumId: "AUT_STAT_RUNNING", reconciliationRunResultId: "RR_AUTO", retryCount: 1],
-                ]),
-                "darpan.rule.RuleSet": new FinderStub(listResult: [[ruleSetId: "RS_C", ruleSetName: "Returns by hand"]]),
+                ],
+                "darpan.rule.RuleSet": [[ruleSetId: "RS_C", ruleSetName: "Returns by hand"]],
         ])
 
         Map live = board(ec)
@@ -77,12 +76,12 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void runSlowerThanItsLastSuccessCarriesTheUsualDurationAndRaisesAWarning() {
-        def ec = superAdminEc(baseFinders() + [
-                "darpan.reconciliation.ReconciliationRunResult": new FinderStub(listResult: [
+        def ec = superAdminEc(baseTables() + [
+                "darpan.reconciliation.ReconciliationRunResult": [
                         runRow("RR_SLOW", "RAILS", "RS_C", "COMPARE", 45),
                         [reconciliationRunResultId: "RR_PREV", companyUserGroupId: "RAILS", savedRunId: "RS_C",
                          statusEnumId: "AUT_STAT_SUCCESS", startedDate: minutesAgo(1500), completedDate: minutesAgo(1490)],
-                ]),
+                ],
         ])
 
         Map live = board(ec)
@@ -95,13 +94,13 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void failuresInTheLastDayBecomeOneCriticalWarningPerRunAndOlderOnesAreIgnored() {
-        def ec = superAdminEc(baseFinders() + [
-                "darpan.reconciliation.ReconciliationRunResult": new FinderStub(listResult: [
+        def ec = superAdminEc(baseTables() + [
+                "darpan.reconciliation.ReconciliationRunResult": [
                         [reconciliationRunResultId: "RR_F1", companyUserGroupId: "RAILS", savedRunId: "RS_B",
                          statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(30), errorMessage: "OMS 504"],
                         [reconciliationRunResultId: "RR_F0", companyUserGroupId: "RAILS", savedRunId: "RS_B",
                          statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(3000), errorMessage: "ancient"],
-                ]),
+                ],
         ])
 
         Map live = board(ec)
@@ -116,8 +115,8 @@ class AdminLiveOperationsSupportTests {
     // still called both critical for 24 hours.
     @Test
     void aFailureALaterSuccessOfTheSameRunSupersededIsListedAsRecoveredAndRaisesNoWarning() {
-        def ec = superAdminEc(baseFinders() + [
-                "darpan.reconciliation.ReconciliationRunResult": new FinderStub(listResult: [
+        def ec = superAdminEc(baseTables() + [
+                "darpan.reconciliation.ReconciliationRunResult": [
                         [reconciliationRunResultId: "RR_F1", companyUserGroupId: "RAILS", savedRunId: "RS_B",
                          statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(60), errorMessage: "UNRESOLVED_COLUMN"],
                         [reconciliationRunResultId: "RR_OK", companyUserGroupId: "RAILS", savedRunId: "RS_B",
@@ -126,7 +125,7 @@ class AdminLiveOperationsSupportTests {
                          statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(20), errorMessage: "still broken"],
                         [reconciliationRunResultId: "RR_OLD_OK", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
                          statusEnumId: "AUT_STAT_SUCCESS", startedDate: minutesAgo(100), completedDate: minutesAgo(90)],
-                ]),
+                ],
         ])
 
         Map live = board(ec)
@@ -153,14 +152,14 @@ class AdminLiveOperationsSupportTests {
                     LocalTime.of(9, 0), LocalTime.of(12, 0), [])] : []
         }
         AutomationExecutionSupport.tenantZoneLoader = { def e, String tenantId -> ZoneId.of("UTC") }
-        Map finders = baseFinders()
-        finders["darpan.reconciliation.ReconciliationAutomation"] = new FinderStub(listResult: [
+        Map<String, List<Map>> tables = baseTables()
+        tables["darpan.reconciliation.ReconciliationAutomation"] = [
                 [automationId: "AUT_A", automationName: "Month close", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
                  isActive: "Y", nextScheduledFireTime: minutesAgo(40)],
                 [automationId: "AUT_H", automationName: "Held", companyUserGroupId: "RAILS", savedRunId: "RS_H",
                  isActive: "Y", nextScheduledFireTime: minutesAgo(40), windowTimeZone: "UTC"],
-        ])
-        def ec = superAdminEc(finders)
+        ]
+        def ec = superAdminEc(tables)
 
         Map live = board(ec)
 
@@ -171,8 +170,8 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void overdueListsActiveAutomationsPastTheirFireTimeButNotPausedOrStillRunningOnes() {
-        Map finders = baseFinders()
-        finders["darpan.reconciliation.ReconciliationAutomation"] = new FinderStub(listResult: [
+        Map<String, List<Map>> tables = baseTables()
+        tables["darpan.reconciliation.ReconciliationAutomation"] = [
                 [automationId: "AUT_A", automationName: "Month close", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
                  isActive: "Y", nextScheduledFireTime: minutesAgo(40)],
                 [automationId: "AUT_B", automationName: "Orders vs OMS", companyUserGroupId: "RAILS", savedRunId: "RS_B",
@@ -181,12 +180,12 @@ class AdminLiveOperationsSupportTests {
                  isActive: "N", nextScheduledFireTime: minutesAgo(400)],
                 [automationId: "AUT_F", automationName: "Future", companyUserGroupId: "RAILS", savedRunId: "RS_F",
                  isActive: "Y", nextScheduledFireTime: new Timestamp(NOW.time + 60_000L)],
-        ])
-        finders["darpan.reconciliation.ReconciliationAutomationExecution"] = new FinderStub(listResult: [
+        ]
+        tables["darpan.reconciliation.ReconciliationAutomationExecution"] = [
                 [automationExecutionId: "EX_B", automationId: "AUT_B", companyUserGroupId: "RAILS",
                  statusEnumId: "AUT_STAT_RUNNING", reconciliationRunResultId: "RR_B"],
-        ])
-        def ec = superAdminEc(finders)
+        ]
+        def ec = superAdminEc(tables)
 
         Map live = board(ec)
 
@@ -197,7 +196,7 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void unreadableSystemIsReportedAsUnavailableAndTheRestStillLoads() {
-        def ec = superAdminEc(baseFinders())
+        def ec = superAdminEc(baseTables())
 
         Map live = AdminLiveOperationsSupport.getLiveOperations(ec, NOW, { throw new IllegalStateException("no MXBean") })
 
@@ -209,7 +208,7 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void slotsCarryWhatWaitsForAdmissionAndEachTenantsShare() {
-        def ec = superAdminEc(baseFinders())
+        def ec = superAdminEc(baseTables())
         java.util.concurrent.Executor hold = { Runnable r -> } as java.util.concurrent.Executor
         RunAdmission admission = new RunAdmission(1, 1, 85, { -> null }, hold)
         admission.submit("GORJANA", "a1", { -> } as Runnable)
@@ -228,7 +227,7 @@ class AdminLiveOperationsSupportTests {
 
     @Test
     void systemPressureSurfacesAsWarnings() {
-        def ec = superAdminEc(baseFinders())
+        def ec = superAdminEc(baseTables())
 
         Map live = board(ec, [heapAfterGcPercent: 93, processCpuPercent: 20, diskFreePercent: 60, workerPool: null])
 
@@ -244,37 +243,37 @@ class AdminLiveOperationsSupportTests {
                 startedDate: minutesAgo(startedMinutesAgo), lastHeartbeatDate: minutesAgo(startedMinutesAgo)]
     }
 
-    private static Map baseFinders() {
+    private static Map baseTables() {
         return [
-                "moqui.security.UserGroup": new FinderStub(listResult: [
+                "moqui.security.UserGroup": [
                         [userGroupId: "GORJANA", description: "gorjana"],
                         [userGroupId: "RAILS", description: "Rails"],
-                ]),
-                "darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [
+                ],
+                "darpan.reconciliation.ReconciliationAutomation": [
                         [automationId: "AUT_A", automationName: "Month close automation", companyUserGroupId: "GORJANA",
                          savedRunId: "RS_A", isActive: "Y", nextScheduledFireTime: new Timestamp(NOW.time + 60_000L)],
                         [automationId: "AUT_B", automationName: "Orders vs OMS", companyUserGroupId: "RAILS",
                          savedRunId: "RS_B", isActive: "Y", nextScheduledFireTime: new Timestamp(NOW.time + 60_000L)],
-                ]),
+                ],
                 // As the real model: no auditId on a check; it reaches its audit through a statement.
-                "darpan.audit.AuditCheck": new FinderStub(listResult: [
+                "darpan.audit.AuditCheck": [
                         [checkId: "CHK_1", companyUserGroupId: "GORJANA", automationId: "AUT_A"],
-                ]),
-                "darpan.audit.AuditStatementCheck": new FinderStub(listResult: [
+                ],
+                "darpan.audit.AuditStatementCheck": [
                         [checkId: "CHK_1", statementId: "ST_1", companyUserGroupId: "GORJANA"],
-                ]),
-                "darpan.audit.AuditStatement": new FinderStub(listResult: [
+                ],
+                "darpan.audit.AuditStatement": [
                         [statementId: "ST_1", auditId: "AUD_G", companyUserGroupId: "GORJANA"],
-                ]),
-                "darpan.audit.Audit": new FinderStub(listResult: [
+                ],
+                "darpan.audit.Audit": [
                         [auditId: "AUD_G", companyUserGroupId: "GORJANA", auditName: "Month close"],
-                ]),
+                ],
         ]
     }
 
     /** A super admin whose clock reads NOW. */
-    private static def superAdminEc(Map finders) {
-        return AdminTestStubs.superAdminEc(finders, [user: new UserStub(userId: AdminTestStubs.SUPER_ADMIN_ID,
+    private static def superAdminEc(Map tables) {
+        return AdminTestStubs.superAdminEc(tables, [user: new UserStub(userId: AdminTestStubs.SUPER_ADMIN_ID,
                 username: "darpan.admin", nowTimestamp: NOW)])
     }
 }

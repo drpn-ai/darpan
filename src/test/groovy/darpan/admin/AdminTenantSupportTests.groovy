@@ -1,6 +1,5 @@
 package darpan.admin
 
-import darpan.admin.AdminTestStubs.FinderStub
 import darpan.admin.AdminTestStubs.MessageFacadeStub
 import darpan.admin.AdminTestStubs.ServiceFacadeStub
 import darpan.facade.common.TenantAccessSupport
@@ -12,15 +11,15 @@ import static org.junit.jupiter.api.Assertions.*
 
 class AdminTenantSupportTests {
 
-    private static def adminEc(Map finders, ServiceFacadeStub service = new ServiceFacadeStub(),
+    private static def adminEc(Map tables, ServiceFacadeStub service = new ServiceFacadeStub(),
                                MessageFacadeStub message = new MessageFacadeStub()) {
-        return superAdminEc(finders, [service: service, message: message])
+        return superAdminEc(tables, [service: service, message: message])
     }
 
     @Test
     void createTenantCreatesGroupSettingAndAudit() {
         def service = new ServiceFacadeStub()
-        def ec = adminEc(["moqui.security.UserGroup": new FinderStub(oneResult: null)], service)
+        def ec = adminEc(["moqui.security.UserGroup": []], service)
 
         Map result = AdminTenantSupport.createTenant(ec, "KREWE", "Krewe", "America/Chicago")
 
@@ -51,7 +50,7 @@ class AdminTenantSupportTests {
         def service = new ServiceFacadeStub()
         def message = new MessageFacadeStub()
         def ec = adminEc(["moqui.security.UserGroup":
-                new FinderStub(oneResult: [userGroupId: "KREWE", description: "Krewe"])], service, message)
+                [[userGroupId: "KREWE", description: "Krewe"]]], service, message)
 
         assertNull(AdminTenantSupport.createTenant(ec, "KREWE", "Krewe again", null))
         assertTrue(message.errors.any { it.contains("already exists") })
@@ -77,7 +76,7 @@ class AdminTenantSupportTests {
         // Same hole update#Tenant guards against, reachable through the create wizard instead.
         def service = new ServiceFacadeStub()
         def message = new MessageFacadeStub()
-        def ec = adminEc(["moqui.security.UserGroup": new FinderStub(oneResult: null)], service, message)
+        def ec = adminEc(["moqui.security.UserGroup": []], service, message)
 
         assertEquals(null, AdminTenantSupport.createTenant(ec, "KREWE", "Krewe", "Not/AZone"))
         assertTrue(message.hasError())

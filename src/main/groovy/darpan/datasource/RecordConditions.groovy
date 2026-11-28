@@ -85,11 +85,37 @@ class RecordConditions {
         return errors
     }
 
+    /**
+     * OC176 (DAR-OPS-029 S15a): the longest a MATCHES pattern may spend on one value. A value it cannot decide in time does not
+     * match, as one it rejects, so a backtracking pattern on an unlucky value cannot pin the read's thread.
+     */
+    static final long MATCH_MILLIS = 100L
+
     private static boolean matchesPattern(Object value, Map c) {
         if (isBlank(value) || value instanceof Collection || value instanceof Map) return false
         String pattern = (String) ((List) c.values)[0]
-        return PATTERNS.computeIfAbsent(pattern, { java.util.regex.Pattern.compile(it) }).matcher(value.toString().trim()).matches()
+        return matchesWithin(PATTERNS.computeIfAbsent(pattern, { java.util.regex.Pattern.compile(it) }), value.toString().trim(), MATCH_MILLIS)
     }
+
+    /** Whether `text` matches `pattern` whole; false when the match has not finished within `millis` (a backtracking pattern). */
+    static boolean matchesWithin(java.util.regex.Pattern pattern, String text, long millis) {
+        long deadline = System.nanoTime() + millis * 1_000_000L
+        CharSequence timed = new CharSequence() {
+            int length() { return text.length() }
+            char charAt(int i) {
+                if (System.nanoTime() > deadline) throw new java.util.concurrent.CancellationException("the pattern ran out of time")
+                return text.charAt(i)
+            }
+            CharSequence subSequence(int start, int end) { return text.subSequence(start, end) }
+            String toString() { return text }
+        }
+        try {
+            return pattern.matcher(timed).matches()
+        } catch (java.util.concurrent.CancellationException ignored) {
+            return false
+        }
+    }
+
 
     private static boolean afterNow(Object value, Long referenceMillis) {
         long now = referenceMillis != null ? referenceMillis : System.currentTimeMillis()

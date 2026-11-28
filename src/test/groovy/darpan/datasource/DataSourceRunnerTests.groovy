@@ -326,6 +326,6 @@ class DataSourceRunnerTests {
                     .run([mode: "ids", keys: ["a" * 40 + "b"], keyField: "invoiceNo"]) { }
         }
         assertTrue(e.message.contains("refuses"), e.message)
-        assertTrue(DataSourceRunner.matchesWithin(java.util.regex.Pattern.compile("[A-Z0-9]{1,10}"), "A1", 100L), "an ordinary key still matches")
+        assertTrue(RecordConditions.matchesWithin(java.util.regex.Pattern.compile("[A-Z0-9]{1,10}"), "A1", 100L), "an ordinary key still matches")
     }
 }

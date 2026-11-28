@@ -194,25 +194,6 @@ class DataSourceRunner {
         return e
     }
 
-    /** Whether `text` matches `pattern` whole; false when the match has not finished within `millis` (a backtracking pattern). */
-    static boolean matchesWithin(java.util.regex.Pattern pattern, String text, long millis) {
-        long deadline = System.nanoTime() + millis * 1_000_000L
-        CharSequence timed = new CharSequence() {
-            int length() { return text.length() }
-            char charAt(int i) {
-                if (System.nanoTime() > deadline) throw new java.util.concurrent.CancellationException("the pattern ran out of time")
-                return text.charAt(i)
-            }
-            CharSequence subSequence(int start, int end) { return text.subSequence(start, end) }
-            String toString() { return text }
-        }
-        try {
-            return pattern.matcher(timed).matches()
-        } catch (java.util.concurrent.CancellationException ignored) {
-            return false
-        }
-    }
-
     private static int parallelOf(Map bind) {
         return ((bind?.parallel ?: 1) as Number).intValue()
     }
@@ -233,7 +214,7 @@ class DataSourceRunner {
         java.util.regex.Pattern pattern = b.idPattern ? java.util.regex.Pattern.compile((String) b.idPattern) : null
         // OC176: a key comes from a caller (an agent's or a CLI's lookup). One over MAX_LOOKUP_KEY_LENGTH, or one the pattern
         // cannot decide within ID_PATTERN_MILLIS, is refused like a key the pattern rejects.
-        List<String> bad = keys.findAll { it.length() > MAX_LOOKUP_KEY_LENGTH || (pattern && !matchesWithin(pattern, it, ID_PATTERN_MILLIS)) }
+        List<String> bad = keys.findAll { it.length() > MAX_LOOKUP_KEY_LENGTH || (pattern && !RecordConditions.matchesWithin(pattern, it, ID_PATTERN_MILLIS)) }
         if (bad) throw new IllegalArgumentException("Step '${step.id}' refuses the key(s) ${bad.take(5).join(', ')}.")
         return keys.collate(((b.chunk ?: 100) as Number).intValue()).collect { List<String> chunk ->
             fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""] + optionTexts)

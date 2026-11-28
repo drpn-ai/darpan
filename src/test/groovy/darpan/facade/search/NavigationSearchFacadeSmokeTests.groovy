@@ -80,6 +80,10 @@ class NavigationSearchFacadeSmokeTests {
         assertEquals("OrderIdSchemaMap", ((Map) outputTarget.routeParams).savedRunId)
         assertEquals("search-csv-order-compare-result.json", ((Map) outputTarget.routeParams).outputFileName)
         assertEquals("CSV Order Compare", ((Map) outputTarget.routeQuery).runName)
+
+        // DAR-BE-424: NetSuite RESTlet endpoints are gone, so Cmd+K offers no endpoint target; the auth profile still is one.
+        List<Map<String, Object>> netSuiteRows = (List<Map<String, Object>>) (search("krewe netsuite endpoint").results ?: [])
+        assertFalse(netSuiteRows.any { it.type == "netsuite-endpoint" }, "${netSuiteRows}")
     }
 
     /** DAR-BE-384: a result its run names opens at the run's short address; the page reads the rest from the run. */
@@ -190,19 +194,6 @@ class NavigationSearchFacadeSmokeTests {
                 username          : "krewe-auth",
                 password          : "secret",
                 isActive          : "Y",
-        ])
-        upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "KREWE_SEARCH_ENDPOINT"], [
-                nsRestletConfigId    : "KREWE_SEARCH_ENDPOINT",
-                description          : "Krewe Search Endpoint",
-                companyUserGroupId   : KREWE,
-                createdByUserId      : TEST_USER_ID,
-                endpointUrl          : "https://krewe.example.com/search-restlet",
-                httpMethod           : "POST",
-                nsAuthConfigId       : "KREWE_SEARCH_AUTH",
-                headersJson          : "{}",
-                connectTimeoutSeconds: 30,
-                readTimeoutSeconds   : 60,
-                isActive             : "Y",
         ])
         upsertEntityValue("darpan.reconciliation.JsonSchema", [jsonSchemaId: "KreweSearchShopifySchema"], [
                 jsonSchemaId      : "KreweSearchShopifySchema",

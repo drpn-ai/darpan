@@ -2299,7 +2299,7 @@ class AutomationExecutionSupport {
      * safeMetadataJson, a run's compare source in sourceConfigId): two checks share a read only when all of them agree.
      */
     static final List<String> SHARED_READ_SOURCE_FIELDS = ["systemEnumId", "sourceConfigId", "safeMetadataJson",
-            "extractParametersJson", "systemMessageRemoteId", "nsRestletConfigId", "databaseSourceQueryId",
+            "extractParametersJson", "systemMessageRemoteId", "databaseSourceQueryId",
             "apiRequestTemplateJson", "extractStatusIds"].asImmutable()
 
     /** A field of a source row or map, null when its entity does not declare it (EntityValue.get throws then). */

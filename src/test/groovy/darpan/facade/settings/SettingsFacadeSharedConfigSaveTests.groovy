@@ -22,9 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 /**
  * DAR-BE-005 Task 8, Finding A.
  *
- * <p>Task 5 made shared NsAuthConfig / NsRestletConfig rows visible to a member tenant in
- * {@code list#NsAuthConfigs} / {@code list#NsRestletConfigs}, but {@code save#NsAuthConfig} and
- * {@code save#NsRestletConfig} kept the strict owner-only {@code TenantAccessSupport}.
+ * <p>Task 5 made shared NsAuthConfig rows visible to a member tenant in
+ * {@code list#NsAuthConfigs}, but {@code save#NsAuthConfig} kept the strict owner-only {@code TenantAccessSupport}.
  * {@code requireTenantRecordAccess} gate — the exact half-open "sees a config it cannot use" state
  * DAR-BE-005 exists to close. These tests prove the fix from both directions: a member tenant with
  * an active grant can now save the shared row it can already see, and a stranger with no standing
@@ -84,75 +83,7 @@ class SettingsFacadeSharedConfigSaveTests {
         assertEquals(OWNER, stored.companyUserGroupId)
     }
 
-    @Test
-    void memberTenantWithActiveGrantCanSaveASharedNsRestletConfig() {
-        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, MEMBER)
-
-        Map<String, Object> result = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                nsRestletConfigId: "SHARED_ENDPOINT",
-                description      : "Member edited shared endpoint",
-                endpointUrl      : "https://krewe.suitetalk.api.netsuite.com/member-edited-restlet",
-                httpMethod       : "POST",
-                nsAuthConfigId   : "SHARED_AUTH",
-                headersJson      : "{}",
-        ])
-
-        assertTrue((Boolean) result.ok, result.errors?.toString())
-        def stored = findOne("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "SHARED_ENDPOINT"])
-        assertEquals("Member edited shared endpoint", stored.description)
-        assertEquals(OWNER, stored.companyUserGroupId)
-    }
-
     // --- 2. existence oracle stays closed --------------------------------------------------------
-    //
-    // save#NsRestletConfig's referenced-NsAuthConfig check (SettingsFacadeServices.xml ~:797) has no
-    // create fallback — an endpoint cannot silently create the auth config it references — so it is
-    // a pure existence check, exactly like the Seam B validators in ReconciliationSavedRunSupport.
-    // That makes it the one place under save#NsAuthConfig / save#NsRestletConfig where "a real
-    // foreign-owned id" and "an id that does not exist at all" can be compared for byte-identical
-    // text: query the SAME id before and after deleting the real row.
-    //
-    // The PRIMARY existence checks (~:604 in save#NsAuthConfig, ~:785 in save#NsRestletConfig) do NOT
-    // have this property, and that is not a gap in the fix: both are create-or-update checks, so a
-    // genuinely free id is a legitimate create (ok=true, no error), not a denial — there is no
-    // "not found" branch to compare against an id that never existed. The last test below documents
-    // that directly rather than asserting an equality that cannot hold.
-
-    @Test
-    void strangerGetsIdenticalErrorTextForARealForeignReferencedNsAuthConfigAndANonexistentOneWithinNsRestletConfigSave() {
-        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, STRANGER)
-
-        Map<String, Object> realResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                description      : "Stranger probe",
-                endpointUrl      : "https://stranger-probe.suitetalk.api.netsuite.com/restlet",
-                httpMethod       : "POST",
-                nsAuthConfigId   : "ORACLE_REF_AUTH",
-                headersJson      : "{}",
-        ])
-        assertFalse((Boolean) realResult.ok)
-        List<String> realErrors = (List<String>) realResult.errors
-
-        // Remove the referenced auth config so the SAME id is now genuinely nonexistent, then probe
-        // again. Both probes create (no nsRestletConfigId, DAR-BE-135), so the endpoint's own
-        // existence check stays silent both times and the referenced-config check is what's compared.
-        deleteEntity("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ORACLE_REF_AUTH"])
-        ec.message.clearErrors()
-        Map<String, Object> missingResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                description      : "Stranger probe",
-                endpointUrl      : "https://stranger-probe.suitetalk.api.netsuite.com/restlet",
-                httpMethod       : "POST",
-                nsAuthConfigId   : "ORACLE_REF_AUTH",
-                headersJson      : "{}",
-        ])
-        assertFalse((Boolean) missingResult.ok)
-        List<String> missingErrors = (List<String>) missingResult.errors
-
-        assertEquals(missingErrors, realErrors,
-                "a stranger must see the identical text for a real foreign-owned referenced auth " +
-                "config and a nonexistent one — otherwise the response becomes a cross-tenant " +
-                "existence oracle")
-        assertEquals(["NsAuthConfig ORACLE_REF_AUTH not found."], realErrors)
-    }
 
     @Test
     void strangerGetsTheCollapsedNotFoundTextNotTheOldDistinguishableTextForARealForeignNsAuthConfig() {
@@ -235,97 +166,6 @@ class SettingsFacadeSharedConfigSaveTests {
         assertEquals([otherAccount, "new-private-key"], [row.tokenUrl, row.privateKeyPem])
     }
 
-    /** DAR-BE-258: an endpoint stays on its auth config's NetSuite account, so a peer cannot send the shared secret elsewhere. */
-    @Test
-    void anEndpointCannotLeaveItsAuthConfigsNetSuiteAccount() {
-        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, MEMBER)
-        Map<String, Object> elsewhere = [description: "Peer endpoint", endpointUrl: "https://3333333.suitetalk.api.netsuite.com/restlet",
-                                         httpMethod: "POST", nsAuthConfigId: "SHARED_AUTH", headersJson: "{}"]
-        String refusal = "This endpoint must stay on NetSuite account krewe, the account its auth config uses. Use an auth config for account 3333333 instead."
-
-        // BASIC, no token URL: the account is the one its endpoints already use.
-        Map<String, Object> repointed = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [nsRestletConfigId: "SHARED_ENDPOINT"])
-        assertEquals([refusal], (List<String>) repointed.errors, "repointing the shared endpoint to another account")
-        assertEquals("https://krewe.suitetalk.api.netsuite.com/restlet",
-                findOne("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "SHARED_ENDPOINT"]).endpointUrl)
-
-        ec.message.clearErrors()
-        Map<String, Object> added = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere)
-        assertEquals([refusal], (List<String>) added.errors, "a new endpoint bound to the shared auth config on another account")
-
-        // OAuth: the token URL names the account; hosts compare without case.
-        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, OWNER)
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ACCOUNT_AUTH"], [
-                nsAuthConfigId: "ACCOUNT_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "OAUTH2_M2M_JWT",
-                tokenUrl: "https://1234567-sb1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token",
-                clientId: "client", certId: "cert", privateKeyPem: "stored-key", isActive: "Y"])
-        ec.message.clearErrors()
-        Map<String, Object> sameAccount = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [
-                nsAuthConfigId: "ACCOUNT_AUTH", endpointUrl: "https://1234567-SB1.app.netsuite.com/app/site/hosting/restlet.nl"])
-        assertTrue((Boolean) sameAccount.ok, sameAccount.errors?.toString())
-        ec.message.clearErrors()
-        Map<String, Object> otherAccount = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [nsAuthConfigId: "ACCOUNT_AUTH"])
-        assertEquals(["This endpoint must stay on NetSuite account 1234567-sb1, the account its auth config uses. Use an auth config for account 3333333 instead."],
-                (List<String>) otherAccount.errors)
-    }
-
-    /** DAR-BE-258: the account is kept on the auth config, so removing its endpoints does not reopen it; an unreadable
-     *  token URL refuses rather than lets anything through. */
-    @Test
-    void theAccountStaysOnTheAuthConfigWhenItsEndpointsGo() {
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "DETACH_AUTH"], [
-                nsAuthConfigId: "DETACH_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "BASIC",
-                username: "u", password: "stored-password", isActive: "Y"])
-        Map<String, Object> endpoint = [description: "Detach", httpMethod: "POST", nsAuthConfigId: "DETACH_AUTH", headersJson: "{}"]
-
-        Map<String, Object> first = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [endpointUrl: "https://5555555.app.netsuite.com/r"])
-        assertTrue((Boolean) first.ok, first.errors?.toString())
-        assertEquals("5555555", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "DETACH_AUTH"]).netsuiteAccount, "the first endpoint sets the account")
-
-        ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsAuthConfigId", "DETACH_AUTH").disableAuthz().deleteAll()
-        ec.message.clearErrors()
-        Map<String, Object> afterDelete = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [endpointUrl: "https://6666666.app.netsuite.com/r"])
-        assertEquals(["This endpoint must stay on NetSuite account 5555555, the account its auth config uses. Use an auth config for account 6666666 instead."],
-                (List<String>) afterDelete.errors, "deleting every endpoint must not reset the account")
-
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "BAD_TOKEN_AUTH"], [
-                nsAuthConfigId: "BAD_TOKEN_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "OAUTH2_M2M_JWT",
-                tokenUrl: "not a url", clientId: "client", certId: "cert", privateKeyPem: "stored-key", isActive: "Y"])
-        ec.message.clearErrors()
-        Map<String, Object> badToken = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [
-                nsAuthConfigId: "BAD_TOKEN_AUTH", endpointUrl: "https://5555555.app.netsuite.com/r"])
-        assertEquals(["The auth config's token URL names no NetSuite account. Fix its token URL first."], (List<String>) badToken.errors)
-    }
-
-    /** DAR-BE-258: NS_AUTH_ACCOUNTS fills the account from the token URL, else the oldest endpoint; dry run writes nothing;
-     *  a second run finds nothing. */
-    @Test
-    void theNsAuthAccountsMigrationStoresEachAuthConfigsAccount() {
-        Map<String, Object> base = [companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, isActive: "Y"]
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_TOKEN"], base + [nsAuthConfigId: "MIG_TOKEN", authType: "OAUTH2_M2M_JWT",
-                tokenUrl: "https://7777777-SB1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token"])
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_BASIC"], base + [nsAuthConfigId: "MIG_BASIC", authType: "BASIC"])
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_EMPTY"], base + [nsAuthConfigId: "MIG_EMPTY", authType: "BASIC"])
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_SET"], base + [nsAuthConfigId: "MIG_SET", authType: "BASIC", netsuiteAccount: "1010101"])
-        ["MIG_EP_1": "https://8888888.app.netsuite.com/r", "MIG_EP_2": "https://9999999.app.netsuite.com/r"].each { String id, String url ->
-            upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: id], base + [nsRestletConfigId: id, nsAuthConfigId: "MIG_BASIC",
-                    endpointUrl: url, httpMethod: "POST", headersJson: "{}", connectTimeoutSeconds: 30, readTimeoutSeconds: 60])
-        }
-        Closure<String> account = { String id -> findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: id]).netsuiteAccount as String }
-
-        Map<String, Object> dry = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([dryRun: true]).disableAuthz().call()
-        assertTrue((dry.rowsUpdated as Integer) >= 2, dry.toString())
-        assertNull(account("MIG_TOKEN"), "a dry run writes nothing")
-
-        Map<String, Object> real = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([:]).disableAuthz().call()
-        assertTrue((Boolean) real.ok, real.errors?.toString())
-        assertEquals(["7777777-sb1", "8888888", null, "1010101"], ["MIG_TOKEN", "MIG_BASIC", "MIG_EMPTY", "MIG_SET"].collect(account))
-        assertTrue((real.messages as List<String>).any { it.contains("MIG_BASIC (8888888, 9999999)") }, "endpoints on two accounts are reported: ${real.messages}")
-
-        Map<String, Object> again = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([:]).disableAuthz().call()
-        assertEquals(0, again.rowsUpdated as Integer, "idempotent: ${again.messages}")
-    }
-
     // --- helpers ------------------------------------------------------------------------------
 
     private Map<String, Object> saveFacade(String serviceName, Map<String, Object> parameters) {
@@ -359,11 +199,6 @@ class SettingsFacadeSharedConfigSaveTests {
         upsertEntityValue("moqui.basic.Enumeration", [enumId: "SCFG_NS_AUTH"], [
                 enumId     : "SCFG_NS_AUTH",
                 description: "NetSuite auth config (darpan.reconciliation.NsAuthConfig)",
-                enumTypeId : "DarpanSharedConfigType",
-        ])
-        upsertEntityValue("moqui.basic.Enumeration", [enumId: "SCFG_NS_RESTLET"], [
-                enumId     : "SCFG_NS_RESTLET",
-                description: "NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)",
                 enumTypeId : "DarpanSharedConfigType",
         ])
     }
@@ -409,19 +244,6 @@ class SettingsFacadeSharedConfigSaveTests {
                 privateKeyPem     : "krewe-private-key",
                 isActive          : "Y",
         ])
-        upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "SHARED_ENDPOINT"], [
-                nsRestletConfigId    : "SHARED_ENDPOINT",
-                description          : "Krewe shared endpoint",
-                companyUserGroupId   : OWNER,
-                createdByUserId      : TEST_USER_ID,
-                endpointUrl          : "https://krewe.suitetalk.api.netsuite.com/restlet",
-                httpMethod           : "POST",
-                nsAuthConfigId       : "SHARED_AUTH",
-                headersJson          : "{}",
-                connectTimeoutSeconds: 30,
-                readTimeoutSeconds   : 60,
-                isActive             : "Y",
-        ])
         upsertEntityValue("darpan.auth.ConfigTenantAccess", [
                 configTypeEnumId : "SCFG_NS_AUTH",
                 configId         : "SHARED_AUTH",
@@ -430,19 +252,6 @@ class SettingsFacadeSharedConfigSaveTests {
         ], [
                 configTypeEnumId : "SCFG_NS_AUTH",
                 configId         : "SHARED_AUTH",
-                tenantUserGroupId: MEMBER,
-                fromDate         : GRANT_FROM_DATE,
-                thruDate         : null,
-                grantedByUserId  : TEST_USER_ID,
-        ])
-        upsertEntityValue("darpan.auth.ConfigTenantAccess", [
-                configTypeEnumId : "SCFG_NS_RESTLET",
-                configId         : "SHARED_ENDPOINT",
-                tenantUserGroupId: MEMBER,
-                fromDate         : GRANT_FROM_DATE,
-        ], [
-                configTypeEnumId : "SCFG_NS_RESTLET",
-                configId         : "SHARED_ENDPOINT",
                 tenantUserGroupId: MEMBER,
                 fromDate         : GRANT_FROM_DATE,
                 thruDate         : null,
@@ -458,16 +267,6 @@ class SettingsFacadeSharedConfigSaveTests {
                 authType          : "BASIC",
                 username          : "krewe-oracle-user",
                 password          : "krewe-oracle-password",
-                isActive          : "Y",
-        ])
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ORACLE_REF_AUTH"], [
-                nsAuthConfigId    : "ORACLE_REF_AUTH",
-                description       : "Krewe unshared referenced auth",
-                companyUserGroupId: OWNER,
-                createdByUserId   : TEST_USER_ID,
-                authType          : "BASIC",
-                username          : "krewe-oracle-ref-user",
-                password          : "krewe-oracle-ref-password",
                 isActive          : "Y",
         ])
     }

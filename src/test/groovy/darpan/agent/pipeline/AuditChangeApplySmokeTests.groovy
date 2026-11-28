@@ -1293,7 +1293,7 @@ class AuditChangeApplySmokeTests {
         return asSystem {
             def s = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", scopeId).condition("fileSide", "FILE_1")
                     .useCache(false).one()
-            ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "nsRestletConfigId", "sourceConfigId", "sourceConfigType",
+            ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "sourceConfigId", "sourceConfigType",
              "fileTypeEnumId", "schemaFileName", "recordRootExpression", "primaryIdExpression", "duplicateKeyHandling",
              "extractParametersJson"].collectEntries { [(it): s.get(it)] }
         }

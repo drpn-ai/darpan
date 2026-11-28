@@ -120,8 +120,6 @@ class AutomationFacadeSupport {
 
     static List<Map<String, Object>> listSourceConfigOptions(def ec) { return AutomationSourceOptionsSupport.listSourceConfigOptions(ec) }
 
-    static List<Map<String, Object>> listNsRestletOptions(def ec) { return AutomationSourceOptionsSupport.listNsRestletOptions(ec) }
-
     static List<Map<String, Object>> listNsSuiteQlQueryOptions(def ec) { return AutomationSourceOptionsSupport.listNsSuiteQlQueryOptions(ec) }
 
     static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) { return AutomationSourceOptionsSupport.listOmsRestSourceRemoteOptions(ec) }

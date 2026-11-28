@@ -77,8 +77,8 @@ class KnowledgeAdminSmokeTests {
                 preferenceValue: ACME])
         upsert("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: "KB_ACME_SHOP", companyUserGroupId: ACME,
                 shopApiUrl: "https://${SHOPIFY_HOST}/admin/api".toString(), apiVersion: "2025-01"])
-        upsert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "KB_BETA_NS", companyUserGroupId: BETA,
-                endpointUrl: "https://${NS_ACCOUNT}.restlets.api.netsuite.com/app/site/hosting/restlet.nl".toString()])
+        upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "KB_BETA_NS", companyUserGroupId: BETA,
+                tokenUrl: "https://${NS_ACCOUNT}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token".toString()])
 
         productRoot = Files.createTempDirectory("kb-product-")
         Path oms = Files.createDirectories(productRoot.resolve("product/oms"))
@@ -379,7 +379,7 @@ class KnowledgeAdminSmokeTests {
         assertNotNull(ids.find { it.value == "kb-acme-test" && it.kind == "store" && it.tenantId == ACME && it.caseSensitive == false },
                 "a .myshopify.com host gives its shop handle")
         assertNull(ids.find { it.kind == "store" && it.tenantId == BETA }, "a NetSuite host gives no shop handle")
-        assertNotNull(ids.find { it.value == "${NS_ACCOUNT}.restlets.api.netsuite.com" && it.kind == "host" && it.tenantId == BETA })
+        assertNotNull(ids.find { it.value == "${NS_ACCOUNT}.suitetalk.api.netsuite.com" && it.kind == "host" && it.tenantId == BETA })
         assertNotNull(ids.find { it.value == NS_ACCOUNT && it.kind == "account" && it.tenantId == BETA })
         assertTrue(ids.every { it.tenantId != "DARPAN_USER" }, "only company groups are tenants")
     }

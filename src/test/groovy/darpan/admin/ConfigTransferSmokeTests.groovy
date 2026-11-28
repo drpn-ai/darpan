@@ -59,7 +59,7 @@ class ConfigTransferSmokeTests {
             "darpan.rule.RuleSetCompareSourceFilter", "darpan.rule.RuleSetCompareSourceKeyField",
             "darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareScope", "darpan.rule.Rule", "darpan.rule.RuleSet",
             "darpan.rule.TenantConclusion",
-            "darpan.reconciliation.NsSuiteQlSourceQuery", "darpan.reconciliation.NsRestletConfig",
+            "darpan.reconciliation.NsSuiteQlSourceQuery",
             "darpan.reconciliation.NsAuthConfig", "darpan.shopify.ShopifyAuthConfig", "darpan.hotwax.HotWaxOmsRestSourceConfig",
     ]
 
@@ -192,22 +192,20 @@ class ConfigTransferSmokeTests {
     @Test
     void headersJsonTravelsAsASecretName() {
         // headersJson is plain text, not encrypt="true", but it can carry an auth header.
-        create("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "XFER_RESTLET", description: "returns restlet",
-                companyUserGroupId: SRC, endpointUrl: "https://ns.example/restlet", nsAuthConfigId: "XFER_NS_AUTH",
-                headersJson: '{"X-Api-Key":"restlet-key-xfer"}'])
+        create("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "XFER_HDR_OMS", description: "headers oms",
+                companyUserGroupId: SRC, baseUrl: "https://oms.example/headers", headersJson: '{"X-Api-Key":"oms-key-xfer"}'])
         try {
             Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC,
-                    connectionRefs: ["NETSUITE_RESTLET:XFER_RESTLET"]])
+                    connectionRefs: ["HOTWAX_OMS_REST:XFER_HDR_OMS"]])
             assertNoErrors(out)
             String json = JsonOutput.toJson(out.result.bundle)
             assertFalse(json.contains("X-Api-Key"), "no header names from headersJson")
-            assertFalse(json.contains("restlet-key-xfer"), "no header values from headersJson")
-            Map restlet = (out.result.bundle.connections as List<Map>).find { it.ref == "NETSUITE_RESTLET:XFER_RESTLET" }
-            assertTrue("headersJson" in (restlet.secretFields as List), "${restlet.secretFields}")
-            assertFalse((restlet.fields as Map).containsKey("headersJson"))
-            assertEquals(AUTH_REF, restlet.refs.nsAuthConfigId)
+            assertFalse(json.contains("oms-key-xfer"), "no header values from headersJson")
+            Map oms = (out.result.bundle.connections as List<Map>).find { it.ref == "HOTWAX_OMS_REST:XFER_HDR_OMS" }
+            assertTrue("headersJson" in (oms.secretFields as List), "${oms.secretFields}")
+            assertFalse((oms.fields as Map).containsKey("headersJson"))
         } finally {
-            ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", "XFER_RESTLET").disableAuthz().deleteAll()
+            ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig").condition("omsRestSourceConfigId", "XFER_HDR_OMS").disableAuthz().deleteAll()
         }
     }
 
@@ -840,25 +838,24 @@ class ConfigTransferSmokeTests {
 
     @Test
     void sealedRoundTrip() {
-        String restletRef = "NETSUITE_RESTLET:XFER_SEAL_RESTLET"
-        Map secrets = [password: "restlet-pass-xfer", apiToken: "restlet-token-xfer", privateKeyPem: "restlet-pem-xfer",
-                       headersJson: '{"X-Api-Key":"restlet-header-xfer"}']
-        create("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "XFER_SEAL_RESTLET", description: "sealed restlet",
-                companyUserGroupId: SRC, endpointUrl: "https://ns.example/sealed", nsAuthConfigId: "XFER_NS_AUTH"] + secrets)
-        List<String> plaintexts = [PASSWORD, PEM] + secrets.values().collect { it as String } + ["restlet-header-xfer"]
+        String omsRef = "HOTWAX_OMS_REST:XFER_SEAL_OMS"
+        Map secrets = [password: "oms-pass-xfer", apiToken: "oms-token-xfer", headersJson: '{"X-Api-Key":"oms-header-xfer"}']
+        create("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "XFER_SEAL_OMS", description: "sealed oms",
+                companyUserGroupId: SRC, baseUrl: "https://oms.example/sealed"] + secrets)
+        List<String> plaintexts = [PASSWORD, PEM] + secrets.values().collect { it as String } + ["oms-header-xfer"]
         try {
             Map handoff = beginHandoff(DST)
             assertTrue((handoff.publicKey as String).length() > 300)
             assertTrue((handoff.keyFingerprint as String) ==~ /[0-9a-f]{64}/)
             assertNotNull(handoff.expiresAt)
-            Map bundle = exportSealed(handoff.publicKey as String, [connectionRefs: [restletRef]])
+            Map bundle = exportSealed(handoff.publicKey as String, [connectionRefs: [AUTH_REF, omsRef]])
             String bundleJson = JsonOutput.toJson(bundle)
             plaintexts.each { assertFalse(bundleJson.contains(it), "no plaintext in the bundle: ${it}") }
             assertEquals(handoff.keyFingerprint, bundle.secrets.keyFingerprint)
             assertEquals("RSA-OAEP-256+A256GCM", bundle.secrets.alg)
             assertEquals(["password", "privateKeyPem"], ((bundle.connections as List<Map>).find { it.ref == AUTH_REF }.sealedSecrets as Map).keySet().collect { it as String }.sort())
 
-            Map map = [(AUTH_REF): "CREATE", (restletRef): "CREATE"]
+            Map map = [(AUTH_REF): "CREATE", (omsRef): "CREATE"]
             Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
             assertNoErrors(preview)
             Map plan = preview.result.plan as Map
@@ -867,7 +864,7 @@ class ConfigTransferSmokeTests {
             assertEquals("CREATE", authLine.action, "credentials arrive, so nothing is left to enter")
             assertEquals(["password", "privateKeyPem"], authLine.secretsFilled)
             assertEquals([], authLine.secretsKept)
-            assertEquals(["apiToken", "headersJson", "password", "privateKeyPem"], (plan.lines as List<Map>).find { it.ref == restletRef }.secretsFilled)
+            assertEquals(["apiToken", "headersJson", "password"], (plan.lines as List<Map>).find { it.ref == omsRef }.secretsFilled)
             assertEquals(2, plan.counts.CREDENTIALS_FILLED)
             assertFalse((plan.warnings as List<Map>).any { it.code == "NEEDS_CREDENTIALS" })
 
@@ -878,19 +875,19 @@ class ConfigTransferSmokeTests {
             assertEquals(PASSWORD, auth.password)
             assertEquals(PEM, auth.privateKeyPem)
             assertNull(auth.apiToken)
-            def restlet = ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", applied.result.idMap[restletRef])
+            def oms = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig").condition("omsRestSourceConfigId", applied.result.idMap[omsRef])
                     .disableAuthz().useCache(false).one()
-            secrets.each { String field, String value -> assertEquals(value, restlet.get(field), field) }
+            secrets.each { String field, String value -> assertEquals(value, oms.get(field), field) }
 
             String everythingSaid = JsonOutput.toJson([preview.result, applied.result, preview.errors, applied.errors,
                     ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()*.getMap()])
             plaintexts.each { assertFalse(everythingSaid.contains(it), "no plaintext in a plan, an error or the audit log: ${it}") }
             assertTrue((ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", DST)
                     .condition("serviceName", "admin.TransferAdminServices.import#ConfigBundle").disableAuthz().useCache(false).one()
-                    .detailText as String).contains("credentials filled: 6"), "the apply log counts the fields filled")
+                    .detailText as String).contains("credentials filled: 5"), "the apply log counts the fields filled")
         } finally {
             wipeTenant(DST)
-            ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", "XFER_SEAL_RESTLET").disableAuthz().deleteAll()
+            ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig").condition("omsRestSourceConfigId", "XFER_SEAL_OMS").disableAuthz().deleteAll()
         }
     }
 

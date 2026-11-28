@@ -18,8 +18,8 @@
         <description>Endpoints registered for this config type, each with its current enablement.
             The catalog comes from SourceSystemConnector; access rows only supply isEnabled.</description>
         <in-parameters>
-            <parameter name="configTypeEnumId" required="true"><description>SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,
-                SCFG_NS_AUTH, or SCFG_NS_RESTLET.</description></parameter>
+            <parameter name="configTypeEnumId" required="true"><description>SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH
+                or SCFG_NS_AUTH.</description></parameter>
             <parameter name="configId" required="true"/>
         </in-parameters>
         <out-parameters>

@@ -20,10 +20,6 @@
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.hotwax.HotWaxOmsRestSourceConfig', entityValue, eecaOperation)</script></actions>
     </eeca>
-    <eeca id="TenantConfigChange_NsRestletConfig" entity="darpan.reconciliation.NsRestletConfig" on-create="true" on-update="true" on-delete="true"
-            run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsRestletConfig', entityValue, eecaOperation)</script></actions>
-    </eeca>
     <eeca id="TenantConfigChange_NsSuiteQlSourceQuery" entity="darpan.reconciliation.NsSuiteQlSourceQuery" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsSuiteQlSourceQuery', entityValue, eecaOperation)</script></actions>

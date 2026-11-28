@@ -34,7 +34,6 @@ class CliMethodAllowlistTests {
             // credential saves and deletes
             "facade.SettingsFacadeServices.save#NsAuthConfig",
             "facade.SettingsFacadeServices.delete#NsAuthConfig",
-            "facade.SettingsFacadeServices.save#NsRestletConfig",
             "facade.SettingsFacadeServices.save#SftpServer",
             "facade.SettingsFacadeServices.save#TenantChatSpace",
             "facade.SettingsFacadeServices.delete#TenantChatSpace",
@@ -58,7 +57,6 @@ class CliMethodAllowlistTests {
             // DAR-CLI-008 (Aditi 2026-11-25): connection credentials are managed in the app — their getters return
             // usernames/ids/webhook URLs, and sharing widens another tenant's access to them
             "facade.SettingsFacadeServices.list#NsAuthConfigs",
-            "facade.SettingsFacadeServices.list#NsRestletConfigs",
             "facade.SettingsFacadeServices.list#SftpServers",
             "facade.SettingsFacadeServices.list#TenantChatSpaces",
             "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess",

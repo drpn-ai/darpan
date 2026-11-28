@@ -432,11 +432,9 @@ class CliMethodAllowlist {
             "facade.SettingsFacadeServices.delete#NsAuthConfig",
             "facade.SettingsFacadeServices.delete#TenantChatSpace",
             "facade.SettingsFacadeServices.list#NsAuthConfigs", // returns the NetSuite login username, clientId and certId
-            "facade.SettingsFacadeServices.list#NsRestletConfigs", // returns raw headersJson, which may carry an auth header
             "facade.SettingsFacadeServices.list#SftpServers", // returns the SFTP login username
             "facade.SettingsFacadeServices.list#TenantChatSpaces", // returns each webhook URL in clear text
             "facade.SettingsFacadeServices.save#NsAuthConfig",
-            "facade.SettingsFacadeServices.save#NsRestletConfig",
             "facade.SettingsFacadeServices.save#SftpServer",
             "facade.SettingsFacadeServices.save#TenantChatSpace",
 

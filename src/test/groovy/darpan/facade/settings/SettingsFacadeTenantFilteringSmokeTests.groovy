@@ -53,8 +53,8 @@ class SettingsFacadeTenantFilteringSmokeTests {
 
     @Test
     void settingsListsOnlyReturnRowsForTheActiveTenant() {
-        assertTenantVisibleRows(KREWE, "KREWE_SFTP", "KREWE_AUTH", "KREWE_ENDPOINT")
-        assertTenantVisibleRows(GORJANA, "GORJANA_SFTP", "GORJANA_AUTH", "GORJANA_ENDPOINT")
+        assertTenantVisibleRows(KREWE, "KREWE_SFTP", "KREWE_AUTH")
+        assertTenantVisibleRows(GORJANA, "GORJANA_SFTP", "GORJANA_AUTH")
     }
 
     @Test
@@ -76,12 +76,6 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertTrue(authConfigs.first().hasApiToken as boolean)
         assertTrue(authConfigs.first().hasPrivateKeyPem as boolean)
         assertNoRawCredentialFields(authConfigs)
-
-        ec.message.clearErrors()
-        Map<String, Object> endpointResult = listFacade("facade.SettingsFacadeServices.list#NsRestletConfigs")
-        List<Map<String, Object>> endpoints = (List<Map<String, Object>>) (endpointResult.restletConfigs ?: [])
-        assertEquals(["KREWE_ENDPOINT"], endpoints.collect { Map<String, Object> row -> row.nsRestletConfigId })
-        assertNoRawCredentialFields(endpoints)
 
         ec.message.clearErrors()
         Map<String, Object> chatSpaceResult = getFacade("facade.SettingsFacadeServices.list#TenantChatSpaces")
@@ -128,27 +122,13 @@ class SettingsFacadeTenantFilteringSmokeTests {
         // not shared with KREWE here, so this stays a denial, just with the non-distinguishing text.
         assertTrue((authResult.errors ?: []).join(" ").contains("was not found"))
         assertEquals("Gorjana Auth", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "GORJANA_AUTH"]).description)
-
-        ec.message.clearErrors()
-        Map<String, Object> endpointResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                nsRestletConfigId: "GORJANA_ENDPOINT",
-                description      : "Cross-tenant Endpoint edit",
-                endpointUrl      : "https://leaked-tenant.suitetalk.api.netsuite.com/restlet",
-                httpMethod       : "POST",
-                nsAuthConfigId   : "GORJANA_AUTH",
-                headersJson      : "{}",
-        ])
-        assertFalse((Boolean) endpointResult.ok)
-        // Same Finding A collapse as above, for save#NsRestletConfig's own existence/access gate.
-        assertTrue((endpointResult.errors ?: []).join(" ").contains("was not found"))
-        assertEquals("https://gorjana.suitetalk.api.netsuite.com/restlet", findOne("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "GORJANA_ENDPOINT"]).endpointUrl)
     }
 
     @Test
     void viewOnlyTenantCanReadButCannotCreateOrUpdateSettings() {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
 
-        assertTenantVisibleRows(KREWE, "KREWE_SFTP", "KREWE_AUTH", "KREWE_ENDPOINT")
+        assertTenantVisibleRows(KREWE, "KREWE_SFTP", "KREWE_AUTH")
 
         ec.message.clearErrors()
         Map<String, Object> createResult = saveFacade("facade.SettingsFacadeServices.save#SftpServer", [
@@ -208,7 +188,8 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 username    : "created-user",
         ])
         assertTrue((Boolean) sftpResult.ok, sftpResult.errors?.toString())
-        assertTenantOwnership("darpan.reconciliation.SftpServer", [sftpServerId: (sftpResult.savedServer as Map).sftpServerId])
+        String createdSftpId = (sftpResult.savedServer as Map).sftpServerId
+        assertTenantOwnership("darpan.reconciliation.SftpServer", [sftpServerId: createdSftpId])
 
         ec.message.clearErrors()
         Map<String, Object> authResult = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", [
@@ -222,23 +203,26 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertTenantOwnership("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: createdAuthId])
 
         ec.message.clearErrors()
-        Map<String, Object> endpointResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                description      : "Created Endpoint",
-                endpointUrl      : "https://created.suitetalk.api.netsuite.com/restlet",
-                httpMethod       : "POST",
-                nsAuthConfigId   : createdAuthId,
-                headersJson      : "{}",
-        ])
-        assertTrue((Boolean) endpointResult.ok, endpointResult.errors?.toString())
-        assertTenantOwnership("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: (endpointResult.savedRestletConfig as Map).nsRestletConfigId])
-
-        ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [
                 timeZone: "Europe/London",
         ])
         assertTrue((Boolean) tenantSettingsResult.ok, tenantSettingsResult.errors?.toString())
         assertTenantOwnership("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA])
         assertEquals("Europe/London", findOne("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA]).timeZone)
+
+        // Clean up, as tenantChatSpaceSavesScopedToActiveTenantAndCreator does: settingsListsOnlyReturnRowsForTheActiveTenant
+        // asserts GORJANA's exact rows and its seeded zone, and JUnit's method order is name-hash-based, so rows and a zone
+        // left here would make it pass or fail by method name (DAR-OPS-029 S03b).
+        ec.message.clearErrors()
+        Map<String, Object> zoneBack = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [timeZone: "America/New_York"])
+        assertTrue((Boolean) zoneBack.ok, zoneBack.errors?.toString())
+        boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: createdAuthId]).delete()
+            findOne("darpan.reconciliation.SftpServer", [sftpServerId: createdSftpId]).delete()
+        } finally {
+            if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
+        }
     }
 
     @Test
@@ -290,7 +274,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"]).googleChatWebhookUrl)
     }
 
-    private void assertTenantVisibleRows(String tenantId, String expectedSftpId, String expectedAuthId, String expectedEndpointId) {
+    private void assertTenantVisibleRows(String tenantId, String expectedSftpId, String expectedAuthId) {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenantId)
         ec.message.clearErrors()
 
@@ -306,14 +290,6 @@ class SettingsFacadeTenantFilteringSmokeTests {
         List<Map<String, Object>> authConfigs = (List<Map<String, Object>>) (authResult.authConfigs ?: [])
         assertEquals([expectedAuthId], authConfigs.collect { Map<String, Object> row -> row.nsAuthConfigId })
         assertTrue(authConfigs.every { Map<String, Object> row -> row.companyUserGroupId == tenantId })
-
-        ec.message.clearErrors()
-        Map<String, Object> endpointResult = listFacade("facade.SettingsFacadeServices.list#NsRestletConfigs")
-        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        List<Map<String, Object>> endpoints = (List<Map<String, Object>>) (endpointResult.restletConfigs ?: [])
-        assertEquals([expectedEndpointId], endpoints.collect { Map<String, Object> row -> row.nsRestletConfigId })
-        assertTrue(endpoints.every { Map<String, Object> row -> row.companyUserGroupId == tenantId })
-        assertTrue(endpoints.every { Map<String, Object> row -> row.nsAuthConfigId == expectedAuthId })
 
         ec.message.clearErrors()
         Map<String, Object> chatSpaceResult = getFacade("facade.SettingsFacadeServices.list#TenantChatSpaces")
@@ -373,7 +349,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
     }
 
     private void seedPermissionGroup(String permissionGroupId, String description) {
-        upsertEntity("moqui.security.UserGroup", [userGroupId: permissionGroupId], [
+        storeIfMissing("moqui.security.UserGroup", [userGroupId: permissionGroupId], [
                 userGroupId    : permissionGroupId,
                 description    : description,
                 groupTypeEnumId: TenantAccessSupport.DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID,
@@ -381,12 +357,12 @@ class SettingsFacadeTenantFilteringSmokeTests {
     }
 
     private void seedTenant(String tenantId, String label) {
-        upsertEntity("moqui.security.UserGroup", [userGroupId: tenantId], [
+        storeIfMissing("moqui.security.UserGroup", [userGroupId: tenantId], [
                 userGroupId     : tenantId,
                 description     : label,
                 groupTypeEnumId : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
         ])
-        upsertEntityValue("moqui.security.UserGroupMember", [
+        storeIfMissing("moqui.security.UserGroupMember", [
                 userGroupId: tenantId,
                 userId     : TEST_USER_ID,
                 fromDate   : TEST_FROM_DATE,
@@ -418,7 +394,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
         }
-        upsertEntityValue(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+        storeIfMissing(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
                 tenantUserGroupId    : tenantId,
                 userId               : TEST_USER_ID,
                 permissionUserGroupId: permissionGroupId,
@@ -432,7 +408,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
     }
 
     private void seedSettingsFixtures() {
-        upsertEntityValue("darpan.reconciliation.SftpServer", [sftpServerId: "KREWE_SFTP"], [
+        storeIfMissing("darpan.reconciliation.SftpServer", [sftpServerId: "KREWE_SFTP"], [
                 sftpServerId      : "KREWE_SFTP",
                 description       : "Krewe SFTP",
                 companyUserGroupId: KREWE,
@@ -444,7 +420,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 privateKey        : "krewe-sftp-private-key",
                 remoteAttributes  : "Y",
         ])
-        upsertEntityValue("darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_SFTP"], [
+        storeIfMissing("darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_SFTP"], [
                 sftpServerId      : "GORJANA_SFTP",
                 description       : "Gorjana SFTP",
                 companyUserGroupId: GORJANA,
@@ -457,7 +433,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 remoteAttributes  : "Y",
         ])
 
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "KREWE_AUTH"], [
+        storeIfMissing("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "KREWE_AUTH"], [
                 nsAuthConfigId    : "KREWE_AUTH",
                 description       : "Krewe Auth",
                 companyUserGroupId: KREWE,
@@ -469,7 +445,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 privateKeyPem     : "krewe-auth-private-key",
                 isActive          : "Y",
         ])
-        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "GORJANA_AUTH"], [
+        storeIfMissing("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "GORJANA_AUTH"], [
                 nsAuthConfigId    : "GORJANA_AUTH",
                 description       : "Gorjana Auth",
                 companyUserGroupId: GORJANA,
@@ -482,45 +458,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 isActive          : "Y",
         ])
 
-        upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "KREWE_ENDPOINT"], [
-                nsRestletConfigId    : "KREWE_ENDPOINT",
-                description          : "Krewe Endpoint",
-                companyUserGroupId   : KREWE,
-                createdByUserId      : TEST_USER_ID,
-                endpointUrl          : "https://krewe.suitetalk.api.netsuite.com/restlet",
-                httpMethod           : "POST",
-                nsAuthConfigId       : "KREWE_AUTH",
-                headersJson          : "{}",
-                connectTimeoutSeconds: 30,
-                readTimeoutSeconds   : 60,
-                isActive             : "Y",
-                authType             : "BEARER",
-                username             : "legacy-krewe-user",
-                password             : "legacy-krewe-password",
-                apiToken             : "legacy-krewe-api-token",
-                privateKeyPem        : "legacy-krewe-private-key",
-        ])
-        upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "GORJANA_ENDPOINT"], [
-                nsRestletConfigId    : "GORJANA_ENDPOINT",
-                description          : "Gorjana Endpoint",
-                companyUserGroupId   : GORJANA,
-                createdByUserId      : TEST_USER_ID,
-                endpointUrl          : "https://gorjana.suitetalk.api.netsuite.com/restlet",
-                httpMethod           : "POST",
-                nsAuthConfigId       : "GORJANA_AUTH",
-                headersJson          : "{}",
-                connectTimeoutSeconds: 30,
-                readTimeoutSeconds   : 60,
-                isActive             : "Y",
-                authType             : "BEARER",
-                username             : "legacy-gorjana-user",
-                password             : "legacy-gorjana-password",
-                apiToken             : "legacy-gorjana-api-token",
-                privateKeyPem        : "legacy-gorjana-private-key",
-        ])
-
-        // TenantNotificationSetting retired 2026-07-29 — TenantChatSpace is the fixture now.
-        upsertEntityValue("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"], [
+        storeIfMissing("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"], [
                 chatSpaceId          : "KREWE_SPACE",
                 companyUserGroupId   : KREWE,
                 spaceName            : "Krewe space",
@@ -530,7 +468,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 createdDate          : TEST_FROM_DATE,
                 lastUpdatedDate      : TEST_FROM_DATE,
         ])
-        upsertEntityValue("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"], [
+        storeIfMissing("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"], [
                 chatSpaceId          : "GORJANA_SPACE",
                 companyUserGroupId   : GORJANA,
                 spaceName            : "Gorjana space",
@@ -540,14 +478,14 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 createdDate          : TEST_FROM_DATE,
                 lastUpdatedDate      : TEST_FROM_DATE,
         ])
-        upsertEntityValue("darpan.auth.TenantSetting", [companyUserGroupId: KREWE], [
+        storeIfMissing("darpan.auth.TenantSetting", [companyUserGroupId: KREWE], [
                 companyUserGroupId: KREWE,
                 createdByUserId   : TEST_USER_ID,
                 timeZone          : "America/Los_Angeles",
                 createdDate       : TEST_FROM_DATE,
                 lastUpdatedDate   : TEST_FROM_DATE,
         ])
-        upsertEntityValue("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA], [
+        storeIfMissing("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA], [
                 companyUserGroupId: GORJANA,
                 createdByUserId   : TEST_USER_ID,
                 timeZone          : "America/New_York",
@@ -569,14 +507,6 @@ class SettingsFacadeTenantFilteringSmokeTests {
         } else if (payload instanceof Iterable) {
             ((Iterable) payload).each { Object value -> assertNoRawCredentialFields(value) }
         }
-    }
-
-    private void upsertEntity(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
-        storeIfMissing(entityName, pkFields, fields)
-    }
-
-    private void upsertEntityValue(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
-        storeIfMissing(entityName, pkFields, fields)
     }
 
     private void storeIfMissing(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {

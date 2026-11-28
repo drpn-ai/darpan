@@ -24,9 +24,9 @@ class SharedConfigAccessSupportTests {
     // --- registry -------------------------------------------------------
 
     @Test
-    void registryCoversTheFourShareableConfigTypesAndNothingElse() {
+    void registryCoversTheThreeShareableConfigTypesAndNothingElse() {
         assertEquals(
-                ["SCFG_HOTWAX_OMS", "SCFG_NS_AUTH", "SCFG_NS_RESTLET", "SCFG_SHOPIFY_AUTH"],
+                ["SCFG_HOTWAX_OMS", "SCFG_NS_AUTH", "SCFG_SHOPIFY_AUTH"],
                 SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY.keySet().sort(),
                 "SystemMessageRemote is deliberately absent — it is a framework endpoint descriptor " +
                 "already global to every tenant, not a per-tenant credential")
@@ -39,8 +39,7 @@ class SharedConfigAccessSupportTests {
                 SharedConfigAccessSupport.configType("SCFG_SHOPIFY_AUTH").pkField)
         assertEquals("nsAuthConfigId",
                 SharedConfigAccessSupport.configType("SCFG_NS_AUTH").pkField)
-        assertEquals("nsRestletConfigId",
-                SharedConfigAccessSupport.configType("SCFG_NS_RESTLET").pkField)
+        assertNull(SharedConfigAccessSupport.configType("SCFG_NS_RESTLET"), "the RESTlet type is retired (DAR-BE-424)")
     }
 
     @Test

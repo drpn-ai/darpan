@@ -33,7 +33,7 @@ class AutomationSyncSupport {
     static final List<String> RUN_AUTHORITATIVE_SOURCE_FIELDS = [
             "sourceTypeEnumId", "systemEnumId", "fileTypeEnumId", "schemaFileName",
             "recordRootExpression", "primaryIdExpression", "idValueNormalizer",
-            "systemMessageRemoteId", "nsRestletConfigId",
+            "systemMessageRemoteId",
     ].asImmutable()
 
     /**
@@ -152,7 +152,7 @@ class AutomationSyncSupport {
                     // The run is authoritative WHERE IT HAS A VALUE. Every run-authoritative column is
                     // nullable on RuleSetCompareSource, while several are required on
                     // ReconciliationAutomationSource (sourceTypeEnumId is not-null; an API source must
-                    // carry systemMessageRemoteId or nsRestletConfigId). A run that never recorded one
+                    // carry systemMessageRemoteId). A run that never recorded one
                     // cannot supply it, and writing the null through makes validateSources reject the
                     // whole sync — leaving the operator no way to sync at all.
                     //

@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-005 review finding B5 — {@code listNsAuthConfigOptions} and {@code listNsRestletOptions}
+ * DAR-BE-005 review finding B5 — {@code listNsAuthConfigOptions}
  * (AutomationFacadeSupport.groovy) stayed on owner-only {@code TenantScopedFinder.findTenantScoped}
  * after {@code listOmsRestSourceConfigOptions} / {@code listShopifyAuthConfigOptions} were widened to
  * {@code SharedConfigAccessSupport.listAccessibleConfigRows} (Task 5). So a shared NetSuite config
@@ -77,51 +77,6 @@ class AutomationFacadeSupportSharedConfigTests {
                 "its own isActive filter after widening (same precedent as the OMS/Shopify builders)")
     }
 
-    // --- listNsRestletOptions ----------------------------------------------
-
-    @Test
-    void listNsRestletOptionsIncludesAConfigSharedWithTheActiveTenant() {
-        Map ownedRow = [nsRestletConfigId: "NS_RESTLET_MEMBER_OWN", companyUserGroupId: "BETSEY_JOHNSON",
-                        description: "Member's own restlet", isActive: "Y"]
-        Map sharedRow = [nsRestletConfigId: "NS_RESTLET_SM", companyUserGroupId: "STEVE_MADDEN",
-                         description: "Shared restlet", isActive: "Y"]
-        def ec = ecForNsRestlet("BETSEY_JOHNSON", [ownedRow, sharedRow],
-                [grant("SCFG_NS_RESTLET", "NS_RESTLET_SM", "BETSEY_JOHNSON")])
-
-        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsRestletOptions(ec)
-
-        assertEquals(["NS_RESTLET_MEMBER_OWN", "NS_RESTLET_SM"] as Set,
-                options.collect { it.nsRestletConfigId } as Set,
-                "the picker must offer both the tenant's own restlet AND the one shared with it")
-    }
-
-    @Test
-    void listNsRestletOptionsExcludesAConfigNotSharedWithTheActiveTenant() {
-        Map foreignRow = [nsRestletConfigId: "NS_RESTLET_SM", companyUserGroupId: "STEVE_MADDEN",
-                          description: "Not shared", isActive: "Y"]
-        def ec = ecForNsRestlet("THIRD_LOVE", [foreignRow], [])
-
-        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsRestletOptions(ec)
-
-        assertTrue(options.isEmpty(),
-                "a tenant with no grant and no ownership must still see nothing")
-    }
-
-    @Test
-    void listNsRestletOptionsZeroGrantsPreservesOwnerVisibilityAndForeignExclusion() {
-        Map ownedRow = [nsRestletConfigId: "NS_RESTLET_OWN", companyUserGroupId: "STEVE_MADDEN",
-                        description: "Owned, unshared", isActive: "Y"]
-        def ecAsOwner = ecForNsRestlet("STEVE_MADDEN", [ownedRow], [])
-        assertEquals(["NS_RESTLET_OWN"], AutomationSourceOptionsSupport.listNsRestletOptions(ecAsOwner)
-                .collect { it.nsRestletConfigId },
-                "with zero grants the owner must still see its own restlet — byte-identical to " +
-                "pre-DAR-BE-005 behavior")
-
-        def ecAsForeign = ecForNsRestlet("THIRD_LOVE", [ownedRow], [])
-        assertTrue(AutomationSourceOptionsSupport.listNsRestletOptions(ecAsForeign).isEmpty(),
-                "with zero grants a foreign tenant must still be rejected exactly as before")
-    }
-
     // --- listEnabledConfigEndpoints: a failed read is loud (S19 F7) --------
 
     @Test
@@ -149,10 +104,6 @@ class AutomationFacadeSupportSharedConfigTests {
 
     private static Expando ecForNsAuth(String activeTenant, List<Map> configRows, List<Map> grants) {
         return executionContext(activeTenant, "darpan.reconciliation.NsAuthConfig", configRows, grants)
-    }
-
-    private static Expando ecForNsRestlet(String activeTenant, List<Map> configRows, List<Map> grants) {
-        return executionContext(activeTenant, "darpan.reconciliation.NsRestletConfig", configRows, grants)
     }
 
     private static Expando executionContext(String activeTenant, String entityName, List<Map> configRows,

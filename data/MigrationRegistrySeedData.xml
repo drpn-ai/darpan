@@ -70,13 +70,6 @@
             description="Open every audit finding still pending: a finding is only open or fixed, and a grace is an
                 expected conclusion rule, not a state (DAR-BE-206). Every tenant; dates and history kept. Idempotent."/>
 
-    <darpan.migration.DarpanMigration migrationId="NS_AUTH_ACCOUNTS" componentName="darpan"
-            serviceName="facade.SettingsFacadeServices.migrate#NsAuthAccounts"
-            sequenceNum="120" supportsDryRun="Y"
-            description="Store on each NetSuite auth config the account its secret belongs to (token URL, else its oldest
-                endpoint), so an endpoint on another account is refused and detaching or deleting endpoints cannot reset it
-                (DAR-BE-258). Endpoints on other accounts are reported, not changed. Idempotent."/>
-
     <darpan.migration.DarpanMigration migrationId="RETIRED_JOB_PARAMETERS" componentName="darpan"
             serviceName="retention.RetentionMigrations.move#PurgeJobRetentionParameters"
             sequenceNum="130" supportsDryRun="Y"

@@ -287,6 +287,9 @@ class AutomationSaveSupport {
                 ec.message.addError("${fileSide} sourceTypeEnumId must be one of ${allowedSourceTypes.join(', ')}")
             }
             if (!source.systemEnumId) ec.message.addError("${fileSide} systemEnumId is required")
+            if (source.nsRestletConfigId) {
+                ec.message.addError("${fileSide}: NetSuite RESTlet endpoints were removed (DAR-BE-424): read NetSuite through a NetSuite connection instead.")
+            }
             validateSourceMatchesSavedRun(ec, source, savedRun)
             if (source.sourceTypeEnumId == SOURCE_TYPE_SFTP) validateSftpSource(ec, source)
             if (source.sourceTypeEnumId == SOURCE_TYPE_API) validateApiSource(ec, source)
@@ -347,14 +350,14 @@ class AutomationSaveSupport {
 
     protected static void validateApiSource(def ec, Map<String, Object> source) {
         // DAR-UI-064: a side the connector registry knows (an extract service and a config parameter: NetSuite SuiteQL,
-        // the OMS GraphQL and order-line endpoints) is identified by its config id, not by a remote or a RESTlet. Holding
+        // the OMS GraphQL and order-line endpoints) is identified by its config id, not by a remote. Holding
         // it to the remote rule made every such automation unsavable, so Sync failed on each one the audit made.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source.systemEnumId))
         String configParam = normalize(connector?.configParameterName)
         boolean registryDriven = normalize(connector?.extractServiceName) && configParam
-        if (!source.systemMessageRemoteId && !source.nsRestletConfigId) {
+        if (!source.systemMessageRemoteId) {
             if (!registryDriven) {
-                ec.message.addError("${source.fileSide} API source requires systemMessageRemoteId or nsRestletConfigId")
+                ec.message.addError("${source.fileSide} API source requires systemMessageRemoteId")
             } else {
                 Map metadata = parseJsonMap(source.safeMetadataJson)
                 Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
@@ -375,15 +378,6 @@ class AutomationSaveSupport {
             }
             if (!remote) {
                 ec.message.addError("SystemMessageRemote ${source.systemMessageRemoteId} was not found for ${source.fileSide}.")
-            }
-        }
-        if (source.nsRestletConfigId) {
-            // P0 #4 step 4b: unified tenant-scoped load; sets not-found/forbidden error on ec.message if denied.
-            def restlet = TenantScopedFinder.findTenantScopedById(
-                    ec, DarpanEntityConstants.NS_RESTLET_CONFIG,
-                    "nsRestletConfigId", source.nsRestletConfigId)
-            if (restlet && (readString(restlet, "isActive") ?: "Y").equalsIgnoreCase("N")) {
-                ec.message.addError("NsRestletConfig ${source.nsRestletConfigId} is inactive.")
             }
         }
         validateApiSourceMetadata(ec, source)

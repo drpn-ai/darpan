@@ -91,7 +91,7 @@ class AuditCheckAutomation {
                     idValueNormalizer: source.idValueNormalizer, createdDate: now, lastUpdatedDate: now,
                     // A3 (S19): the extract reads safeMetadataJson, not these, but they are sync-drift fields and shared-read keys:
                     // without them an audit-made automation reports a false drift and does not share a saved one's read.
-                    systemMessageRemoteId: source.systemMessageRemoteId, nsRestletConfigId: source.nsRestletConfigId,
+                    systemMessageRemoteId: source.systemMessageRemoteId,
                     safeMetadataJson: metadata ? AutomationRuntimeSupport.safeMetadataJson(metadata) : null]).create()
             // DAR-UI-063 (found in DAR-UI-064's walk): the run's source filters too. An automation reads its OWN filter rows
             // (loadAutomationSourceFilters), so without this copy every run that filters its source (R1 "completed units

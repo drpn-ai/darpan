@@ -309,8 +309,8 @@ class AutomationSyncSupportTests {
 
     @Test
     void mergeKeepsTheStoredEndpointWhenTheRunDidNotRecordOne() {
-        // An API source must carry systemMessageRemoteId or nsRestletConfigId. RuleSetCompareSource
-        // may hold neither, and writing that null through makes validateSources reject the sync.
+        // An API source must carry systemMessageRemoteId. RuleSetCompareSource
+        // may not hold it, and writing that null through makes validateSources reject the sync.
         Map stored = storedSftpSource("FILE_1") + [systemMessageRemoteId: "OMS_REMOTE"]
         Map<String, Map<String, Object>> derived = derivedFile1([systemMessageRemoteId: null])
         List merged = AutomationSyncSupport.mergeSyncedSourceEntries([stored], derived, [FILE_1: []])

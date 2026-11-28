@@ -46,7 +46,6 @@ class KnowledgeSupport {
     private static final Map<String, String> CONNECTION_URL_FIELDS = [
             'darpan.hotwax.HotWaxOmsRestSourceConfig': 'baseUrl',
             'darpan.shopify.ShopifyAuthConfig'       : 'shopApiUrl',
-            'darpan.reconciliation.NsRestletConfig'  : 'endpointUrl',
             'darpan.reconciliation.NsAuthConfig'     : 'tokenUrl',
     ]
 

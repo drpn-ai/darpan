@@ -16,8 +16,8 @@
             be a tenant admin of the target tenant AND of a tenant that already uses the config.
             Sharing widens access to the config's encrypted credentials — it is not a copy.</description>
         <in-parameters>
-            <parameter name="configTypeEnumId" required="true"><description>SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,
-                SCFG_NS_AUTH, or SCFG_NS_RESTLET.</description></parameter>
+            <parameter name="configTypeEnumId" required="true"><description>SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH
+                or SCFG_NS_AUTH.</description></parameter>
             <parameter name="configId" required="true"><description>Id of the existing config row.</description></parameter>
             <parameter name="targetTenantUserGroupId" required="true"><description>Tenant to add to the group.</description></parameter>
         </in-parameters>

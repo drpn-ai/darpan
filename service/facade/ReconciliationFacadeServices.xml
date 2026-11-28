@@ -14,7 +14,7 @@
             <parameter name="file1SystemEnumId" required="true"/>
             <parameter name="file1SourceTypeEnumId"/>
             <parameter name="file1SystemMessageRemoteId"/>
-            <parameter name="file1NsRestletConfigId"/>
+            <parameter name="file1NsRestletConfigId"><description>Retired (DAR-BE-424): any value is refused.</description></parameter>
             <parameter name="file1SourceConfigId"/>
             <parameter name="file1SourceConfigType"/>
             <parameter name="file1FileTypeEnumId"/>
@@ -31,7 +31,7 @@
             <parameter name="file2SystemEnumId"/>
             <parameter name="file2SourceTypeEnumId"/>
             <parameter name="file2SystemMessageRemoteId"/>
-            <parameter name="file2NsRestletConfigId"/>
+            <parameter name="file2NsRestletConfigId"><description>Retired (DAR-BE-424): any value is refused.</description></parameter>
             <parameter name="file2SourceConfigId"/>
             <parameter name="file2SourceConfigType"/>
             <parameter name="file2FileTypeEnumId"/>
@@ -108,8 +108,6 @@
                     <parameter name="sourceTypeLabel"/>
                     <parameter name="systemMessageRemoteId"/>
                     <parameter name="systemMessageRemoteLabel"/>
-                    <parameter name="nsRestletConfigId"/>
-                    <parameter name="nsRestletConfigLabel"/>
                     <parameter name="sourceConfigId"/>
                     <parameter name="sourceConfigType"/>
                 </parameter>
@@ -161,7 +159,9 @@
                  extract-vs-upload gates (fileType defaulting, schema/root nulling, sourceConfigId/Type). -->
             <set field="file1UsesConnectorSource" from="file1UsesApiSource || file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
-            <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
+            <if condition="file1NsRestletConfigId || file2NsRestletConfigId">
+                <message error="true">NetSuite RESTlet endpoints were removed (DAR-BE-424): read NetSuite through a NetSuite connection instead.</message>
+            </if>
             <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
             <set field="file1DuplicateKeyHandlingValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.duplicateKeyHandlingOrError(ec, file1DuplicateKeyHandling, 'File 1')"/>
             <set field="file1ExtractParametersJsonValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.validatedJsonOrError(ec, file1SystemEnumId, file1ExtractOptions, 'File 1')"/>
@@ -185,7 +185,6 @@
             <!-- See file1UsesConnectorSource comment above. -->
             <set field="file2UsesConnectorSource" from="file2UsesApiSource || file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
-            <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
             <set field="file2DuplicateKeyHandlingValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.duplicateKeyHandlingOrError(ec, file2DuplicateKeyHandling, 'File 2')"/>
             <set field="file2ExtractParametersJsonValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.validatedJsonOrError(ec, file2SystemEnumId, file2ExtractOptions, 'File 2')"/>
@@ -229,19 +228,13 @@
             <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesConnectorSource">
                 <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
             </if>
-            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue &amp;&amp; !file1SourceConfigIdValue">
+            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1SourceConfigIdValue">
                 <message error="true">file1 API source requires an endpoint</message>
             </if>
-            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue &amp;&amp; !file2SourceConfigIdValue">
+            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2SourceConfigIdValue">
                 <message error="true">file2 API source requires an endpoint</message>
             </if>
-            <if condition="file1UsesApiSource &amp;&amp; file1SystemMessageRemoteIdValue &amp;&amp; file1NsRestletConfigIdValue">
-                <message error="true">file1 API source must use only one endpoint</message>
-            </if>
-            <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
-                <message error="true">file2 API source must use only one endpoint</message>
-            </if>
-            <!-- DB sources have no HTTP endpoint (not systemMessageRemoteId/nsRestletConfigId): they locate
+            <!-- DB sources have no HTTP endpoint (not systemMessageRemoteId): they locate
                  their extract via the generic sourceConfigId/sourceConfigType slot instead (reused the same
                  way NetSuite's auth config is), so only require that slot be populated. -->
             <if condition="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file1SourceConfigIdValue">
@@ -269,13 +262,6 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
                     <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
                 </if>
-                <!-- DAR-BE-005 B4: was a bare ec.entity.find, authz-enabled and silently filtered by
-                     DARPAN_ACTIVE_COMPANY_SCOPE, so a shared-but-foreign-owned restlet was invisible
-                     before the access check below ever ran. findGlobalUnscoped bypasses that filter;
-                     SharedConfigAccessSupport.canActiveTenantUseConfig is the real owner-or-shared
-                     gate, applied immediately below. -->
-                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
-                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
@@ -300,38 +286,13 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)">
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
-                <if condition="file1NsRestletConfigIdValue">
-                    <!-- DAR-BE-005 B4: was owner-only requireTenantRecordAccess with a distinguishing
-                         "not available in your active tenant" message, so a peer holding an active
-                         ConfigTenantAccess grant on this restlet (visible and editable in Settings)
-                         could not reference it here. canActiveTenantUseConfig is the owner-or-shared
-                         gate; the denial collapses to the SAME "was not found" text a nonexistent id
-                         produces — matches Task 6/7's reference-validator and settings-save collapse,
-                         so a caller with no standing cannot tell "missing" from "foreign, unshared"
-                         apart. Do not split this back into two messages. -->
-                    <if condition="file1NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file1NsRestletConfig)">
-                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found</message>
-                    </if>
-                    <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
-                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
-                    </if>
-                </if>
-                <if condition="file2NsRestletConfigIdValue">
-                    <!-- DAR-BE-005 B4 — see file1NsRestletConfigId above for the full rationale. -->
-                    <if condition="file2NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file2NsRestletConfig)">
-                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found</message>
-                    </if>
-                    <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
-                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
-                    </if>
-                </if>
                 <if condition="file1UsesApiSource">
-                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue, file1NsRestletConfig)"/>
+                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue)"/>
                     <set field="file1SourceConfigIdValue" from="file1SourceConfigResolution.sourceConfigId"/>
                     <set field="file1SourceConfigTypeValue" from="file1SourceConfigResolution.sourceConfigType"/>
                 </if>
                 <if condition="file2UsesApiSource">
-                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue, file2NsRestletConfig)"/>
+                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue)"/>
                     <set field="file2SourceConfigIdValue" from="file2SourceConfigResolution.sourceConfigId"/>
                     <set field="file2SourceConfigTypeValue" from="file2SourceConfigResolution.sourceConfigType"/>
                 </if>
@@ -429,7 +390,7 @@
                         in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, companyUserGroupId: ruleSetValue.companyUserGroupId, description: descriptionValue ?: 'Compare scope for ' + runNameValue, scopeMode: scopeModeValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, duplicateKeyHandling: file1DuplicateKeyHandlingValue, extractParametersJson: file1ExtractParametersJsonValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, duplicateKeyHandling: file1DuplicateKeyHandlingValue, extractParametersJson: file1ExtractParametersJsonValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <if condition="resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1">
                     <set field="file1KeyFieldSequence" from="0"/>
                     <iterate list="resolvedFile1PrimaryIdExpressionsValue" entry="file1KeyFieldExpression">
@@ -461,7 +422,7 @@
                 <if condition="!isSingleSidedRun">
                     <service-call name="create#darpan.rule.RuleSetCompareSource"
                             disable-authz="true"
-                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, duplicateKeyHandling: file2DuplicateKeyHandlingValue, extractParametersJson: file2ExtractParametersJsonValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, duplicateKeyHandling: file2DuplicateKeyHandlingValue, extractParametersJson: file2ExtractParametersJsonValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                     <if condition="resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1">
                         <set field="file2KeyFieldSequence" from="0"/>
                         <iterate list="resolvedFile2PrimaryIdExpressionsValue" entry="file2KeyFieldExpression">
@@ -560,8 +521,6 @@
                     <parameter name="sourceTypeLabel"/>
                     <parameter name="systemMessageRemoteId"/>
                     <parameter name="systemMessageRemoteLabel"/>
-                    <parameter name="nsRestletConfigId"/>
-                    <parameter name="nsRestletConfigLabel"/>
                     <parameter name="sourceConfigId"/>
                     <parameter name="sourceConfigType"/>
                 </parameter>
@@ -745,7 +704,7 @@
             <parameter name="file1SystemEnumId" required="true"/>
             <parameter name="file1SourceTypeEnumId"/>
             <parameter name="file1SystemMessageRemoteId"/>
-            <parameter name="file1NsRestletConfigId"/>
+            <parameter name="file1NsRestletConfigId"><description>Retired (DAR-BE-424): any value is refused.</description></parameter>
             <parameter name="file1SourceConfigId"/>
             <parameter name="file1SourceConfigType"/>
             <parameter name="file1FileTypeEnumId"/>
@@ -756,7 +715,7 @@
             <parameter name="file2SystemEnumId"><description>Required unless the run reads one system (EVALUATE).</description></parameter>
             <parameter name="file2SourceTypeEnumId"/>
             <parameter name="file2SystemMessageRemoteId"/>
-            <parameter name="file2NsRestletConfigId"/>
+            <parameter name="file2NsRestletConfigId"><description>Retired (DAR-BE-424): any value is refused.</description></parameter>
             <parameter name="file2SourceConfigId"/>
             <parameter name="file2SourceConfigType"/>
             <parameter name="file2FileTypeEnumId"/>
@@ -834,8 +793,6 @@
                     <parameter name="sourceTypeLabel"/>
                     <parameter name="systemMessageRemoteId"/>
                     <parameter name="systemMessageRemoteLabel"/>
-                    <parameter name="nsRestletConfigId"/>
-                    <parameter name="nsRestletConfigLabel"/>
                     <parameter name="sourceConfigId"/>
                     <parameter name="sourceConfigType"/>
                 </parameter>
@@ -888,7 +845,9 @@
                  extract-vs-upload gates (fileType defaulting, schema/root nulling, sourceConfigId/Type). -->
             <set field="file1UsesConnectorSource" from="file1UsesApiSource || file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
-            <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
+            <if condition="file1NsRestletConfigId || file2NsRestletConfigId">
+                <message error="true">NetSuite RESTlet endpoints were removed (DAR-BE-424): read NetSuite through a NetSuite connection instead.</message>
+            </if>
             <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
             <set field="file1SourceConfigTypeValue" from="((file1SourceConfigType)?.toString()?.trim())"/>
             <set field="file1FileTypeEnumIdValue" from="file1UsesConnectorSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
@@ -905,7 +864,6 @@
             <!-- See file1UsesConnectorSource comment above. -->
             <set field="file2UsesConnectorSource" from="file2UsesApiSource || file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
-            <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigTypeValue" from="((file2SourceConfigType)?.toString()?.trim())"/>
             <set field="file2FileTypeEnumIdValue" from="file2UsesConnectorSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
@@ -956,19 +914,13 @@
             </if>
             <!-- DAR-UI-064: a config id is an endpoint too (a NetSuite SuiteQL query, an OMS GraphQL config), as create#RuleSetRun
                  already allows; without it no run with a SuiteQL side could be edited after creation. -->
-            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue &amp;&amp; !file1SourceConfigIdValue">
+            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1SourceConfigIdValue">
                 <message error="true">file1 API source requires an endpoint</message>
             </if>
             <!-- DAR-UI-064: a config id is an endpoint too (a NetSuite SuiteQL query, an OMS GraphQL config), as create#RuleSetRun
                  already allows; without it no run with a SuiteQL side could be edited after creation. -->
-            <if condition="!oneSystem &amp;&amp; file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue &amp;&amp; !file2SourceConfigIdValue">
+            <if condition="!oneSystem &amp;&amp; file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2SourceConfigIdValue">
                 <message error="true">file2 API source requires an endpoint</message>
-            </if>
-            <if condition="file1UsesApiSource &amp;&amp; file1SystemMessageRemoteIdValue &amp;&amp; file1NsRestletConfigIdValue">
-                <message error="true">file1 API source must use only one endpoint</message>
-            </if>
-            <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
-                <message error="true">file2 API source must use only one endpoint</message>
             </if>
             <!-- See create#RuleSetRun's DB-source-requires-sourceConfigId comment above. -->
             <if condition="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file1SourceConfigIdValue">
@@ -1012,13 +964,6 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
                     <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
                 </if>
-                <!-- DAR-BE-005 B4: was a bare ec.entity.find, authz-enabled and silently filtered by
-                     DARPAN_ACTIVE_COMPANY_SCOPE, so a shared-but-foreign-owned restlet was invisible
-                     before the access check below ever ran. findGlobalUnscoped bypasses that filter;
-                     SharedConfigAccessSupport.canActiveTenantUseConfig is the real owner-or-shared
-                     gate, applied immediately below. -->
-                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
-                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
@@ -1043,38 +988,13 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)">
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
-                <if condition="file1NsRestletConfigIdValue">
-                    <!-- DAR-BE-005 B4: was owner-only requireTenantRecordAccess with a distinguishing
-                         "not available in your active tenant" message, so a peer holding an active
-                         ConfigTenantAccess grant on this restlet (visible and editable in Settings)
-                         could not reference it here. canActiveTenantUseConfig is the owner-or-shared
-                         gate; the denial collapses to the SAME "was not found" text a nonexistent id
-                         produces — matches Task 6/7's reference-validator and settings-save collapse,
-                         so a caller with no standing cannot tell "missing" from "foreign, unshared"
-                         apart. Do not split this back into two messages. -->
-                    <if condition="file1NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file1NsRestletConfig)">
-                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found</message>
-                    </if>
-                    <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
-                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
-                    </if>
-                </if>
-                <if condition="file2NsRestletConfigIdValue">
-                    <!-- DAR-BE-005 B4 — see file1NsRestletConfigId above for the full rationale. -->
-                    <if condition="file2NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file2NsRestletConfig)">
-                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found</message>
-                    </if>
-                    <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
-                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
-                    </if>
-                </if>
                 <if condition="file1UsesApiSource">
-                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue, file1NsRestletConfig)"/>
+                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue)"/>
                     <set field="file1SourceConfigIdValue" from="file1SourceConfigResolution.sourceConfigId"/>
                     <set field="file1SourceConfigTypeValue" from="file1SourceConfigResolution.sourceConfigType"/>
                 </if>
                 <if condition="file2UsesApiSource">
-                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue, file2NsRestletConfig)"/>
+                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue)"/>
                     <set field="file2SourceConfigIdValue" from="file2SourceConfigResolution.sourceConfigId"/>
                     <set field="file2SourceConfigTypeValue" from="file2SourceConfigResolution.sourceConfigType"/>
                 </if>
@@ -1179,7 +1099,6 @@
                 <set field="file1Source.systemEnumId" from="file1SystemEnumIdValue"/>
                 <set field="file1Source.sourceTypeEnumId" from="file1SourceTypeEnumIdValue"/>
                 <set field="file1Source.systemMessageRemoteId" from="file1SystemMessageRemoteIdValue"/>
-                <set field="file1Source.nsRestletConfigId" from="file1NsRestletConfigIdValue"/>
                 <set field="file1Source.sourceConfigId" from="file1UsesConnectorSource ? file1SourceConfigIdValue : null"/>
                 <set field="file1Source.sourceConfigType" from="file1UsesConnectorSource ? file1SourceConfigTypeValue : null"/>
                 <set field="file1Source.fileTypeEnumId" from="file1FileTypeEnumIdValue"/>
@@ -1251,7 +1170,6 @@
                     <set field="file2Source.systemEnumId" from="file2SystemEnumIdValue"/>
                     <set field="file2Source.sourceTypeEnumId" from="file2SourceTypeEnumIdValue"/>
                     <set field="file2Source.systemMessageRemoteId" from="file2SystemMessageRemoteIdValue"/>
-                    <set field="file2Source.nsRestletConfigId" from="file2NsRestletConfigIdValue"/>
                     <set field="file2Source.sourceConfigId" from="file2UsesConnectorSource ? file2SourceConfigIdValue : null"/>
                     <set field="file2Source.sourceConfigType" from="file2UsesConnectorSource ? file2SourceConfigTypeValue : null"/>
                     <set field="file2Source.fileTypeEnumId" from="file2FileTypeEnumIdValue"/>
@@ -1401,8 +1319,6 @@
                     <parameter name="sourceTypeLabel"/>
                     <parameter name="systemMessageRemoteId"/>
                     <parameter name="systemMessageRemoteLabel"/>
-                    <parameter name="nsRestletConfigId"/>
-                    <parameter name="nsRestletConfigLabel"/>
                     <parameter name="sourceConfigId"/>
                     <parameter name="sourceConfigType"/>
                     <parameter name="duplicateKeyHandling"><description>DAR-UI-064. Blank, or FINDING.</description></parameter>
@@ -1497,8 +1413,6 @@
                     <parameter name="sourceTypeLabel"/>
                     <parameter name="systemMessageRemoteId"/>
                     <parameter name="systemMessageRemoteLabel"/>
-                    <parameter name="nsRestletConfigId"/>
-                    <parameter name="nsRestletConfigLabel"/>
                     <parameter name="sourceConfigId"/>
                     <parameter name="sourceConfigType"/>
                 </parameter>
@@ -2773,7 +2687,7 @@
                 <parameter name="primaryIdExpression"/>
                 <parameter name="idValueNormalizer"/>
                 <parameter name="systemMessageRemoteId"/>
-                <parameter name="nsRestletConfigId"/>
+                <parameter name="nsRestletConfigId"><description>Retired (DAR-BE-424): any value is refused.</description></parameter>
                 <parameter name="sftpServerId"/>
                 <parameter name="remotePathTemplate"/>
                 <parameter name="fileNamePattern"/>
@@ -2969,7 +2883,6 @@
                             primaryIdExpression: sourceEntry.primaryIdExpression,
                             idValueNormalizer: sourceEntry.idValueNormalizer,
                             systemMessageRemoteId: sourceEntry.systemMessageRemoteId,
-                            nsRestletConfigId: sourceEntry.nsRestletConfigId,
                             sftpServerId: sourceEntry.sftpServerId,
                             remotePathTemplate: sourceEntry.remotePathTemplate,
                             fileNamePattern: sourceEntry.fileNamePattern,
@@ -3841,7 +3754,6 @@
             <parameter name="savedRuns" type="List"/>
             <parameter name="sftpServers" type="List"/>
             <parameter name="sourceConfigs" type="List"/>
-            <parameter name="nsRestletConfigs" type="List"/>
             <parameter name="systemRemotes" type="List"/>
         </out-parameters>
         <actions>
@@ -3858,7 +3770,6 @@
             <set field="savedRuns" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec)"/>
             <set field="sftpServers" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSftpServerOptions(ec)"/>
             <set field="sourceConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSourceConfigOptions(ec)"/>
-            <set field="nsRestletConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listNsRestletOptions(ec)"/>
             <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listOmsRestSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listShopifySourceRemoteOptions(ec)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

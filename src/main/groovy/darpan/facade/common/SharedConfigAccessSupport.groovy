@@ -31,7 +31,6 @@ class SharedConfigAccessSupport {
     static final String CONFIG_TYPE_HOTWAX_OMS = "SCFG_HOTWAX_OMS"
     static final String CONFIG_TYPE_SHOPIFY_AUTH = "SCFG_SHOPIFY_AUTH"
     static final String CONFIG_TYPE_NS_AUTH = "SCFG_NS_AUTH"
-    static final String CONFIG_TYPE_NS_RESTLET = "SCFG_NS_RESTLET"
 
     /**
      * The catalog of shareable config types.
@@ -52,9 +51,6 @@ class SharedConfigAccessSupport {
             (CONFIG_TYPE_NS_AUTH)     : [entityName: DarpanEntityConstants.NS_AUTH_CONFIG,
                                          pkField   : "nsAuthConfigId",
                                          label     : "NetSuite auth config"],
-            (CONFIG_TYPE_NS_RESTLET)  : [entityName: DarpanEntityConstants.NS_RESTLET_CONFIG,
-                                         pkField   : "nsRestletConfigId",
-                                         label     : "NetSuite Restlet config"],
     ].asImmutable()
 
     private static final String GRANT_READ_REASON =

@@ -251,10 +251,6 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.NsAuthConfig"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_RESTLET"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.reconciliation.NsRestletConfig"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- Audit H12.2 — both entities are tenant-owned (companyUserGroupId not-null) but were missing
          from the DARPAN_ACTIVE_COMPANY_SCOPE filter set, so any direct find against the entity layer
          returned rows across all tenants. -->
@@ -625,9 +621,6 @@
             enumTypeId="DarpanSharedConfigType"/>
     <moqui.basic.Enumeration enumId="SCFG_NS_AUTH"
             description="NetSuite auth config (darpan.reconciliation.NsAuthConfig)"
-            enumTypeId="DarpanSharedConfigType"/>
-    <moqui.basic.Enumeration enumId="SCFG_NS_RESTLET"
-            description="NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)"
             enumTypeId="DarpanSharedConfigType"/>
 
     <!-- Admin API fence: the admin.* service namespace is the platform-operator surface

@@ -84,9 +84,6 @@ class NsAuthConfigDeleteSmokeTests {
     @Test
     void aProfileStillInUseIsKeptAndEveryUserIsNamed() {
         seedAuth("DEL_USED")
-        upsert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "DEL_USED_EP"], [
-                description: "Invoice export", companyUserGroupId: OWNER, endpointUrl: "https://1.restlets.api.netsuite.com/x",
-                httpMethod: "POST", nsAuthConfigId: "DEL_USED", connectTimeoutSeconds: 30, readTimeoutSeconds: 60, isActive: "Y"])
         ["DEL_USED_Q1", "DEL_USED_Q2"].each { String id ->
             upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: id],
                     [nsAuthConfigId: "DEL_USED", recordType: "SalesOrd", companyUserGroupId: OWNER, isActive: "Y"])
@@ -103,7 +100,7 @@ class NsAuthConfigDeleteSmokeTests {
 
         assertFalse(result.ok as boolean)
         assertFalse(result.deleted as boolean)
-        assertEquals(["NS Auth config 'DEL_USED' is still used by 1 RESTlet endpoint, 2 NetSuite checks, 1 saved run. " +
+        assertEquals(["NS Auth config 'DEL_USED' is still used by 2 NetSuite checks, 1 saved run. " +
                 "Move them to another auth profile or delete them first."], result.errors)
         assertNotNull(find("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "DEL_USED"]))
     }

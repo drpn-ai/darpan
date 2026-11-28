@@ -23,18 +23,6 @@ class SettingsFacadeSupport {
         }
     }
 
-    /** OC123: the header names of a headers JSON object, in their order; [] when there is none or it is not an object. */
-    static List<String> headerNamesOf(String headersJson) {
-        String normalized = normalize(headersJson)
-        if (!normalized) return []
-        try {
-            def parsed = new JsonSlurper().parseText(normalized)
-            return parsed instanceof Map ? ((Map) parsed).keySet().collect { it.toString() } : []
-        } catch (Exception ignored) {
-            return []   // save#NsRestletConfig refuses a non-object, so only a hand-edited row lands here: no names to show
-        }
-    }
-
     static List<Map<String, Object>> deduplicateEnumOptions(String enumTypeId, List<Map<String, Object>> rawOptions) {
         List<Map<String, Object>> optionList = (rawOptions ?: []) as List<Map<String, Object>>
         if (normalize(enumTypeId) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList

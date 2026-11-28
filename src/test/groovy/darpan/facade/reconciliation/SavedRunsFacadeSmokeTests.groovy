@@ -477,7 +477,6 @@ class SavedRunsFacadeSmokeTests {
                 "file1",
                 "DarSysShopify",
                 "KREWE_SHOPIFY_ALIAS",
-                null,
                 null
         )
 

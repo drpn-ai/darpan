@@ -179,7 +179,6 @@ class AutomationRowSupport {
                 primaryIdExpression   : readString(source, "primaryIdExpression"),
                 idValueNormalizer     : readString(source, "idValueNormalizer"),
                 systemMessageRemoteId : readString(source, "systemMessageRemoteId"),
-                nsRestletConfigId     : readString(source, "nsRestletConfigId"),
                 sftpServerId          : readString(source, "sftpServerId"),
                 sftpServerLabel       : sftpServerLabel(ec, readString(source, "sftpServerId")),
                 remotePathTemplate    : readString(source, "remotePathTemplate"),
@@ -260,7 +259,6 @@ class AutomationRowSupport {
         List<String> parts = sources.collect { source ->
             String systemLabel = enumLabel(ec, readString(source, "systemEnumId")) ?: readString(source, "systemEnumId")
             String target = readString(source, "sftpServerId") ?:
-                    readString(source, "nsRestletConfigId") ?:
                     readString(source, "systemMessageRemoteId")
             return target ? "${systemLabel} via ${target}".toString() : systemLabel
         }.findAll { it } as List<String>

@@ -286,11 +286,9 @@ facade.SettingsFacadeServices.get#TenantSettings
 facade.SettingsFacadeServices.get#UserNotificationDefault
 facade.SettingsFacadeServices.list#EnumOptions
 facade.SettingsFacadeServices.list#NsAuthConfigs
-facade.SettingsFacadeServices.list#NsRestletConfigs
 facade.SettingsFacadeServices.list#SftpServers
 facade.SettingsFacadeServices.list#TenantChatSpaces
 facade.SettingsFacadeServices.save#NsAuthConfig
-facade.SettingsFacadeServices.save#NsRestletConfig
 facade.SettingsFacadeServices.save#SftpServer
 facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantSettings

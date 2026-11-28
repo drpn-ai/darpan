@@ -938,7 +938,7 @@
                 <set field="nsAuthConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsAuthConfig', 'nsAuthConfigId')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, netsuiteAccount: (nsTokenUrlValue ? darpan.facade.settings.NsEndpointAccount.accountOf(nsTokenUrlValue) : null) ?: existingAuth?.netsuiteAccount, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: keptAuth?.password, apiToken: nsApiTokenValue ?: keptAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: keptAuth?.privateKeyPem]"/>
+                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: keptAuth?.password, apiToken: nsApiTokenValue ?: keptAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: keptAuth?.privateKeyPem]"/>
                 <if condition="existingAuth == null || !existingAuth.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(authMap, ec)"/>
                 </if>
@@ -956,7 +956,7 @@
 
     <service verb="delete" noun="NsAuthConfig" allow-remote="true" authenticate="true">
         <description>Delete one tenant-owned NetSuite auth profile (DAR-BE-114). Refused, naming what is in the way,
-            while anything still signs in with it: RESTlet endpoints, NetSuite checks, saved runs. nsAuthConfigId is
+            while anything still signs in with it: NetSuite checks, saved runs. nsAuthConfigId is
             referenced without a cascading FK, so deleting under them would surface later as a confusing "not found"
             at run time. Owner-only, and never while shared with another tenant — the same rules as the Shopify and
             HotWax deletes.</description>
@@ -996,10 +996,9 @@
             <if condition="!ec.message.hasError()">
                 <!-- Counted past the tenant filter on purpose: a user anywhere is a reason to refuse, and the
                      owner-only and not-shared gates above already mean only this tenant can be holding one. -->
-                <set field="restletCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('nsAuthConfigId', nsAuthConfigIdValue).count()"/>
                 <set field="checkCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsSuiteQlSourceQuery', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('nsAuthConfigId', nsAuthConfigIdValue).count()"/>
                 <set field="runCount" from="(darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.rule.RuleSetCompareSource', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('sourceConfigType', 'NETSUITE_AUTH').condition('sourceConfigId', nsAuthConfigIdValue).selectField('compareScopeId').list()*.compareScopeId).unique().size()"/>
-                <set field="usedBy" from="[restletCount ? (restletCount + (restletCount == 1 ? ' RESTlet endpoint' : ' RESTlet endpoints')) : null, checkCount ? (checkCount + (checkCount == 1 ? ' NetSuite check' : ' NetSuite checks')) : null, runCount ? (runCount + (runCount == 1 ? ' saved run' : ' saved runs')) : null].findAll()"/>
+                <set field="usedBy" from="[checkCount ? (checkCount + (checkCount == 1 ? ' NetSuite check' : ' NetSuite checks')) : null, runCount ? (runCount + (runCount == 1 ? ' saved run' : ' saved runs')) : null].findAll()"/>
                 <if condition="usedBy">
                     <message error="true">NS Auth config '${nsAuthConfigIdValue}' is still used by ${usedBy.join(', ')}. Move them to another auth profile or delete them first.</message>
                 </if>
@@ -1015,260 +1014,6 @@
                 <set field="deleted" from="true"/>
                 <set field="deletedNsAuthConfigId" from="nsAuthConfigIdValue"/>
                 <message>Deleted NS Auth config ${nsAuthConfigIdValue}.</message>
-            </if>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
-
-    <service verb="list" noun="NsRestletConfigs" authz-action="view" allow-remote="true" authenticate="true">
-        <description>List NetSuite endpoint configs joined with auth metadata.</description>
-        <in-parameters>
-            <parameter name="query"/>
-            <parameter name="pageIndex" type="Integer" default-value="0"/>
-            <parameter name="pageSize" type="Integer" default-value="20"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="pagination" type="Map">
-                <parameter name="pageIndex" type="Integer"/>
-                <parameter name="pageSize" type="Integer"/>
-                <parameter name="totalCount" type="Integer"/>
-                <parameter name="pageCount" type="Integer"/>
-            </parameter>
-            <parameter name="restletConfigs" type="List">
-                <parameter name="nsRestletConfigId"/>
-                <parameter name="description"/>
-                <parameter name="companyUserGroupId"/>
-                <parameter name="companyLabel"/>
-                <parameter name="endpointUrl"/>
-                <parameter name="httpMethod"/>
-                <parameter name="nsAuthConfigId"/>
-                <parameter name="authDescription"/>
-                <parameter name="authType"/>
-                <parameter name="authIsActive"/>
-                <parameter name="headersJson"><description>OC123: the custom headers, values included, only to those who may save
-                    the endpoint (run access, as save#NsRestletConfig); null for everyone else.</description></parameter>
-                <parameter name="headerNames" type="List"><description>OC123: the custom header names, for everyone.</description></parameter>
-                <parameter name="connectTimeoutSeconds" type="Integer"/>
-                <parameter name="readTimeoutSeconds" type="Integer"/>
-                <parameter name="isActive"/>
-                <parameter name="isShared" type="Boolean"/>
-            </parameter>
-        </out-parameters>
-        <actions>
-            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
-            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
-            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="restletConfigs" from="[]"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
-            <set field="authConfigFinder" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').useCache(false)"/>
-            <set field="authConfigList" from="activeTenantUserGroupId ? authConfigFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []"/>
-            <!-- DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
-                 With zero grants this is identical to the previous tenant-only finder. -->
-            <set field="nsRestletConfigList" from="darpan.facade.common.SharedConfigAccessSupport.listAccessibleConfigRows(ec, 'SCFG_NS_RESTLET')"/>
-            <set field="withHeaderValues" from="darpan.facade.common.TenantAccessSupport.canRunActiveTenantReconciliation(ec)"/>
-            <set field="authById" from="(authConfigList ?: []).collectEntries { item -> [(item.nsAuthConfigId): [description: item.description, authType: item.authType, isActive: item.isActive ?: 'Y']] }"/>
-            <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: withHeaderValues ? item.headersJson : null, headerNames: darpan.facade.settings.SettingsFacadeSupport.headerNamesOf(item.headersJson as String), connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y', isShared: item.companyUserGroupId != activeTenantUserGroupId] }"/>
-            <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsRestletConfigId, row.description, row.endpointUrl, row.nsAuthConfigId, row.authType].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
-            <set field="totalCount" from="filteredRows.size()"/>
-            <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
-            <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
-            <set field="restletConfigs" from="filteredRows.subList(fromIndex, toIndex)"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
-
-    <!-- DAR-BE-258: registered migration NS_AUTH_ACCOUNTS (data/MigrationRegistrySeedData.xml). -->
-    <service verb="migrate" noun="NsAuthAccounts" authenticate="false" allow-remote="false">
-        <description>One-time: store on each NetSuite auth config the account its secret belongs to, so save#NsRestletConfig
-            stops inferring it from the endpoints bound now (detaching or deleting them would reset it). The account comes
-            from the token URL, else from its oldest endpoint; endpoints on other accounts are reported, not changed, and
-            are refused on their next save. Rows that already have one, or have neither, are left. Every tenant at once
-            (the supervisor runs this with authz disabled). Idempotent: a second run finds nothing. Not remote.</description>
-        <in-parameters>
-            <parameter name="dryRun" type="Boolean" default="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="rowsUpdated" type="Integer"/>
-        </out-parameters>
-        <actions>
-            <entity-find entity-name="darpan.reconciliation.NsAuthConfig" list="authList" for-update="true">
-                <econdition field-name="netsuiteAccount" operator="is-null"/>
-                <order-by field-name="nsAuthConfigId"/>
-            </entity-find>
-            <set field="rowsUpdated" from="0" type="Integer"/>
-            <set field="conflicts" from="[]"/>
-            <iterate list="authList" entry="auth">
-                <set field="account" from="auth.tokenUrl ? darpan.facade.settings.NsEndpointAccount.accountOf(auth.tokenUrl) : null"/>
-                <if condition="!auth.tokenUrl">
-                    <entity-find entity-name="darpan.reconciliation.NsRestletConfig" list="endpointList">
-                        <econdition field-name="nsAuthConfigId" from="auth.nsAuthConfigId"/>
-                        <order-by field-name="nsRestletConfigId"/>
-                    </entity-find>
-                    <set field="endpointAccounts" from="endpointList.collect { darpan.facade.settings.NsEndpointAccount.accountOf(it.endpointUrl) }.findAll { it }"/>
-                    <set field="account" from="endpointAccounts ? endpointAccounts[0] : null"/>
-                    <if condition="endpointAccounts.unique(false).size() &gt; 1">
-                        <script>conflicts.add(auth.nsAuthConfigId + ' (' + endpointAccounts.unique(false).join(', ') + ')')</script>
-                    </if>
-                </if>
-                <if condition="account">
-                    <set field="rowsUpdated" from="rowsUpdated + 1" type="Integer"/>
-                    <if condition="!dryRun">
-                        <set field="auth.netsuiteAccount" from="account"/>
-                        <entity-update value-field="auth"/>
-                    </if>
-                </if>
-            </iterate>
-            <set field="messages" from="[(dryRun ? 'Would store' : 'Stored') + ' the NetSuite account on ' + rowsUpdated + ' auth config(s).'] +
-                    (conflicts ? ['Endpoints on more than one account (the oldest endpoint\'s account kept; the others are refused on their next save): ' + conflicts.join('; ') + '.'] : [])"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="errors" from="ec.message.errors ?: []"/>
-        </actions>
-    </service>
-
-    <service verb="save" noun="NsRestletConfig" allow-remote="true" authenticate="true">
-        <description>Create or update a NetSuite endpoint configuration bound to an auth config.</description>
-        <in-parameters>
-            <parameter name="nsRestletConfigId"><description>DAR-BE-135: names an endpoint this tenant owns or was granted, to
-                update it. Leave it out to create one; the server mints the id.</description></parameter>
-            <parameter name="description"/>
-            <parameter name="endpointUrl" required="true"/>
-            <parameter name="httpMethod" default-value="POST"/>
-            <parameter name="nsAuthConfigId" required="true"/>
-            <parameter name="headersJson" allow-html="true"/>
-            <parameter name="connectTimeoutSeconds" type="Integer" default-value="30"/>
-            <parameter name="readTimeoutSeconds" type="Integer" default-value="60"/>
-            <parameter name="isActive" type="Boolean" default-value="true"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="savedRestletConfig" type="Map">
-                <parameter name="nsRestletConfigId"/>
-                <parameter name="description"/>
-                <parameter name="endpointUrl"/>
-                <parameter name="httpMethod"/>
-                <parameter name="nsAuthConfigId"/>
-                <parameter name="headersJson"/>
-                <parameter name="connectTimeoutSeconds" type="Integer"/>
-                <parameter name="readTimeoutSeconds" type="Integer"/>
-                <parameter name="isActive"/>
-            </parameter>
-        </out-parameters>
-        <actions>
-            <set field="nsRestletConfigIdValue" from="((nsRestletConfigId)?.toString()?.trim())"/>
-            <set field="nsDescriptionValue" from="((description)?.toString()?.trim())"/>
-            <set field="nsEndpointUrlValue" from="((endpointUrl)?.toString()?.trim())"/>
-            <set field="nsHttpMethodValue" from="((httpMethod)?.toString()?.trim())?.toUpperCase() ?: 'POST'"/>
-            <set field="nsAuthConfigIdValue" from="((nsAuthConfigId)?.toString()?.trim())"/>
-            <set field="nsHeadersJsonValue" from="((headersJson)?.toString()?.trim())"/>
-            <set field="nsConnectTimeoutValue" from="connectTimeoutSeconds != null ? connectTimeoutSeconds : 30"/>
-            <set field="nsReadTimeoutValue" from="readTimeoutSeconds != null ? readTimeoutSeconds : 60"/>
-            <set field="nsIsActiveValue" from="isActive != null ? (isActive ? 'Y' : 'N') : 'Y'"/>
-            <set field="headersJsonError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(nsHeadersJsonValue, 'Headers JSON')"/>
-            <if condition="!nsEndpointUrlValue">
-                <message error="true">Endpoint URL is required.</message>
-            </if>
-            <!-- SSRF defense (audit H5.3 / H6.4): tenant-controlled endpointUrl would otherwise let bearer tokens
-                 leak to attacker hosts or let Darpan probe internal infrastructure (cloud metadata, intranet). -->
-            <if condition="nsEndpointUrlValue">
-                <script><![CDATA[
-                    def __endpointCheck = darpan.facade.common.OutboundHttpPolicy.validate(nsEndpointUrlValue, ['.suitetalk.api.netsuite.com', '.app.netsuite.com'])
-                    if (!__endpointCheck.ok) ec.message.addError("NetSuite Endpoint URL is not allowed: " + __endpointCheck.error)
-                ]]></script>
-            </if>
-            <if condition="!['POST', 'PUT', 'GET'].contains(nsHttpMethodValue)">
-                <message error="true">HTTP Method must be POST, PUT, or GET.</message>
-            </if>
-            <if condition="!nsAuthConfigIdValue">
-                <message error="true">Auth Config ID is required.</message>
-            </if>
-            <if condition="nsConnectTimeoutValue &lt;= 0">
-                <set field="nsConnectTimeoutValue" from="30"/>
-            </if>
-            <if condition="nsReadTimeoutValue &lt;= 0">
-                <set field="nsReadTimeoutValue" from="60"/>
-            </if>
-            <if condition="headersJsonError">
-                <message error="true">${headersJsonError}</message>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; nsRestletConfigIdValue">
-                <!-- DAR-BE-005 seam C: a bare ec.entity.find here is silently filtered by
-                     DARPAN_ACTIVE_COMPANY_SCOPE (SecuritySeedData.xml DARPAN_SCOPE_NS_RESTLET), so a
-                     shared-but-foreign-owned row would be invisible before any access check runs.
-                     findGlobalUnscoped bypasses that filter; canActiveTenantUseConfig below is the
-                     real owner-or-shared gate. -->
-                <set field="existingEndpoint" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsRestletConfigId', nsRestletConfigIdValue).useCache(false).one()"/>
-                <if condition="!existingEndpoint || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, existingEndpoint)">
-                    <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
-                         no standing over it" (not owner, not a peer) — matches Task 6's reference
-                         validators and Task 7's component gates. Splitting this into a more specific
-                         "not available" message would both break the byte-identical pre-DAR-BE-005
-                         behavior for a foreign tenant AND reopen a cross-tenant existence oracle.
-                         Do not "improve" this. -->
-                    <message error="true">NS endpoint config '${nsRestletConfigIdValue}' was not found.</message>
-                </if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <!-- DAR-BE-005 seam C: same DARPAN_ACTIVE_COMPANY_SCOPE bypass as above, this time for
-                     the referenced NsAuthConfig (DARPAN_SCOPE_NS_AUTH) — a member tenant saving a
-                     restlet against a shared auth config must be able to see that auth config exists. -->
-                <set field="authCfg" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsRestletConfig auth-config reference check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
-                <set field="authCfgAccessible" from="authCfg != null &amp;&amp; darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, authCfg)"/>
-                <if condition="!authCfgAccessible">
-                    <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
-                         no standing over it" — same ruling as above; kept as its own gate (rather than
-                         reusing the site-604 shape) because this is a REFERENCE check inside
-                         save#NsRestletConfig, not the primary record being saved. -->
-                    <message error="true">NsAuthConfig ${nsAuthConfigIdValue} not found.</message>
-                </if>
-                <if condition="authCfgAccessible &amp;&amp; (authCfg.isActive ?: 'Y').toString().equalsIgnoreCase('N')">
-                    <message error="true">NsAuthConfig ${nsAuthConfigIdValue} is inactive.</message>
-                </if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <!-- DAR-BE-258: the endpoint is sent this auth config's secret, so it stays on the auth config's
-                     NetSuite account (NsEndpointAccount): its token URL's, else the account stored on the auth config.
-                     The row is re-read for update so two first endpoints cannot both set the account. The caller
-                     already passed canActiveTenantUseConfig on the auth config above. -->
-                <set field="authCfg" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsRestletConfig account check (DAR-BE-258), row locked; access gated above').condition('nsAuthConfigId', nsAuthConfigIdValue).forUpdate(true).useCache(false).one()"/>
-                <set field="boundEndpointUrls" from="authCfg.tokenUrl || authCfg.netsuiteAccount ? [] : darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig account check (DAR-BE-258): until NS_AUTH_ACCOUNTS has run, a row without an account takes its endpoints\' account').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).list()*.endpointUrl"/>
-                <set field="accountDecision" from="darpan.facade.settings.NsEndpointAccount.decide(nsEndpointUrlValue, authCfg.tokenUrl as String, authCfg.netsuiteAccount as String, boundEndpointUrls)"/>
-                <if condition="accountDecision.error"><message error="true">${accountDecision.error}</message></if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
-            </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !nsRestletConfigIdValue">
-                <set field="nsRestletConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsRestletConfig', 'nsRestletConfigId')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="endpointMap" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, companyUserGroupId: existingEndpoint?.companyUserGroupId ?: authCfg?.companyUserGroupId, createdByUserId: existingEndpoint?.createdByUserId, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue, authType: null, username: null, password: null, apiToken: null, tokenUrl: null, clientId: null, certId: null, privateKeyPem: null, scope: null]"/>
-                <if condition="existingEndpoint == null || !existingEndpoint.companyUserGroupId">
-                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(endpointMap, ec)"/>
-                </if>
-                <if condition="!ec.message.hasError()">
-                    <service-call name="store#darpan.reconciliation.NsRestletConfig" in-map="endpointMap"/>
-                    <if condition="accountDecision?.store">
-                        <!-- DAR-BE-258: the first endpoint of an auth config without an account sets it, on the row. -->
-                        <service-call name="store#darpan.reconciliation.NsAuthConfig"
-                                in-map="[nsAuthConfigId: nsAuthConfigIdValue, netsuiteAccount: accountDecision.store]"/>
-                    </if>
-                    <set field="savedRestletConfig" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue]"/>
-                    <message>Saved NS endpoint config ${nsRestletConfigIdValue}.</message>
-                </if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

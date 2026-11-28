@@ -108,7 +108,7 @@ class AutomationEntityContractTests {
                 "automationId", "fileSide", "companyUserGroupId", "createdByUserId",
                 "sourceTypeEnumId", "systemEnumId", "fileTypeEnumId", "schemaFileName",
                 "recordRootExpression", "primaryIdExpression", "idValueNormalizer",
-                "systemMessageRemoteId", "nsRestletConfigId", "sftpServerId", "databaseSourceQueryId",
+                "systemMessageRemoteId", "sftpServerId", "databaseSourceQueryId",
                 "remotePathTemplate", "fileNamePattern", "apiRequestTemplateJson",
                 "apiResponsePathExpression", "dateFromParameterName", "dateToParameterName",
                 "safeMetadataJson", "createdDate", "lastUpdatedDate",
@@ -118,7 +118,6 @@ class AutomationEntityContractTests {
         assertTrue(field(source, "fileSide").description.text().contains("FILE_1 or FILE_2"))
         assertRelationship(source, "SourceType", "moqui.basic.Enumeration", "sourceTypeEnumId", "enumId")
         assertRelationship(source, null, "darpan.reconciliation.SftpServer", "sftpServerId", null)
-        assertRelationship(source, null, "darpan.reconciliation.NsRestletConfig", "nsRestletConfigId", null)
 
         assertFields(execution, [
                 "automationExecutionId", "automationId", "companyUserGroupId", "createdByUserId",
@@ -214,7 +213,7 @@ class AutomationEntityContractTests {
         // (and only when) it names a real ReconciliationAutomationSource column. That is safe ONLY while
         // databaseSourceQueryId is the SOLE connector configParameterName that is a source-row column. If a
         // future connector row set configParameterName to an existing source column (sftpServerId,
-        // nsRestletConfigId, systemMessageRemoteId, omsRestSourceConfigId, shopifyAuthConfigId, ...), the DB
+        // systemMessageRemoteId, omsRestSourceConfigId, shopifyAuthConfigId, ...), the DB
         // guard would silently start rewriting that path's dispatch with no other test catching it. Fail
         // loudly here instead.
         def source = entity(parse("entity/ReconciliationEntities.xml").entity, "ReconciliationAutomationSource")

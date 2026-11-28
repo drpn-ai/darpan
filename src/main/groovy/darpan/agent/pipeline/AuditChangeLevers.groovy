@@ -42,7 +42,7 @@ class AuditChangeLevers {
             STATEMENT_EDIT     : ["auditId", "statementCode"],
             REASON_PRIORITY    : ["auditId", "statementCode", "conclusionCode"]].asImmutable()
     static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
-    static final List<String> SIDE_FIELDS = ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "nsRestletConfigId",
+    static final List<String> SIDE_FIELDS = ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId",
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
     static final List<String> CHECK_TEXT_FIELDS = ["label", "file1RecordType", "file2RecordType", "matchedBy", "fixOwner",
             "expectedSource", "actualSource", "headlineTemplate", "fixActionTemplate", "passesWhenTemplate"].asImmutable()

@@ -42,11 +42,8 @@ class SharedConfigEntityContractTests {
 
     /**
      * Extracts a single {@code <service verb="..." noun="...">...</service>} block by its opening
-     * tag. SettingsFacadeServices.xml is a large, multi-service file — list#NsRestletConfigs' own
-     * auth-metadata join (a documented, out-of-scope Task 5 cosmetic minor / Finding B territory)
-     * contains a bare {@code ec.entity.find('darpan.reconciliation.NsAuthConfig')} that a whole-file
-     * match would collide with. Scoping to the specific service block is what makes the assertions
-     * below match ONLY the two save# services Task 8 Finding A fixed.
+     * tag. SettingsFacadeServices.xml is a large, multi-service file; scoping to the specific service
+     * block makes the assertions below match ONLY the save# service Task 8 Finding A fixed.
      */
     private static String serviceBlock(String xml, String verb, String noun) {
         String startMarker = "<service verb=\"${verb}\" noun=\"${noun}\""
@@ -93,18 +90,19 @@ class SharedConfigEntityContractTests {
     }
 
     @Test
-    void sharedConfigTypeEnumSeedsAllFourShareableConfigTypes() {
+    void sharedConfigTypeEnumSeedsAllThreeShareableConfigTypes() {
         String xml = securitySeedXml()
         assertTrue(xml.contains('enumTypeId="DarpanSharedConfigType"'),
                 "DarpanSharedConfigType enum type must be seeded")
-        ['SCFG_HOTWAX_OMS', 'SCFG_SHOPIFY_AUTH', 'SCFG_NS_AUTH', 'SCFG_NS_RESTLET'].each { String enumId ->
+        ['SCFG_HOTWAX_OMS', 'SCFG_SHOPIFY_AUTH', 'SCFG_NS_AUTH'].each { String enumId ->
             assertTrue(xml.contains("enumId=\"${enumId}\""),
                     "${enumId} must be seeded so a grant can name this config type")
         }
+        assertFalse(xml.contains('enumId="SCFG_NS_RESTLET"'), "the RESTlet type is retired (DAR-BE-424)")
     }
 
     /**
-     * DAR-BE-005 seam C. The four shareable config entities are members of the framework
+     * DAR-BE-005 seam C. The three shareable config entities are members of the framework
      * EntityFilterSet DARPAN_ACTIVE_COMPANY_SCOPE, which hard-filters them to the active tenant on
      * any authz-enabled read. Every sharing-aware read MUST therefore go through TenantScopedFinder
      * (which disables authz on every method). A future read that forgets would silently drop the
@@ -114,7 +112,6 @@ class SharedConfigEntityContractTests {
     void shareableConfigEntitiesAreStillCoveredByTheActiveCompanyEntityFilter() {
         String xml = securitySeedXml()
         ['darpan.reconciliation.NsAuthConfig',
-         'darpan.reconciliation.NsRestletConfig',
          'darpan.hotwax.HotWaxOmsRestSourceConfig',
          'darpan.shopify.ShopifyAuthConfig'].each { String entityName ->
             assertTrue(xml.contains("entityName=\"${entityName}\""),
@@ -148,8 +145,8 @@ class SharedConfigEntityContractTests {
     }
 
     /**
-     * DAR-BE-005 Task 8 review finding. Finding A's fix has two halves at each of the three sites in
-     * {@code save#NsAuthConfig} / {@code save#NsRestletConfig}: the owner-or-shared access gate
+     * DAR-BE-005 Task 8 review finding. Finding A's fix has two halves in
+     * {@code save#NsAuthConfig}: the owner-or-shared access gate
      * ({@code SharedConfigAccessSupport.canActiveTenantUseConfig}) AND the read that feeds it
      * ({@code TenantScopedFinder.findGlobalUnscoped} instead of a bare {@code ec.entity.find}). The
      * gate half is exercised end to end by {@code SettingsFacadeSharedConfigSaveTests}. The read half
@@ -172,35 +169,20 @@ class SharedConfigEntityContractTests {
      * that method's Javadoc for the unrelated bare find this must not collide with.</p>
      */
     @Test
-    void saveNsAuthAndNsRestletConfigResolveTheirRecordsThroughFindGlobalUnscopedNotABareEntityFind() {
+    void saveNsAuthConfigResolvesItsRecordThroughFindGlobalUnscopedNotABareEntityFind() {
         String xml = settingsFacadeServicesXml()
         String saveNsAuthConfig = serviceBlock(xml, "save", "NsAuthConfig")
-        String saveNsRestletConfig = serviceBlock(xml, "save", "NsRestletConfig")
-
-        [["save#NsAuthConfig", saveNsAuthConfig], ["save#NsRestletConfig", saveNsRestletConfig]].each { List pair ->
-            String label = (String) pair[0]
-            String block = (String) pair[1]
-            assertFalse(block.contains("ec.entity.find('darpan.reconciliation.NsAuthConfig'") ||
-                    block.contains('ec.entity.find("darpan.reconciliation.NsAuthConfig"'),
-                    "${label} must not resolve NsAuthConfig via a bare ec.entity.find — " +
-                    "DARPAN_ACTIVE_COMPANY_SCOPE silently filters it to the active tenant on any " +
-                    "authz-enabled read, hiding a shared-but-foreign-owned row from the " +
-                    "owner-or-shared access check before it can even run")
-            assertFalse(block.contains("ec.entity.find('darpan.reconciliation.NsRestletConfig'") ||
-                    block.contains('ec.entity.find("darpan.reconciliation.NsRestletConfig"'),
-                    "${label} must not resolve NsRestletConfig via a bare ec.entity.find — same reason")
-        }
+        assertFalse(saveNsAuthConfig.contains("ec.entity.find('darpan.reconciliation.NsAuthConfig'") ||
+                saveNsAuthConfig.contains('ec.entity.find("darpan.reconciliation.NsAuthConfig"'),
+                "save#NsAuthConfig must not resolve NsAuthConfig via a bare ec.entity.find — " +
+                "DARPAN_ACTIVE_COMPANY_SCOPE silently filters it to the active tenant on any " +
+                "authz-enabled read, hiding a shared-but-foreign-owned row from the " +
+                "owner-or-shared access check before it can even run")
 
         assertTrue(saveNsAuthConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig'"),
                 "save#NsAuthConfig's own existence check (site :604) must resolve the record through " +
                 "TenantScopedFinder.findGlobalUnscoped so a shared-but-foreign-owned row is visible " +
                 "to SharedConfigAccessSupport.canActiveTenantUseConfig")
-        assertTrue(saveNsRestletConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig'"),
-                "save#NsRestletConfig's own existence check (site :785) must resolve the record " +
-                "through TenantScopedFinder.findGlobalUnscoped")
-        assertTrue(saveNsRestletConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig'"),
-                "save#NsRestletConfig's referenced-auth-config check (site :797) must resolve the " +
-                "referenced NsAuthConfig through TenantScopedFinder.findGlobalUnscoped too")
     }
 
 }

@@ -91,42 +91,6 @@ class Step3TenantDenialTests {
     }
 
     // -----------------------------------------------------------------------
-    // ReconciliationSavedRunSupport.buildRuleSetSystemOptions — NsRestletConfig denial
-    // -----------------------------------------------------------------------
-
-    @Test
-    void buildRuleSetSystemOptionsReturnsNullNsRestletConfigLabelForForeignTenant() {
-        // Arrange: active tenant = KREWE; NsRestletConfig belongs to ACME (foreign).
-        def foreignNsRestletConfig = [nsRestletConfigId: "NS_ACME", companyUserGroupId: "ACME", description: "Acme NS"]
-        def source = [fileSide: "FILE_1", systemEnumId: "NETSUITE", nsRestletConfigId: "NS_ACME"]
-        def ec = executionContext(
-                user: new UserStub(userId: "EX_USER", preferences: [
-                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE"
-                ]),
-                entity: new EntityFacadeStub(finders: [
-                        "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
-                                [userGroupId: "KREWE", userId: "EX_USER",
-                                 description: "Krewe",
-                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]
-                        ]),
-                        "moqui.basic.Enumeration"                  : new FinderStub(oneResult: null),
-                        (DarpanEntityConstants.NS_RESTLET_CONFIG)  : new FinderStub(oneResult: foreignNsRestletConfig),
-                        "moqui.service.message.SystemMessageRemote": new FinderStub(oneResult: null),
-                ]),
-                message: new MessageFacadeStub()
-        )
-
-        // Act: call buildRuleSetSystemOptions with a sourceBySide map containing the foreign source
-        Map<String, Object> sourceBySide = [FILE_1: source]
-        List result = ReconciliationSavedRunSupport.buildRuleSetSystemOptions(ec, sourceBySide)
-
-        // Assert: NsRestletConfig is denied (foreign) → nsRestletConfigLabel must be null/empty (no leak)
-        def file1Option = result.find { it?.fileSide == "FILE_1" }
-        assertNull(file1Option?.nsRestletConfigLabel,
-                "nsRestletConfigLabel must be null when NsRestletConfig belongs to a foreign tenant")
-    }
-
-    // -----------------------------------------------------------------------
     // Execution context and stub builders (mirror RuleEngineTenantDenialTests pattern)
     // -----------------------------------------------------------------------
 

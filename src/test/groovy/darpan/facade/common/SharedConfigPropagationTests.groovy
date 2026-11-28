@@ -184,8 +184,8 @@ class SharedConfigPropagationTests {
         def asOutsiderUnknownId = ecForConfigType("THIRD_LOVE", "darpan.reconciliation.NsAuthConfig",
                 "SCFG_NS_AUTH", "nsAuthConfigId", unrelatedRow)
 
-        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderRealId, "File 1", "NS_SM", null)
-        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderUnknownId, "File 1", "NS_SM", null)
+        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderRealId, "File 1", "NS_SM")
+        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderUnknownId, "File 1", "NS_SM")
 
         assertEquals(asOutsiderUnknownId.message.errors, asOutsiderRealId.message.errors,
                 "oracle-closed: a real config the outsider has no standing over must be " +

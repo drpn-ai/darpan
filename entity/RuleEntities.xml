@@ -190,9 +190,6 @@
         <field name="systemMessageRemoteId" type="id">
             <description>Optional SystemMessageRemote endpoint used when the source is API-backed.</description>
         </field>
-        <field name="nsRestletConfigId" type="id">
-            <description>Optional NetSuite RESTlet endpoint used when the source is API-backed.</description>
-        </field>
         <field name="sourceConfigId" type="id">
             <description>System-specific API source configuration selected before the endpoint, such as Shopify auth, HotWax OMS REST source, or NetSuite auth.</description>
         </field>
@@ -224,9 +221,6 @@
         </relationship>
         <relationship type="one" related="moqui.service.message.SystemMessageRemote" fk-name="RSCSR_REMOTE">
             <key-map field-name="systemMessageRemoteId"/>
-        </relationship>
-        <relationship type="one" related="darpan.reconciliation.NsRestletConfig" fk-name="RSCSR_NSREST">
-            <key-map field-name="nsRestletConfigId"/>
         </relationship>
         <relationship type="many" related="darpan.rule.RuleSetCompareSourceKeyField" short-alias="keyFields">
             <key-map field-name="compareScopeId"/>

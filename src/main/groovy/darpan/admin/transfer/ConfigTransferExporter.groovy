@@ -245,8 +245,7 @@ class ConfigTransferExporter {
             else reached[parsed[0]].add(parsed[1])
         }
         List<Map> connectionRecords = []
-        // A Restlet names its NetSuite auth, so Restlets are read first and their auths join the reach.
-        [NETSUITE_RESTLET, NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST].each { String kind ->
+        [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST].each { String kind ->
             new ArrayList<String>(reached[kind]).each { String id ->
                 Map rec = connectionRecord(ec, tenantId, kind, id, namer)
                 if (rec == null) ec.message.addError("Connection '${TransferSpecs.ref(kind, id)}' was not found for tenant ${tenantId}.")

@@ -171,7 +171,7 @@ class RunSideOptionsSmokeTests {
         assertTrue(ec.message.errorsString.contains("requires its nsSuiteQlSourceQueryId"), ec.message.errorsString)
         ec.message.clearErrors()
         AutomationFacadeSupport.validateApiSource(ec, [fileSide: "FILE_1", systemEnumId: "NO_SUCH_SYSTEM", sourceTypeEnumId: "AUT_SRC_API"])
-        assertTrue(ec.message.errorsString.contains("requires systemMessageRemoteId or nsRestletConfigId"), "an unknown system keeps the old rule")
+        assertTrue(ec.message.errorsString.contains("requires systemMessageRemoteId"), "an unknown system keeps the old rule")
         ec.message.clearErrors()
     }
 

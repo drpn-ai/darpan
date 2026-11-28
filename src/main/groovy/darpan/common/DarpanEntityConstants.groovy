@@ -10,7 +10,6 @@ class DarpanEntityConstants {
     static final String RECONCILIATION_AUTOMATION_EXECUTION = "darpan.reconciliation.ReconciliationAutomationExecution"
     static final String SFTP_SERVER = "darpan.reconciliation.SftpServer"
     static final String NS_AUTH_CONFIG = "darpan.reconciliation.NsAuthConfig"
-    static final String NS_RESTLET_CONFIG = "darpan.reconciliation.NsRestletConfig"
     static final String TENANT_CHAT_SPACE = "darpan.reconciliation.TenantChatSpace"
     static final String RUN_NOTIFY_SUBSCRIPTION = "darpan.reconciliation.ReconciliationRunNotifySubscription"
 

@@ -801,7 +801,7 @@ class AuditSettingsSmokeTests {
             insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "${ruleSetId}_SCOPE".toString(), fileSide: s.side,
                     systemEnumId: s.system, sourceTypeEnumId: "AUT_SRC_API", fileTypeEnumId: "DftJson",
                     recordRootExpression: "records", primaryIdExpression: s.key, sourceConfigId: "cfg", companyUserGroupId: MINE,
-                    systemMessageRemoteId: s.remote, nsRestletConfigId: s.restlet])
+                    systemMessageRemoteId: s.remote])
         }
     }
 

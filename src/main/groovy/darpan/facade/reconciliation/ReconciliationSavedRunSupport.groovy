@@ -958,15 +958,10 @@ class ReconciliationSavedRunSupport {
     }
 
     static Map<String, Object> resolveApiSourceConfig(def ec, String sourceLabel, Object rawSystemEnumId,
-            Object rawSourceConfigId, Object rawSourceConfigType, Object rawNsRestletConfig = null) {
+            Object rawSourceConfigId, Object rawSourceConfigType) {
         String systemEnumId = canonicalSystemEnumId(rawSystemEnumId)
         String sourceConfigId = normalize(rawSourceConfigId)
         String sourceConfigType = normalize(rawSourceConfigType)
-        def nsRestletConfig = rawNsRestletConfig
-
-        if (!sourceConfigId && systemEnumId == SYSTEM_NETSUITE && nsRestletConfig) {
-            sourceConfigId = normalize(nsRestletConfig.nsAuthConfigId)
-        }
 
         // Resolved once and reused below for dispatch, instead of a second call to
         // expectedSourceConfigType(ec, systemEnumId) — same registry row, same result.
@@ -1000,7 +995,7 @@ class ReconciliationSavedRunSupport {
             // NetSuite's connector row carries no configEntityName by design (no automation
             // extractor — see SourceSystemConnectorSeedData.xml) so it can never resolve through the
             // registry branches above; dispatch stays a direct, unchanged call.
-            validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId, nsRestletConfig)
+            validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId)
         }
         // else: unregistered system (e.g. SAPI, or no connector row at all) — no validator, exactly
         // the prior "default: break" behavior.
@@ -1091,7 +1086,7 @@ class ReconciliationSavedRunSupport {
                 systemEnumId)
     }
 
-    protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {
+    protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
         // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
         // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
         // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
@@ -1118,10 +1113,6 @@ class ReconciliationSavedRunSupport {
         }
         if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is inactive.")
-        }
-        String endpointAuthConfigId = normalize(nsRestletConfig?.nsAuthConfigId)
-        if (endpointAuthConfigId && endpointAuthConfigId != sourceConfigId) {
-            ec.message.addError("${sourceLabel} NetSuite endpoint is configured for ${endpointAuthConfigId}, not ${sourceConfigId}.")
         }
     }
 
@@ -1153,9 +1144,6 @@ class ReconciliationSavedRunSupport {
             // there first. Falls through to the old chain when no connector row is registered for this
             // systemEnumId (kept for any bespoke SystemMessageRemote outside the registry).
             def systemConnector = source.systemMessageRemoteId ? SourceSystemConnectorSupport.resolve(ec, systemEnumId) : null
-            // NsRestletConfig is directly-owned (has companyUserGroupId); use quiet variant for display label.
-            def nsRestletConfig = source.nsRestletConfigId ? TenantScopedFinder.findTenantScopedByIdQuiet(
-                    ec, DarpanEntityConstants.NS_RESTLET_CONFIG, "nsRestletConfigId", source.nsRestletConfigId) : null
             return [
                     fileSide          : fileSide,
                     enumId            : systemEnumId,
@@ -1183,8 +1171,6 @@ class ReconciliationSavedRunSupport {
                             normalize(systemMessageRemote?.description) ?:
                             virtualSystemRemoteLabel(systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
                             normalize(systemMessageRemote?.systemMessageRemoteId),
-                    nsRestletConfigId       : normalize(source.nsRestletConfigId),
-                    nsRestletConfigLabel    : normalize(nsRestletConfig?.description) ?: normalize(nsRestletConfig?.nsRestletConfigId),
                     sourceConfigId          : normalize(source.sourceConfigId),
                     sourceConfigType        : normalize(source.sourceConfigType),
                     // DAR-UI-064: the side's own choices, so a run's settings can show what it reads.

@@ -243,7 +243,7 @@ class AgentReadFacadeSmokeTests {
                                        [docId: "D2", status: "OPEN", total: 3, customerEmail: "bo@example.com", note: "x"]]
 
     private static Map docsDefinition() {
-        return [connection: [urlTemplate: "{endpointUrl}/graphql", auth: [kindField: "authType", kinds: [TOKEN: [method: "BEARER", tokenFields: ["apiToken"]]]]],
+        return [connection: [urlTemplate: "{baseUrl}/graphql", auth: [kindField: "authType", kinds: [TOKEN: [method: "BEARER", tokenFields: ["apiToken"]]]]],
                 limits: [maxCostPerCall: 100],
                 steps: [[id: "docs", kind: "query", document: DOCS, connectionAt: "docs", recordsAt: "nodes[*]", hasNextAt: "page.more", cursorAt: "page.next",
                          bind: [ids: [chunk: 5, separator: ",", variables: [filter: "{keyField} in ({ids})"], from: "LOOKUP_KEYS", defaultKeyField: "docId", idPattern: "[A-Z0-9]{1,10}"]],
@@ -255,13 +255,13 @@ class AgentReadFacadeSmokeTests {
         insert("darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "AGR_DOCS_V1", definitionName: "Agent docs", protocol: "GRAPHQL",
                 definitionVersion: 1L, statusId: "ACTIVE", definitionJson: groovy.json.JsonOutput.toJson(docsDefinition())])
         insert("darpan.reconciliation.SourceSystemConnector", [systemEnumId: "AGR_DOCS", extractServiceName: darpan.datasource.DataDefinedExtract.SERVICE_NAME,
-                expectedSourceConfigType: "SCFG_NS_RESTLET", configParameterName: "nsRestletConfigId", configEntityName: "darpan.reconciliation.NsRestletConfig",
+                expectedSourceConfigType: "SCFG_HOTWAX_OMS", configParameterName: "omsRestSourceConfigId", configEntityName: "darpan.hotwax.HotWaxOmsRestSourceConfig",
                 dataSourceDefinitionId: "AGR_DOCS_V1", enabled: "Y"])
         insert("darpan.agent.AgentReadCatalog", [readId: "AGR_DOC_BY_ID", definitionId: "AGR_DOCS_V1", systemCode: "NETSUITE", recordKind: "doc",
                 lookupKeyField: "docId", allowedFields: "docId,status,total,note", description: "test"])
-        insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", companyUserGroupId: MINE, endpointUrl: "https://acme.test",
+        insert("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "AGR_CFG_MINE", companyUserGroupId: MINE, baseUrl: "https://acme.test",
                 authType: "TOKEN", apiToken: "t", isActive: "Y"])
-        insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_OTHER", companyUserGroupId: OTHER, endpointUrl: "https://other.test",
+        insert("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "AGR_CFG_OTHER", companyUserGroupId: OTHER, baseUrl: "https://other.test",
                 authType: "TOKEN", apiToken: "t", isActive: "Y"])
     }
 
@@ -271,7 +271,7 @@ class AgentReadFacadeSmokeTests {
         List<Map> calls = []
         darpan.datasource.DataDefinedExtract.transportFactory = { Map d, Map conn ->
             [execute: { String doc, Map vars, int reservation ->
-                calls << [filter: vars.filter, endpoint: conn.endpointUrl]
+                calls << [filter: vars.filter, endpoint: conn.baseUrl]
                 List<Map> rows = DOC_ROWS.findAll { vars.filter.toString().contains(it.docId.toString()) }.collect { new LinkedHashMap(it) }
                 [docs: [nodes: rows, page: [more: false, next: null]]]
             }]
@@ -304,17 +304,17 @@ class AgentReadFacadeSmokeTests {
         List<String> endpoints = []
         darpan.datasource.DataDefinedExtract.transportFactory = { Map d, Map conn ->
             [execute: { String doc, Map vars, int reservation ->
-                endpoints << (conn.endpointUrl as String)
+                endpoints << (conn.baseUrl as String)
                 [docs: [nodes: [new LinkedHashMap(DOC_ROWS[0])], page: [more: false, next: null]]]
             }]
         }
         boolean wasDisabled = ec.artifactExecution.disableAuthz()
         try {
-            insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", isActive: "N"])
+            insert("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "AGR_CFG_MINE", isActive: "N"])
             insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanSharedConfigType", description: "Shared config type"])
-            insert("moqui.basic.Enumeration", [enumId: "SCFG_NS_RESTLET", enumTypeId: "DarpanSharedConfigType", description: "NetSuite Restlet config"])
+            insert("moqui.basic.Enumeration", [enumId: "SCFG_HOTWAX_OMS", enumTypeId: "DarpanSharedConfigType", description: "HotWax OMS source config"])
             insert("moqui.security.UserGroup", [userGroupId: MINE, description: "Krewe"])
-            insert("darpan.auth.ConfigTenantAccess", [configTypeEnumId: "SCFG_NS_RESTLET", configId: "AGR_CFG_OTHER", tenantUserGroupId: MINE,
+            insert("darpan.auth.ConfigTenantAccess", [configTypeEnumId: "SCFG_HOTWAX_OMS", configId: "AGR_CFG_OTHER", tenantUserGroupId: MINE,
                     fromDate: new java.sql.Timestamp(System.currentTimeMillis() - 60_000L)])
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
             Map out = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D1"])
@@ -324,7 +324,7 @@ class AgentReadFacadeSmokeTests {
         } finally {
             ec.artifactExecution.disableAuthz()
             ec.entity.find("darpan.auth.ConfigTenantAccess").condition("configId", "AGR_CFG_OTHER").deleteAll()
-            insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", isActive: "Y"])
+            insert("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "AGR_CFG_MINE", isActive: "Y"])
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
             darpan.datasource.DataDefinedExtract.transportFactory = previous
         }

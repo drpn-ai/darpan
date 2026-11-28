@@ -24,7 +24,6 @@ class TransferSpecs {
     static final String NETSUITE_AUTH = "NETSUITE_AUTH"
     static final String SHOPIFY_AUTH = "SHOPIFY_AUTH"
     static final String HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
-    static final String NETSUITE_RESTLET = "NETSUITE_RESTLET"
     static final String NETSUITE_SUITEQL = "NETSUITE_SUITEQL"
     static final String CONC = "CONC"
     static final String RUN = "RUN"
@@ -67,7 +66,7 @@ class TransferSpecs {
     /** Kinds that live only as children of another kind's record (refs to them resolve inside their parent). */
     static final List<String> CHILD_KINDS = [RULE, QUESTION, SCOPE, DEPLOYMENT].asImmutable()
 
-    static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
+    static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST].asImmutable()
 
     /** DAR-BE-188. The bundle lists whose records may carry sealedSecrets. */
     static final List<String> SEALED_LISTS = ["connections", "chatSpaces"].asImmutable()
@@ -106,7 +105,7 @@ class TransferSpecs {
     private static final Map SCOPE_CHILD = [entityName: "darpan.rule.RuleSetCompareScope", pkField: "compareScopeId",
             mintPrefix: "CS_", parentFields: ["ruleSetId"], orderBy: ["objectType", "compareScopeId"], positionKind: SCOPE, children: [
             [entityName: "darpan.rule.RuleSetCompareSource", parentFields: ["compareScopeId"], orderBy: ["fileSide"],
-             refFields: [nsRestletConfigId: NETSUITE_RESTLET], polymorphicRef: "sourceConfigId", children: [
+             polymorphicRef: "sourceConfigId", children: [
                     [entityName: "darpan.rule.RuleSetCompareSourceKeyField", parentFields: ["compareScopeId", "fileSide"],
                      orderBy: ["sequenceNum"]],
                     [entityName: "darpan.rule.RuleSetCompareSourceFilter", parentFields: ["compareScopeId", "fileSide"],
@@ -136,9 +135,6 @@ class TransferSpecs {
              dropFields: ["shopifyAppId", "refreshToken", "accessTokenExpiresDate", "refreshTokenExpiresDate", "grantedScopes", "installedDate"]],
             [kind: HOTWAX_OMS_REST, entityName: "darpan.hotwax.HotWaxOmsRestSourceConfig", pkField: "omsRestSourceConfigId",
              naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, extraSecretFields: ["headersJson"]],
-            [kind: NETSUITE_RESTLET, entityName: "darpan.reconciliation.NsRestletConfig", pkField: "nsRestletConfigId",
-             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, refFields: [nsAuthConfigId: NETSUITE_AUTH],
-             extraSecretFields: ["headersJson"]],
             [kind: NETSUITE_SUITEQL, entityName: "darpan.reconciliation.NsSuiteQlSourceQuery", pkField: "nsSuiteQlSourceQueryId",
              naturalKey: "description", refFields: [nsAuthConfigId: NETSUITE_AUTH, omsStatusConfigId: HOTWAX_OMS_REST], children: [
                     [entityName: "darpan.reconciliation.NsSuiteQlSourceQueryField", parentFields: ["nsSuiteQlSourceQueryId"],
@@ -201,7 +197,7 @@ class TransferSpecs {
              auditScheduleFields: ["scheduleExpr", "windowTimeZone"],
              versionPlainFields: ["ruleSetId", "chatSpaceId", "compareScopeId", "reconciliationRunId", "reconciliationMappingId"], children: [
                     [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
-                     orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
+                     orderBy: ["fileSide"], children: [
                             [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
                              parentFields: ["automationId", "fileSide"], orderBy: ["sequenceNum"]]]]]],
             // DAR-BE-161. Matched by id in its own version restore, else by entryKey within the target tenant; the importer
@@ -218,7 +214,7 @@ class TransferSpecs {
 
     /** The bundle list each top-level kind travels in. */
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
-            (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
+            (HOTWAX_OMS_REST): "connections", (NETSUITE_SUITEQL): "queries",
             (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
             (CHAT_SPACE): "chatSpaces", (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge",
             (SCRIPT): "scripts"].asImmutable()

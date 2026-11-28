@@ -888,9 +888,6 @@
                                         "$ref": "#/components/schemas/ListNsAuthConfigsRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/ListNsRestletConfigsRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/ListSftpServersRequest"
                                     },
                                     {
@@ -898,9 +895,6 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveNsAuthConfigRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/SaveNsRestletConfigRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveSftpServerRequest"
@@ -1320,11 +1314,9 @@
                                         "facade.SettingsFacadeServices.get#UserNotificationDefault": "#/components/schemas/GetUserNotificationDefaultRequest",
                                         "facade.SettingsFacadeServices.list#EnumOptions": "#/components/schemas/ListEnumOptionsRequest",
                                         "facade.SettingsFacadeServices.list#NsAuthConfigs": "#/components/schemas/ListNsAuthConfigsRequest",
-                                        "facade.SettingsFacadeServices.list#NsRestletConfigs": "#/components/schemas/ListNsRestletConfigsRequest",
                                         "facade.SettingsFacadeServices.list#SftpServers": "#/components/schemas/ListSftpServersRequest",
                                         "facade.SettingsFacadeServices.list#TenantChatSpaces": "#/components/schemas/ListTenantChatSpacesRequest",
                                         "facade.SettingsFacadeServices.save#NsAuthConfig": "#/components/schemas/SaveNsAuthConfigRequest",
-                                        "facade.SettingsFacadeServices.save#NsRestletConfig": "#/components/schemas/SaveNsRestletConfigRequest",
                                         "facade.SettingsFacadeServices.save#SftpServer": "#/components/schemas/SaveSftpServerRequest",
                                         "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
@@ -2248,9 +2240,6 @@
                                             "$ref": "#/components/schemas/ListNsAuthConfigsResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/ListNsRestletConfigsResponse"
-                                        },
-                                        {
                                             "$ref": "#/components/schemas/ListSftpServersResponse"
                                         },
                                         {
@@ -2258,9 +2247,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveNsAuthConfigResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SaveNsRestletConfigResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveSftpServerResponse"
@@ -21681,7 +21667,7 @@
                 "properties": {
                     "configTypeEnumId": {
                         "type": "string",
-                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,\n                SCFG_NS_AUTH, or SCFG_NS_RESTLET."
+                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH\n                or SCFG_NS_AUTH."
                     },
                     "configId": {
                         "type": "string",
@@ -27091,12 +27077,6 @@
                                         "systemMessageRemoteLabel": {
                                             "type": "string"
                                         },
-                                        "nsRestletConfigId": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigLabel": {
-                                            "type": "string"
-                                        },
                                         "sourceConfigId": {
                                             "type": "string"
                                         },
@@ -27335,7 +27315,8 @@
                         "type": "string"
                     },
                     "file1NsRestletConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Retired (DAR-BE-424): any value is refused."
                     },
                     "file1SourceConfigId": {
                         "type": "string"
@@ -27380,7 +27361,8 @@
                         "type": "string"
                     },
                     "file2NsRestletConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Retired (DAR-BE-424): any value is refused."
                     },
                     "file2SourceConfigId": {
                         "type": "string"
@@ -27624,12 +27606,6 @@
                                             "type": "string"
                                         },
                                         "systemMessageRemoteLabel": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigId": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigLabel": {
                                             "type": "string"
                                         },
                                         "sourceConfigId": {
@@ -30705,12 +30681,6 @@
                             
                         }
                     },
-                    "nsRestletConfigs": {
-                        "type": "array",
-                        "items": {
-                            
-                        }
-                    },
                     "systemRemotes": {
                         "type": "array",
                         "items": {
@@ -31862,12 +31832,6 @@
                                                 "type": "string"
                                             },
                                             "systemMessageRemoteLabel": {
-                                                "type": "string"
-                                            },
-                                            "nsRestletConfigId": {
-                                                "type": "string"
-                                            },
-                                            "nsRestletConfigLabel": {
                                                 "type": "string"
                                             },
                                             "sourceConfigId": {
@@ -33504,7 +33468,8 @@
                                     "type": "string"
                                 },
                                 "nsRestletConfigId": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Retired (DAR-BE-424): any value is refused."
                                 },
                                 "sftpServerId": {
                                     "type": "string"
@@ -35136,7 +35101,8 @@
                         "type": "string"
                     },
                     "file1NsRestletConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Retired (DAR-BE-424): any value is refused."
                     },
                     "file1SourceConfigId": {
                         "type": "string"
@@ -35173,7 +35139,8 @@
                         "type": "string"
                     },
                     "file2NsRestletConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Retired (DAR-BE-424): any value is refused."
                     },
                     "file2SourceConfigId": {
                         "type": "string"
@@ -35419,12 +35386,6 @@
                                             "type": "string"
                                         },
                                         "systemMessageRemoteLabel": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigId": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigLabel": {
                                             "type": "string"
                                         },
                                         "sourceConfigId": {
@@ -35748,12 +35709,6 @@
                                             "type": "string"
                                         },
                                         "systemMessageRemoteLabel": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigId": {
-                                            "type": "string"
-                                        },
-                                        "nsRestletConfigLabel": {
                                             "type": "string"
                                         },
                                         "sourceConfigId": {
@@ -36604,7 +36559,7 @@
                 "required": [
                     "nsAuthConfigId"
                 ],
-                "description": "Delete one tenant-owned NetSuite auth profile (DAR-BE-114). Refused, naming what is in the way,\n            while anything still signs in with it: RESTlet endpoints, NetSuite checks, saved runs. nsAuthConfigId is\n            referenced without a cascading FK, so deleting under them would surface later as a confusing \"not found\"\n            at run time. Owner-only, and never while shared with another tenant \u2014 the same rules as the Shopify and\n            HotWax deletes."
+                "description": "Delete one tenant-owned NetSuite auth profile (DAR-BE-114). Refused, naming what is in the way,\n            while anything still signs in with it: NetSuite checks, saved runs. nsAuthConfigId is\n            referenced without a cascading FK, so deleting under them would surface later as a confusing \"not found\"\n            at run time. Owner-only, and never while shared with another tenant \u2014 the same rules as the Shopify and\n            HotWax deletes."
             },
             "DeleteNsAuthConfigResult": {
                 "type": "object",
@@ -37449,179 +37404,6 @@
                     "result"
                 ]
             },
-            "ListNsRestletConfigsParams": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string"
-                    },
-                    "pageIndex": {
-                        "type": "integer"
-                    },
-                    "pageSize": {
-                        "type": "integer"
-                    }
-                },
-                "description": "List NetSuite endpoint configs joined with auth metadata."
-            },
-            "ListNsRestletConfigsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "pagination": {
-                        "type": "object",
-                        "properties": {
-                            "pageIndex": {
-                                "type": "integer"
-                            },
-                            "pageSize": {
-                                "type": "integer"
-                            },
-                            "totalCount": {
-                                "type": "integer"
-                            },
-                            "pageCount": {
-                                "type": "integer"
-                            }
-                        }
-                    },
-                    "restletConfigs": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "nsRestletConfigId": {
-                                    "type": "string"
-                                },
-                                "description": {
-                                    "type": "string"
-                                },
-                                "companyUserGroupId": {
-                                    "type": "string"
-                                },
-                                "companyLabel": {
-                                    "type": "string"
-                                },
-                                "endpointUrl": {
-                                    "type": "string"
-                                },
-                                "httpMethod": {
-                                    "type": "string"
-                                },
-                                "nsAuthConfigId": {
-                                    "type": "string"
-                                },
-                                "authDescription": {
-                                    "type": "string"
-                                },
-                                "authType": {
-                                    "type": "string"
-                                },
-                                "authIsActive": {
-                                    "type": "string"
-                                },
-                                "headersJson": {
-                                    "type": "string",
-                                    "description": "OC123: the custom headers, values included, only to those who may save\n                    the endpoint (run access, as save#NsRestletConfig); null for everyone else."
-                                },
-                                "headerNames": {
-                                    "type": "array",
-                                    "items": {
-                                        
-                                    },
-                                    "description": "OC123: the custom header names, for everyone."
-                                },
-                                "connectTimeoutSeconds": {
-                                    "type": "integer"
-                                },
-                                "readTimeoutSeconds": {
-                                    "type": "integer"
-                                },
-                                "isActive": {
-                                    "type": "string"
-                                },
-                                "isShared": {
-                                    "type": "boolean"
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "ListNsRestletConfigsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.list#NsRestletConfigs",
-                "x-darpan-method": "facade.SettingsFacadeServices.list#NsRestletConfigs",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.list#NsRestletConfigs"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/ListNsRestletConfigsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "ListNsRestletConfigsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.list#NsRestletConfigs. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/ListNsRestletConfigsResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "ListSftpServersParams": {
                 "type": "object",
                 "properties": {
@@ -38100,156 +37882,6 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveNsAuthConfigResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "SaveNsRestletConfigParams": {
-                "type": "object",
-                "properties": {
-                    "nsRestletConfigId": {
-                        "type": "string",
-                        "description": "DAR-BE-135: names an endpoint this tenant owns or was granted, to\n                update it. Leave it out to create one; the server mints the id."
-                    },
-                    "description": {
-                        "type": "string"
-                    },
-                    "endpointUrl": {
-                        "type": "string"
-                    },
-                    "httpMethod": {
-                        "type": "string"
-                    },
-                    "nsAuthConfigId": {
-                        "type": "string"
-                    },
-                    "headersJson": {
-                        "type": "string"
-                    },
-                    "connectTimeoutSeconds": {
-                        "type": "integer"
-                    },
-                    "readTimeoutSeconds": {
-                        "type": "integer"
-                    },
-                    "isActive": {
-                        "type": "boolean"
-                    }
-                },
-                "required": [
-                    "endpointUrl",
-                    "nsAuthConfigId"
-                ],
-                "description": "Create or update a NetSuite endpoint configuration bound to an auth config."
-            },
-            "SaveNsRestletConfigResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "savedRestletConfig": {
-                        "type": "object",
-                        "properties": {
-                            "nsRestletConfigId": {
-                                "type": "string"
-                            },
-                            "description": {
-                                "type": "string"
-                            },
-                            "endpointUrl": {
-                                "type": "string"
-                            },
-                            "httpMethod": {
-                                "type": "string"
-                            },
-                            "nsAuthConfigId": {
-                                "type": "string"
-                            },
-                            "headersJson": {
-                                "type": "string"
-                            },
-                            "connectTimeoutSeconds": {
-                                "type": "integer"
-                            },
-                            "readTimeoutSeconds": {
-                                "type": "integer"
-                            },
-                            "isActive": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "SaveNsRestletConfigRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.save#NsRestletConfig",
-                "x-darpan-method": "facade.SettingsFacadeServices.save#NsRestletConfig",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.save#NsRestletConfig"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/SaveNsRestletConfigParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "SaveNsRestletConfigResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.save#NsRestletConfig. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/SaveNsRestletConfigResult"
                     }
                 },
                 "required": [
@@ -40547,7 +40179,7 @@
                 "properties": {
                     "configTypeEnumId": {
                         "type": "string",
-                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,\n                SCFG_NS_AUTH, or SCFG_NS_RESTLET."
+                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH\n                or SCFG_NS_AUTH."
                     },
                     "configId": {
                         "type": "string"
@@ -43321,11 +42953,9 @@
         "facade.SettingsFacadeServices.get#UserNotificationDefault": "GetUserNotificationDefault",
         "facade.SettingsFacadeServices.list#EnumOptions": "ListEnumOptions",
         "facade.SettingsFacadeServices.list#NsAuthConfigs": "ListNsAuthConfigs",
-        "facade.SettingsFacadeServices.list#NsRestletConfigs": "ListNsRestletConfigs",
         "facade.SettingsFacadeServices.list#SftpServers": "ListSftpServers",
         "facade.SettingsFacadeServices.list#TenantChatSpaces": "ListTenantChatSpaces",
         "facade.SettingsFacadeServices.save#NsAuthConfig": "SaveNsAuthConfig",
-        "facade.SettingsFacadeServices.save#NsRestletConfig": "SaveNsRestletConfig",
         "facade.SettingsFacadeServices.save#SftpServer": "SaveSftpServer",
         "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",

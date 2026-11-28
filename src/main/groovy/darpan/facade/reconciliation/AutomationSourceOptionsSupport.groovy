@@ -128,8 +128,8 @@ class AutomationSourceOptionsSupport {
     /**
      * One option row per (accessible, active config row) x (enabled endpoint), across every
      * {@code SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY} type that has {@code SourceSystemConnector}
-     * rows keyed to its {@code configEntityName} — today HOTWAX_OMS and SHOPIFY_AUTH (NS_AUTH /
-     * NS_RESTLET have none; those keep their own non-endpoint-aware builders below, unchanged).
+     * rows keyed to its {@code configEntityName} — today HOTWAX_OMS and SHOPIFY_AUTH (NS_AUTH has
+     * none; it keeps its own non-endpoint-aware builder below, unchanged).
      *
      * <p>THE FIX: before this, every row for a config was stamped with the parent system's canonical
      * id (OMS / SHOPIFY) regardless of which endpoint it represented. The wizard filters this list by
@@ -205,8 +205,8 @@ class AutomationSourceOptionsSupport {
      * DAR-BE-058: NetSuite SuiteQL check definitions, so a run can be built over one from the
      * wizard instead of only from a data load.
      *
-     * <p>A dedicated builder rather than a CONFIG_TYPE_REGISTRY entry, following the NS_AUTH /
-     * NS_RESTLET precedent above. Registering the type would enrol these rows in cross-tenant
+     * <p>A dedicated builder rather than a CONFIG_TYPE_REGISTRY entry, following the NS_AUTH
+     * precedent above. Registering the type would enrol these rows in cross-tenant
      * config SHARING, which needs a DarpanSharedConfigType enumeration row and implies a
      * borrowing model these do not have: a check is a question about one tenant's data, cheap to
      * recreate, and it already points at an NsAuthConfig that IS shareable. The credential is the
@@ -279,40 +279,6 @@ class AutomationSourceOptionsSupport {
         } as List<Map<String, Object>>
     }
 
-    static List<Map<String, Object>> listNsRestletOptions(def ec) {
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return []
-        // DAR-BE-005 B5: owned rows plus rows shared to this tenant via ConfigTenantAccess — was
-        // owner-only findTenantScoped, so a shared NetSuite Restlet config appeared in Settings
-        // (editable) but never in this automation source picker. listAccessibleConfigRows applies
-        // no status filter; this builder never filtered by isActive either (isActive is surfaced
-        // as a response field, not filtered out), so there is nothing to preserve beyond the
-        // widened row set — unlike listNsAuthConfigOptions above.
-        List rows = SharedConfigAccessSupport
-                .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET)
-        return rows.collect { item ->
-            String label = readString(item, "description") ?: readString(item, "nsRestletConfigId")
-            // Every row this builder sees is a NetSuite Restlet config by construction (it reads only
-            // CONFIG_TYPE_NS_RESTLET rows) — no inference needed, and none of the old substring-match
-            // heuristic's misclassification risk if a description happened to contain another
-            // system's name.
-            String systemEnumId = NETSUITE_SYSTEM_ENUM_ID
-            [
-                    nsRestletConfigId: readString(item, "nsRestletConfigId"),
-                    description      : readString(item, "description"),
-                    endpointUrl      : readString(item, "endpointUrl"),
-                    httpMethod       : readString(item, "httpMethod") ?: "POST",
-                    nsAuthConfigId   : readString(item, "nsAuthConfigId"),
-                    sourceConfigId   : readString(item, "nsAuthConfigId"),
-                    sourceConfigType : SOURCE_CONFIG_TYPE_NETSUITE_AUTH,
-                    isActive         : readString(item, "isActive") ?: "Y",
-                    systemEnumId     : systemEnumId,
-                    systemLabel      : enumLabel(ec, systemEnumId),
-                    label            : label,
-            ].findAll { it.value != null }
-        } as List<Map<String, Object>>
-    }
-
     static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) {
         return remoteOptionsForType(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
     }
@@ -353,9 +319,8 @@ class AutomationSourceOptionsSupport {
      * registry gate ({@code SourceSystemConnector.enabled='Y'}) and the per-config decision
      * ({@link SourceEndpointAccessSupport#isEndpointEnabled}, where an absent decision means enabled).
      *
-     * <p>Returns {@code []} for a config type with no registered endpoints (NS_AUTH / NS_RESTLET
-     * today — {@code listNsAuthConfigOptions}/{@code listNsRestletOptions} are untouched, separate
-     * builders) or with no active tenant.</p>
+     * <p>Returns {@code []} for a config type with no registered endpoints (NS_AUTH today —
+     * {@code listNsAuthConfigOptions} is a separate builder) or with no active tenant.</p>
      */
     protected static List<Map<String, Object>> listEnabledConfigEndpoints(def ec, String configTypeEnumId) {
         Map<String, String> type = SharedConfigAccessSupport.configType(configTypeEnumId)

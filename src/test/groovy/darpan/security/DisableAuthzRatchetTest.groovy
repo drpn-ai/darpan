@@ -139,8 +139,6 @@ class DisableAuthzRatchetTest {
                     }
                 }
 
-        System.out.println("[DisableAuthzRatchetTest] bare .disableAuthz( count: ${count}/${BASELINE} — sites: ${violations}")
-
         assertTrue(count == BASELINE,
                 "Bare .disableAuthz( count ${count} does not match ratchet BASELINE ${BASELINE}. " +
                 "If count > BASELINE: a new unscoped call was added outside the allowlist — route it through TenantScopedFinder. " +
@@ -187,7 +185,8 @@ class DisableAuthzRatchetTest {
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
             // 66 again since DAR-BE-338: save#Automation and delete#Automation clear the automation's own filter rows again.
-            "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
+            // 65 since DAR-OPS-029 S22: save#Automation's saved-run guard reuses the automation row it already read.
+            "darpan service+screen XML .disableAuthz("            : 65, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             // 35 again since DAR-BE-338: save#Automation creates the automation's own filter rows again.
             // 36 since DAR-BE-374 (re-baselined in 3.5.3): IdIndexFacadeServices save#TenantIdIndexField stores the tenant's own
             // field after requireActiveTenantWriteAccess, companyUserGroupId set to the active tenant.
@@ -254,7 +253,6 @@ class DisableAuthzRatchetTest {
                 "ratchet scopes drifted from the baselines: counted ${counts.keySet()}, baselined ${COMPONENT_BASELINES.keySet()}")
         List<String> mismatches = COMPONENT_BASELINES.findAll { String scope, Integer baseline -> counts[scope] != baseline }
                 .collect { String scope, Integer baseline -> "${scope}: ${counts[scope]} vs baseline ${baseline} — sites: ${sites[scope]}".toString() }
-        System.out.println("[DisableAuthzRatchetTest] component/XML counts: ${counts}")
         assertTrue(mismatches.isEmpty(),
                 "Authz-bypass count changed. If it grew: a new bypass was added — route reads through TenantScopedFinder " +
                 "(findGlobalUnscoped with a reason, or a tenant-scoped finder) and justify any service-call bypass. " +

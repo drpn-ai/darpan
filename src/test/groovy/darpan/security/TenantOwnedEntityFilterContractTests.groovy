@@ -97,6 +97,11 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.reconciliation.TenantStreakFact": "DARPAN_SCOPE_TENANT_STREAK_FACT",
     ].asImmutable()
 
+    /** DAR-BE-320: the morning read the audit checks of one day share (shipped in 3.5.3). */
+    static final Map<String, String> DAR_BE_320_FILTERS = [
+            "darpan.audit.AuditSharedRead": "DARPAN_SCOPE_AUD_SHARED_READ",
+    ].asImmutable()
+
     /** DAR-BE-265: the download trail carries the tenant the file was read for. */
     static final Map<String, String> DAR_BE_265_FILTERS = [
             "darpan.admin.DataExportLog": "DARPAN_SCOPE_DATA_EXPORT_LOG",
@@ -111,11 +116,11 @@ class TenantOwnedEntityFilterContractTests {
     // DAR-BE-318 plan 2: every moqui-rules row and judge config row belongs to one tenant (15 rules.* + 5 darpan.judge.*)
     // 3.4.0 shipped all 32 (DAR-BE-318 plan 2: 15 rules.* + 5 darpan.judge.*; plan 3a: 2 darpan.dataset.*;
     // DAR-BE-328 plans 1 and 3: 7 darpan.peak.* / darpan.pulse.*; DAR-BE-334: 3 jexl.script.*)
-    // DAR-BE-320: the shared morning read (AuditSharedRead), filtered from the day the entity was added
+    // 3.5.3 shipped DAR-BE-320's AuditSharedRead row (pinned in DAR_BE_320_FILTERS)
     static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS + DAR_BE_320_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [
@@ -137,8 +142,6 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.reconciliation.SlackPostedMessage"             : "child of a run result, no tenant column",
             "darpan.reconciliation.ReconciliationRunNotifySubscription": "keyed by the caller's own userId, no tenant column " +
                     "(documented in SecuritySeedData.xml)",
-            "darpan.reconciliation.RunDataDocument"                : "child of ReconciliationRun, no tenant column",
-            "darpan.reconciliation.RunSystemInstance"              : "child of ReconciliationRun, no tenant column",
             // DAR-BE-306: platform configuration about a tenant, written by super admins, read by the retention sweep.
             "darpan.retention.TenantRetentionPeriod"               : "super-admin retention override keyed by the tenant; the sweep reads it " +
                     "through findGlobalUnscoped with an explicit tenantUserGroupId, and no tenant user ever reads it",

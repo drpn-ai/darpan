@@ -215,4 +215,34 @@
         </actions>
     </service>
 
+    <!-- DAR-OPS-029 S27 (D19): registered migration LLM_WORKSPACE_REMOTES (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="LlmWorkspaceRemotes" authenticate="false" allow-remote="false">
+        <description>One-time (DAR-OPS-029 S27): deletes the SystemMessageRemote rows the deleted LLM provider settings wrote
+            (OPENAI_RULE_WORKSPACE, GEMINI_RULE_WORKSPACE, RULE_WORKSPACE_LLM_ACTIVE), an LLM API key among them. Nothing has read
+            them since "Rule Workspace DRL generation" went. The dry run counts them. Idempotent: a second run finds none.
+            Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="moqui.service.message.SystemMessageRemote" list="remoteList" for-update="true">
+                <econdition field-name="systemMessageRemoteId" operator="in"
+                        from="['OPENAI_RULE_WORKSPACE', 'GEMINI_RULE_WORKSPACE', 'RULE_WORKSPACE_LLM_ACTIVE']"/>
+            </entity-find>
+            <set field="rowsUpdated" from="remoteList.size()" type="Integer"/>
+            <if condition="!dryRun">
+                <iterate list="remoteList" entry="remote"><entity-delete value-field="remote"/></iterate>
+            </if>
+            <set field="messages" from="[(dryRun ? 'Would delete ' : 'Deleted ') + rowsUpdated + ' LLM provider setting row(s).']"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
 </services>

@@ -102,4 +102,11 @@
             description="Let an acknowledgement have no note (DAR-UI-152): AuditFindingAcknowledgement.note becomes nullable.
                 Schema only, no row changes. Idempotent: a nullable column is left alone."/>
 
+    <darpan.migration.DarpanMigration migrationId="LLM_WORKSPACE_REMOTES" componentName="darpan"
+            serviceName="migration.MigrationServices.migrate#LlmWorkspaceRemotes"
+            sequenceNum="190" supportsDryRun="Y" enabled="N"
+            description="Delete the SystemMessageRemote rows (OPENAI_RULE_WORKSPACE, GEMINI_RULE_WORKSPACE, RULE_WORKSPACE_LLM_ACTIVE)
+                the deleted LLM provider settings wrote, an LLM API key among them (DAR-OPS-029 S27). Nothing reads them. The dry run
+                counts them. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
+
 </entity-facade-xml>

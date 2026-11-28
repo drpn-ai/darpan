@@ -1507,7 +1507,7 @@ class AutomationExecutionSupport {
                     diffFile: resolveDiffFile(ec, reconcileResult), file1Source: file1Source, file2Source: file2Source,
                     file1Result: file1Result, file2Result: file2Result, runResultId: runResultId, stepCtx: stepCtx])
             // DAR-BE-157: rows a HIDE rule dropped are not differences this run reports.
-            darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(reconcileResult, (Map) concluded?.hiddenByBucket, "differenceCount", (Collection) concluded?.repeatSidesCleared)
+            darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(reconcileResult, (Map) concluded?.hiddenByBucket)
         } catch (Throwable ignored) {
             if (ec?.message?.hasError()) ec.message.clearErrors()
         }

@@ -38,7 +38,7 @@ class AppContentRules {
     static final Pattern ANCHOR_ID = Pattern.compile(/^[a-z0-9-]{1,80}$/)
     private static final Pattern TOKEN = Pattern.compile(/\{[A-Za-z0-9_]+\}/)
 
-    /** Copied verbatim from darpan-ui's mascotVoice.spec.ts PERFORMED_FLAVOUR: a mood performed, not earned. */
+    /** Copied verbatim from darpan-ui's src/lib/mascotContent.ts PERFORMED_FLAVOUR: a mood performed, not earned. */
     static final List<Pattern> PERFORMED_FLAVOUR = [
             Pattern.compile(/\bsorry\b/, Pattern.CASE_INSENSITIVE),
             Pattern.compile(/\bawkward\b/, Pattern.CASE_INSENSITIVE),

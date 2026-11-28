@@ -1,11 +1,9 @@
 package darpan.facade.reconciliation
 
-import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
-import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.JsonSchemaUtil
 
 import static darpan.common.ValueSupport.boundedInt
@@ -13,15 +11,6 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeLower
 
 class ReconciliationMappingSupport {
-
-    static boolean ensureMappingTables(def ec) {
-        [
-                JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME,
-                DarpanEntityConstants.RECONCILIATION_MAPPING,
-                DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER
-        ].each { String entityName -> ensureEntityTable(ec, entityName) }
-        return true
-    }
 
     static List<Map<String, Object>> buildEditableMappingMembers(def ec, List mappingMembers) {
         List members = mappingMembers ?: []
@@ -318,12 +307,6 @@ class ReconciliationMappingSupport {
     protected static String resolveSystemLabel(def ec, String enumId) {
         if (!enumId) return "A configured system"
         return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
-    }
-
-    protected static void ensureEntityTable(def ec, String entityName) {
-        String groupName = ec.entity.getEntityGroupName(entityName) ?: "default"
-        def datasourceFactory = ec.entity.getDatasourceFactory(groupName)
-        datasourceFactory?.checkAndAddTable(entityName)
     }
 
     protected static boolean mappingRowMatches(Map<String, Object> row, String search) {

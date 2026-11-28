@@ -668,7 +668,6 @@
             <set field="schema2IdValue" from="((schema2Id)?.toString()?.trim())"/>
             <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema1FieldPath)"/>
             <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema2FieldPath)"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingNameValue">
                 <message error="true">mappingName is required</message>
             </if>
@@ -1750,7 +1749,6 @@
         </out-parameters>
         <actions>
             <set field="mappingIdValue" from="((reconciliationMappingId)?.toString()?.trim())"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingIdValue">
                 <message error="true">reconciliationMappingId is required</message>
             </if>
@@ -1821,7 +1819,6 @@
             <set field="schema2IdValue" from="((schema2Id)?.toString()?.trim())"/>
             <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema1FieldPath)"/>
             <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema2FieldPath)"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingIdValue">
                 <message error="true">reconciliationMappingId is required</message>
             </if>

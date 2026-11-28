@@ -3,6 +3,7 @@ package darpan.security
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -202,21 +203,52 @@ class TenantOwnedEntityFilterContractTests {
         return filterRows(componentRoot().resolve("darpan/data/SecuritySeedData.xml"))
     }
 
-    /** Full entity name -> declared field names, across every component's entity XML. */
+    /**
+     * Full entity name -> declared field names, across every component's entity XML: an entity's own fields, then those
+     * its extend-entity elements add (S99-204), read after every file so the component order cannot drop either.
+     */
     private static Map<String, List<String>> entityFields() {
+        return entityFields(componentRoot())
+    }
+
+    private static Map<String, List<String>> entityFields(Path root) {
         Map<String, List<String>> out = [:]
-        Files.newDirectoryStream(componentRoot()).each { Path component ->
+        Map<String, List<String>> extended = [:]
+        Files.newDirectoryStream(root).each { Path component ->
             Path entityDir = component.resolve("entity")
             if (!Files.isDirectory(entityDir)) return
             Files.newDirectoryStream(entityDir, "*.xml").each { Path file ->
-                parse(file).children().findAll { it instanceof Node && it.name() == "entity" }.each { Node e ->
+                parse(file).children().findAll { it instanceof Node && it.name() in ["entity", "extend-entity"] }.each { Node e ->
                     String full = "${e.attribute('package')}.${e.attribute('entity-name')}".toString()
-                    out[full] = e.children().findAll { it instanceof Node && it.name() == "field" }
+                    List<String> names = e.children().findAll { it instanceof Node && it.name() == "field" }
                             .collect { (it as Node).attribute("name") as String }
+                    if (e.name() == "entity") out[full] = names
+                    else extended.computeIfAbsent(full) { [] }.addAll(names)
                 }
             }
         }
+        extended.each { String full, List<String> names -> out[full] = ((out[full] ?: []) + names).unique() }
         return out
+    }
+
+    /**
+     * S99-204: a companyUserGroupId that an extend-entity adds (darpan stamps the moqui-rules and moqui-jexl tables this
+     * way) counts as the entity's own, whichever component is read first, and an entity only extended here (its base is
+     * the framework's) is seen too, so the completeness check above cannot miss either.
+     */
+    @Test
+    void anExtendEntityFieldCountsAsTheEntitysOwn(@TempDir Path root) {
+        entityXml(root, "a-extends", '''<extend-entity entity-name="Thing" package="fx"><field name="companyUserGroupId" type="id"/></extend-entity>
+                <extend-entity entity-name="FrameworkOwned" package="moqui.fx"><field name="companyUserGroupId" type="id"/></extend-entity>''')
+        entityXml(root, "b-defines", '''<entity entity-name="Thing" package="fx"><field name="thingId" type="id" is-pk="true"/></entity>''')
+        Map<String, List<String>> fields = entityFields(root)
+        assertEquals(["thingId", "companyUserGroupId"], fields["fx.Thing"], "the base's fields, then the extension's")
+        assertEquals(["companyUserGroupId"], fields["moqui.fx.FrameworkOwned"], "an entity only extended here")
+    }
+
+    private static void entityXml(Path root, String component, String body) {
+        Path dir = Files.createDirectories(root.resolve(component).resolve("entity"))
+        Files.writeString(dir.resolve("Fixture.xml"), "<entities>${body}</entities>".toString())
     }
 
     @Test

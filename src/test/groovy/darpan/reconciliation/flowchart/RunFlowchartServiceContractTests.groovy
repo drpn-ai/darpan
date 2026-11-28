@@ -1,5 +1,6 @@
 package darpan.reconciliation.flowchart
 
+import darpan.contract.ApiContractGenerator
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
 
@@ -31,18 +32,39 @@ class RunFlowchartServiceContractTests {
         assertTrue(question."in-parameters".parameter.any { it.attributes().get("name") == "systemTenantRun" })
 
         // Every service file in the component, not only the facade: a remote service anywhere that
-        // declares a walker-only input would let a browser name a server file.
+        // declares a walker-only input would let a browser name a server file. Its inputs as Moqui merges them
+        // (S99-056): one inherited through <implements> counts too.
         int checked = 0
+        def index = new ApiContractGenerator.ServiceIndex(root().toFile())
         Files.walk(root().resolve("service")).filter { it.toString().endsWith(".xml") }.each { Path file ->
             new XmlParser(false, false).parse(file.toFile()).service.findAll { it.attributes().get("allow-remote") == "true" }.each { svc ->
                 checked++
-                List<String> names = svc."in-parameters".parameter.collect { it.attributes().get("name") as String }
+                List<String> names = index.mergedParameters(svc, "in-parameters", file.fileName.toString())
+                        .collect { it.attributes().get("name") as String }
                 WALKER_ONLY.each { String p ->
                     assertFalse(names.contains(p), "${file.fileName} ${svc.attributes().get('verb')}#${svc.attributes().get('noun')} must not accept ${p}")
                 }
             }
         }
         assertTrue(checked > 50, "expected to check the facade's remote services, checked ${checked}")
+    }
+
+    /**
+     * S99-056: the question is the Run button's run plus the walker's inputs. It takes run#SavedRunDiff's parameters
+     * through {@code <implements>}, so a parameter added to the Run button reaches the question too, and answers the same.
+     */
+    @Test
+    void theQuestionTakesEveryRunButtonInputAndAnswersTheSame() {
+        def index = new ApiContractGenerator.ServiceIndex(root().toFile())
+        def question = index.find("reconciliation.ReconciliationFlowchartServices.run#FlowchartQuestion")
+        def runButton = index.find("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+        Closure<List> merged = { svc, String kind -> index.mergedParameters(svc, kind, "test") }
+        List<String> runButtonIn = merged(runButton, "in-parameters").collect { it.attributes().get("name") as String }
+        List<String> questionIn = merged(question, "in-parameters").collect { it.attributes().get("name") as String }
+
+        assertEquals([], runButtonIn - questionIn, "run#FlowchartQuestion lacks run#SavedRunDiff inputs")
+        assertEquals(merged(runButton, "out-parameters")*.toString(), merged(question, "out-parameters")*.toString())
+        WALKER_ONLY.each { String p -> assertFalse(runButtonIn.contains(p), "run#SavedRunDiff must not accept ${p}") }
     }
 
     /**

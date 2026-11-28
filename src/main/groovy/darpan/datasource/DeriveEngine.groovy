@@ -12,7 +12,8 @@ import reconciliation.rule.RuleEngineSupport
 /**
  * DAR-BE-176. A derive step's rows (DeriveRules) as a Drools rule base: one rule per row from a fixed template whose
  * only variable parts are the row's number and its salience, so no definition text ever reaches the DRL. Rows fire in
- * order on each record; a rule does not update() its fact, so conditions are read once, on the record as it entered.
+ * order on each record, and a row's conditions see what the rows before it set (exactly as applying the rows in order
+ * does: DeriveRulesTests.aRowsWhenSeesWhatAnEarlierRowOfTheStepSet, droolsWritesWhatTheRowsAppliedInOrderWrite).
  *
  * Built once per run and closed after it, with its own ReleaseId (the ConclusionTreeEngine pattern: no container
  * outlives its run, and two builds never swap modules). Every fire goes through RuleEngineSupport.fireAllRulesBounded;
@@ -41,14 +42,15 @@ class DeriveEngine implements Closeable {
         drl.append("package ${PACKAGE}\n")
         drl.append("import java.util.Map\n")
         drl.append("global java.util.List rules\n")
+        drl.append("global java.lang.Long referenceMillis\n")
         for (int i = 0; i < count; i++) {
             drl.append("\nrule \"row${i}\"\n")
             drl.append("    salience ${count - i}\n")
             drl.append("when\n")
             drl.append("    \$r : Map()\n")
-            drl.append("    eval(darpan.datasource.DeriveRules.matches(\$r, (Map) rules.get(${i})))\n")
+            drl.append("    eval(darpan.datasource.DeriveRules.matches(\$r, (Map) rules.get(${i}), referenceMillis))\n")
             drl.append("then\n")
-            drl.append("    darpan.datasource.DeriveRules.apply(\$r, (Map) rules.get(${i}));\n")
+            drl.append("    darpan.datasource.DeriveRules.apply(\$r, (Map) rules.get(${i}), referenceMillis);\n")
             drl.append("end\n")
         }
         return drl.toString()
@@ -79,19 +81,33 @@ class DeriveEngine implements Closeable {
         }
     }
 
-    /** Fires every row on every record, in place. */
-    void derive(List<Map> records, String label) {
+    /**
+     * Fires every row on every record, in place. referenceMillis is the run's reference time (its window end), which
+     * AFTER_NOW conditions compare against (OC178); a caller with no run leaves it null and gets now, read once per batch.
+     */
+    void derive(List<Map> records, String label, Long referenceMillis = null) {
         if (!records) return
         KieSession session = container.newKieSession()
         try {
             session.setGlobal("rules", rules)
+            session.setGlobal("referenceMillis", referenceMillis != null ? referenceMillis : System.currentTimeMillis())
             records.each { session.insert(it) }
-            Map<String, Object> fired = RuleEngineSupport.fireAllRulesBounded(session, label)
-            if (fired.halted) {
-                throw new IllegalStateException("Derive rules ran past ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms and were halted; no records were written")
-            }
+            requireComplete(RuleEngineSupport.fireAllRulesBounded(session, label))
         } finally {
             session.dispose()
+        }
+    }
+
+    /**
+     * A batch that was halted, or that reached the rule-fire cap with rows possibly left unfired, wrote partial records:
+     * fail, so nothing is written (OC173: the cap used to return quietly and leave the later records underived).
+     */
+    static void requireComplete(Map<String, Object> fired) {
+        if (fired.halted) {
+            throw new IllegalStateException("Derive rules ran past ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms and were halted; no records were written")
+        }
+        if ((fired.fired as int) >= RuleEngineSupport.MAX_RULE_FIRES) {
+            throw new IllegalStateException("Derive rules reached the ${RuleEngineSupport.MAX_RULE_FIRES}-fire cap, so some rows may not have run; no records were written")
         }
     }
 

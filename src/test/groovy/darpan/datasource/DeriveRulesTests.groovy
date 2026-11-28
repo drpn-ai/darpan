@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -122,6 +123,27 @@ class DeriveRulesTests {
     }
 
     /**
+     * DAR-OPS-029 S15b (QA): when a row's `when` is read. Row 2 asks about a field row 1 set in the same step; the engine and
+     * the rows applied in order must agree on it.
+     */
+    @Test
+    void aRowsWhenSeesWhatAnEarlierRowOfTheStepSet() {
+        List<Map> rules = [[set: "flag", value: [literal: "Y"]],
+                           [set: "hit", when: [field: "flag", op: "IN", values: ["Y"]], value: [literal: "yes"]]]
+        Map plain = [id: 1]
+        rules.each { Map rule -> if (DeriveRules.matches(plain, rule)) DeriveRules.apply(plain, rule) }
+        Map viaDrools = [id: 1]
+        DeriveEngine engine = DeriveEngine.compile(rules)
+        try {
+            engine.derive([viaDrools], "when-timing")
+        } finally {
+            engine.close()
+        }
+        assertEquals(plain, viaDrools)
+        assertEquals("yes", viaDrools.hit)
+    }
+
+    /**
      * DAR-OPS-029 S15b, lens E (no silent false): a missing field is BLANK, on purpose and in every op. IN and MATCHES do not
      * hold, NOT_IN does; a path through a list that reaches nothing is BLANK and NOT_IN anything. Numbers compare as numbers.
      */
@@ -138,6 +160,58 @@ class DeriveRulesTests {
         assertTrue(RecordConditions.matches(r, [field: "order.lines[*].sku", op: "NOT_IN", values: ["A"]]))
         assertFalse(RecordConditions.matches(r, [field: "order.lines[*].sku", op: "IN", values: ["A"]]))
         assertTrue(RecordConditions.matches([qty: 1], [field: "qty", op: "IN", values: ["1.0"]]), "1, \"1\" and 1.0 are one value")
+    }
+
+    /** OC173: a batch that reached the rule-fire cap may have rows left unfired, so it fails and writes nothing. */
+    @Test
+    void aBatchThatReachedTheFireCapFailsInsteadOfWritingPartialRecords() {
+        int cap = reconciliation.rule.RuleEngineSupport.MAX_RULE_FIRES
+        DeriveEngine.requireComplete([fired: cap - 1, halted: false])
+        assertTrue(assertThrows(IllegalStateException) { DeriveEngine.requireComplete([fired: cap, halted: false]) }.message.contains("fire cap"))
+        assertTrue(assertThrows(IllegalStateException) { DeriveEngine.requireComplete([fired: 3, halted: true]) }.message.contains("halted"))
+    }
+
+    /** OC174: a text with a leading zero is text: id "007" is not id "7"; "0", "0.5" and "-0.5" are still numbers. */
+    @Test
+    void aLeadingZeroKeepsATextAText() {
+        assertFalse(RecordConditions.same("007", 7))
+        assertFalse(RecordConditions.same("007", "7"))
+        assertFalse(RecordConditions.matches([id: "007"], [field: "id", op: "IN", values: ["7"]]))
+        assertTrue(RecordConditions.matches([id: "007"], [field: "id", op: "NOT_IN", values: [7]]))
+        assertFalse(RecordConditions.same("-01", -1))
+        assertTrue(RecordConditions.same("7", 7.0))
+        assertTrue(RecordConditions.same("0", 0))
+        assertTrue(RecordConditions.same("0.5", 0.5))
+        assertTrue(RecordConditions.same("-0.5", new BigDecimal("-0.50")))
+    }
+
+    /** OC177 (Aditi 2026-11-28): a present amount that is not a number makes multiply/sum unknown; a blank still counts as 0. */
+    @Test
+    void anAmountThatIsNotANumberMakesTheArithmeticUnknownNotZero() {
+        Map line = [price: "\$5", qty: 2, blankPrice: "", items: [[amount: "1.50"], [amount: "n/a"]], ok: [[amount: "1.50"], [amount: null]]]
+        assertNull(DeriveRules.valueOf(line, [fn: "multiply", args: [[copy: "price"], [copy: "qty"]]]))
+        assertEquals(new BigDecimal("0"), DeriveRules.valueOf(line, [fn: "multiply", args: [[copy: "blankPrice"], [copy: "qty"]]]))
+        assertNull(DeriveRules.valueOf(line, [fn: "sum", args: [[copy: "items[*].amount"]]]))
+        assertEquals(new BigDecimal("1.50"), DeriveRules.valueOf(line, [fn: "sum", args: [[copy: "ok[*].amount"]]]))
+    }
+
+    /** OC178 (Aditi 2026-11-28): AFTER_NOW compares against the run's reference time, so a replay reads the same. */
+    @Test
+    void afterNowReadsTheRunsReferenceTimeNotTheClock() {
+        long y2000 = java.time.Instant.parse("2000-01-01T00:00:00Z").toEpochMilli()
+        Map past = [thru: "2001-01-01T00:00:00Z"]
+        assertTrue(RecordConditions.matches(past, [field: "thru", op: "AFTER_NOW"], y2000), "after the run's time, though long past")
+        assertFalse(RecordConditions.matches(past, [field: "thru", op: "AFTER_NOW"]), "with no run time, the clock")
+        Map r = [ids: [[value: "OLD", thru: "2001-01-01T00:00:00Z"], [value: "NEW"]]]
+        List<Map> rules = [[set: "active", value: [fn: "firstWhere", list: "ids", field: "value",
+                                                   when: [[field: "thru", op: "AFTER_NOW"]]]]]
+        DeriveEngine engine = DeriveEngine.compile(rules)
+        try {
+            engine.derive([r], "reference-time", y2000)
+        } finally {
+            engine.close()
+        }
+        assertEquals("OLD", r.active, "the identification active at the run's time")
     }
 
     private static Map deepCopy(Map m) {

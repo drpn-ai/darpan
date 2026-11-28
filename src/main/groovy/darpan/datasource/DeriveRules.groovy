@@ -8,7 +8,7 @@ import java.time.Instant
  * and fires them; this class is what each rule calls.
  *
  *   set    the field written (one word)
- *   when   RecordConditions, read on the record as it entered the step; absent = always
+ *   when   RecordConditions, read on the record as the rows before this one left it; absent = always
  *   value  {literal}, {copy: path}, {map: {..}, from: path, default}, or {fn, args: [values], sep}; a copy path through a
  *          list (`opps[*].method`) gives the list of every value it reaches
  *          fn: text (trimmed text, blank = null), decimal (text that parses as a number becomes one; anything else is
@@ -19,12 +19,14 @@ import java.time.Instant
  *          trimmed, once each, sorted, joined by sep (default ","); none gives empty text), first (a list's first value,
  *          null when empty; any other value itself), atLeast (true when the first arg is a number at least the second),
  *          firstWhere {list, when, field} (field of the list's first element matching when, else null), multiply and sum
- *          (numbers; blank counts as 0; sum flattens lists), daysBetween (whole days from the second epoch-millis arg to
+ *          (numbers; a blank arg counts as 0, a present arg that is not a number makes the result null, unknown, so a "$5"
+ *          price is a difference, never a silent 0 (Aditi 2026-11-28, OC177); sum flattens lists), daysBetween (whole days from the second epoch-millis arg to
  *          the first, floored; null unless both are numbers),
  *          without (the first arg's list less every value equal to a later arg); join flattens list args
  *
  * Rows fire in order, so a later row's value may read a field an earlier row set, and a later row for the same field
- * overrides an earlier one (a default first, the cases after). Pure.
+ * overrides an earlier one (a default first, the cases after). Pure: AFTER_NOW in a condition reads the run's reference
+ * time, never the clock, when the run passes one (OC178).
  */
 class DeriveRules {
 
@@ -34,15 +36,15 @@ class DeriveRules {
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
     private static final String PATH = RecordConditions.FIELD
 
-    static boolean matches(Map record, Map rule) {
-        return RecordConditions.matches(record, rule.when)
+    static boolean matches(Map record, Map rule, Long referenceMillis = null) {
+        return RecordConditions.matches(record, rule.when, referenceMillis)
     }
 
-    static void apply(Map record, Map rule) {
-        record.put((String) rule.set, valueOf(record, (Map) rule.value))
+    static void apply(Map record, Map rule, Long referenceMillis = null) {
+        record.put((String) rule.set, valueOf(record, (Map) rule.value, referenceMillis))
     }
 
-    static Object valueOf(Map record, Map v) {
+    static Object valueOf(Map record, Map v, Long referenceMillis = null) {
         if (v.containsKey("literal")) return v.literal
         if (v.copy != null) {
             String path = (String) v.copy
@@ -53,7 +55,7 @@ class DeriveRules {
             Map m = (Map) v.map
             return key != null && m.containsKey(key.toString()) ? m.get(key.toString()) : v.get("default")
         }
-        List<Object> args = ((v.args ?: []) as List).collect { Object a -> a instanceof Map ? valueOf(record, (Map) a) : a }
+        List<Object> args = ((v.args ?: []) as List).collect { Object a -> a instanceof Map ? valueOf(record, (Map) a, referenceMillis) : a }
         Object first = args ? args[0] : null
         switch (v.fn) {
             case "text":
@@ -97,13 +99,14 @@ class DeriveRules {
             case "firstWhere":
                 // A path to a list gives the list as one value: its elements are what is searched.
                 Object found = JsonPathValues.values(record, (String) v.list).collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
-                        .find { it instanceof Map && RecordConditions.matches((Map) it, v.when) }
+                        .find { it instanceof Map && RecordConditions.matches((Map) it, v.when, referenceMillis) }
                 return found == null ? null : JsonPathValues.value(found, (String) v.field)
             case "multiply":
-                return args.inject(BigDecimal.ONE) { BigDecimal p, Object a -> p * zeroIfBlank(a) }
+                List<BigDecimal> factors = args.collect { amountOf(it) }
+                return factors.contains(null) ? null : factors.inject(BigDecimal.ONE) { BigDecimal p, BigDecimal a -> p * a }
             case "sum":
-                return args.collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
-                        .inject(BigDecimal.ZERO) { BigDecimal t, Object a -> t + zeroIfBlank(a) }
+                List<BigDecimal> terms = args.collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }.collect { amountOf(it) }
+                return terms.contains(null) ? null : terms.inject(BigDecimal.ZERO) { BigDecimal t, BigDecimal a -> t + a }
             case "daysBetween":
                 if (!(first instanceof Number) || !(args.size() > 1 && args[1] instanceof Number)) return null
                 return Math.floorDiv(((Number) first).longValue() - ((Number) args[1]).longValue(), 86_400_000L)
@@ -115,10 +118,12 @@ class DeriveRules {
         }
     }
 
-    /** A number for arithmetic: blank (or not a number) counts as 0, as a missing price or quantity does. */
-    private static BigDecimal zeroIfBlank(Object v) {
-        BigDecimal n = RecordConditions.isBlank(v) ? null : parseDecimal(v)
-        return n ?: BigDecimal.ZERO
+    /**
+     * A number for arithmetic: blank counts as 0, as a missing price or quantity does; a present value that is not a number
+     * (or is out of bounds) is unknown, null, and makes the whole result unknown (OC177).
+     */
+    private static BigDecimal amountOf(Object v) {
+        return RecordConditions.isBlank(v) ? BigDecimal.ZERO : parseDecimal(v)
     }
 
     static Object epochMillis(Object v) {
@@ -129,7 +134,7 @@ class DeriveRules {
     /**
      * Bounds on a number a value may parse to. new BigDecimal reads exponents ("1e999999999") for free, but adding it to 1
      * or printing it plainly builds a billion digits: a value outside these bounds is not a number here, so arithmetic
-     * counts it as 0 and the conversions keep it as it came.
+     * gives unknown (null) and the conversions keep it as it came.
      */
     static final int MAX_DECIMAL_SCALE = 100
     static final int MAX_DECIMAL_DIGITS = 100

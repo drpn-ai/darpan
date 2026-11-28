@@ -10,7 +10,9 @@ package darpan.datasource
  * NOT_IN and BLANK when none does (a path that reaches nothing is BLANK and NOT_IN anything).
  *
  * MATCHES {values: [one pattern, up to 200 characters]}: the value's trimmed text matches it whole. AFTER_NOW: the value
- * is an ISO instant (or epoch millis) later than now; anything else is not. Pure but for the clock.
+ * is an ISO instant (or epoch millis) later than the reference time; anything else is not. The reference time is the
+ * run's (its window end, DAR-OPS-029 OC178), so a replay reads the same; only a caller with no run falls back to now.
+ * A text with a leading zero ("007") is text, not the number 7 (OC174): ids keep their zeros.
  */
 class RecordConditions {
 
@@ -19,12 +21,12 @@ class RecordConditions {
     private static final Map<String, java.util.regex.Pattern> PATTERNS = new java.util.concurrent.ConcurrentHashMap<>()
     static final String FIELD = /[A-Za-z_][A-Za-z0-9_]*(\[\*\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\*\])?){0,7}/
 
-    static boolean matches(Map record, Object conditions) {
+    static boolean matches(Map record, Object conditions, Long referenceMillis = null) {
         if (conditions == null) return true
-        if (conditions instanceof List) return ((List) conditions).every { matches(record, it) }
+        if (conditions instanceof List) return ((List) conditions).every { matches(record, it, referenceMillis) }
         Map c = (Map) conditions
-        if (c.any instanceof List) return ((List) c.any).any { matches(record, it) }
-        if (c.all instanceof List) return ((List) c.all).every { matches(record, it) }
+        if (c.any instanceof List) return ((List) c.any).any { matches(record, it, referenceMillis) }
+        if (c.all instanceof List) return ((List) c.all).every { matches(record, it, referenceMillis) }
         String field = (String) c.field
         if (field.contains("[*]")) {
             List<Object> found = JsonPathValues.values(record, field)
@@ -35,7 +37,7 @@ class RecordConditions {
                 case "IN": return found.any(listed)
                 case "NOT_IN": return !found.any(listed)
                 case "MATCHES": return found.any { matchesPattern(it, c) }
-                case "AFTER_NOW": return found.any { afterNow(it) }
+                case "AFTER_NOW": return found.any { afterNow(it, referenceMillis) }
                 default: throw new IllegalArgumentException("A condition is one of ${OPS.join(', ')}, not '${c.op}'.")
             }
         }
@@ -47,7 +49,7 @@ class RecordConditions {
             case "IN": return !blank && ((c.values ?: []) as List).any { same(value, it) }
             case "NOT_IN": return blank || !((c.values ?: []) as List).any { same(value, it) }
             case "MATCHES": return matchesPattern(value, c)
-            case "AFTER_NOW": return afterNow(value)
+            case "AFTER_NOW": return afterNow(value, referenceMillis)
             default: throw new IllegalArgumentException("A condition is one of ${OPS.join(', ')}, not '${c.op}'.")
         }
     }
@@ -89,8 +91,8 @@ class RecordConditions {
         return PATTERNS.computeIfAbsent(pattern, { java.util.regex.Pattern.compile(it) }).matcher(value.toString().trim()).matches()
     }
 
-    private static boolean afterNow(Object value) {
-        long now = System.currentTimeMillis()
+    private static boolean afterNow(Object value, Long referenceMillis) {
+        long now = referenceMillis != null ? referenceMillis : System.currentTimeMillis()
         if (value instanceof Number) return ((Number) value).longValue() > now
         if (isBlank(value) || value instanceof Collection || value instanceof Map) return false
         try { return java.time.Instant.parse(value.toString().trim()).toEpochMilli() > now } catch (Exception ignored) { return false }
@@ -113,7 +115,7 @@ class RecordConditions {
     static BigDecimal number(Object v) {
         if (v instanceof Number) return new BigDecimal(v.toString())
         String s = v?.toString()?.trim()
-        if (!s || !(s ==~ /-?\d+(\.\d+)?/)) return null
+        if (!s || !(s ==~ /-?(0|[1-9]\d*)(\.\d+)?/)) return null
         return new BigDecimal(s)
     }
 }

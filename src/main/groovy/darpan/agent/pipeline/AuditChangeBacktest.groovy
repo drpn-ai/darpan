@@ -201,15 +201,7 @@ class AuditChangeBacktest {
 
         List open = openFindings(ec, tenantId, checkIds, null)
         Map<String, String> periodKinds = periodKindsOf(ec, tenantId, open)
-        Set<String> closedIds = new TreeSet<String>()
-        bases.each { Map basis ->
-            Set<String> dropped = droppedByBasis[basis.executionId as String]
-            open.each { f ->
-                String id = findingId(f.checkId, f.statementId, f.recordKey)
-                if (dropped.contains(f.recordKey as String) && !reportedAfter.contains(id) && !maybeKept.contains(id) &&
-                        periodHolds(f, periodKinds, basis)) closedIds.add(f.findingId as String)
-            }
-        }
+        Set<String> closedIds = closedBy(open, periodKinds, bases, droppedByBasis, reportedAfter + maybeKept)
         List<String> opened = recordKeysOf(reportedAfter - openInBasisPeriods(open, periodKinds, bases))
         return result(true, undecided ? OPENED_NOT_COMPUTED : null, basisId(bases), closedIds as List<String>, opened,
                 open.size() - closedIds.size(), limits)
@@ -321,14 +313,7 @@ class AuditChangeBacktest {
         }
         List open = openFindings(ec, tenantId, checkIds, null)
         Map<String, String> periodKinds = periodKindsOf(ec, tenantId, open)
-        Set<String> closedIds = new TreeSet<String>()
-        bases.each { Map basis ->
-            Set<String> changed = changedByBasis[basis.executionId as String]
-            open.each { f ->
-                if (changed.contains(f.recordKey as String) && !candidateReported.contains(findingId(f.checkId, f.statementId, f.recordKey)) &&
-                        periodHolds(f, periodKinds, basis)) closedIds.add(f.findingId as String)
-            }
-        }
+        Set<String> closedIds = closedBy(open, periodKinds, bases, changedByBasis, candidateReported)
         List<String> opened = recordKeysOf(candidateReported - savedReported - openInBasisPeriods(open, periodKinds, bases))
         return result(true, null, basisId(bases), closedIds as List<String>, opened, open.size() - closedIds.size(), [LATEST_WINDOW_ONLY])
     }
@@ -392,7 +377,7 @@ class AuditChangeBacktest {
      */
     private static List<Map> bases(def ec, String tenantId, String savedRunId, List<String> needed) {
         List<Map> out = []
-        automationsOf(ec, tenantId, savedRunId).each { automation ->
+        AuditChangeLevers.automationRowsOf(ec, tenantId, savedRunId).each { automation ->
             String automationId = automation.automationId as String
             List executions = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
                     .condition("companyUserGroupId", tenantId).condition("automationId", automationId)
@@ -444,15 +429,9 @@ class AuditChangeBacktest {
         return statements.collectEntries { [(it.statementId as String): kindByAudit[it.auditId as String]] }
     }
 
-    private static List automationsOf(def ec, String tenantId, String savedRunId) {
-        return ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", tenantId)
-                .condition("savedRunId", savedRunId).orderBy("automationId").useCache(false).list()
-                .findAll { (normalize(it.savedRunType) ?: "ruleset").equalsIgnoreCase("ruleset") }
-    }
-
     /** The run's audit checks: those naming the run, and those its automations run. */
     private static List<String> checkIdsOf(def ec, String tenantId, String savedRunId) {
-        List<String> automations = automationsOf(ec, tenantId, savedRunId)*.automationId.collect { it as String }
+        List<String> automations = AuditChangeLevers.automationRowsOf(ec, tenantId, savedRunId)*.automationId.collect { it as String }
         EntityCondition byRun = ec.entity.conditionFactory.makeCondition("savedRunId", EntityCondition.EQUALS, savedRunId)
         EntityCondition either = automations ? ec.entity.conditionFactory.makeCondition([byRun,
                 ec.entity.conditionFactory.makeCondition("automationId", EntityCondition.IN, automations)], EntityCondition.OR) : byRun
@@ -496,6 +475,23 @@ class AuditChangeBacktest {
     private static void forEachKeptRecord(File extract, Closure visit) {
         if (KeepArtifacts.keepFile(extract).isFile()) KeepArtifacts.forEachKeptRecord(extract, visit)
         else JsonRecordStream.forEachRecord(extract, "records", visit)
+    }
+
+    /**
+     * The open findings a change closes: the basis no longer has its record as it was (movedByBasis: dropped by the filter, or
+     * concluded differently), no link still reports it (stillReported), and the finding's period holds that basis window.
+     */
+    private static Set<String> closedBy(List open, Map<String, String> periodKinds, List<Map> bases, Map<String, Set<String>> movedByBasis,
+                                        Set<String> stillReported) {
+        Set<String> closed = new TreeSet<String>()
+        bases.each { Map basis ->
+            Set<String> moved = movedByBasis[basis.executionId as String]
+            open.each { f ->
+                if (moved.contains(f.recordKey as String) && !stillReported.contains(findingId(f.checkId, f.statementId, f.recordKey)) &&
+                        periodHolds(f, periodKinds, basis)) closed.add(f.findingId as String)
+            }
+        }
+        return closed
     }
 
     /**

@@ -314,7 +314,7 @@ class AuditChangeLevers {
      * not already excluded (compared ignoring case, as the extract matches) and each once. All of them when the field has
      * no filter. Answers [] when the field has a filter that is not EXCLUDE_IN (merge refuses that).
      */
-    static List<String> addedValues(Map existing, List<String> proposed) {
+    private static List<String> addedValues(Map existing, List<String> proposed) {
         if (existing != null && existingOperator(existing) != EXCLUDE_IN) return []
         Set<String> seen = new HashSet<String>(((List) (existing?.filterValues ?: [])).collect { (it as String).toUpperCase(Locale.ROOT) })
         List<String> out = []
@@ -759,7 +759,7 @@ class AuditChangeLevers {
      */
     static Map<String, List<String>> automationDrift(def ec, Map state) {
         Map<String, List<String>> drifted = new LinkedHashMap<String, List<String>>()
-        automationRowsOf(ec, ((Map) state.run).savedRunId as String).each { automation ->
+        automationRowsOf(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), ((Map) state.run).savedRunId as String).each { automation ->
             String automationId = automation.automationId as String
             List stored = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomationSource",
                     "agent apply: sources of an automation already read as the active tenant's").condition("automationId", automationId)
@@ -773,11 +773,11 @@ class AuditChangeLevers {
     }
 
     private static List<String> automationsOf(def ec, String savedRunId) {
-        return automationRowsOf(ec, savedRunId)*.automationId.collect { it as String }
+        return automationRowsOf(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), savedRunId)*.automationId.collect { it as String }
     }
 
-    private static List automationRowsOf(def ec, String savedRunId) {
-        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+    /** The tenant's rule-set automations of a saved run (a lifecycle's or a mapping's are not), by id. The backtest reads these too. */
+    static List automationRowsOf(def ec, String tenantId, String savedRunId) {
         if (!tenantId || !savedRunId) return []
         return ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", tenantId)
                 .condition("savedRunId", savedRunId).orderBy("automationId").useCache(false).list()

@@ -84,7 +84,7 @@ class AuditChangePlanner {
     }
 
     /** A person-origin row's whole unconfirmed list (kept in its evidence); otherwise the stored blocked list. */
-    static List<String> unconfirmedOf(def row) {
+    private static List<String> unconfirmedOf(def row) {
         if (row.conversationId == null && row.evidenceJson) {
             Object listed = parse(row.evidenceJson).unconfirmedIds
             if (listed instanceof List) return ((List) listed).collect { it as String }
@@ -160,8 +160,8 @@ class AuditChangePlanner {
     // ---------------------------------------------------------------- plan
 
     static Map plan(def ec, String proposalId) {
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access; an editor must plan this change.")) return null
-        def row = proposalFor(ec, proposalId)
+        // Planning is allowed inside the agent loop (it changes no config); only an editor's session runs the validating save.
+        def row = rowForAction(ec, proposalId, "Your active tenant only has view access; an editor must plan this change.", false)
         if (row == null) return null
         if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be planned again.".toString()); return null }
         Map current = AuditChangeLevers.current(ec, row.kind as String, parse(row.targetJson))
@@ -220,9 +220,7 @@ class AuditChangePlanner {
 
     /** A person applies a planned, provenance-PASS proposal whose plan still matches the config. Null (with an error) when refused. */
     static Map apply(def ec, String proposalId, String expectedHash, List<String> confirmedIds = null) {
-        if (refusedInAgentLoop(ec)) return null
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot apply a change.")) return null
-        def row = proposalFor(ec, proposalId)
+        def row = rowForAction(ec, proposalId, "Your active tenant only has view access, so it cannot apply a change.")
         if (row == null) return null
         if (row.status != "PLANNED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only a planned proposal can be applied.".toString()); return null }
         boolean confirmed = false
@@ -292,9 +290,7 @@ class AuditChangePlanner {
     // ---------------------------------------------------------------- reject and revert
 
     static Map reject(def ec, String proposalId, String reason) {
-        if (refusedInAgentLoop(ec)) return null
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot reject a change.")) return null
-        def row = proposalFor(ec, proposalId)
+        def row = rowForAction(ec, proposalId, "Your active tenant only has view access, so it cannot reject a change.")
         if (row == null) return null
         if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be rejected.".toString()); return null }
         row.setAll([status: "REJECTED", statusMessage: reason?.trim()?.take(INTERMEDIATE) ?: null])
@@ -319,9 +315,7 @@ class AuditChangePlanner {
 
     /** A new planned proposal that puts back what an applied one moved; its values came from config, so provenance is PASS. */
     static Map revert(def ec, String proposalId) {
-        if (refusedInAgentLoop(ec)) return null
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot revert a change.")) return null
-        def row = proposalFor(ec, proposalId)
+        def row = rowForAction(ec, proposalId, "Your active tenant only has view access, so it cannot revert a change.")
         if (row == null) return null
         if (row.status != "APPLIED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only an applied proposal can be reverted.".toString()); return null }
         String tenantId = row.companyUserGroupId as String
@@ -409,7 +403,7 @@ class AuditChangePlanner {
     // ---------------------------------------------------------------- provenance inputs (R21)
 
     /** The human's own words: text of the conversation's USER messages; tool results inside them are never text. */
-    static List<String> humanTexts(def ec, String tenantId, String conversationId) {
+    private static List<String> humanTexts(def ec, String tenantId, String conversationId) {
         List<String> out = []
         ec.entity.find("darpan.agent.AgentMessage").condition("companyUserGroupId", tenantId).condition("conversationId", conversationId)
                 .condition("kind", "USER").orderBy("sequenceNum").useCache(false).list().each { msg ->
@@ -433,13 +427,13 @@ class AuditChangePlanner {
     }
 
     /** The opened finding's structured fields only, never its records or record data. */
-    static Map openContext(def ec, String tenantId, def conversation) {
+    private static Map openContext(def ec, String tenantId, def conversation) {
         String findingId = conversation?.findingId as String
         return findingId ? openContextForFinding(ec, tenantId, findingId) : [:]
     }
 
     /** One finding's structured fields only, never its records or record data. Empty when it is not the tenant's. */
-    static Map openContextForFinding(def ec, String tenantId, String findingId) {
+    private static Map openContextForFinding(def ec, String tenantId, String findingId) {
         def f = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)
         if (f == null) return [:]
         def statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", f.statementId, tenantId, WHY)
@@ -532,6 +526,16 @@ class AuditChangePlanner {
             json = JsonOutput.toJson(kept + ["+${ids.size() - kept.size()} more".toString()])
         }
         return json
+    }
+
+    /**
+     * The active tenant's proposal for an action on it, or null with the refusal on ec.message: inside the agent loop
+     * (refuseInLoop, R28), without write access (viewOnlyMessage), or not the tenant's (not found).
+     */
+    private static def rowForAction(def ec, String proposalId, String viewOnlyMessage, boolean refuseInLoop = true) {
+        if (refuseInLoop && refusedInAgentLoop(ec)) return null
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, viewOnlyMessage)) return null
+        return proposalFor(ec, proposalId)
     }
 
     private static def proposalFor(def ec, String proposalId) {

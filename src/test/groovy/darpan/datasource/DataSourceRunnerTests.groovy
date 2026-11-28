@@ -273,4 +273,26 @@ class DataSourceRunnerTests {
         }
         assertEquals("TOO_MANY_SLICES", e.code)
     }
+
+    /**
+     * OC178 (Aditi, 18:58; S15b's seam 058a172f). AFTER_NOW reads the run's reference time, its window end, not the wall
+     * clock: a read of last month asks what was still open at the end of last month. A record due 2026-10-30 is after the
+     * end of a window ending 2026-10-25, though it is long past today.
+     */
+    @Test
+    void afterNowReadsTheWindowEndNotTheWallClock() {
+        Map d = firstStepOnly()
+        d.record = [fields: ["invoiceNo", "due"]]
+        d.steps = d.steps + [[id: "stillOpen", kind: "drop", name: "openAtWindowEnd", when: [[field: "due", op: "AFTER_NOW"]]]]
+        def t = new Expando(execute: { String doc, Map v, int res ->
+            [invoices: [edges: [[node: [invoiceNo: "A", due: "2026-10-30T00:00:00Z"]], [node: [invoiceNo: "B", due: "2026-10-20T00:00:00Z"]]],
+                        pageInfo: [hasNextPage: false, endCursor: null]]]
+        })
+        List<String> kept = []
+        long from = java.time.Instant.parse("2026-10-24T00:00:00Z").toEpochMilli()
+        long thru = java.time.Instant.parse("2026-10-25T00:00:00Z").toEpochMilli()
+        Map r = new DataSourceRunner(d, t).run([mode: "window", from: from, thru: thru]) { List<Map> batch -> kept.addAll(batch*.invoiceNo) }
+        assertEquals(1L, r.counts.openAtWindowEnd, "A is due after the window's end")
+        assertEquals(["B"], kept)
+    }
 }

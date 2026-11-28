@@ -62,6 +62,8 @@ class DataSourceRunner {
     /** This run's options: the text each option's value fills its {name} with, and the fields put on every first-step record. */
     private Map<String, String> optionTexts = [:]
     private Map<String, Object> optionFields = [:]
+    /** OC178: the run's reference time for AFTER_NOW, its window end; null (the wall clock) for a read by keys or of everything. */
+    private Long referenceMillis = null
 
     DataSourceRunner(Map definition, def transport) {
         this.definition = definition
@@ -81,10 +83,11 @@ class DataSourceRunner {
         filterRules = (List<Map<String, Object>>) (request.filters ?: [])
         checkFilterFields()
         keepFields = keepFieldsOf(request.keep)
+        referenceMillis = request.mode == "window" && request.thru instanceof Number ? ((Number) request.thru).longValue() : null
         resolveOptions((Map) request.options)
         List<String> wanted = (((request.keep ?: []) as List) + filterRules.collect { it.fieldExpression })
                 .collect { it?.toString()?.trim() }.findAll { it }.unique()
-        ((List<Map>) definition.steps).findAll { it.kind == "query" }.each { plans.put((String) it.id, planOf(it, wanted)) }
+        ((List<Map>) definition.steps).findAll { it.kind == "query" }.each { plans.put((String) it.id, planOf(it, wanted, referenceMillis)) }
         // A whole-set read is one batch: every step sees every record (a catalogue's ranks and groups), held up to the cap.
         int batchSize = definition.wholeSet == true ? Integer.MAX_VALUE : ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
         heldCap = definition.wholeSet == true ? (((Map) definition.limits)?.maxRecordsInMemory ?: DEFAULT_MAX_RECORDS_IN_MEMORY) as int : 0
@@ -302,8 +305,8 @@ class DataSourceRunner {
     }
 
     /** A query step's selections for this run: the ones whose when holds for {wanted}, their document, cost and values. */
-    private static Map planOf(Map step, List<String> wanted) {
-        List<Map> on = ((List<Map>) (step.selections ?: [])).findAll { RecordConditions.matches([wanted: wanted], it.when) }
+    private static Map planOf(Map step, List<String> wanted, Long referenceMillis) {
+        List<Map> on = ((List<Map>) (step.selections ?: [])).findAll { RecordConditions.matches([wanted: wanted], it.when, referenceMillis) }
         String document = step.selections != null ? DataSourceDefinitionSupport.fillSlots((String) step.document, on) : (String) step.document
         double extra = (on.collect { ((it.cost ?: 0) as Number).doubleValue() }.sum() ?: 0d) as double
         Map set = [:]
@@ -337,14 +340,14 @@ class DataSourceRunner {
             switch (step.kind) {
                 case "query": ctx.put((String) step.id, readChildren(step, ctx)); break
                 case "unwrap": unwrap(step, ctx.get((String) step.of)); break
-                case "join": join(step, ctx); break
+                case "join": join(step, ctx, referenceMillis); break
                 case "split": ctx.put((String) step.id, split(step, ctx.get((step.from ?: current) as String))); current = (String) step.id; break
                 case "repeat": ctx.put((String) step.id, repeat(step, ctx.get(current))); current = (String) step.id; break
                 case "number": number(step, ctx.get((step.on ?: current) as String)); break
                 case "count": count(step, ctx.get(current)); break
                 case "derive":
                     engines.computeIfAbsent((String) step.id, { DeriveEngine.compile((List<Map>) step.rules) })
-                            .derive(ctx.get((step.on ?: current) as String), "derive:${step.id}".toString())
+                            .derive(ctx.get((step.on ?: current) as String), "derive:${step.id}".toString(), referenceMillis)
                     break
                 case "filter": ctx.put((String) step.id, filter(step, ctx.get(current))); current = (String) step.id; break
                 case "drop": drop(step, ctx.get((step.on ?: current) as String)); break
@@ -377,7 +380,7 @@ class DataSourceRunner {
         }
         Map b = (Map) ((Map) step.bind).ids
         String[] from = ((String) b.from).split(/\./, 2)
-        List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).findAll { RecordConditions.matches(it, b.when) }
+        List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).findAll { RecordConditions.matches(it, b.when, referenceMillis) }
                 .collectMany { JsonPathValues.values(it, from[1]) })
         List<List<String>> chunks = ids.collate(((b.chunk ?: 100) as Number).intValue())
         List<List<Map>> byChunk = chunks.collect { new ArrayList<Map>() }
@@ -423,9 +426,9 @@ class DataSourceRunner {
         }
     }
 
-    private static void join(Map step, Map<String, List<Map>> ctx) {
+    private static void join(Map step, Map<String, List<Map>> ctx, Long referenceMillis) {
         List<Map> into = ctx.get((String) step.into) ?: []
-        List<Map> from = (ctx.get((String) step.from) ?: []).findAll { RecordConditions.matches(it, step.fromWhen) }
+        List<Map> from = (ctx.get((String) step.from) ?: []).findAll { RecordConditions.matches(it, step.fromWhen, referenceMillis) }
         if (step.sortBy) from = sortedBy(from, (List) step.sortBy)
         List<Map> on = (List<Map>) (step.on ?: [])
         List<Map> atOn = (List<Map>) (step.atOn ?: [])
@@ -670,10 +673,10 @@ class DataSourceRunner {
         Iterator<Map> it = input.iterator()
         while (it.hasNext()) {
             Map r = it.next()
-            if (!RecordConditions.matches(r, step.when)) continue
+            if (!RecordConditions.matches(r, step.when, referenceMillis)) continue
             it.remove()
             n++
-            if (sc) entries << ((Map) sc.fields).collectEntries { k, v -> [(k): DeriveRules.valueOf(r, (Map) v)] }
+            if (sc) entries << ((Map) sc.fields).collectEntries { k, v -> [(k): DeriveRules.valueOf(r, (Map) v, referenceMillis)] }
         }
         synchronized (counts) { counts.put((String) step.name, (counts.get(step.name) ?: 0L) + n) }
         if (sc && entries) {
@@ -688,7 +691,7 @@ class DataSourceRunner {
 
     private void count(Map step, List<Map> input) {
         List<String> distinct = (List<String>) step.distinct
-        Collection<Map> matched = (input ?: []).findAll { RecordConditions.matches(it, step.when) }
+        Collection<Map> matched = (input ?: []).findAll { RecordConditions.matches(it, step.when, referenceMillis) }
         long n = distinct ? matched.collect { Map r -> keyOf(distinct.collect { JsonPathValues.value(r, it) }) }.unique().size() : matched.size()
         synchronized (counts) { counts.put((String) step.name, (counts.get(step.name) ?: 0L) + n) }
     }

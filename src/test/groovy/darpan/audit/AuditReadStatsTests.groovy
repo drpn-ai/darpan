@@ -27,6 +27,20 @@ class AuditReadStatsTests {
         assertEquals('{"candidates":3,"lookedUp":3,"found":2}', stats.lookupJson)
     }
 
+    /**
+     * R1 (S21a): the verify pass keys each side's lookup outcome by the compare's side, since two sides of one system share
+     * a label and one outcome would overwrite the other. A result from before keyed them by label, so the label still answers.
+     */
+    @Test
+    void eachSideReadsItsOwnLookupOutcomeEvenWhenBothSidesShareALabel() {
+        Map reconcile = [file1Label: "NetSuite", file2Label: "NetSuite",
+                         verificationSides: [FILE_1: [candidates: 2, lookedUp: 2, found: 0], FILE_2: [candidates: 5, lookedUp: 5, found: 4]]]
+        assertEquals('{"candidates":2,"lookedUp":2,"found":0}',
+                AuditAutomationSupport.readStats("FILE_1", [:], [reconcileResult: reconcile]).lookupJson)
+        assertEquals('{"candidates":5,"lookedUp":5,"found":4}',
+                AuditAutomationSupport.readStats("FILE_2", [:], [reconcileResult: reconcile]).lookupJson)
+    }
+
     @Test
     void unknownFactsAreLeftOutNotGuessed() {
         Map stats = AuditAutomationSupport.readStats("FILE_2", [recordCount: 5], [reconcileResult: [file2Label: "OMS"]])

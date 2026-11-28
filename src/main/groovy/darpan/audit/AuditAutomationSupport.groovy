@@ -500,7 +500,10 @@ class AuditAutomationSupport {
         if (calls instanceof Map && calls) out.callsJson = truncate(groovy.json.JsonOutput.toJson(calls), REASON_MAX)
         Map reconcile = (Map) context?.reconcileResult
         String label = normalize(reconcile?.get(fileSide == "FILE_1" ? "file1Label" : "file2Label"))
-        Object lookup = label && reconcile?.verificationSides instanceof Map ? ((Map) reconcile.verificationSides).get(label) : null
+        // R1 (S21a): the verify pass keys each side's lookup outcome by the compare's side (two sides of one system share a
+        // label, so one outcome would overwrite the other); a result from before keyed them by label.
+        Map sides = reconcile?.verificationSides instanceof Map ? (Map) reconcile.verificationSides : null
+        Object lookup = sides ? (sides.get(fileSide) ?: (label ? sides.get(label) : null)) : null
         if (lookup instanceof Map && lookup) out.lookupJson = truncate(groovy.json.JsonOutput.toJson(lookup), REASON_MAX)
         return out
     }

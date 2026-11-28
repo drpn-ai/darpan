@@ -33,6 +33,10 @@ class AcknowledgementWrites {
         Map result = null
         Throwable thrown = null
         List<String> errors = []
+        // The caller's messages, so a failed write's errors can be dropped: clearErrors would turn them into danger messages
+        // that ride out in the reply (DAR-OPS-029 S12; ErrorLogCapture.flush's pattern).
+        List infos = new ArrayList(ec.message.messageInfos)
+        List publics = new ArrayList(ec.message.publicMessageInfos)
         ec.message.pushErrors()
         try {
             try {
@@ -44,7 +48,7 @@ class AcknowledgementWrites {
             errors.addAll((ec.message.errors ?: []).collect { it as String })
             errors.addAll((ec.message.validationErrors ?: []).collect { it.toString() })
         } finally {
-            ec.message.clearErrors()
+            if (thrown != null || errors) restoreMessages(ec, infos, publics)
             ec.message.popErrors()
         }
         if (thrown == null && errors.isEmpty()) return result ?: [:]
@@ -53,6 +57,15 @@ class AcknowledgementWrites {
         logger.error("Acknowledgement {} for {} {} failed: {}", what, tenantId, findingId, detail)
         ec.message.addError(PLAIN)
         return null
+    }
+
+    /** Drops everything the failed write added (its errors and messages) and puts the caller's messages back as they were. */
+    private static void restoreMessages(def ec, List infos, List publics) {
+        ec.message.clearAll()
+        infos.each { mi ->
+            if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+            else ec.message.addMessage(mi.message, mi.type)
+        }
     }
 
     /** The failure text without the note, quoted values or email addresses, cut to a log line. */

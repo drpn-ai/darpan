@@ -283,6 +283,8 @@ class FeedbackSupportTests {
                 assertFalse(out.hadError as boolean, "${c[0]}: ${out.errorText}".toString())
                 assertEquals(true, out.ok, c[0] as String)
                 assertEquals([], out.errors ?: [], c[0] as String)
+                // DAR-OPS-029 S12: nor as a message (clearErrors turns a dropped error into a danger message): it names the address.
+                assertFalse((out.messages ?: []).toString().contains("SMTP down"), "${c[0]}: ${out.messages}".toString())
                 assertEquals("Mail is down but this matters", (out.feedback as Map)?.note, c[0] as String)
                 assertEquals(1, rows(f).size(), "${c[0]}: the row is saved".toString())
                 Map listed = this.call("get#AuditFindingFeedback", [findingId: f])

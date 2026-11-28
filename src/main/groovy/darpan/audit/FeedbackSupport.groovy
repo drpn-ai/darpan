@@ -288,20 +288,27 @@ class FeedbackSupport {
     /**
      * Runs a delivery behind a fresh error scope: an error it adds (send#EmailTemplate reports SMTP trouble as one) is logged and
      * dropped, never left for the caller, so the facade still answers ok; errors the caller already held come back. The
-     * error text is not logged: it can carry the recipient's address.
+     * error text is not logged, nor left as a message (clearErrors would make it a danger message in the reply): it can carry
+     * the recipient's address.
      */
     private static Object isolated(def ec, String what, Map facts, Closure work) {
+        List infos = new ArrayList(ec.message.messageInfos)
+        List publics = new ArrayList(ec.message.publicMessageInfos)
         ec.message.pushErrors()
         try {
             Object result = work.call()
             if (ec.message.hasError()) {
                 logger.error("Feedback {} for {} {} to user {} reported {} error(s)", what, facts?.tenantId, facts?.findingId,
                         (facts?.user as Map)?.id, ec.message.errors.size())
+                ec.message.clearAll()
+                infos.each { mi ->
+                    if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+                    else ec.message.addMessage(mi.message, mi.type)
+                }
                 return null
             }
             return result
         } finally {
-            ec.message.clearErrors()
             ec.message.popErrors()
         }
     }

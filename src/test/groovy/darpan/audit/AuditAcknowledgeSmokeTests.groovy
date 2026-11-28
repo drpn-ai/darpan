@@ -326,8 +326,13 @@ class AuditAcknowledgeSmokeTests {
 
             // A write a nested service fails with an error message: change and reopen.
             AcknowledgementWrites.afterWrite = { def ectx, String what -> ectx.message.addError(raw) }
+            ec.message.clearAll()
             Map changed = call("update#AuditFindingAcknowledgement", [findingId: taken, note: "Known: secret", remind: false])
             assertEquals(plain, changed.errorText?.toString()?.trim())
+            // DAR-OPS-029 S12: the dropped error must not come back as a danger message (clearErrors turns errors into those)
+            // and ride out in the reply's messages.
+            assertFalse(ec.message.messages.any { it.contains("Referential") || it.contains("smoke.customer@example.com") },
+                    ec.message.messages.toString())
             assertEquals(["First"], acks([taken])*.note, "rolled back: the note is unchanged")
             assertEquals([], events([taken], "AUDFE_ACK_CHANGED"))
             Map reopened = call("delete#AuditFindingAcknowledgement", [findingId: taken])

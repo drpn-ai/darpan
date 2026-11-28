@@ -190,14 +190,13 @@ class ScheduledAutomationTenantContextTests {
     }
 
     /**
-     * SFTP automations reach the runner through {@code run#SftpFileAutomation}, which calls
-     * {@code SftpAutomationSupport.runSftpFileAutomation} directly rather than through
-     * {@code execute#Automation}. Its {@code resolveRunScope} defaults {@code runTenantUserGroupId}
-     * from the active tenant and throws "runTenantUserGroupId is required for tenant-scoped SFTP
-     * automation" when there is none — the same defect, on the other entry point.
+     * SFTP automations run through {@code execute#Automation}, which hands an AUT_IN_SFTP_FILES automation to
+     * {@code SftpAutomationSupport.runSftpFileAutomation}. Its {@code resolveRunScope} defaults {@code runTenantUserGroupId}
+     * from the active tenant and throws "runTenantUserGroupId is required for tenant-scoped SFTP automation" when there is
+     * none, so this drives the real scheduled entry point as the anonymous {@code _NA_} user.
      *
      * <p>{@code resolveRunScope} runs before any SFTP connect, so reaching the client factory proves
-     * the tenant resolved.</p>
+     * the tenant resolved. DAR-OPS-029 S06: was driven through run#SftpFileAutomation, which has no production caller.</p>
      */
     @Test
     void scheduledSftpAutomationResolvesItsTenantBeforeConnecting() {
@@ -206,19 +205,15 @@ class ScheduledAutomationTenantContextTests {
             reachedSftpStage.set(true)
             throw new IllegalStateException("SFTP stage reached — no real connection in tests")
         }
+        // execute#Automation takes no poll parameters, so the default poll window applies: never sleep through it here.
+        SftpAutomationSupport.setRetrySleeper { long ignored -> }
         try {
             onSchedulerThread { ExecutionContext jobEc ->
-                return jobEc.service.sync()
-                        .name("reconciliation.ReconciliationAutomationServices.run#SftpFileAutomation")
-                        .parameters([
-                                automationId       : SFTP_AUTOMATION_ID,
-                                pollIntervalMinutes: 10,
-                                pollTimeoutMinutes : 1,
-                        ])
-                        .call()
+                return callExecuteAutomation(jobEc, [automationId: SFTP_AUTOMATION_ID])
             }
         } finally {
             SftpAutomationSupport.resetClientFactory()
+            SftpAutomationSupport.resetRetrySleeper()
         }
 
         assertTrue(reachedSftpStage.get(),

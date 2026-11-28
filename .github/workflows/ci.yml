@@ -56,7 +56,7 @@ jobs:
   backend-tests:
     name: Component test suite (JDK 21, H2 + MySQL) ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80   # shards ran 37-56+ min of tests (2026-11-28); 60 killed the slowest shard every run
     strategy:
       fail-fast: false
       matrix:

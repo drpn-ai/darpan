@@ -1,6 +1,5 @@
 package darpan.reconciliation.automation
 
-import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.junit.jupiter.api.Test
@@ -20,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * Task 7 (gchat notifications): verifies StuckRunReaper.sweepEntity notifies subscriber spaces for every
- * ReconciliationRunResult row it reaps (marks FAILED), best-effort.
+ * What StuckRunReaper.sweep tells whom for every row it reaps (marks FAILED), best-effort: Darpan's error space gets the
+ * card, a notify-me subscriber only the neutral line (DAR-BE-015 for executions, DAR-BE-362's path for run results).
  *
  * StuckRunReaper is {@code @CompileStatic} with an {@code ExecutionContext}-typed parameter and an
  * explicit {@code (EntityFind)} cast internally, so a plain duck-typed Groovy fake (the pattern used in
@@ -35,31 +34,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class StuckRunReaperNotifyTests {
 
+    /**
+     * DAR-OPS-029 S07a (OUTPUT CHANGE). A reaped interactive run is a failed run: Darpan's error space gets one card with the
+     * reason, its notify-me subscriber only the neutral line (DAR-BE-362's client.runfailed), never the watchdog text, and the
+     * row keeps the reason in errorMessage. It used to post "⚠ Status: FAILED — the ruleset did not fully evaluate" plus the
+     * watchdog line to the subscriber, write no reason (the statusMessage it wrote is on neither entity) and tell Darpan nothing.
+     */
     @Test
-    void reaperNotifiesReapedRunResults() {
-        FakeStore store = new FakeStore()
-        Timestamp stale = new Timestamp(System.currentTimeMillis() - (200 * 60_000L))
-        store.add(DarpanEntityConstants.RECONCILIATION_RUN_RESULT, [
-                reconciliationRunResultId: "RUN_1",
-                companyUserGroupId       : "TENANT_A",
-                savedRunId               : "RS_ORDER",
-                resultDataManagerPath    : "reconciliation-runs/RS_ORDER/result.json",
-                statusEnumId             : StuckRunReaper.STATUS_RUNNING,
-                lastUpdatedStamp         : stale,
-        ])
-        store.add("darpan.reconciliation.TenantChatSpace", [
-                chatSpaceId         : "CS_OPS",
-                companyUserGroupId  : "TENANT_A",
-                spaceName           : "Ops",
-                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/AAA/messages?key=test-key&token=test-token",
-                isActive            : "Y",
-        ])
-        store.add(DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION, [
-                reconciliationRunResultId: "RUN_1",
-                chatSpaceId              : "CS_OPS",
-        ])
-
+    void aReapedRunResultPostsOneCardKeepsItsReasonAndItsSubscriberGetsOnlyTheNeutralLine() {
+        FakeStore store = storeWithStaleRunResult(StuckRunReaper.STATUS_RUNNING)
         ExecutionContext ec = fakeEc(store)
+        List<Map> cards = []
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: webhookUrl, payload: payload]
@@ -71,36 +58,72 @@ class StuckRunReaperNotifyTests {
             result = StuckRunReaper.sweep(ec)
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
         }
 
         assertEquals(1, result.reapedRunResultCount)
         Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0]
         assertEquals(StuckRunReaper.STATUS_FAILED, row.statusEnumId)
-        assertEquals(1, deliveries.size())
-        String text = deliveries[0].payload.text as String
-        assertTrue(text.contains("stuck-run watchdog"))
+        assertEquals(StuckRunReaper.REAPED_REASON, row.errorMessage, "the run-result page shows why")
+        assertEquals(1, cards.size(), "one card for Darpan: ${cards}")
+        assertEquals("FAILED", cards[0].kind)
+        assertEquals(StuckRunReaper.REAPED_REASON, cards[0].errorFirstLine)
+        assertEquals(1, deliveries.size(), "the subscriber is told once: ${deliveries}")
+        assertEquals("RS_ORDER did not finish. Darpan has been alerted and is working on a fix.", deliveries[0].payload.text)
+        assertFalse(deliveries.toString().contains("watchdog"), "no error text reaches a client")
+    }
+
+    @Test
+    void aReapedRunResultKeepsTheErrorItAlreadyHad() {
+        FakeStore store = storeWithStaleRunResult(StuckRunReaper.STATUS_PENDING)
+        store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0].errorMessage = "OMS read timed out"
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
+        try {
+            StuckRunReaper.sweep(fakeEc(store))
+        } finally {
+            AutomationExecutionSupport.resetForTests()
+        }
+        assertEquals("OMS read timed out", store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0].errorMessage)
     }
 
     @Test
     void reaperSweepSurvivesNotifyFailure() {
-        // Fix round 1 (review finding 2): a delivery-hook throw never reaches StuckRunReaper's own catch
-        // — notifyRunCompleted's per-destination delivery loop already absorbs delivery exceptions
-        // internally (TenantNotificationSupport.groovy ~lines 120-131), so that mechanism doesn't exercise
-        // what this test claims. Instead force the exception out of the payload-BUILD call itself (the
-        // `ec.service.sync()...build#RunCompletedPayload...call()` invocation has no internal try/catch,
-        // unlike the delivery loop — see TenantNotificationSupport.notifyRunCompleted ~lines 111-115), so
-        // it genuinely escapes notifyRunCompleted unguarded and must be absorbed by the reaper's own
-        // best-effort catch: the row still flips FAILED and the count is still correct, no exception
-        // propagates out of sweep().
+        // Best-effort: a card post and a notice copy that both throw never stop the sweep; the row still flips FAILED.
+        FakeStore store = storeWithStaleRunResult(StuckRunReaper.STATUS_PENDING)
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> throw new IllegalStateException("chat down") }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> throw new IllegalStateException("copy unreadable") }
+        Map<String, Object> result
+        try {
+            result = StuckRunReaper.sweep(fakeEc(store))
+        } finally {
+            AutomationExecutionSupport.resetForTests()
+        }
+
+        assertEquals(1, result.reapedRunResultCount)
+        assertEquals(StuckRunReaper.STATUS_FAILED, store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0].statusEnumId)
+    }
+
+    @Test
+    void aFreshOrFinishedRowIsNotReaped() {
+        FakeStore store = storeWithStaleRunResult(StuckRunReaper.STATUS_RUNNING)
+        store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0].lastUpdatedStamp = new Timestamp(System.currentTimeMillis())
+        store.add(DarpanEntityConstants.RECONCILIATION_RUN_RESULT, [reconciliationRunResultId: "RUN_DONE", companyUserGroupId: "TENANT_A",
+                statusEnumId: "AUT_STAT_SUCCESS", lastUpdatedStamp: new Timestamp(System.currentTimeMillis() - (500 * 60_000L))])
+        Map<String, Object> result = StuckRunReaper.sweep(fakeEc(store))
+        assertEquals(0, result.reapedRunResultCount)
+        assertEquals([StuckRunReaper.STATUS_RUNNING, "AUT_STAT_SUCCESS"], store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT]*.statusEnumId)
+    }
+
+    private static FakeStore storeWithStaleRunResult(String status) {
         FakeStore store = new FakeStore()
-        store.explodeOnBuildPayload = true
         Timestamp stale = new Timestamp(System.currentTimeMillis() - (200 * 60_000L))
         store.add(DarpanEntityConstants.RECONCILIATION_RUN_RESULT, [
                 reconciliationRunResultId: "RUN_1",
                 companyUserGroupId       : "TENANT_A",
                 savedRunId               : "RS_ORDER",
                 resultDataManagerPath    : "reconciliation-runs/RS_ORDER/result.json",
-                statusEnumId             : StuckRunReaper.STATUS_PENDING,
+                statusEnumId             : status,
                 lastUpdatedStamp         : stale,
         ])
         store.add("darpan.reconciliation.TenantChatSpace", [
@@ -114,16 +137,7 @@ class StuckRunReaperNotifyTests {
                 reconciliationRunResultId: "RUN_1",
                 chatSpaceId              : "CS_OPS",
         ])
-
-        ExecutionContext ec = fakeEc(store)
-
-        // No delivery hook is needed/set here: the payload-build call throws before deliverGoogleChat is
-        // ever reached, so if this test regresses (production catch removed), sweep() itself would throw.
-        Map<String, Object> result = StuckRunReaper.sweep(ec)
-
-        assertEquals(1, result.reapedRunResultCount)
-        Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0]
-        assertEquals(StuckRunReaper.STATUS_FAILED, row.statusEnumId)
+        return store
     }
 
     @Test
@@ -211,7 +225,6 @@ class StuckRunReaperNotifyTests {
     private static class FakeStore {
         Map<String, List<Map<String, Object>>> rows = [:].withDefault { [] }
         Timestamp userNow = new Timestamp(System.currentTimeMillis())
-        boolean explodeOnBuildPayload = false
 
         void add(String entityName, Map<String, Object> fields) {
             rows[entityName] << new LinkedHashMap<String, Object>(fields)
@@ -307,38 +320,13 @@ class StuckRunReaperNotifyTests {
         return handlers as UserFacade
     }
 
-    private static Map<String, Object> buildNotificationPayload(Map params) {
-        String runName = ((params.runName)?.toString()?.trim()) ?: ((params.savedRunId)?.toString()?.trim()) ?: "reconciliation run"
-        boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == "AUT_STAT_FAILED"
-        String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
-        // Delegates to the real renderer rather than reimplementing it — the reaper's notify really
-        // does go through build#RunCompletedPayload, so a hand-rolled line stack here would keep this
-        // suite green against copy the production path no longer produces.
-        List<String> lines = RunNotificationVoice.renderLines(
-                RunNotificationVoice.classify([runFailed: runFailed]) +
-                        [runName: runName, completedMoment: null])
-        if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
-        if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
-        String resultId = ((params.reconciliationRunResultId)?.toString()?.trim())
-        if (resultId) lines << "Result ID: ${resultId}".toString()
-        return [payload: [text: lines.join("\n")]]
-    }
-
     private static ServiceCallSync newServiceCallSync(FakeStore store) {
         ServiceCallSync[] selfHolder = new ServiceCallSync[1]
-        String[] serviceNameHolder = [null]
-        Map<String, Object>[] paramsHolder = [[:]]
         Map handlers = [
-                name        : { String serviceName -> serviceNameHolder[0] = serviceName; selfHolder[0] },
-                parameters  : { Map<String, Object> params -> paramsHolder[0] = params; selfHolder[0] },
+                name        : { String ignored -> selfHolder[0] },
+                parameters  : { Map<String, Object> ignored -> selfHolder[0] },
                 disableAuthz: { -> selfHolder[0] },
-                call        : { ->
-                    if (serviceNameHolder[0] == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload") {
-                        if (store.explodeOnBuildPayload) throw new RuntimeException("payload build failed")
-                        return buildNotificationPayload(paramsHolder[0])
-                    }
-                    return [:]
-                },
+                call        : { -> [:] },
         ]
         ServiceCallSync proxy = handlers as ServiceCallSync
         selfHolder[0] = proxy

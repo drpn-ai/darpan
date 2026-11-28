@@ -29937,7 +29937,7 @@
                     },
                     "buckets": {
                         "type": "string",
-                        "description": "Comma-separated active diff buckets (file-1,file-2,rule). Empty means all."
+                        "description": "Comma-separated active diff buckets (file-1,file-2,rule,duplicate). Empty means all; rule without duplicate also lists duplicates, as before the duplicate bucket existed."
                     },
                     "ruleFilterKey": {
                         "type": "string",

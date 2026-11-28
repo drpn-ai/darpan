@@ -4059,7 +4059,7 @@
             <parameter name="pageIndex" type="Integer" default-value="0"/>
             <parameter name="pageSize" type="Integer" default-value="50"/>
             <parameter name="buckets">
-                <description>Comma-separated active diff buckets (file-1,file-2,rule). Empty means all.</description>
+                <description>Comma-separated active diff buckets (file-1,file-2,rule,duplicate). Empty means all; rule without duplicate also lists duplicates, as before the duplicate bucket existed.</description>
             </parameter>
             <parameter name="ruleFilterKey" default-value="all">
                 <description>Rule selector key ('all', 'base-diff', or a specific rule filter key).</description>

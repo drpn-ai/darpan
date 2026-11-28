@@ -229,6 +229,26 @@ class RunPathParityGateTest {
         }
     }
 
+    /**
+     * DAR-OPS-029 S99-218 (OC19, caa84abe). A manual run that compared nothing closes like a scheduled one: both paths decide
+     * the close with AutomationNoDataJudge.closeFinding (the manual one through ReconciliationSavedRunSupport.manualNoDataClose,
+     * asked from each of its four compare branches: evaluate and compare, before and after Keep), the manual path keeps no
+     * rule of its own (the pre-OC19 bare recordCount check), and it tells a no-data run through notifySavedRunNoData.
+     */
+    @Test
+    void aRunThatComparedNothingClosesThroughTheSameJudgeOnBothPaths() {
+        Pattern judge = ~/AutomationNoDataJudge\s*\.\s*closeFinding\s*\(/
+        assertTrue(judge.matcher(codeOf(SCHEDULED_PATH)).find(), "${SCHEDULED_PATH} must decide a no-data close with AutomationNoDataJudge.closeFinding")
+        String bridge = methodBody(codeOf("facade/reconciliation/ReconciliationSavedRunSupport.groovy"), "manualNoDataClose")
+        assertTrue(judge.matcher(bridge).find(), "manualNoDataClose must ask the scheduler's AutomationNoDataJudge.closeFinding")
+        String manual = codeOf(MANUAL_PATH)
+        assertEquals(4, (manual =~ /ReconciliationSavedRunSupport\s*\.\s*manualNoDataClose\s*\(/).size(),
+                "${MANUAL_PATH}: each compare branch (evaluate and compare, before and after Keep) asks manualNoDataClose")
+        assertFalse((manual =~ /obsNoData\s*=\s*[^\n]*recordCount\s*==\s*0/).find(),
+                "${MANUAL_PATH}: a bare recordCount check is the manual-only rule OC19 replaced")
+        assertTrue((manual =~ /notifySavedRunNoData\s*\(/).find(), "${MANUAL_PATH} must tell a no-data run through notifySavedRunNoData")
+    }
+
     /** The text of {@code method}'s body: from its declaration to the next method declaration at class level. */
     private static String methodBody(String code, String method) {
         Matcher decl = Pattern.compile(/(?m)^    (?:(?:public|protected|private|static)\s+)+[\w<>,\[\]\s]+\s+${method}\s*\(/).matcher(code)

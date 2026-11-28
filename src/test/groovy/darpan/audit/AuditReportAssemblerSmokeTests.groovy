@@ -269,6 +269,8 @@ class AuditReportAssemblerSmokeTests {
     @Test
     void aPartialReadIsNamedWithTheStatementsItAffects() {
         Map doc = report(GORJANA, "2026-10-09")
+        // S99-211 F30: a partial morning carries the reason/affects nodes the 10-08 report leaves null, so its shape is checked.
+        assertSameShape(golden("golden-report.json"), doc, '$', null, templates(golden("golden-report.json")))
         assertEquals([read: "partial", records: 300, readAt: "2026-10-09T06:05:00-07:00", reason: "page ceiling reached",
                       affects: ["R4", "R8"]], doc.health.sources.NetSuite)
         assertEquals([], doc.health.sources.OMS.affects)
@@ -633,8 +635,34 @@ class AuditReportAssemblerSmokeTests {
         }
     }
 
+    /**
+     * DAR-OPS-029 S99-211 (F30). The report fixture has no acknowledged finding, so the golden's acknowledgement block was
+     * never compared. One acknowledgement row on M258615: the report row and the finding document both carry the block,
+     * in the golden's shape. The row is removed after, as every other test expects M258615 unacknowledged.
+     */
+    @Test
+    void anAcknowledgedFindingCarriesTheBlockTheGoldensDescribe() {
+        insert("darpan.audit.AuditFindingAcknowledgement", [findingId: m258615, companyUserGroupId: GORJANA, note: "Known: the 3PL is late",
+                acknowledgedByUserId: ec.user.userId, acknowledgedStamp: at("2026-10-08", "05:40:00"), remindDate: Date.valueOf("2099-01-01")])
+        try {
+            Map doc = report(GORJANA, "2026-10-08")
+            List<Map> r4Findings = doc.categories.refundsAndCredits.statements.R4.findings as List<Map>
+            Map brief = r4Findings.find { it.id == m258615 }
+            assertEquals("Known: the 3PL is late", brief.acknowledgement?.note, "the report row carries the acknowledgement")
+            assertSameShape(golden("golden-report.json"), doc, '$', null, templates(golden("golden-report.json")))
+
+            Map one = finding(GORJANA, m258615)
+            assertEquals("Known: the 3PL is late", one.finding.acknowledgement?.note, "the finding document carries it too")
+            assertSameShape(golden("golden-finding.json"), one, '$', null, templates(golden("golden-finding.json")))
+        } finally {
+            ec.entity.find("darpan.audit.AuditFindingAcknowledgement").condition("findingId", m258615).deleteAll()
+        }
+    }
+
     @Test
     void aFixedFindingSaysWhenAndByWhat() {
+        // S99-211 F30: a fixed finding carries closedAt/closedBy, so their shape is checked against the golden.
+        assertSameShape(golden("golden-finding.json"), finding(GORJANA, rx1), '$', null, templates(golden("golden-finding.json")))
         Map s = finding(GORJANA, rx1).finding.status
         assertEquals(["fixed", "2026-10-08T06:12:40-07:00", 1], [s.state, s.closedAt, s.ageDays])
         assertEquals([type: "check", id: "returns-vs-credit-memos", label: "scheduled check, 2026-10-08T06:12-07:00"], s.closedBy)

@@ -11,7 +11,7 @@
       "text": "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open.",
       "weight": "derived"
     },
-    "priority": { "level": "P2", "source": "statement", "reason": null },
+    "priority": { "level": "P2", "source": "reason", "reason": "Over-refunded return" },
     "check": { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "matchedBy": "return id (custbody_hc_return_id)" },
     "status": {
       "state": "open",
@@ -20,19 +20,19 @@
       "lastChecked": "2026-10-08T06:12:40-07:00",
       "ageDays": 1,
       "timesSeen": 2,
-      "closedAt": null,
-      "closedBy": null
+      "closedAt": "2026-10-08T06:12:40-07:00",
+      "closedBy": { "type": "check", "id": "returns-vs-credit-memos", "label": "scheduled check, 2026-10-08T06:12-07:00" }
     },
-    "acknowledgement": null,
+    "acknowledgement": { "note": "Known: the 3PL is late", "by": { "id": "100050", "label": "Ada Lovelace" }, "at": "2026-10-08T05:40:00-07:00", "remindOn": "2026-10-13", "reminded": false },
     "feedback": { "recentCount": 0 },
     "records": {
       "Shopify": {
-        "order": [ { "id": "7187000000000", "internalId": null, "status": null } ],
-        "refund": [ { "id": "1113000000000", "internalId": null, "status": null } ]
+        "order": [ { "id": "7187000000000", "internalId": "5901000000000", "status": "PAID" } ],
+        "refund": [ { "id": "1113000000000", "internalId": "1113000000001", "status": "SUCCESS" } ]
       },
       "OMS": {
-        "return": [ { "id": "M258615", "internalId": null, "status": "Completed" } ],
-        "order": [ { "id": "M1000000", "internalId": null, "status": null } ]
+        "return": [ { "id": "M258615", "internalId": "100230", "status": "Completed" } ],
+        "order": [ { "id": "M1000000", "internalId": "100231", "status": "Completed" } ]
       },
       "NetSuite": {
         "rma": [ { "id": "RMA-40112", "internalId": "51000001", "status": "Pending Refund" } ],

@@ -310,7 +310,9 @@ class ReconciliationSavedRunSupport {
         int size = boundedInt(pageSize, 20, 1, 200)
         String search = normalizeLower(query)
 
-        List<Map<String, Object>> rows = collectSavedRunRows(ec)
+        // DAR-OPS-029 OC21 (Aditi 2026-11-28): a legacy mapping is no longer a saved run, so the Saved runs page lists none.
+        // collectSavedRunRows keeps them for an SFTP automation, which still picks a mapping (SftpAutomationSupport).
+        List<Map<String, Object>> rows = collectSavedRunRows(ec).findAll { Map<String, Object> row -> row.runType != RUN_TYPE_MAPPING }
         // DAR-BE-061. Archived runs are OUT by default — that absence is the whole point of the
         // trash can. Opt in with includeArchived to build the Show archived view, which is the
         // only way back and therefore has to exist wherever this filter is applied.

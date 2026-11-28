@@ -230,7 +230,8 @@ class SavedRunsFacadeSmokeTests {
 
         List<Map<String, Object>> savedRuns = (List<Map<String, Object>>) (listResult.savedRuns ?: [])
         assertTrue(savedRuns.any { Map<String, Object> row -> row.savedRunId == createResult.savedRun.savedRunId })
-        assertTrue(savedRuns.any { Map<String, Object> row -> row.savedRunId == "OrderIdSchemaMap" })
+        // DAR-OPS-029 OC21: a legacy mapping is not a saved run any more (the seeded OrderIdSchemaMap stays a mapping).
+        assertFalse(savedRuns.any { Map<String, Object> row -> row.savedRunId == "OrderIdSchemaMap" })
 
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
@@ -745,6 +746,7 @@ class SavedRunsFacadeSmokeTests {
 
     @Test
     void viewOnlyActiveTenantCanListButCannotRunSavedRuns() {
+        String savedRunId = createCsvSavedRun("View Only Compare")
         seedPermissionGroup(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, "Can view tenant-scoped Darpan data but cannot mutate it")
         replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID)
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
@@ -761,13 +763,13 @@ class SavedRunsFacadeSmokeTests {
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         List<Map<String, Object>> savedRuns = (List<Map<String, Object>>) (listResult.savedRuns ?: [])
-        assertTrue(savedRuns.any { Map<String, Object> row -> row.savedRunId == "OrderIdSchemaMap" })
+        assertTrue(savedRuns.any { Map<String, Object> row -> row.savedRunId == savedRunId })
 
         ec.message.clearErrors()
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
                 .parameters([
-                        savedRunId: "OrderIdSchemaMap",
+                        savedRunId: savedRunId,
                         file1Name : "orders-1.csv",
                         file1Text : "order_id\nA100\n",
                         file2Name : "orders-2.csv",
@@ -784,10 +786,33 @@ class SavedRunsFacadeSmokeTests {
     // DAR-BE-292 (Aditi's permissions sheet): running a saved run is the run tier's, so a tenant user runs one too.
     @Test
     void tenantUserCanRunSavedRuns() {
+        String savedRunId = createCsvSavedRun("Tenant User Compare")
         seedPermissionGroup(TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID, "Can view tenant pages, upload files, run audits, saved runs and reconciliations, resolve findings, and add, edit or delete connections for associated tenants")
         replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
 
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: savedRunId,
+                        file1Name : "orders-1.csv",
+                        file1Text : "order_id\nA100\n",
+                        file2Name : "orders-2.csv",
+                        file2Text : "order_id\nA200\n",
+                        hasHeader : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals(true, runResult.ok, (runResult.errors ?: []).toString())
+    }
+
+    /**
+     * DAR-OPS-029 OC21 (Aditi 2026-11-28): legacy mapping saved runs are retired. A mapping id given to run#SavedRunDiff
+     * answers exactly as a missing run does (the mapping path used to write two run rows per run).
+     */
+    @Test
+    void aLegacyMappingIdIsNotARunnableSavedRun() {
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
                 .parameters([
@@ -801,7 +826,26 @@ class SavedRunsFacadeSmokeTests {
                 .disableAuthz()
                 .call()
 
-        assertEquals(true, runResult.ok, (runResult.errors ?: []).toString())
+        assertEquals(false, runResult.ok)
+        assertEquals(["Saved run 'OrderIdSchemaMap' was not found."], runResult.errors)
+    }
+
+    /** A two-sided CSV saved run on order_id, removed after the test. */
+    private String createCsvSavedRun(String runName) {
+        Map<String, Object> created = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([
+                        runName           : runName,
+                        file1SystemEnumId : "OMS",
+                        file2SystemEnumId : "SHOPIFY",
+                        file1CompareColumn: "order_id",
+                        file2CompareColumn: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        ruleSetRunFixturesToCleanUp << [ruleSetId: created.savedRun.ruleSetId as String, compareScopeId: created.savedRun.compareScopeId as String]
+        return created.savedRun.savedRunId as String
     }
 
     @Test
@@ -2566,8 +2610,8 @@ end'''
     @Test
     void generatedOutputsForOneSavedRunListOnlyThatRunsRows() {
         // DAR-BE-146. The saved-run filter now runs in the query; a legacy row named by its mapping id
-        // alone still belongs to the run, and another saved run's row does not. Other tests here run the
-        // seeded mapping too, so this checks membership rather than an exact list.
+        // alone still belongs to the run, and another saved run's row does not. Old rows of a retired mapping run
+        // (OC21) stay in history, so this checks membership rather than an exact list.
         String mappingId = "OrderIdSchemaMap"
         Timestamp now = ec.user.nowTimestamp
         createRunResultRow("RRR_FILTER_MINE", mappingId, KREWE, "AUT_STAT_RUNNING", now)
@@ -2737,6 +2781,23 @@ end'''
     }
 
     private void deleteRuleSetRunEntities(String ruleSetId, String compareScopeId) {
+        // A fixture that was RUN leaves ReconciliationRunResult rows on its scope (RECRES_SCOPE/RECRES_RULESET), and those
+        // carry children of their own: remove them first, children before parents, or the scope delete below is refused.
+        List<String> runResultIds = (ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz().useCache(false).list() +
+                ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                        .condition("ruleSetId", ruleSetId)
+                        .disableAuthz().useCache(false).list())
+                .collect { it.get("reconciliationRunResultId") as String }.unique()
+        if (runResultIds) {
+            ["darpan.reconciliation.ReconciliationRunStep", "darpan.reconciliation.SlackPostedMessage",
+             "darpan.reconciliation.ReconciliationRunNotifySubscription", "darpan.reconciliation.ReconciliationAutomationExecution"].each { String child ->
+                ec.entity.find(child).condition("reconciliationRunResultId", "in", runResultIds).disableAuthz().useCache(false).deleteAll()
+            }
+            ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                    .condition("reconciliationRunResultId", "in", runResultIds).disableAuthz().useCache(false).deleteAll()
+        }
         // RuleSetCompareSourceFilter/KeyField FK-reference RuleSetCompareSource (RSCFL_SOURCE/
         // RSCKF_SOURCE on compareScopeId+fileSide) — delete children first or the parent delete below
         // throws a constraint violation for any fixture that created exclusion filters or key fields.

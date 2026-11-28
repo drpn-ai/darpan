@@ -607,79 +607,8 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
 }
 
 try {
-    def mapping = null
+    // DAR-OPS-029 OC21 (Aditi 2026-11-28): legacy mapping saved runs are retired; a mapping id resolves as a missing run.
     if (!ec.message.hasError()) {
-        mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
-                .condition("reconciliationMappingId", savedRunIdValue)
-                .useCache(false)
-                .one()
-    }
-
-    if (!ec.message.hasError() && mapping != null) {
-        TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Saved run '${savedRunIdValue}' was not found.")
-    }
-    if (!ec.message.hasError() && mapping != null) runNameValue = normalize(mapping.mappingName)
-
-    if (!ec.message.hasError() && mapping != null) {
-        requireUploadInput("file1", inputFile1Name, file1TextValue)
-        requireUploadInput("file2", inputFile2Name, file2TextValue)
-    }
-
-    if (!ec.message.hasError() && mapping != null) {
-        // Observability: the legacy mapping path runs as a single COMPARE stage — extraction and
-        // output writing happen inside run#GenericDiff, so there are no per-side EXTRACT brackets.
-        RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
-        obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
-        obsStage = RunObservability.STAGE_COMPARE
-        Map legacyResult = ec.service.sync()
-                .name("facade.ReconciliationFacadeServices.run#GenericDiff")
-                .parameters([
-                        reconciliationMappingId: savedRunIdValue,
-                        file1Name              : inputFile1Name,
-                        file1Text              : file1TextValue,
-                        file2Name              : inputFile2Name,
-                        file2Text              : file2TextValue,
-                        file1SystemEnumId      : requestedFile1SystemEnumId,
-                        file2SystemEnumId      : requestedFile2SystemEnumId,
-                        hasHeader              : hasHeaderValue,
-                        sparkMaster            : sparkMaster,
-                        sparkAppName           : sparkAppName ?: "SavedRunDiff"
-                ])
-                .call()
-
-        Map legacyRunResult = (legacyResult?.runResult ?: [:]) as Map
-        Map generatedOutput = legacyRunResult.generatedOutput instanceof Map ? (Map) legacyRunResult.generatedOutput : [:]
-        runResult = [
-                savedRunId             : mapping.reconciliationMappingId,
-                runName                : mapping.mappingName,
-                runType                : ReconciliationSavedRunSupport.RUN_TYPE_MAPPING,
-                reconciliationMappingId: mapping.reconciliationMappingId,
-                companyUserGroupId     : legacyRunResult.companyUserGroupId ?: mapping.companyUserGroupId,
-                reconciliationRunResultId: legacyRunResult.reconciliationRunResultId,
-                resultDataManagerPath  : legacyRunResult.resultDataManagerPath ?: generatedOutput.fileName,
-                differenceCount        : legacyRunResult.differenceCount,
-                onlyInFile1Count       : legacyRunResult.onlyInFile1Count,
-                onlyInFile2Count       : legacyRunResult.onlyInFile2Count,
-                ruleSetId              : null,
-                compareScopeId         : null,
-                compareScopeDescription: null,
-                file1Name              : legacyRunResult.file1Name,
-                file2Name              : legacyRunResult.file2Name,
-                file1SystemEnumId      : legacyRunResult.file1SystemEnumId,
-                file1SystemLabel       : legacyRunResult.file1SystemLabel,
-                file2SystemEnumId      : legacyRunResult.file2SystemEnumId,
-                file2SystemLabel       : legacyRunResult.file2SystemLabel,
-                validationErrors       : (legacyRunResult.validationErrors ?: []) as List,
-                processingWarnings     : (legacyRunResult.processingWarnings ?: []) as List,
-                generatedOutput        : generatedOutput,
-        ]
-        if (!ec.message.hasError()) {
-            RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: runResult.differenceCount])
-            obsStep = null
-        }
-    }
-
-    if (!ec.message.hasError() && mapping == null) {
         Map<String, Object> resolvedRuleSetRun = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)
         if (!resolvedRuleSetRun.error) runNameValue = normalize(((Map) resolvedRuleSetRun.savedRun)?.runName)
         if (resolvedRuleSetRun.error) {

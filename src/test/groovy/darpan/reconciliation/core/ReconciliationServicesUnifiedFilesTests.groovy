@@ -86,13 +86,14 @@ class ReconciliationServicesUnifiedFilesTests {
         def (Map result, Map document) = run(hotwax, "CSV", "id", shopify, "CSV", "id")
 
         assertEquals(["A", "A"], idsOfType(document, "DUPLICATE_IN_FILE_1"), "both copies of A are findings")
+        assertEquals(["A"], idsOfType(document, "DUPLICATE_IN_FILE_2_PAIRED"), "Shopify's A is its partner row (S01b OC14)")
         assertEquals(["B"], idsOfType(document, "missing_in_Shopify"))
         assertEquals(["C"], idsOfType(document, "missing_in_HotWax"))
         assertEquals(1L, result.onlyInFile1Count)
         assertEquals(1L, result.onlyInFile2Count)
-        assertEquals(2L, result.duplicateDifferenceCount)
+        assertEquals(3L, result.duplicateDifferenceCount, "2 repeats and the partner")
         assertEquals(0L, result.matchedCount, "A left the compare on both sides; nothing matched")
-        assertEquals(4L, result.differenceCount, "1 + 1 missing and the 2 duplicate records")
+        assertEquals(5L, result.differenceCount, "1 + 1 missing, the 2 duplicate records and their partner")
         assertEquals(((List) document.differences).size(), (document.summary as Map).totalDifferences as int,
                 "the summary counts exactly the rows written")
         assertTrue(((List<String>) result.processingWarnings).any { it.contains("HotWax") && it.contains("more than one record") },

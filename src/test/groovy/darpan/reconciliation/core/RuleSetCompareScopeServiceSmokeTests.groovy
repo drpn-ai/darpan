@@ -495,7 +495,9 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.getErrorsString())
         List<Map<String, Object>> duplicates = collectRows((Dataset) result.missingDiffDf).findAll { it.type == "DUPLICATE_IN_FILE_1" }
         assertEquals(["6470622478467", "6470622478467"], duplicates.collect { it.id?.toString() }, "both copies are findings")
-        assertEquals(2L, result.duplicateDifferenceCount)
+        assertEquals(["6470622478467"], collectRows((Dataset) result.missingDiffDf).findAll { it.type == "DUPLICATE_IN_FILE_2_PAIRED" }
+                .collect { it.id?.toString() }, "the other side's record for the key is its partner row (S01b OC14)")
+        assertEquals(3L, result.duplicateDifferenceCount)
     }
 
     @Test
@@ -690,9 +692,11 @@ class RuleSetCompareScopeServiceSmokeTests {
         List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
         List<Map<String, Object>> duplicates = diffs.findAll { it.diffType == "DUPLICATE_IN_FILE_1" || it.type == "DUPLICATE_IN_FILE_1" }
         assertEquals(2, duplicates.size(), "both copies of the repeated key are findings: ${diffs}")
-        assertEquals(2L, result.duplicateDifferenceCount)
+        assertEquals(1, diffs.count { it.diffType == "DUPLICATE_IN_FILE_2_PAIRED" || it.type == "DUPLICATE_IN_FILE_2_PAIRED" },
+                "the other side's record for the key is its partner row (S01b OC14): ${diffs}")
+        assertEquals(3L, result.duplicateDifferenceCount)
         assertEquals(3L, result.missingObjectDifferenceCount, "presence findings are unchanged")
-        assertEquals(5L, result.differenceCount, "duplicates are differences too")
+        assertEquals(6L, result.differenceCount, "duplicates and their partner are differences too")
         List<String> warnings = ((List) result.processingWarnings).collect { Object value -> value?.toString() }
         assertTrue(warnings.any { it.contains("FILE_1") && it.contains("1 key(s) on more than one record") }, warnings.toString())
     }
@@ -915,7 +919,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                 assertEquals(NO_KEEP_DIFF.collect { groovy.json.JsonOutput.toJson(it) }.sort(), diff)
                 Map scalars = result.findAll { key, value -> !(value instanceof Dataset) && key != "persistedSources" }
                 assertEquals(groovy.json.JsonOutput.toJson(new TreeMap(NO_KEEP_RESULT)), groovy.json.JsonOutput.toJson(new TreeMap(scalars)))
-                assertEquals(7, ((List) result.persistedSources).size(), "the frames the compare persisted before Keep")
+                assertEquals(8, ((List) result.persistedSources).size(), "the frames the compare persisted before Keep, and (S01b OC14) FILE_2's partner frame")
             }
             assertEquals(["acme-one.json", "acme-two.json"], folder.list().toList().sort(), "no Keep artifact")
         } finally {
@@ -924,16 +928,19 @@ class RuleSetCompareScopeServiceSmokeTests {
         }
     }
 
-    /** The no-Keep compare of the Keep fixture, recorded from the code before Task 11: A4 twice on FILE_1 is a duplicate. */
+    /** The no-Keep compare of the Keep fixture, recorded from the code before Task 11: A4 twice on FILE_1 is a duplicate, and
+     *  (S01b OC14) FILE_2's A4 is its partner row. */
     private static final List<Map> NO_KEEP_DIFF = [
             [diffType : "DUPLICATE_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A4", presentIn: "ACME one",
              missingIn: "", data: '{"id":"A4","status":"OPEN"}', message: "Duplicated in ACME one: more than one record shares this key"],
             [diffType : "DUPLICATE_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A4", presentIn: "ACME one",
              missingIn: "", data: '{"id":"A4","status":"VOID"}', message: "Duplicated in ACME one: more than one record shares this key"],
+            [diffType : "DUPLICATE_IN_FILE_2_PAIRED", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A4", presentIn: "ACME two",
+             missingIn: "", data: '{"id":"A4"}', message: "Paired with a key repeated in ACME one"],
             [diffType : "MISSING_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A5", presentIn: "ACME two",
              missingIn: "ACME one", data: '{"id":"A5"}', message: "Present in ACME two, missing in ACME one"]]
     private static final Map NO_KEEP_RESULT = [
-            compareScopeDescription: KEEP_SCOPE, compareScopeId: KEEP_SCOPE, differenceCount: 3, duplicateDifferenceCount: 2,
+            compareScopeDescription: KEEP_SCOPE, compareScopeId: KEEP_SCOPE, differenceCount: 4, duplicateDifferenceCount: 3,
             file1Label: "ACME one", file1Type: "JSON", file2Label: "ACME two", file2Type: "JSON", firedRuleCount: 0, matchedPairCount: 3,
             missingInFile1Count: 1, missingInFile2Count: 0, missingObjectDifferenceCount: 1, objectType: "ORDER",
             processingWarnings: ["Compare scope 'DARPAN_TEST_KEEP_SCOPE' FILE_1 (ACME one) has 1 key(s) on more than one record; " +

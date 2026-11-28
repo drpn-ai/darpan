@@ -2,6 +2,7 @@ package darpan.reconciliation.core
 
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
+import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
@@ -9,6 +10,10 @@ import org.apache.spark.storage.StorageLevel
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+
+import static org.apache.spark.sql.functions.col
+import static org.apache.spark.sql.functions.lit
+import static org.apache.spark.sql.functions.when
 
 class RuleSetCompareScopeAdapter {
     private static final Logger logger = LoggerFactory.getLogger(RuleSetCompareScopeAdapter.class)
@@ -278,7 +283,7 @@ class RuleSetCompareScopeAdapter {
             // with one order twice in HotWax showed nothing, and to collapse silently into a match on a base-diff run.
             // An evaluate run never joins on compare_id, so its repeated ids are its findings and pass through untouched.
             Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
-                    splitDuplicateKeys(ingestBySide)
+                    splitDuplicateKeys(ingestBySide, activeSides.collectEntries { String side -> [(side): ((Map) sidePlanBySide[side]).label] })
             ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
             ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
                 if (count > 0) processingWarnings.add(duplicateKeyWarning(
@@ -405,12 +410,19 @@ class RuleSetCompareScopeAdapter {
         return written
     }
 
+    /** OC14: the row type of a side's record whose key repeats only on the other side, named for the record's own side. */
+    static String pairedRowType(String fileSide) {
+        return "DUPLICATE_IN_${fileSide}_PAIRED".toString()
+    }
+
     /**
-     * DAR-BE-063 / DAR-BE-165. Each side's repeated keys: every record under them is kept aside as that side's
-     * duplicate frame, and the union of all such keys is removed from EVERY side's data and id frames, so the other
-     * side's record for a repeated key is not reported missing. With no key repeated anywhere, the input map itself.
+     * DAR-BE-063 / DAR-BE-165 / OC14. The union of every side's repeated keys leaves EVERY side's data and id frames, so
+     * no repeated key is matched or reported missing. Each side's duplicate frame holds every one of its records under
+     * such a key: its own repeats (row type from the caller) and its partner records, whose key repeats only on the
+     * other side (row type pairedRowType, note naming that side by labelBySide, else its code). So per side,
+     * input = kept + duplicate frame. With no key repeated anywhere, the input map itself.
      */
-    static Map<String, Object> splitDuplicateKeys(Map<String, Object> ingestBySide) {
+    static Map<String, Object> splitDuplicateKeys(Map<String, Object> ingestBySide, Map<String, String> labelBySide = [:]) {
         Map<String, Dataset> duplicateIdsBySide = [:]
         Map<String, Long> countBySide = [:]
         (ingestBySide ?: [:]).each { String fileSide, Object raw ->
@@ -432,9 +444,26 @@ class RuleSetCompareScopeAdapter {
             CompareDatasetSupport.unionDatasets(acc, ids)
         }.distinct()
         Map<String, Dataset> duplicateDataBySide = [:]
-        duplicateIdsBySide.each { String fileSide, Dataset ids ->
-            Dataset dataDf = (Dataset) ((Map) ingestBySide.get(fileSide)).dataDf
-            duplicateDataBySide.put(fileSide, dataDf.join(ids, "compare_id", "inner"))
+        ingestBySide.each { String fileSide, Object raw ->
+            Dataset dataDf = (Dataset) ((Map) raw)?.dataDf
+            if (dataDf == null) return
+            String otherSides = ingestBySide.keySet().findAll { it != fileSide }.collect { labelBySide?.get(it) ?: it }.join(", ")
+            Column partnerType = lit(pairedRowType(fileSide))
+            Column partnerNote = lit("Paired with a key repeated in ${otherSides}".toString())
+            Dataset underRepeatedKeys = CompareDatasetSupport.keepCompareIds(dataDf, allDuplicateIds)
+            Dataset ownIds = duplicateIdsBySide.get(fileSide)
+            Dataset tagged
+            if (ownIds == null) {
+                tagged = underRepeatedKeys.withColumn(CompareDatasetSupport.DUPLICATE_ROW_TYPE_COLUMN, partnerType)
+                        .withColumn(CompareDatasetSupport.DUPLICATE_ROW_NOTE_COLUMN, partnerNote)
+            } else {
+                Column partner = col("own_repeat").isNull()
+                tagged = underRepeatedKeys.join(ownIds.withColumn("own_repeat", lit(true)), "compare_id", "left")
+                        .withColumn(CompareDatasetSupport.DUPLICATE_ROW_TYPE_COLUMN, when(partner, partnerType))
+                        .withColumn(CompareDatasetSupport.DUPLICATE_ROW_NOTE_COLUMN, when(partner, partnerNote))
+                        .drop("own_repeat")
+            }
+            duplicateDataBySide.put(fileSide, tagged)
         }
         Map<String, Object> filtered = ingestBySide.collectEntries { String fileSide, Object raw ->
             Map ingest = new LinkedHashMap((Map) raw)

@@ -103,15 +103,29 @@ class CompareDatasetSupport {
         return df.join(ids, df.col("compare_id").equalTo(ids.col("compare_id")), "left_semi")
     }
 
+    /** OC14: set by RuleSetCompareScopeAdapter.splitDuplicateKeys on a partner record (its key repeats only on the other side). */
+    static final String DUPLICATE_ROW_TYPE_COLUMN = "duplicate_row_type"
+    static final String DUPLICATE_ROW_NOTE_COLUMN = "duplicate_row_note"
+
     /**
      * DAR-BE-063: one finding row per record under a duplicated key, in buildMissingDiffRows' exact row
      * shape. missingIn is EMPTY (the evaluate-row precedent): nothing is missing, and the verify pass
-     * selects rows by missingIn, so it leaves these alone.
+     * selects rows by missingIn, so it leaves these alone. OC14: a record the split tagged as a partner
+     * carries its own type and note (DUPLICATE_IN_FILE_n_PAIRED); every other record takes diffType and note.
      */
     static Dataset buildDuplicateRows(Dataset duplicateDataDf, String diffType, String sideLabel, String note) {
         if (duplicateDataDf == null) return null
-        return buildMissingDiffRows(duplicateDataDf, duplicateDataDf.select("compare_id").distinct(),
-                diffType, sideLabel, "", note)
+        boolean tagged = (duplicateDataDf.columns() as List).contains(DUPLICATE_ROW_TYPE_COLUMN)
+        Column type = tagged ? coalesce(col(DUPLICATE_ROW_TYPE_COLUMN), lit(diffType)) : lit(diffType)
+        Column rowNote = tagged ? coalesce(col(DUPLICATE_ROW_NOTE_COLUMN), lit(note)) : lit(note)
+        return duplicateDataDf.select(
+                type.alias("type"),
+                col("compare_id").alias("id"),
+                lit(sideLabel).alias("presentIn"),
+                lit("").alias("missingIn"),
+                to_json(col("data")).alias("data"),
+                rowNote.alias("note")
+        )
     }
 
     static Dataset unionDatasets(Dataset firstDf, Dataset secondDf) {

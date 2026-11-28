@@ -68,7 +68,7 @@ class ReconciliationServicesBucketCountTests {
             int duplicates = types.count { it?.startsWith("DUPLICATE_IN_FILE_") } as int
             int rule = types.size() - missing - duplicates
 
-            assertEquals(2, duplicates, "both P100 records are findings: ${types}")
+            assertEquals(3, duplicates, "both P100 records and the other side's P100 (its partner row, S01b OC14) are findings: ${types}")
             assertTrue(rule > 0, "the run has rule differences too: ${types}")
             assertEquals((long) missing, result.missingObjectDifferenceCount)
             assertEquals((long) duplicates, result.duplicateDifferenceCount)
@@ -76,11 +76,13 @@ class ReconciliationServicesBucketCountTests {
             assertEquals((long) types.size(), result.differenceCount, "differenceCount is every row, each once")
             assertEquals((long) missing, (long) result.missingInFile1Count + (long) result.missingInFile2Count)
 
-            // Records: FILE_1 = matched + missing from FILE_2 + its duplicate records. FILE_2's one P100 record left the
-            // compare with the key (it is neither missing nor matched), so FILE_2 = matched + missing from FILE_1 + 1.
+            // Records, per side: matched + missing from the other side + its rows under a repeated key. S01b OC14: FILE_2's
+            // one P100 record is its partner row (DUPLICATE_IN_FILE_2_PAIRED), so every record of both sides is in a bucket.
             long matched = (long) result.matchedPairCount
-            assertEquals(5L, matched + (long) result.missingInFile2Count + duplicates)
-            assertEquals(4L, matched + (long) result.missingInFile1Count + 1L)
+            long underRepeated1 = types.count { it?.startsWith("DUPLICATE_IN_FILE_1") } as long
+            long underRepeated2 = types.count { it?.startsWith("DUPLICATE_IN_FILE_2") } as long
+            assertEquals(5L, matched + (long) result.missingInFile2Count + underRepeated1)
+            assertEquals(4L, matched + (long) result.missingInFile1Count + underRepeated2)
         } finally {
             ReconciliationServices.unpersistDatasets((List) result.persistedSources)
         }

@@ -74,7 +74,8 @@ class DuplicateKeySplitTests {
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_2.dataDf))
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_2.idDf))
         assertEquals(["K2", "K2"], ids((Dataset) split.duplicateDataBySide.FILE_2), "every record under the key is kept")
-        assertNull(split.duplicateDataBySide.FILE_1, "a side with no repeated key has no duplicate frame")
+        // OC14 (Aditi, F-E1 option a): FILE_1's single K2 record is its partner row, not dropped.
+        assertEquals(["K2"], ids((Dataset) split.duplicateDataBySide.FILE_1), "the other side's record under the key is kept too")
         assertEquals(1L, split.duplicateKeyCountBySide.FILE_2)
         assertNull(split.duplicateKeyCountBySide.FILE_1)
     }
@@ -116,16 +117,60 @@ class DuplicateKeySplitTests {
 
     @Test
     void everyKeyedRecordLandsInExactlyOnePlace() {
-        // S01b I1, conservation: per side, input = kept + own duplicates + partners (key repeated only on the other side).
+        // S01b I1, conservation: per side, input = kept + every record under a repeated key (its own repeats and its
+        // partner records), so left = matched + onlyLeft + duplicates + paired adds up.
         Map<String, Dataset> input = mixed()
         Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)])
-        Map partnersBySide = [FILE_1: ["K2"], FILE_2: []]
         ["FILE_1", "FILE_2"].each { String side ->
             List<String> kept = ids((Dataset) ((Map) split.ingestBySide)[side].dataDf)
-            List<String> own = idsOrEmpty(split.duplicateDataBySide[side])
-            List<String> partners = (List<String>) partnersBySide[side]
-            assertEquals(ids(input[side]), (kept + own + partners).sort(), "${side}: every record is in exactly one place")
+            List<String> underRepeatedKeys = idsOrEmpty(split.duplicateDataBySide[side])
+            assertEquals(ids(input[side]), (kept + underRepeatedKeys).sort(), "${side}: every record is in exactly one place")
         }
+    }
+
+    private static List<String> rowsOf(Dataset rows) {
+        return rows.collectAsList().collect { Row r -> "${r.getAs('type')}|${r.getAs('id')}|${r.getAs('presentIn')}|${r.getAs('note')}".toString() }.sort()
+    }
+
+    private static List<String> duplicateRows(Map split, String label1, String label2) {
+        Dataset all = CompareDatasetSupport.unionDatasets(
+                CompareDatasetSupport.buildDuplicateRows((Dataset) split.duplicateDataBySide.FILE_1, "DUPLICATE_IN_FILE_1", label1, "Duplicated in ${label1}".toString()),
+                CompareDatasetSupport.buildDuplicateRows((Dataset) split.duplicateDataBySide.FILE_2, "DUPLICATE_IN_FILE_2", label2, "Duplicated in ${label2}".toString()))
+        return rowsOf(all)
+    }
+
+    @Test
+    void aPartnerRecordIsItsOwnRowNamedForItsSide() {
+        // OC14: K2 is twice in NetSuite and once in OMS; OMS's record is a DUPLICATE_IN_FILE_1_PAIRED row.
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(alpha()), FILE_2: ingest(beta())],
+                [FILE_1: "OMS", FILE_2: "NetSuite"])
+        assertEquals(["DUPLICATE_IN_FILE_1_PAIRED|K2|OMS|Paired with a key repeated in NetSuite",
+                      "DUPLICATE_IN_FILE_2|K2|NetSuite|Duplicated in NetSuite",
+                      "DUPLICATE_IN_FILE_2|K2|NetSuite|Duplicated in NetSuite"], duplicateRows(split, "OMS", "NetSuite"))
+    }
+
+    @Test
+    void aKeyRepeatedOnOneSideNoLongerHidesWhetherTheOtherSideHasIt() {
+        // OC14 presence: "K4 twice in NetSuite, absent from OMS" must read differently from "K2 twice, once in OMS".
+        Map<String, Dataset> input = mixed()
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(input.FILE_1), FILE_2: ingest(input.FILE_2)],
+                [FILE_1: "OMS", FILE_2: "NetSuite"])
+        List<String> rows = duplicateRows(split, "OMS", "NetSuite")
+        assertTrue(rows.contains("DUPLICATE_IN_FILE_1_PAIRED|K2|OMS|Paired with a key repeated in NetSuite"), rows.toString())
+        assertTrue(rows.findAll { it.contains("|K4|") }.every { it.startsWith("DUPLICATE_IN_FILE_2|") }, "OMS has no K4: no partner row")
+        // K5 repeats on BOTH sides: every record is its own side's duplicate, none is a partner.
+        assertTrue(rows.findAll { it.contains("|K5|") }.every { !it.contains("_PAIRED") }, rows.toString())
+        assertEquals(9, rows.size(), "FILE_1: K2 partner + 2 K5; FILE_2: 2 K2 + 2 K4 + 2 K5")
+    }
+
+    @Test
+    void taggedDuplicateRowsKeepTheMissingRowSchema() {
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(alpha()), FILE_2: ingest(beta())])
+        Dataset tagged = CompareDatasetSupport.buildDuplicateRows((Dataset) split.duplicateDataBySide.FILE_1, "DUPLICATE_IN_FILE_1", "OMS", "n")
+        Dataset missing = CompareDatasetSupport.buildMissingDiffRows(alpha(), alpha().select("compare_id"), "MISSING_IN_FILE_2", "OMS", "NetSuite", "n")
+        assertEquals(missing.schema(), tagged.schema())
+        // Without labels the note names the side code.
+        assertEquals(["DUPLICATE_IN_FILE_1_PAIRED|K2|OMS|Paired with a key repeated in FILE_2"], rowsOf(tagged))
     }
 
     @Test
@@ -136,7 +181,7 @@ class DuplicateKeySplitTests {
         Map sides = (Map) split.ingestBySide
         Dataset matched = CompareDatasetSupport.buildMatchedIdDataset((Dataset) sides.FILE_1.idDf, (Dataset) sides.FILE_2.idDf)
         assertEquals(["K1"], ids(matched))
-        assertEquals(["K5", "K5"], ids((Dataset) split.duplicateDataBySide.FILE_1))
+        assertEquals(["K2", "K5", "K5"], ids((Dataset) split.duplicateDataBySide.FILE_1))
         assertEquals(["K2", "K2", "K4", "K4", "K5", "K5"], ids((Dataset) split.duplicateDataBySide.FILE_2))
         assertEquals([FILE_1: 1L, FILE_2: 3L], split.duplicateKeyCountBySide)
     }

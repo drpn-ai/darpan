@@ -1,6 +1,5 @@
 package darpan.reconciliation.support
 
-import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantAccessSupport
 
 import java.sql.Timestamp
@@ -10,27 +9,24 @@ import java.sql.Timestamp
  * entity stand-ins used to be hand-copied into each test; ec.entity is a {@link FakeEntityFacade}, so finders answer as
  * Moqui's do (a full PK drops a tenant condition beside it; a fresh finder per find()).
  *
- * <p>{@link #tenantTables} declares the tables TenantAccessSupport reads to resolve the active tenant: memberships
- * (UserGroupAndMember, UserGroupMember), per-tenant permission groups and TenantSetting (disabled tenants).</p>
+ * <p>{@link #tenantTables} declares the memberships TenantAccessSupport reads to resolve the active tenant
+ * (UserGroupAndMember, UserGroupMember).</p>
  */
 class FakeTenantEc {
-    static final List<String> USER_GROUP_MEMBER_PK = ["userGroupId", "userId", "fromDate"].asImmutable()
-
     /**
      * Declares the tenant tables on {@code entity} for {@code userId} as a member of each of {@code tenantIds}. A
-     * table the test declared already is left alone, so a test can seed its own rows first.
+     * table the test declared already is left alone, so a test can seed its own rows first. Tables not named here
+     * (permission groups, TenantSetting) are empty unless the test declares them.
      */
     static FakeEntityFacade tenantTables(FakeEntityFacade entity, String userId, List<String> tenantIds) {
         List<Map> memberships = tenantIds.collect { String tenant ->
             [userGroupId: tenant, userId: userId, description: tenant,
              groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID] as Map
         }
-        declareIfAbsent(entity, "moqui.security.UserGroupAndMember", USER_GROUP_MEMBER_PK, memberships)
-        declareIfAbsent(entity, "moqui.security.UserGroupMember", USER_GROUP_MEMBER_PK,
-                memberships.collect { [userGroupId: it.userGroupId, userId: userId] as Map })
-        declareIfAbsent(entity, DarpanEntityConstants.TENANT_USER_PERMISSION_GROUP_MEMBER,
-                ["tenantUserGroupId", "userId", "permissionUserGroupId", "fromDate"], [])
-        declareIfAbsent(entity, DarpanEntityConstants.TENANT_SETTING, ["companyUserGroupId"], [])
+        if (entity.rows("moqui.security.UserGroupAndMember") == null) entity.table("moqui.security.UserGroupAndMember", memberships)
+        if (entity.rows("moqui.security.UserGroupMember") == null) {
+            entity.table("moqui.security.UserGroupMember", memberships.collect { [userGroupId: it.userGroupId, userId: userId] as Map })
+        }
         return entity
     }
 
@@ -46,10 +42,6 @@ class FakeTenantEc {
                 l10n    : new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:]),
         ] + overrides)
-    }
-
-    private static void declareIfAbsent(FakeEntityFacade entity, String name, List<String> pk, List<Map> rows) {
-        if (entity.rows(name) == null) entity.table(name, pk, rows)
     }
 
     static class UserStub {

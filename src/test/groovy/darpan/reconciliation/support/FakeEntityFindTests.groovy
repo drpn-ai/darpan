@@ -109,14 +109,28 @@ class FakeEntityFindTests {
     }
 
     @Test
-    void theFacadeIssuesAFreshRecordedFinderPerFindAndRefusesUndeclaredTables() {
-        FakeEntityFacade entity = new FakeEntityFacade().table("Chat", ["chatSpaceId"], new ArrayList<Map>(ROWS))
-        assertEquals(1L, entity.find("Chat").condition("companyUserGroupId", "TENANT_A").disableAuthz().count())
-        assertEquals(3L, entity.find("Chat").count(), "the first find's condition does not narrow the second")
-        assertEquals([true, false], entity.issuedFor("Chat")*.authzDisabled)
-        entity.find("Chat").condition("chatSpaceId", "CS_A").deleteAll()
-        assertEquals(2, entity.rows("Chat").size())
-        assertThrows(IllegalStateException) { entity.find("Undeclared") }
+    void theFacadeIssuesAFreshRecordedFinderPerFind() {
+        FakeEntityFacade entity = new FakeEntityFacade().table("TestOnlyChat", ["chatSpaceId"], new ArrayList<Map>(ROWS))
+        assertEquals(1L, entity.find("TestOnlyChat").condition("companyUserGroupId", "TENANT_A").disableAuthz().count())
+        assertEquals(3L, entity.find("TestOnlyChat").count(), "the first find's condition does not narrow the second")
+        assertEquals([true, false], entity.issuedFor("TestOnlyChat")*.authzDisabled)
+        entity.find("TestOnlyChat").condition("chatSpaceId", "CS_A").deleteAll()
+        assertEquals(2, entity.rows("TestOnlyChat").size())
+    }
+
+    // Keys come from the entity XML: an undeclared real entity is an empty table with its real key; an unknown name throws.
+    @Test
+    void theFacadeReadsPrimaryKeysFromTheEntityXml() {
+        assertEquals(["userGroupId", "userId", "fromDate"], EntityPrimaryKeys.of("moqui.security.UserGroupMember"))
+        assertEquals(["userGroupId", "userId", "fromDate"], EntityPrimaryKeys.of("moqui.security.UserGroupAndMember"), "a view's key is its members' aliased key")
+        assertEquals(["companyUserGroupId"], EntityPrimaryKeys.of("darpan.auth.TenantSetting"))
+        assertEquals(EntityPrimaryKeys.of("darpan.auth.TenantSetting"), EntityPrimaryKeys.of("TenantSetting"), "a unique bare name resolves too")
+
+        FakeEntityFacade entity = new FakeEntityFacade().table("moqui.security.UserGroup", [[userGroupId: "KREWE"]])
+        assertEquals("KREWE", entity.find("moqui.security.UserGroup").condition("userGroupId", "KREWE").condition("x", "y").one()?.userGroupId)
+        assertEquals([], entity.find("darpan.auth.TenantSetting").list(), "an undeclared real entity is an empty table")
+        assertThrows(IllegalStateException) { entity.find("darpan.no.SuchEntity") }
+        assertThrows(IllegalArgumentException) { new FakeEntityFacade().table("darpan.auth.TenantSetting", ["tenantId"], []) }
     }
 
     @Test

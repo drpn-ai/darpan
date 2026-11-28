@@ -548,6 +548,7 @@ class KeptCopySupport {
 
             documentWork = File.createTempFile("kept-copy-", ".partial", outDir)
             File recordLines = projectedWork ?: recordsWork
+            long written = 0
             documentWork.withWriter("UTF-8") { Writer out ->
                 out.write('{"metadata":' + JsonOutput.toJson(metadata) + ',"records":[')
                 boolean first = true
@@ -556,9 +557,13 @@ class KeptCopySupport {
                     if (!first) out.write(",")
                     out.write(line)
                     first = false
+                    written++
                 }
                 out.write(']}')
             }
+            // the records the file holds, not the count a projection service declares (moqui-qa-technician): a service that
+            // writes another number of lines than the slice kept is never served
+            if (written != kept) return notServed("the projection service wrote ${written} record lines of ${kept}".toString())
             DataManagerSupport.moveIntoLocation(ec, documentWork, fileLocation)
             wroteDocument = true
             List<String> warnings = []

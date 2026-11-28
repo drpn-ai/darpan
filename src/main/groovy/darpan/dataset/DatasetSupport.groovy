@@ -165,8 +165,10 @@ class DatasetSupport {
      * were: clearErrors would turn each into a danger message that rides out in the caller's reply (a table name, an address).
      */
     static List<String> takeErrors(def ec) {
-        List<String> errors = ((ec.message.getErrors() ?: []) as List).collect { it.toString() }
-        if (!errors && !ec.message.getValidationErrors()) return errors
+        // validation errors count too: dropped silently they would make a failed call read as an empty answer
+        List<String> errors = ((ec.message.getErrors() ?: []) as List).collect { it.toString() } +
+                ((ec.message.getValidationErrors() ?: []) as List).collect { it.toString() }
+        if (!errors) return errors
         List infos = new ArrayList(ec.message.getMessageInfos())
         List publics = new ArrayList(ec.message.getPublicMessageInfos())
         ec.message.clearAll()

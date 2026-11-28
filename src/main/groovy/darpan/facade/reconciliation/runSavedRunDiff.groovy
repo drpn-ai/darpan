@@ -37,7 +37,11 @@ def logger = LoggerFactory.getLogger("darpan.facade.reconciliation.SavedRunDiff"
 // the caller's transaction is resumed untouched for the response path. Out-parameters are
 // unaffected: they are undeclared binding writes, which pass through this closure to the script
 // binding. See SavedRunTransactionDetachTests.
-return ReconciliationSavedRunSupport.runDetachedFromCallerTransaction(ec) { ->
+// S08 QA (3): the active tenant is a preference every tab shares, re-read by each tenant read when the call requested none
+// (no per-tab header: a flowchart question, a CLI call). Pinned here, once, so a switch mid-run cannot move half the run's
+// reads and owner checks to another tenant (persistRunResult would miss its own row and mint an orphan).
+String runTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+return TenantAccessSupport.withRequestedTenant(runTenantUserGroupId) { -> ReconciliationSavedRunSupport.runDetachedFromCallerTransaction(ec) { ->
 
 def toTimestampValue = { Object rawValue ->
     if (rawValue == null) return null
@@ -1301,4 +1305,4 @@ Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok
 messages = envelope.messages
 errors = envelope.errors
-}
+} }

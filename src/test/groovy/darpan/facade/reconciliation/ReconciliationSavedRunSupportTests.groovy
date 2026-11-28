@@ -426,4 +426,20 @@ class ReconciliationSavedRunSupportTests {
         assertEquals(4, (code =~ /settleCheckErrors\((?:EXCHANGE|RETURNS)_CHECK,/).size(), "prepare and run of both checks settle their errors")
         assertEquals(1, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "one place sends raw text to the alerts room")
     }
+
+    /**
+     * S08 QA (3): the active tenant is a server-side preference every tab shares. With no tenant requested for the call (no
+     * per-tab header, a flowchart question, a CLI call without one), each read re-reads it, so a switch mid-run made
+     * persistRunResult's owner check miss the run row and mint an orphan second row. The run pins the tenant it started in
+     * for its whole body (withRequestedTenant, proven by RequestedTenantSmokeTests to hold against a preference switch).
+     */
+    @Test
+    void runSavedRunDiffPinsTheTenantItStartedIn() {
+        String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
+                .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
+        assertTrue((code =~ /return TenantAccessSupport\.withRequestedTenant\(runTenantUserGroupId\) \{ ->\s*ReconciliationSavedRunSupport\.runDetachedFromCallerTransaction\(ec\)/).find(),
+                "the whole run body runs inside withRequestedTenant(the tenant it started in)")
+        assertTrue(code.contains("String runTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)"))
+    }
 }

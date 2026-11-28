@@ -49,8 +49,14 @@ class KeepColumnSupport {
     private static final Map<String, String> OPPOSITE = [IN: "NOT_IN", NOT_IN: "IN", EQ: "NE", NE: "EQ", LT: "GE", GE: "LT",
             GT: "LE", LE: "GT", LIKE: "NOT_LIKE", NOT_LIKE: "LIKE", IS_NULL: "IS_NOT_NULL", IS_NOT_NULL: "IS_NULL",
             STARTS_WITH_ANY: NOT_STARTS_WITH_ANY, (NOT_STARTS_WITH_ANY): "STARTS_WITH_ANY"]
-    /** Groovy orders null before every value, so these hold for no value. */
-    private static final Set<String> HOLD_FOR_NO_VALUE = ["NE", "NOT_IN", "NOT_LIKE", NOT_STARTS_WITH_ANY, "LT", "LE"] as Set
+    /** KeepRules.HOLDS_FOR_NO_VALUE, plus the builder's own turned-around STARTS_WITH_ANY. */
+    private static final Set<String> HOLD_FOR_NO_VALUE = holdForNoValue()
+
+    private static Set<String> holdForNoValue() {
+        Set<String> out = new HashSet<String>(KeepRules.HOLDS_FOR_NO_VALUE)
+        out.add(NOT_STARTS_WITH_ANY)
+        return Collections.unmodifiableSet(out)
+    }
 
     private static final UserDefinedFunction A_UPPER = functions.udf(new Fold("A_UPPER"), DataTypes.StringType)
     private static final UserDefinedFunction NORMALIZE = functions.udf(new Fold("NORMALIZE"), DataTypes.StringType)
@@ -207,7 +213,7 @@ class KeepColumnSupport {
                     out.add(functions.lit(scaled).cast(NUMBER_TYPE))
                     break
                 case "BOOLEAN":
-                    String yesNo = YesNo.convert(text)
+                    String yesNo = KeepRules.yesNo(text)
                     if (yesNo == null) throw new IllegalArgumentException("Keep rule ${ruleId}: ${raw} is not yes or no.".toString())
                     out.add(functions.lit(yesNo))
                     break
@@ -239,17 +245,9 @@ class KeepColumnSupport {
         }
     }
 
-    /** A yes/no as "true" or "false", from true, false, y or n in any case, trimmed; anything else is no value. */
+    /** KeepRules.yesNo as a Spark function: "true" or "false", anything else no value. */
     static class YesNo implements UDF1<String, String> {
-        String call(String value) { return convert(value) }
-
-        static String convert(String value) {
-            switch (value?.trim()?.toLowerCase(Locale.ROOT)) {
-                case "true": case "y": return "true"
-                case "false": case "n": return "false"
-                default: return null
-            }
-        }
+        String call(String value) { return KeepRules.yesNo(value) }
     }
 
     /** ValueChecks.likeMatches over folded text and pattern; no value is like nothing. */

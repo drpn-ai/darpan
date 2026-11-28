@@ -1,12 +1,12 @@
 package darpan.reconciliation.source
 
 /**
- * DAR-BE-318 (plan 3b-2b). The one Keep rule shape. Both front-ends (the tenant's source filters, and the judge
- * rules' Keep lines plus a connector's built-ins) produce a List of these maps, in evaluation order; the first rule
- * whose test holds owns the record. This class only defines the shape's constants and checks it; it holds no system
+ * DAR-BE-318 (plan 3b-2b). The one Keep rule shape. Both front-ends (the tenant's source filters, SourceFilterSupport.toKeepRules,
+ * and a connector's built-in Keep lines, KeepLineTranslator.declared) produce a List of these maps, in evaluation order; the first
+ * rule whose test holds owns the record. This class only defines the shape's constants and checks it; it holds no system
  * name and no system logic.
  *
- * rule      = [id, sequenceNum, label, source: TENANT|BUILT_IN|DECISION, tests: [[test: predicate, reason], ...]]
+ * rule      = [id, sequenceNum, label, source: TENANT|BUILT_IN, tests: [[test: predicate, reason], ...]]
  * predicate = [kind: "compare", field, text: GROOVY|FACT, op, values, valueKind, fold]
  *           | [kind: "all"|"any", of: [predicate]] | [kind: "not", of: predicate] | [kind: "const", holds: boolean]
  */
@@ -18,19 +18,41 @@ class KeepRules {
     static final String REASON_COLUMN = "_darpanKeepReason"
     static final String INJECTED_PREFIX = "_darpanKeep_"
 
-    static final Set<String> SOURCES = ["TENANT", "BUILT_IN", "DECISION"] as Set
+    static final Set<String> SOURCES = ["TENANT", "BUILT_IN"] as Set
     static final Set<String> TEXTS = ["GROOVY", "FACT"] as Set
     static final Set<String> OPS = ["IN", "NOT_IN", "STARTS_WITH_ANY", "EQ", "NE", "LT", "LE", "GT", "GE", "LIKE",
                                     "NOT_LIKE", "IS_NULL", "IS_NOT_NULL"] as Set
     static final Set<String> NO_VALUE_OPS = ["IS_NULL", "IS_NOT_NULL"] as Set
     static final Set<String> VALUE_KINDS = ["TEXT", "NUMBER", "BOOLEAN"] as Set
     static final Set<String> FOLDS = ["A_UPPER", "NORMALIZE", "LIKE_UPPER", "NONE"] as Set
+    /**
+     * The ops that hold for a record with no value (moqui-rules ValueChecks.fixedValue and Moqui's in-memory condition, where
+     * Groovy orders null before every value). The one list: the Spark builder (KeepColumnSupport) decides by it, and the
+     * landed-file check (KeepPlanSupport.landedFilteredAtRead) uses it to know when a missing flag says nothing.
+     */
+    static final Set<String> HOLDS_FOR_NO_VALUE = ["NE", "NOT_IN", "NOT_LIKE", "LT", "LE", "IS_NULL"] as Set
 
-    /** Throws IllegalArgumentException, naming the rule, for a rule with no tests or a test with an unknown kind or op. */
+    /** A yes/no as "true" or "false", from true, false, y or n in any case, trimmed; anything else is null (no value). */
+    static String yesNo(Object value) {
+        switch (value?.toString()?.trim()?.toLowerCase(Locale.ROOT)) {
+            case "true": case "y": return "true"
+            case "false": case "n": return "false"
+            default: return null
+        }
+    }
+
+    /**
+     * Throws IllegalArgumentException, naming the rule, for a rule with no tests or a test with an unknown kind or op, and for
+     * two rules with one id: every count Keep reports is kept by rule id, so a shared id would give each rule the other's records.
+     */
     static void validate(List<Map> rules) {
+        Set<String> ids = new HashSet<>()
         for (Map rule : (rules ?: [])) {
             String name = "Keep rule ${rule?.get('id') ?: '(no id)'}"
             if (!(rule?.get("id") as String)) throw new IllegalArgumentException("${name} has no id.")
+            if (!ids.add(rule.get("id") as String)) {
+                throw new IllegalArgumentException("${name} appears twice; each rule's counts are kept by its id.")
+            }
             if (!SOURCES.contains(rule.get("source"))) {
                 throw new IllegalArgumentException("${name} has an unknown source: ${rule.get('source')}.")
             }

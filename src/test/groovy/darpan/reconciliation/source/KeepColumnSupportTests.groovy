@@ -304,7 +304,7 @@ class KeepColumnSupportTests {
 
         // annotate checks the rule list before reading it (KeepRules.injections would fail on this one with a cast error)
         IllegalArgumentException invalid = assertThrows(IllegalArgumentException) {
-            KeepColumnSupport.annotate(frame(["a"], [["1"]]), [[id: "B:9", source: "DECISION", tests: "not a list of tests"]])
+            KeepColumnSupport.annotate(frame(["a"], [["1"]]), [[id: "B:9", source: "BUILT_IN", tests: "not a list of tests"]])
         }
         assertTrue(invalid.message.startsWith("Keep rule B:9 "), invalid.message)
     }
@@ -347,7 +347,7 @@ class KeepColumnSupportTests {
     }
 
     private static Map rule(String id, List<List> tests) {
-        String source = id.startsWith("A:") ? "TENANT" : "DECISION"
+        String source = id.startsWith("A:") ? "TENANT" : "BUILT_IN"
         return [id: id, sequenceNum: 1, label: id, source: source, tests: tests.collect { [test: it[0], reason: it[1]] }]
     }
 

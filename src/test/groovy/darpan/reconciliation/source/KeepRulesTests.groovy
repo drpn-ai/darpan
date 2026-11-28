@@ -27,9 +27,22 @@ class KeepRulesTests {
         assertTrue(noTests.message.contains("A:7"), noTests.message)
 
         IllegalArgumentException badOp = assertThrows(IllegalArgumentException) {
-            KeepRules.validate([rule("B:9", [kind: "all", of: [compare("acmeChannel", "FACT", "CONTAINS")]], "DECISION")])
+            KeepRules.validate([rule("B:9", [kind: "all", of: [compare("acmeChannel", "FACT", "CONTAINS")]], "BUILT_IN")])
         }
         assertTrue(badOp.message.contains("B:9") && badOp.message.contains("CONTAINS"), badOp.message)
+    }
+
+    /**
+     * DAR-OPS-029 S05 (conservation): the summary keys every count by rule id, so two rules sharing one would each report the
+     * other's records and the per-rule counts would add up to more than was set aside. Refused, naming the id.
+     */
+    @Test
+    void twoRulesWithOneIdAreRefused() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException) {
+            KeepRules.validate([rule("BUILT_IN:0", compare("acmeChannel"), "BUILT_IN"), rule("A:1", compare("acmeKind")),
+                                rule("BUILT_IN:0", compare("acmeKind"), "BUILT_IN")])
+        }
+        assertTrue(thrown.message.contains("BUILT_IN:0"), thrown.message)
     }
 
     @Test
@@ -37,7 +50,7 @@ class KeepRulesTests {
         List<Map> rules = [
                 rule("A:1", compare("acmeChannel")),
                 rule("B:2", [kind: "any", of: [compare("acmeKind", "FACT"), [kind: "not", of: compare("acmeChannel")],
-                                               [kind: "const", holds: true]]], "DECISION"),
+                                               [kind: "const", holds: true]]], "BUILT_IN"),
                 rule("A:3", compare("acmeChannel", "FACT"))]
 
         List<Map> injections = KeepRules.injections(rules)

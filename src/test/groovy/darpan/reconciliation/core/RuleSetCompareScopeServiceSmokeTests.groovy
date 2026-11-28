@@ -739,9 +739,9 @@ class RuleSetCompareScopeServiceSmokeTests {
                 [id: "2", note: "plain", city: "  portland "],
                 [id: "3", note: "plain", city: "Austin"]]]), "UTF-8")
         List<Map> rules = [
-                [id: "B:LIKE", sequenceNum: 1, label: "Gift notes", source: "DECISION", tests: [[reason: "OUT_LIKE",
+                [id: "B:LIKE", sequenceNum: 1, label: "Gift notes", source: "BUILT_IN", tests: [[reason: "OUT_LIKE",
                         test: [kind: "compare", field: "note", text: "FACT", op: "LIKE", values: ["%gift%"], valueKind: "TEXT", fold: "LIKE_UPPER"]]]],
-                [id: "B:NORM", sequenceNum: 2, label: "Portland", source: "DECISION", tests: [[reason: "OUT_NORM",
+                [id: "B:NORM", sequenceNum: 2, label: "Portland", source: "BUILT_IN", tests: [[reason: "OUT_NORM",
                         test: [kind: "compare", field: "city", text: "FACT", op: "IN", values: ["Portland"], valueKind: "TEXT", fold: "NORMALIZE"]]]]]
         Map sideKeep = [placement: darpan.reconciliation.source.KeepPlanSupport.SPARK, readFilters: [], rules: rules, writeSidecar: false,
                         fields: ["note", "city"] as Set]

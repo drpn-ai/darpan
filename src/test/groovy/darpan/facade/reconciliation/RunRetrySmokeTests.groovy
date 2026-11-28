@@ -104,7 +104,9 @@ class RunRetrySmokeTests {
                 ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunStep", [
                         reconciliationRunStepId: "${runId}_E1".toString(), reconciliationRunResultId: runId, companyUserGroupId: KREWE,
                         stageCode: RunObservability.STAGE_EXTRACT_FILE1, stageSequence: 2, statusEnumId: RunObservability.STATUS_SUCCESS,
-                        startedDate: started, completedDate: started, recordCount: 2])
+                        // 3, while the landed file holds 2 records (DAR-OPS-029 S99-209): a retry that recounted instead of reusing
+                        // the failed run's own count would read 2, so the assertion below can tell the two apart.
+                        startedDate: started, completedDate: started, recordCount: 3])
             }
             ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunStep", [
                     reconciliationRunStepId: "${runId}_E2".toString(), reconciliationRunResultId: runId, companyUserGroupId: KREWE,
@@ -144,7 +146,7 @@ class RunRetrySmokeTests {
         def step1 = ec.entity.find("darpan.reconciliation.ReconciliationRunStep").condition("reconciliationRunResultId", retryId)
                 .condition("stageCode", RunObservability.STAGE_EXTRACT_FILE1).disableAuthz().useCache(false).one()
         assertEquals(RunObservability.STATUS_SUCCESS, step1.statusEnumId)
-        assertEquals(2, step1.recordCount as int)
+        assertEquals(3, step1.recordCount as int, "the landed side's count is the failed run's own, not a recount of its file")
     }
 
     @Test

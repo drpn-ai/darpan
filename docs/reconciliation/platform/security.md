@@ -55,7 +55,7 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - Super-admin checks accept Moqui `ADMIN` and `DARPAN_SUPER_ADMIN`. Darpan app-admin checks accept Moqui `ADMIN` and `DARPAN_ADMIN`. A `DARPAN_SUPER_ADMIN` or `DARPAN_ADMIN` user still needs `DARPAN_USER` base app membership unless the user also has Moqui `ADMIN` artifact access. Tenant permission seed data includes `DARPAN_TENANT_ADMIN` and `DARPAN_TENANT_USER`.
 - Legacy `DARPAN_COMPANY_EDITOR` continues to grant Tenant Admin behavior, and legacy `DARPAN_COMPANY_VIEW_ONLY` remains view-only.
 - Tenant User is not the same as a pure view-only role: this user can upload files and run reconciliation, but cannot mutate saved runs, schemas, rules, settings, users, tenants, or Darpan core configuration.
-- Darpan-admin users can administer app-level settings and private Darpan core management screens. Super-admin users administer tenants and tenant-owned operational data through an active tenant unless a private admin screen intentionally aggregates across tenants.
+- Darpan-admin users can administer app-level settings. Super-admin users administer tenants and tenant-owned operational data through an active tenant unless an admin service (`admin.*`, the admin app) intentionally aggregates across tenants.
 - Tenant and user management is the operator surface `admin.*` (used by the Darpan admin app):
   `admin.TenantAdminServices.create#Tenant`, `admin.UserAdminServices.create#UserAccount`,
   `admin.MembershipAdminServices.add#TenantMember` and their update/disable/remove siblings. Only
@@ -159,8 +159,7 @@ admins' lost factors through the admin app and record the incident.
   (`admin.SecurityAdminServices.rotate#EncryptedFields`, DAR-OPS-019), which decrypts every stored credential to count
   them and so is on the trail too (counts only). GraphQL API key mint and revoke live in `moqui-gql`
   (DAR-BE-267).
-- `darpan.admin.DataExportLog` gets one row per file served for download (`get#GeneratedOutput`, and the super-admin
-  legacy screen download): user, active tenant, file, format, size, time. Never the contents. Client-side exports the
+- `darpan.admin.DataExportLog` gets one row per file served for download (`get#GeneratedOutput`): user, active tenant, file, format, size, time. Never the contents. Client-side exports the
   browser builds from already-loaded data are not seen by the server.
 - Both entities are `create-only`: Moqui's entity facade refuses update and delete on them, including `updateAll`,
   `deleteAll` and the `update#`/`delete#`/`store#` entity-auto services. Raw SQL is the only way past that, so the
@@ -209,7 +208,7 @@ admins' lost factors through the admin app and record the incident.
 - Mask or tokenize sensitive fields when possible
 - Retention policies aligned to client agreements
 - Before handing a tenant to production users, verify active-tenant session metadata, SFTP isolation, source-credential isolation (and any intended sharing grants), schema/mapping/result isolation, and Tenant User mutation rejection.
-- Verify AI/LLM settings, enum/global settings, and app-wide operational config are available only to Darpan-admin users.
+- Verify enum/global settings and app-wide operational config are available only to Darpan-admin users.
 
 ## Production Verification
 
@@ -218,7 +217,7 @@ The operational verification checklist lives in [Production Settings Surfaces](p
 - `get#SessionInfo` returns the intended `activeTenantUserGroupId`, `availableTenants`, `activeTenantPermissionGroupIds`, `canViewActiveTenantData`, `canRunActiveTenantReconciliation`, `canEditActiveTenantData`, `canManageDarpanCore`, and `isSuperAdmin`.
 - tenant A and tenant B cannot see each other's SFTP, NetSuite, Shopify, HotWax OMS, schema, saved-run/mapping, or result records unless a sharing grant says so.
 - a Tenant User active tenant can list/read tenant records and run reconciliation, but cannot save settings or create/update/delete tenant configuration.
-- users without Darpan Admin access cannot call `get#LlmSettings`, `save#LlmSettings`, or `list#EnumOptions`.
+- users without Darpan Admin access cannot call `list#EnumOptions`.
 
 ## Next Steps
 

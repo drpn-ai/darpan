@@ -152,8 +152,6 @@ Single reconciliation engine for all file type combinations. It converts CSV/JSO
 
 **Outputs (key):** `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
 
-> **Note**: Direct usage of `ReconciliationJsonServices.reconcile#JsonFiles` is supported but the Generic service is preferred for UI integration.
-
 ### `ReconciliationGenericServices.delete#GeneratedOutputFile`
 
 Deletes a single generated output file from `runtime://datamanager/reconciliation-runs/**` using the safe relative path returned by `list#GeneratedOutputs`. Legacy basename-only files under `runtime://tmp/reconciliation/generic/output` remain deletable during migration.
@@ -264,31 +262,6 @@ The reconciliation output is a JSON file with the following structure:
 
 For the pilot PWA flow, the backend facade keeps this JSON file as the stored source of truth but can convert the `differences` array to CSV on retrieval so the UI can offer a direct CSV download without reintroducing the larger legacy output-management surface.
 
-## Usage Example
-
-### Via Service Call
-
-```xml
-<service-call name="ReconciliationJsonServices.reconcile#JsonFiles">
-    <field-map field-name="json1Location" value="component://darpan/data/orders-shopify.json"/>
-    <field-map field-name="json2Location" value="component://darpan/data/orders-oms.json"/>
-    <field-map field-name="schemaFileName" value="orders.schema.json"/>
-    <field-map field-name="compareJsonPath" value="$[*].data.orders.edges[*].node.legacyResourceId"/>
-    <field-map field-name="json1Label" value="Shopify Orders"/>
-    <field-map field-name="json2Label" value="OMS Orders"/>
-</service-call>
-```
-
-### Via File Upload Screen
-
-1. Upload both JSON files
-2. Select the JSON schema to validate against
-3. Enter the JSONPath expression for the ID field
-4. Optionally provide labels for the files
-5. Submit to run reconciliation
-6. Download the results JSON file
-7. Use **View** next to a JSON result to see the summary and separate lists for records missing in each JSON file (with full order JSON payloads)
-
 ## Testing
 
 Test files are located in `data/test/`:
@@ -310,10 +283,7 @@ Schema: `runtime://schemas/json/test-orders.schema.json`
 - Full objects are preserved in the output for data analysis
 - JSONPath library (`com.jayway.jsonpath:json-path:2.8.0`) is required
 - Schema parsing for validation/generation uses Jackson ObjectMapper to avoid ad-hoc JSON handling
-- Diff detail view streams large diff files and paginates missing-record lists independently (default 20 per page) using Moqui controls to keep previews responsive
-- Diff detail view includes a Spark-backed record_id search (LIKE-based, full-file filter before pagination; auto-resets to the first page if the current page is beyond the filtered results)
 - Schema generation requires non-empty JSON input files; empty uploads are rejected
-- What changed: Diff View is hidden from the navigation menu and is accessed from the generated file list under File Reconciliation (direct `/Reconciliation/GenericReconciliationView` access removed)
 - What changed: Simple ID keys are resolved against array-root schemas (e.g., `id` -> `$[*].id`) and small array payloads are fully validated before sampling large ones
 - What changed: Schema generation in non-strict mode merges array item shapes to keep schemas compact instead of emitting large `anyOf` lists
 - What changed: Mapping members now support explicit `idValueNormalizer` so ID transforms (for example Shopify GID tail extraction) can be configured separately from JSONPath/column expressions before comparison

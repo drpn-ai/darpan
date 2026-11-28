@@ -22,9 +22,9 @@ Three entry paths feed the same compare pipeline:
 
 | Path | Entry services | Notes |
 | --- | --- | --- |
-| File upload (UI) | `facade.ReconciliationFacadeServices.run#GenericDiff`, `run#SavedRunDiff` | JSON-RPC friendly: accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of multipart uploads. Payload-shape mismatches (JSON into a CSV run, schema documents as record data) are rejected before Spark staging. |
-| API window extraction | `run#SavedRunDiff` (manual, with `windowStartDate`/`windowEndDate`) and `reconciliation.ReconciliationAutomationServices.execute#Automation` (scheduled) | API-backed compare sources use `sourceTypeEnumId=AUT_SRC_API`. Dispatch is data-driven through the `darpan.reconciliation.SourceSystemConnector` registry (`data/SourceSystemConnectorSeedData.xml`): each row names the extract service, its config type, and optional lookup services used by verification. Seeded connectors cover HotWax OMS (REST and GraphQL: orders, order lines, transfer orders, returns), Shopify (orders, order-line units, return refs), NetSuite (`NETSUITE_SUITEQL` → `reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders` in `netsuite-darpan`, driven by a tenant `NsSuiteQlSourceQuery`; the older `NETSUITE` RESTlet row has no extract service) and `DATABASE` (`database-darpan`). Window normalization lives in `darpan/facade/reconciliation/ReconciliationApiWindowSupport.groovy`; Shopify extraction runs a single Bulk Operations `created_at` query (shopify-darpan `extractShopifyOrders.groovy` + `ShopifyBulkOperationClient`) with no client-side window splitting. The requested period is always the active tenant time zone; source-system time zones only affect API parameter representation. |
-| SFTP polling | `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`, `run#SftpFileAutomation` | Checks configured `SftpServer` locations (via the `moqui-sftp` component), stages the newest matching files, archives consumed files, and routes into the compare pipeline. Support classes: `darpan/reconciliation/automation/SftpAutomationSupport.groovy`, `pollSftpAndRunReconciliation.groovy`. |
+| File upload (UI) | `facade.ReconciliationFacadeServices.run#SavedRunDiff` | JSON-RPC friendly: accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of multipart uploads. Payload-shape mismatches (JSON into a CSV run, schema documents as record data) are rejected before Spark staging. |
+| API window extraction | `run#SavedRunDiff` (manual, with `windowStartDate`/`windowEndDate`) and `reconciliation.ReconciliationAutomationServices.execute#Automation` (scheduled) | API-backed compare sources use `sourceTypeEnumId=AUT_SRC_API`. Dispatch is data-driven through the `darpan.reconciliation.SourceSystemConnector` registry (`data/SourceSystemConnectorSeedData.xml`): each row names the extract service, its config type, and optional lookup services used by verification. Seeded connectors cover HotWax OMS (GraphQL only: orders, products, order items, returns), Shopify (orders, order-line units, return refs), NetSuite (`NETSUITE_SUITEQL` → `reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders` in `netsuite-darpan`, driven by a tenant `NsSuiteQlSourceQuery`; the older `NETSUITE` RESTlet row has no extract service) and `DATABASE` (`database-darpan`). Window normalization lives in `darpan/facade/reconciliation/ReconciliationApiWindowSupport.groovy`; Shopify extraction runs a single Bulk Operations `created_at` query (shopify-darpan `extractShopifyOrders.groovy` + `ShopifyBulkOperationClient`) with no client-side window splitting. The requested period is always the active tenant time zone; source-system time zones only affect API parameter representation. |
+| SFTP polling | `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile` | Checks configured `SftpServer` locations (via the `moqui-sftp` component), stages the newest matching files, archives consumed files, and routes into the compare pipeline. Support classes: `darpan/reconciliation/automation/SftpAutomationSupport.groovy`, `pollSftpAndRunReconciliation.groovy`. |
 
 All paths stage source files into the run artifact folder
 `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/` and create a
@@ -43,9 +43,11 @@ Object identity and per-file primary-ID extraction come from RuleSet compare sco
 - `reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope` resolves and validates
   that configuration; the adapter logic is in
   `darpan/reconciliation/core/RuleSetCompareScopeAdapter.groovy`.
-- Legacy mapping-backed runs (`darpan.mapping.ReconciliationMapping` +
-  `ReconciliationMappingMember`) still execute through
-  `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping` as a bridge; see
+- Legacy mappings (`darpan.mapping.ReconciliationMapping` + `ReconciliationMappingMember`)
+  still execute through `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping`
+  as a bridge for SFTP automations and generic compares that name one. Mapping saved runs are
+  retired: `run#SavedRunDiff` answers a mapping id as a saved run that was not found, and
+  `list#SavedRuns` lists no mapping rows (DAR-OPS-029 OC21a/OC21b). See
   [domain README](../domains/reconciliation/README.md) for current cutover status.
 
 ## 3. Spark base compare
@@ -83,7 +85,7 @@ Rule storage and execution live in `reconciliation.ReconciliationRuleEngineServi
 
 - `save#RuleSet`, `save#Rule`, `delete#Rule`, `delete#RuleSet` — tenant rule authoring CRUD.
 - `compile#RuleSet` — compiles the active `darpan.rule.Rule` rows of a RuleSet into a Drools
-  KieBase (DRL), cached until `clear#RuleSetCache` or a rule change.
+  KieBase (DRL), cached until a rule change invalidates it.
 - `execute#RuleSetMatchedPairs` / `execute#RuleSet` — runs the compiled rules.
 
 Key behavioral contract: **DRL rules receive only matched object pairs** (primary ID present in
@@ -200,8 +202,9 @@ best-effort failure alert ("gave up after N retries") through the same path.
      `slackChannelId`, using the `SlackWorkspaceInstall` bot token).
 
 Webhook URLs are stored in clear text on `TenantChatSpace.webhookUrl` (the legacy
-`googleChatWebhookUrl` column is read as a fallback) and `list#TenantChatSpaces` returns them to
-tenant members.
+`googleChatWebhookUrl` column is read as a fallback). `list#TenantChatSpaces` returns a space's
+`webhookUrl` only to callers with edit access (tenant admin, editor, super admin); everyone else
+gets it null, with `webhookConfigured` saying whether one is set.
 
 Tenants connect Slack through `facade.SlackFacadeServices` (`begin#SlackInstall`,
 `save#SlackBotToken`, `list#SlackChannels`, `disconnect#SlackWorkspace`) and manage the named

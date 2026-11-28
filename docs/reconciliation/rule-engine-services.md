@@ -13,7 +13,6 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `save#Rule`
   - `delete#Rule`
   - `delete#RuleSet`
-  - `clear#RuleSetCache`
 - Shared helper for generated identifier tokens, cache, DRL, and Drools/KIE runtime logic:
   - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
 
@@ -41,8 +40,6 @@ This document describes the production RuleSet/Rule service contracts used by re
 - `reconciliation.ReconciliationRuleEngineServices.delete#RuleSet`
   - Deletes RuleSet.
   - Blocks delete when rules exist unless `forceDeleteRules=true`.
-- `reconciliation.ReconciliationRuleEngineServices.clear#RuleSetCache`
-  - Clears one RuleSet cache entry or all cached entries.
 
 ## Operational behavior
 

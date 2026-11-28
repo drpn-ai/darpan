@@ -241,9 +241,9 @@ Create tenant-owned settings only after the active tenant is correct.
 | SFTP | `facade.SettingsFacadeServices.save#SftpServer` | `SftpServer.companyUserGroupId` is the active tenant. |
 | NetSuite auth | `facade.SettingsFacadeServices.save#NsAuthConfig` | `NsAuthConfig.companyUserGroupId` is the active tenant. |
 | NetSuite endpoint | `facade.SettingsFacadeServices.save#NsRestletConfig` | Endpoint auth binding must be visible in the active tenant. |
-| Chat spaces (Google Chat webhook or Slack channel) | `facade.SettingsFacadeServices.save#TenantChatSpace` (Slack needs the workspace connected first through `facade.SlackFacadeServices`) | `list#TenantChatSpaces` returns the named spaces for the active tenant. Google Chat webhook URLs are stored in clear text and returned to tenant members, so treat them as visible to anyone with tenant access. |
+| Chat spaces (Google Chat webhook or Slack channel) | `facade.SettingsFacadeServices.save#TenantChatSpace` (Slack needs the workspace connected first through `facade.SlackFacadeServices`) | `list#TenantChatSpaces` returns the named spaces for the active tenant. Webhook URLs are stored in clear text and returned only to callers with edit access; other members see `webhookConfigured` only. |
 
-Do not create tenant-specific LLM provider settings in the current data model. LLM and enum/global settings are Darpan-admin-only app-level settings.
+Enum/global settings are Darpan-admin-only app-level settings; do not create tenant-specific copies of them.
 
 After a chat space exists, each user sets their own default through
 `facade.SettingsFacadeServices.save#UserNotificationDefault` (personal preference, no tenant write

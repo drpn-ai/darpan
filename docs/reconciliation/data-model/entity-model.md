@@ -22,12 +22,11 @@ rows in the generated result artifact, not stored per rule.
 - Partner-owned source configs: `HotWaxOmsRestSourceConfig` (darpan-hotwax), `ShopifyAuthConfig`
   (shopify-darpan), `DatabaseSourceConfig` / `DatabaseSourceQuery` (database-darpan). The NetSuite
   entities (`NsAuthConfig`, `NsRestletConfig`, `NsSuiteQlSourceQuery*`) are defined here in darpan;
-  netsuite-darpan's entity file is deliberately empty.
+  netsuite-darpan defines no entities.
 
 The ERD and the per-entity sections below cover the core reconciliation model. Entities added
 later are summarized in [Other Entities](#other-entities); the entity XML is authoritative for
 fields.
-- DataDocument: `framework/entity/EntityEntities.xml`
 - SystemMessageRemote: `framework/entity/ServiceEntities.xml`
 - Enumeration: `framework/entity/BasicEntities.xml`
 - Automation enum seed data: `runtime/component/darpan/data/AutomationSeedData.xml`
@@ -38,12 +37,6 @@ fields.
 erDiagram
 
     RECONCILIATION ||--o{ RECONCILIATION_RUN : groups
-
-    RECONCILIATION_RUN ||--o{ RUN_DATA_DOCUMENT : uses
-    DATA_DOCUMENT ||--o{ RUN_DATA_DOCUMENT : defined_by
-
-    RECONCILIATION_RUN ||--o{ RUN_SYSTEM_INSTANCE : runs_on
-    SYSTEM_MESSAGE_REMOTE ||--o{ RUN_SYSTEM_INSTANCE : provides_data
 
     RULE_SET ||--o{ RULE : contains
     RULE_SET ||--o{ RULE_SET_COMPARE_SCOPE : owns
@@ -83,34 +76,6 @@ erDiagram
         string default_time_window
         string ruleset_id FK
         int run_sequence
-    }
-
-    DATA_DOCUMENT {
-        string data_document_id PK
-        string data_document_name
-        string primary_entity_name
-        string description
-    }
-
-    RUN_DATA_DOCUMENT {
-        string reconciliation_run_id FK
-        string data_document_id FK
-        string filter_expression
-        string aggregation
-        boolean is_required
-    }
-
-    SYSTEM_MESSAGE_REMOTE {
-        string system_message_remote_id PK
-        string remote_system_type
-        string remote_system_name
-        string environment
-    }
-
-    RUN_SYSTEM_INSTANCE {
-        string reconciliation_run_id FK
-        string system_message_remote_id FK
-        string role
     }
 
     RULE_SET {
@@ -282,9 +247,6 @@ Defines a single reconciliation check within a reconciliation.
 - `ruleSetId`
 - `runSequence`
 
-**Example linkage**
-- `darpan.reconciliation.ReconciliationRun(ruleSetId="INV_ADJ_DEFAULT_RS")` links to `darpan.rule.RuleSet(ruleSetId="INV_ADJ_DEFAULT_RS")`.
-
 **Operational Note**
 - Reconciliation ownership is no longer modeled with dedicated party entities in component configuration.
 
@@ -424,37 +386,6 @@ Tracks one scheduled automation execution or one child window split from a large
 - `errorMessage`
 - `errorDetail`
 
-### DataDocument (moqui.entity.document.DataDocument)
-Defines a canonical data point used in reconciliation.
-
-**Purpose**
-- Reusable metric definitions
-- Source-agnostic representation of data
-
-**Examples**
-- Order count
-- Total order amount
-- Shipment count by status
-
-**Key Fields**
-- `dataDocumentId`
-- `documentName`
-- `primaryEntityName`
-
-### RunDataDocument (darpan.reconciliation.RunDataDocument)
-Associates DataDocuments with a ReconciliationRun.
-
-**Purpose**
-- Applies run-specific filters and aggregations
-- Controls which metrics are mandatory
-
-**Key Fields**
-- `reconciliationRunId`
-- `dataDocumentId`
-- `filterExpression`
-- `aggregation`
-- `isRequired`
-
 ### SystemMessageRemote (moqui.service.message.SystemMessageRemote)
 Represents an external or internal system instance.
 
@@ -473,18 +404,6 @@ Represents an external or internal system instance.
 - `sendUrl`
 - `receiveUrl`
 - `messageAuthEnumId`
-
-### RunSystemInstance (darpan.reconciliation.RunSystemInstance)
-Associates systems with a reconciliation run.
-
-**Purpose**
-- Defines the role of each system in a run
-- Supports source, target, or peer comparisons
-
-**Key Fields**
-- `reconciliationRunId`
-- `systemMessageRemoteId`
-- `role`
 
 ### SftpServer (darpan.reconciliation.SftpServer)
 Stores SFTP credentials used by reconciliation automation flows.
@@ -555,7 +474,7 @@ Replaces the single-webhook `TenantNotificationSetting`.
   list and automations link one space each for completion notifications.
 - Holds an incoming webhook URL (Google Chat or Slack) or a Slack channel posted to through a
   connected `SlackWorkspaceInstall`. Webhook URLs are stored in clear text (decision 2026-08-14)
-  and `list#TenantChatSpaces` returns them to tenant members.
+  and `list#TenantChatSpaces` returns them only to callers with edit access.
 - Read by `TenantNotificationSupport.resolveDestinationChatSpaces` when fan-out resolves an
   automation's linked space and per-run subscriber snapshots.
 - Managed through `facade.SettingsFacadeServices.list#TenantChatSpaces` / `save#TenantChatSpace` /
@@ -568,7 +487,7 @@ Replaces the single-webhook `TenantNotificationSetting`.
 - `spaceName` (unique per tenant, case-insensitive, service-validated)
 - `chatProviderEnumId` (Google Chat or Slack; resolve through `TenantNotificationSupport.resolveChatProvider`)
 - `webhookUrl` (clear text; supersedes `googleChatWebhookUrl`)
-- `googleChatWebhookUrl` (deprecated; read as a fallback until migrated)
+- `googleChatWebhookUrl` (deprecated column; read as a fallback until migrated, written in lockstep, no longer in any facade response)
 - `slackInstallId`, `slackChannelId`, `slackChannelName` (Slack bot delivery)
 - `isActive`
 - `createdByUserId`

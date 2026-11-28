@@ -13,14 +13,14 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 
 - Reconciliation compare: `service/reconciliation/ReconciliationCoreServices.xml` (Spark base
   compare, RuleSet compare-scope pipeline, mapping bridge), `ReconciliationGenericServices.xml`
-  (generic file compare + generated-output delete/purge), `ReconciliationJsonServices.xml`
+  (generic file compare + generated-output delete/purge)
 - Rule engine: `service/reconciliation/ReconciliationRuleEngineServices.xml` (compile/execute
-  RuleSets, rule CRUD, rule cache) — contracts documented in
+  RuleSets, rule CRUD) — contracts documented in
   `docs/reconciliation/rule-engine-services.md`
 - Lifecycle / flowchart runs: `service/reconciliation/ReconciliationFlowchartServices.xml`
   (`run#Reconciliation`, `run#FlowchartQuestion`)
 - Automation: `service/reconciliation/ReconciliationAutomationServices.xml`
-  (`poll#SftpAndReconcile`, `run#SftpFileAutomation`, `execute#Automation`,
+  (`poll#SftpAndReconcile`, `execute#Automation`,
   `scan#DueAutomations`, `sweep#StuckReconciliationRuns`)
 - Run-completion notifications: `service/reconciliation/ReconciliationNotificationServices.xml`
   (`build#RunCompletedPayload` for the chat payload; `migrate#TenantNotificationSettings`
@@ -86,20 +86,19 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   `MigrationAdminSupport`)
 - API contract generator: `contract/ApiContractGenerator.groovy` (Gradle tasks
   `generateApiContract` / `checkApiContract`; see `docs/reconciliation/platform/api-contract-testing.md`)
-- Facade reconciliation: `facade/reconciliation/runGenericDiff.groovy`,
-  `runSavedRunDiff.groovy` (saved-run execution incl. notification call),
+- Facade reconciliation: `facade/reconciliation/runSavedRunDiff.groovy` (saved-run execution incl. notification call),
   `ReconciliationMappingSupport.groovy`, `ReconciliationOutputSupport.groovy`,
   `ReconciliationSavedRunSupport.groovy`, `ReconciliationApiWindowSupport.groovy`,
   `AutomationFacadeSupport.groovy`,
   `ReconciliationDashboardPreferenceSupport.groovy`
 - Facade settings/search/jsonschema: `facade/settings/SettingsFacadeSupport.groovy`,
-  `facade/settings/LlmSettingsSupport.groovy`, `facade/search/NavigationSearchSupport.groovy`,
+  `facade/search/NavigationSearchSupport.groovy`,
   `facade/jsonschema/JsonSchemaFacadeSupport.groovy`
-- JSON schema scripts/helpers: `jsonschema/service/crud/createJsonSchemaFromJson.groovy`,
-  `jsonschema/service/crud/saveRefinedSchema.groovy`, `jsonschema/service/processing/*.groovy`,
-  `jsonschema/service/validation/*.groovy`, `jsonschema/common/JsonSchemaUtil.groovy` and
-  siblings (`JsonSchemaValidator`, `JsonSchemaInferenceUtil`, `SchemaFlattener`,
-  `JsonSchemaConstants`)
+- JSON schema scripts/helpers: `jsonschema/service/crud/saveRefinedSchema.groovy`,
+  `jsonschema/service/processing/flattenJsonSchema.groovy`,
+  `jsonschema/service/validation/validateJsonLocationAgainstSchema.groovy`,
+  `jsonschema/common/JsonSchemaUtil.groovy` and siblings (`JsonSchemaValidator`,
+  `CsvHeaderSchemaInferrer`, `SchemaFlattener`, `JsonSchemaConstants`)
 - Shared constants/utilities: `common/DarpanEntityConstants.groovy`, `common/ValueSupport.groovy`,
   `common/CryptRotationSupport.groovy`, `common/TransactionDetachSupport.groovy`
 
@@ -162,8 +161,8 @@ client and the loop live in the optional `darpan-agent` component (`drpn-ai/darp
   migration is tenant-scope-filtered when a normal user context is active, so running it as a
   regular authenticated user silently creates nothing. It is idempotent: tenants that already have
   any `TenantChatSpace` row are skipped, so it is safe to invoke more than once.
-- Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark and Drools
-  8.44.0.Final pins, `sparkJava21Opens` JVM flags, `unitTest`/`smokeTest`/`testAll`/`mysqlTest`
+- Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark 4.2.1 and Drools
+  10.2.0 pins, `sparkJava21Opens` JVM flags, `unitTest`/`smokeTest`/`testAll`/`mysqlTest`
   pools, `generateApiContract`, `verifyOrganization`) — see `docs/runtime-baseline.md`
 - Docker production config: lives in the private `drpn-ai/darpan-docker-config` repo —
   `MoquiProductionConf.xml` (the transactional datasource must keep
@@ -171,8 +170,3 @@ client and the loop live in the optional `darpan-agent` component (`drpn-ai/darp
   create newly introduced entity tables before upgrade-data load or user-facing finds run) and
   `docker/entrypoint.sh` / `docker/prod/entrypoint.sh` (JDK 21 `JAVA_TOOL_OPTIONS` flags, required
   secrets), with one Dockerfile per image (`docker/Dockerfile` for UAT, `docker/prod/Dockerfile` for prod)
-
-## Framework References
-
-- DataDocument entity (used by RunDataDocument) lives in `framework/entity/EntityEntities.xml`.
-- SystemMessageRemote entity (used by RunSystemInstance) lives in `framework/entity/ServiceEntities.xml`.

@@ -48,7 +48,7 @@ The retired `Pilot*` service family (`list#PilotMappings`, `run#PilotGenericDiff
   - tenant-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
   - the active tenant is pushed into `ec.user.context.activeTenantUserGroupId` during request/login setup so those filters can apply consistently on authenticated facade reads
   - settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
-  - settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, enum/global admin settings) require Darpan Admin access
+  - settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (enum/global admin settings) require Darpan Admin access
   - Generic reconciliation outputs under `runtime://datamanager/reconciliation-runs/**` are filtered by generated-output metadata for the active tenant; legacy tmp outputs remain tenant-scoped by folder path during migration
   - Legacy backend reconciliation and settings screens: authenticated super-admin only
 - This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same tenant ownership model.
@@ -98,10 +98,10 @@ Shared-tenant rule:
 - `get#TenantSettings`, `save#TenantSettings`, `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are tenant-scoped through `companyUserGroupId`.
 - the three list services now explicitly query the active tenant in addition to the shared `ArtifactAuthzFilter`, so saved settings pages only receive rows that match the current tenant selection.
 - `save#TenantSettings` requires active-tenant write access and stores timezone on `darpan.auth.TenantSetting`, not on the current user.
-- `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` require Darpan Admin access.
+- `list#EnumOptions` requires Darpan Admin access.
 - `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
 - Chat spaces are either Google Chat webhooks or Slack channels posted through a workspace connected with `facade.SlackFacadeServices`.
-- `list#TenantChatSpaces`, `save#TenantChatSpace`, and `delete#TenantChatSpace` are tenant-scoped through `companyUserGroupId`; `save#TenantChatSpace` and `delete#TenantChatSpace` require active-tenant write access, and `delete#TenantChatSpace` rejects a space still referenced by an automation or a live `ReconciliationRunNotifySubscription` (deactivate it instead). Webhook URLs are validated as HTTPS `chat.googleapis.com` space-message endpoints and returned in clear text as `googleChatWebhookUrl`; neither masking nor at-rest encryption applies as of 2026-08-14.
+- `list#TenantChatSpaces`, `save#TenantChatSpace`, and `delete#TenantChatSpace` are tenant-scoped through `companyUserGroupId`; `save#TenantChatSpace` and `delete#TenantChatSpace` require active-tenant write access, and `delete#TenantChatSpace` rejects a space still referenced by an automation or a live `ReconciliationRunNotifySubscription` (deactivate it instead). Google Chat webhook URLs are validated as HTTPS `chat.googleapis.com` space-message endpoints. `webhookUrl` is returned in clear text, and only to callers with edit access (tenant admin, editor, super admin); everyone else gets it null, with `webhookConfigured` saying whether one is set. The pre-Slack `googleChatConfigured` / `googleChatWebhookUrl` response mirrors and input alias are gone (DAR-OPS-029 S27).
 - `get#UserNotificationDefault` and `save#UserNotificationDefault` are personal preferences (stored per-tenant on `UserPreference`, not a tenant-owned entity) — no active-tenant write access is required. The retired `get#TenantNotificationSettings` / `save#TenantNotificationSettings` pair (one webhook per tenant) no longer exists; existing tenant webhooks were migrated to `TenantChatSpace` by the one-time `migrate#TenantNotificationSettings` service during the v1.2.0 upgrade (see `docs/code-map.md`).
 
 ### `facade.JsonSchemaFacadeServices`
@@ -148,13 +148,13 @@ Contract notes:
 - `list#AutomationExecutions` returns execution history scoped to the active tenant and optionally filtered by `automationId`.
 - `list#AutomationSourceOptions` returns saved runs, accessible SFTP servers, active-tenant NetSuite Restlet endpoints, system remotes, and enum options needed by the create/edit workflow without requiring the UI to issue N+1 lookup calls. The facade performs its own active-tenant filtering for saved runs and tenant-owned source configs, so tenant-admin callers do not need direct entity permission to internal setup metadata such as `SystemMessageRemote` or enumeration rows.
 - `create#Mapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
-- `create#Mapping` normalizes schema-flattener field paths into safe JSON ID expressions so newly-created mappings remain visible in `list#Mappings` and executable by the mapping-backed run flow.
+- `create#Mapping` normalizes schema-flattener field paths into safe JSON ID expressions so newly-created mappings remain visible in `list#Mappings`.
 - `get#Mapping` only returns saved mappings whose members still resolve to saved schemas, and includes the editable schema IDs/names needed by the PWA runs settings workflow.
 - `save#Mapping` updates an existing two-source mapping from the PWA runs settings workflow and preserves the existing mapping/member record IDs while refreshing schema and field selections.
-- Mapping-backed runs remain supported alongside RuleSet-backed saved runs. Mapping contracts use `reconciliationMappingId`; RuleSet-run contracts use `savedRunId` plus `ruleSetId`/`compareScopeId`.
+- Mapping saved runs are retired (DAR-OPS-029 OC21a/OC21b): `run#SavedRunDiff` answers a mapping id as a saved run that was not found, and `list#SavedRuns` lists no mapping rows. Mappings remain for SFTP automations that pick one. RuleSet-run contracts use `savedRunId` plus `ruleSetId`/`compareScopeId`.
 - `list#Mappings` also returns `pinnedReconciliationMappingIds`, a user-scoped ordered list of saved dashboard pins backed by Moqui `UserPreference`.
 - `save#DashboardPinnedMappings` accepts `pinnedReconciliationMappingIds` (and `save#DashboardPinnedSavedRuns` does the same for saved runs) and persists that ordered list for the authenticated user, so pinned runs survive browser/profile/origin changes after login.
-- `run#GenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
+- `run#SavedRunDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - `list#GeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
 - The underlying reconciliation engine persists source files and result JSON under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`, writes or updates a `darpan.reconciliation.ReconciliationRunResult` row with lifecycle status plus `file1DataManagerPath`, `file2DataManagerPath`, and `resultDataManagerPath`, and returns generated-output `fileName` values as safe data-manager relative paths.
 - `get#GeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the UI download action; callers should pass the `fileName` returned by list/run responses. Source artifact downloads are limited to `filePath` values returned in `outputFile.sourceDetails.files`, so arbitrary files under the data-manager run folder are not exposed.
@@ -176,7 +176,7 @@ Facade services return these top-level keys:
 - `messages` (`List<String>`)
 - `errors` (`List<String>`)
 
-Payload keys vary by service (`llmSettings`, `servers`, `authConfigs`, `schemas`, `mappings`, `runResult`, `generatedOutputs`, etc).
+Payload keys vary by service (`servers`, `authConfigs`, `schemas`, `mappings`, `runResult`, `generatedOutputs`, etc).
 
 ## Concrete Example (JSON-RPC)
 
@@ -369,59 +369,6 @@ Dashboard pin persistence example:
 }
 ```
 
-Generic diff run example:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 17100003,
-  "method": "facade.ReconciliationFacadeServices.run#GenericDiff",
-  "params": {
-    "reconciliationMappingId": "OmsVsShopifyOrders-260421120000",
-    "file1Name": "oms-orders.csv",
-    "file1Text": "order_id\n1001\n1002\n",
-    "file2Name": "shopify-orders.csv",
-    "file2Text": "order_id\n1002\n1003\n"
-  }
-}
-```
-
-Expected success shape:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 17100003,
-  "result": {
-    "ok": true,
-    "messages": [],
-    "errors": [],
-    "runResult": {
-      "reconciliationMappingId": "OmsVsShopifyOrders-260421120000",
-      "mappingName": "OMS vs Shopify Orders",
-      "file1Name": "oms-orders.csv",
-      "file2Name": "shopify-orders.csv",
-      "file1SystemEnumId": "OMS",
-      "file1SystemLabel": "OMS",
-      "file2SystemEnumId": "SHOPIFY",
-      "file2SystemLabel": "SHOPIFY",
-      "validationErrors": [],
-      "processingWarnings": [],
-      "generatedOutput": {
-        "fileName": "OMS-vs-Shopify-Orders-diff-20260330-123000.json",
-        "sourceFormat": "json",
-        "availableFormats": ["json", "csv"],
-        "preferredDownloadFormat": "csv",
-        "reconciliationType": "CSV",
-        "totalDifferences": 2,
-        "onlyInFile1Count": 1,
-        "onlyInFile2Count": 1
-      }
-    }
-  }
-}
-```
-
 ## Secret Redaction Policy
 
 Settings list/save payloads never expose raw stored credentials. They return flags such as:
@@ -430,13 +377,11 @@ Settings list/save payloads never expose raw stored credentials. They return fla
 - `hasApiToken`
 - `hasPrivateKey`
 - `hasPrivateKeyPem`
-- `hasStoredLlmApiKey`
 
-Exception: chat-space webhook URLs are not treated as credentials. They are stored in clear text
-and `list#TenantChatSpaces` returns them to members of the tenant.
+Exception: chat-space webhook URLs are stored in clear text. `list#TenantChatSpaces` returns them
+only to callers with edit access to the tenant; other members get `webhookUrl` null.
 
 ## UI Migration Notes
 
 - These facade services replace the screen-transition dependency of the first UI pages.
-- Existing backend screens remain active during phased parallel cutover, but the legacy reconciliation/settings screen tree is restricted to authenticated super-admin users so it cannot bypass tenant scoping.
-- Backend UI surfaces (`screen/**`, `template/**`, `theme-library/**`) are not extended by this change.
+- The legacy backend screens and their theme library were deleted (DAR-OPS-029 S36a/S36b); `screen/**` holds only `darpan.xml` and the email bodies, and no new UI goes under `screen/**` or `template/**`.

@@ -10,9 +10,9 @@ For the step-by-step tenant creation tutorial, see [Darpan Tenant Setup Tutorial
 
 ## Evidence Map
 
-- `docs/reconciliation/platform/company-scoped-access-and-user-preferences.md` defines Phase 1 tenant-scoped surfaces as runs, schemas, results, SFTP settings, and NetSuite settings. It explicitly keeps LLM settings and enum/global admin settings out of Phase 1.
+- `docs/reconciliation/platform/company-scoped-access-and-user-preferences.md` defines Phase 1 tenant-scoped surfaces as runs, schemas, results, SFTP settings, and NetSuite settings. It explicitly keeps enum/global admin settings out of Phase 1.
 - `service/facade/AuthFacadeServices.xml` exposes the active tenant session contract: `activeTenantUserGroupId`, `availableTenants`, `activeTenantPermissionGroupIds`, `canEditActiveTenantData`, `canManageDarpanCore`, and `isSuperAdmin`.
-- `service/facade/SettingsFacadeServices.xml` makes `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` Darpan-admin only.
+- `service/facade/SettingsFacadeServices.xml` makes `list#EnumOptions` Darpan-admin only.
 - `service/facade/SettingsFacadeServices.xml` already filters tenant settings, SFTP, the chat-space notification registry, NetSuite auth, and NetSuite endpoint lists by `activeTenantUserGroupId`, checks tenant record access on edits, and requires active-tenant write access for saves. The personal notification default (`get/save#UserNotificationDefault`) and per-run subscribe/unsubscribe are user-level preferences and do not require tenant write access.
 - `service/facade/JsonSchemaFacadeServices.xml` and `service/facade/ReconciliationFacadeServices.xml` already treat schemas, mappings, saved runs, and generated outputs as tenant-owned records using `companyUserGroupId`.
 - `darpan-ui` keys route rendering by active tenant and refreshes command data on tenant change. The active tenant is a server-side user preference, so switching it in one tab re-points every open tab for that user.
@@ -47,7 +47,7 @@ Use this sequence for each production tenant group.
    - New records should also carry `createdByUserId` where the entity supports it.
    - Do not backfill blank `companyUserGroupId` rows to `ALL_USERS`; assign them to a real tenant or keep them admin-only until assigned.
 6. Keep global/admin settings out of tenant setup.
-   - LLM provider settings, enum/global settings, and app-wide operational config require Darpan Admin access and are not tenant-editor or Super Admin surfaces by default.
+   - Enum/global settings and app-wide operational config require Darpan Admin access and are not tenant-editor or Super Admin surfaces by default.
 
 ## Surface Decisions
 
@@ -63,7 +63,6 @@ Use this sequence for each production tenant group.
 | Saved runs and mappings | Tenant-level | Tenant User can list/open/run allowed definitions. Tenant Admin can create/update/delete/run. Super-admin follows active tenant and can edit. | Critical. Saved reconciliation definitions are shared operational tenant assets, not personal user settings. |
 | Schemas | Tenant-level | Tenant User can view. Tenant Admin can create/update/delete/infer/save. Super-admin follows active tenant and can edit. | Critical where schemas drive saved runs, mapping setup, and field selection. |
 | Results and generated outputs | Tenant-level | Tenant User can list/open/download. Tenant Admin can create by running reconciliations and delete where supported. Super-admin follows active tenant and can edit. | Critical where results are shared evidence for tenant users. |
-| AI/LLM provider setup | Admin/global | Darpan Admin only for view and edit. No tenant editor or Super Admin access by default. | Global/admin-only. Provider, model, base URL, timeout, and secrets affect the app runtime, not one tenant. |
 | Enum/global system settings | Admin/global | Darpan Admin only for view and edit. | Global/admin-only. Enum choices and global operational settings should not be tenant-edited. |
 | App-wide operational config | Admin/global | Darpan Admin only for view and edit. | Global/admin-only. Includes system-message remotes and runtime operational config that changes platform behavior. |
 | Pins and saved UI preferences | User-level | Authenticated user owns personal preference. | User-level. Pins stay in `UserPreference`; rendered targets must still be visible in the active tenant. |
@@ -88,7 +87,6 @@ Use this sequence for each production tenant group.
 | Schemas | Yes. `JsonSchema.companyUserGroupId`. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
 | Results and generated outputs | Yes. `ReconciliationRunResult.companyUserGroupId` plus generated-output metadata/path filtering. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
 | Pins and saved UI preferences | Rendered target must be visible in active tenant. | Yes. Stored as `UserPreference`. | No. | No. |
-| AI/LLM provider settings | No. | No. | Yes. `get#LlmSettings` and `save#LlmSettings` require Darpan Admin. | No. |
 | Enum/global settings | No. | No. | Yes. `list#EnumOptions` requires Darpan Admin. | No. |
 | App-wide operational config | No. | No. | Yes. Use only for platform-wide behavior. | No. |
 
@@ -127,10 +125,10 @@ Run these checks after production setup or after moving a tenant to a new enviro
 
 - As tenant A editor, save a named Google Chat space through `facade.SettingsFacadeServices.save#TenantChatSpace`.
 - Confirm the stored `darpan.reconciliation.TenantChatSpace.companyUserGroupId` is tenant A.
-- Call `list#TenantChatSpaces` and confirm each row includes `googleChatConfigured=true` and the `googleChatWebhookUrl` in clear text. Masking and at-rest encryption were both removed 2026-08-14; treat read access to this service as read access to the webhook itself.
+- Call `list#TenantChatSpaces` and confirm each row includes `webhookConfigured=true` and the `webhookUrl` in clear text (stored unmasked and unencrypted since 2026-08-14).
 - Save again with the same `chatSpaceId` and confirm the row is updated, not duplicated; saving a second space with the same name (case-insensitive) in the same tenant must fail.
 - Switch to tenant B and call `list#TenantChatSpaces`; tenant A's spaces must not appear.
-- As a Tenant User in tenant A, call `list#TenantChatSpaces`; the spaces appear, webhook URLs included.
+- As a Tenant User in tenant A, call `list#TenantChatSpaces`; the spaces appear with `webhookConfigured`, and `webhookUrl` is null (only edit access reads the URL).
 - As a Tenant User, call `save#TenantChatSpace` or `delete#TenantChatSpace`; the service must fail with the active-tenant read-only write error.
 - As tenant A editor, call `save#UserNotificationDefault` to set a personal default chat space, then `get#UserNotificationDefault` to confirm it round-trips; a Tenant User can set their own default without tenant write access.
 - While a run is `AUT_STAT_PENDING` or `AUT_STAT_RUNNING`, call `subscribe#RunNotification`; confirm `get#ReconciliationRunStatus` reports `mySubscription=true` and the snapshotted `mySubscriptionSpaceName`. Call `unsubscribe#RunNotification` and confirm the subscription is removed.
@@ -156,11 +154,10 @@ Run these checks after production setup or after moving a tenant to a new enviro
 - Confirm Tenant Users can read visible saved records and results, upload/run reconciliation where run access is allowed, and cannot create, update, or delete settings, schemas, rules, saved runs, or users.
 - Confirm pinned records remain user-level preferences and disappear from rendering when the pinned target is not visible in the active tenant.
 
-### AI/LLM, Enum, and Global Settings
+### Enum and Global Settings
 
-- As a user without Darpan Admin access, call `get#LlmSettings`, `save#LlmSettings`, and `list#EnumOptions`; all must fail with the Darpan-admin settings restriction.
-- As a Darpan Admin, call the same services and confirm they operate independently of Tenant Admin/Tenant User and Super Admin permission.
-- Do not configure tenant-specific LLM providers in the current data model; the current LLM settings are platform-wide `SystemMessageRemote` records. No product feature reads them yet.
+- As a user without Darpan Admin access, call `list#EnumOptions`; it must fail with the Darpan-admin settings restriction.
+- As a Darpan Admin, call the same service and confirm it operates independently of Tenant Admin/Tenant User and Super Admin permission.
 
 ## Task-Ready Checklist
 
@@ -260,20 +257,14 @@ Run these checks after production setup or after moving a tenant to a new enviro
 
 ### 6. Keep global/admin-only Settings out of tenant editors and Super Admin
 
-- [ ] Restrict AI/LLM settings navigation and workflow access to Darpan Admin users.
 - [ ] Keep enum/global system settings Darpan-admin only.
 - [ ] Keep app-wide operational config Darpan-admin only.
 - [ ] Owner files:
   - `darpan-backend/runtime/component/darpan/service/facade/SettingsFacadeServices.xml`
-  - `darpan-ui/src/pages/settings/LlmSettingsPage.vue`
-  - `darpan-ui/src/pages/settings/LlmSettingsWorkflowPage.vue`
-  - `darpan-ui/src/pages/settings/__tests__/LlmSettingsPage.spec.ts`
-  - `darpan-ui/src/pages/settings/__tests__/LlmSettingsWorkflowPage.spec.ts`
   - `darpan-ui/src/App.vue`
   - `darpan-ui/src/router/index.ts`
 - [ ] Validation:
-  - Users without Darpan Admin access cannot open or save AI settings, including Super Admin users who lack Darpan Admin.
-  - Direct API calls to `get#LlmSettings`, `save#LlmSettings`, and `list#EnumOptions` fail for users without Darpan Admin access.
+  - Direct API calls to `list#EnumOptions` fail for users without Darpan Admin access, including Super Admin users who lack Darpan Admin.
   - Darpan Admin users can view/edit global settings independent of active tenant.
 
 ## Release Readiness Checks
@@ -286,5 +277,4 @@ Run these checks after production setup or after moving a tenant to a new enviro
   - Save SFTP, NetSuite auth, NetSuite endpoint, schema, and saved run.
   - Switch the active tenant to one where the user is a Tenant User.
   - Confirm tenant-specific records refresh and write controls disappear or fail closed.
-  - Login as a Darpan Admin and confirm global AI settings are available.
-  - Login as a Super Admin without Darpan Admin and confirm global AI settings are not available while tenant-owned data still follows the active tenant.
+  - Login as a Super Admin without Darpan Admin and confirm global settings are not available while tenant-owned data still follows the active tenant.

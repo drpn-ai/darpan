@@ -40,7 +40,6 @@ Execution is handled by internal services in `reconciliation.ReconciliationAutom
 - `execute#Automation`
 - `scan#DueAutomations` (also re-drives due retries)
 - `sweep#StuckReconciliationRuns`
-- `run#SftpFileAutomation`
 - `poll#SftpAndReconcile`
 
 These are `allow-remote="false"` and are not reachable over `/rpc/json`.
@@ -72,7 +71,8 @@ Supported relative windows are:
 - last N weeks
 - last N months (`AUT_WIN_LAST_MONTHS`)
 - custom range
-- state based (`AUT_WIN_STATE`): no date window; the source extracts current state instead (only for connectors with `supportsStateExtract=Y`)
+
+State-based windows (`AUT_WIN_STATE`) are retired: `save#Automation` refuses them ("State-based windows are retired; choose a date window."), and no connector declares `supportsStateExtract` since DAR-BE-052.
 
 Long windows are split on calendar-month boundaries before extraction. The execution table stores the parent window and each child window so backfills and duplicate checks remain auditable.
 
@@ -92,7 +92,7 @@ Example OMS source metadata:
 
 ```json
 {
-  "extractServiceName": "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
+  "extractServiceName": "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
   "parameters": {
     "omsRestSourceConfigId": "ACME_OMS"
   }
@@ -147,7 +147,7 @@ SFTP-file mode does not use date-window fields. Each source row must provide:
 - `remotePathTemplate`
 - file-side system metadata from the saved run
 
-`run#SftpFileAutomation` records an execution row, loads the two SFTP source rows, validates SFTP access through the centralized SFTP guard, then delegates file movement and reconciliation to `poll#SftpAndReconcile`.
+`execute#Automation` hands an SFTP-file automation to `SftpAutomationSupport.runSftpFileAutomation`, which records an execution row, loads the two SFTP source rows, validates SFTP access through the centralized SFTP guard, then delegates file movement and reconciliation to `poll#SftpAndReconcile`.
 
 The SFTP path selects the newest matching file on each side, stages both files under `runtime://tmp/reconciliation/automation/input`, archives consumed inputs under the configured archive subdirectory, and writes the result artifact to the data-manager reconciliation run folder unless `outputLocation` overrides it.
 

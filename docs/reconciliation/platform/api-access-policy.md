@@ -76,7 +76,7 @@ credentials/secrets; not app-global / super-admin config; rate-limitable; stable
 ### Public-eligible (read + controlled trigger of reconciliation)
 - Read: `list#SavedRuns`, `list#GeneratedOutputs`,
   `get#GeneratedOutput`, `get#GeneratedOutputDifferences`, `list#AutomationExecutions`.
-- Trigger (gated, tenant-scoped, rate-limited): `run#SavedRunDiff`, `run#GenericDiff`,
+- Trigger (gated, tenant-scoped, rate-limited): `run#SavedRunDiff`,
   `create#RuleSetRun`, `create#CsvRun`, `run#AutomationNow`.
 - *Rationale:* these are the only operations a customer/partner system would legitimately want
   — fetch my reconciliation results / run status, or kick off a run.
@@ -86,7 +86,7 @@ credentials/secrets; not app-global / super-admin config; rate-limitable; stable
   `save#UserSettings`, `verify/change#OwnPassword`.
 - Tenant & platform settings: `get/save#TenantSettings`, `list#TenantChatSpaces`,
   `save/delete#TenantChatSpace`, the Slack install services, `get/save#UserNotificationDefault`,
-  `subscribe/unsubscribe#RunNotification`, `get/save#LlmSettings`, `list#EnumOptions`,
+  `subscribe/unsubscribe#RunNotification`, `list#EnumOptions`,
   config sharing (`grant/revoke/list#ConfigTenantAccess`).
   (`get/save#TenantNotificationSettings` is retired — replaced by the chat-space registry above.)
 - Schema authoring: `save#JsonSchemaText`, `save#RefinedSchema`, `infer/flatten#JsonSchema`,
@@ -100,9 +100,9 @@ credentials/secrets; not app-global / super-admin config; rate-limitable; stable
 - Any service handling partner credentials — `*NsAuthConfig`, `*NsRestletConfig`, `*SftpServer`,
   `*ShopifyAuthConfig`, `*HotWaxOmsRestSourceConfig`, `save#SlackBotToken` (they accept secrets
   that are stored encrypted).
-- App-global / super-admin config — `save#LlmSettings`, `list#EnumOptions`.
+- App-global / super-admin config — `list#EnumOptions`.
 - The scheduler services in `ReconciliationAutomationServices.xml` (
-  `run#SftpFileAutomation`, `execute#Automation`, `scan#DueAutomations`,
+  `poll#SftpAndReconcile`, `execute#Automation`, `scan#DueAutomations`,
   `sweep#StuckReconciliationRuns`): they are `authenticate="anonymous-all"` **and**
   `allow-remote="false"` — internal scheduler only, **not** remotely reachable today (and outside
   the fence's namespaces besides). They must **stay `allow-remote="false"`**; never front them with
@@ -148,7 +148,7 @@ assumes a hostile client and defends server-side. For the **public 3rd-party tie
    by throttling or revoking the key. You cannot stop a legitimate user replaying their *own*
    credential — you make it gain them nothing (same authz + validation), bound it, and see it.
 5. **Corrupt-data surface closed on the write side.** The internal write path validates input:
-   caller-supplied `sparkMaster` is ignored, outbound hosts (`llmBaseUrl`, SFTP host) are checked,
+   caller-supplied `sparkMaster` is ignored, outbound hosts (SFTP host) are checked,
    `extractServiceName` is allowlisted at save **and** at the execution sink, and payload, window
    and field sizes are capped — so a replayed token cannot persist data beyond the caller's
    authorized, validated scope. See

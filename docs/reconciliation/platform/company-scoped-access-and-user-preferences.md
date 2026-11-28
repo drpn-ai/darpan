@@ -25,7 +25,6 @@ Pins are personal and should follow the user everywhere they log in. Tenant-scop
 
 ### Out of Scope
 
-- LLM and other global AI settings
 - enum/global admin settings
 - an end-user "all tenants" data view for non-admin users
 - broader global-vs-tenant policy beyond the surfaces listed above
@@ -158,7 +157,7 @@ Admin behavior:
 - keep the active tenant selector visible so super-admin users can choose from all configured Darpan tenants
 - apply the same active-tenant read filtering to super-admin users as every other authenticated user
 - stamp new tenant-scoped records with the active tenant even for super-admin
-- keep global/admin-only Settings, including AI/LLM provider settings, enum/global settings, and app-wide operational config, outside tenant editor permissions
+- keep global/admin-only Settings, including enum/global settings, and app-wide operational config, outside tenant editor permissions
 
 ## Auth and Session Contract
 

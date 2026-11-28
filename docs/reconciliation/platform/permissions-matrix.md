@@ -10,7 +10,7 @@ Two surfaces apply it: the tenant app (`darpan-ui`, `facade.*` services) and the
 
 | Role | Scope | Tenant switching | Core access |
 | --- | --- | --- | --- |
-| Darpan Admin | App-wide. This is the Darpan app-level settings administrator. | Does not grant tenant switching by itself. Combine with Super Admin or tenant membership when tenant data access is also needed. | Can view and edit Darpan core/app-level settings such as AI/LLM provider settings and global enum/system options. |
+| Darpan Admin | App-wide. This is the Darpan app-level settings administrator. | Does not grant tenant switching by itself. Combine with Super Admin or tenant membership when tenant data access is also needed. | Can view and edit Darpan core/app-level settings such as global enum/system options. |
 | Super Admin | Tenant-wide administration across Darpan tenants. | Can access every configured Darpan tenant. Tenant-owned operational pages still use an active tenant unless a private admin screen intentionally aggregates across tenants. | Can view and edit all tenant data and tenant setup. Does not grant Darpan app-level settings unless the user also has Darpan Admin access or Moqui `ADMIN`. |
 | Tenant Admin | Tenant-scoped. Applies only to tenants the user is associated with. | Can switch only between associated tenant `UserGroup` records returned by the session `availableTenants` contract. | Can view and edit tenant-owned data, tenant settings, saved runs, schemas, rules, and result records for the active tenant. Cannot access super-admin-only platform management. |
 | Tenant User | Tenant-scoped. Applies only to tenants the user is associated with. | Can switch only between associated tenant `UserGroup` records returned by the session `availableTenants` contract. | Can view tenant-relevant pages, upload input files, run reconciliation, and view/download results. Cannot create, update, or delete saved runs, schemas, rules, tenant settings, user/tenant assignments, or platform settings. |
@@ -82,9 +82,7 @@ Current implementation notes:
 | Manage users (admin app, `admin.UserAdminServices`) | Yes | No | No |
 | Assign tenant memberships and tenant permission groups (`admin.MembershipAdminServices`) | Yes | No | No |
 | Run or dry-run data migrations, view the cross-tenant schedule board (`admin.*`) | Yes | No | No |
-| View/edit AI/LLM provider settings | No, unless also Darpan Admin | No | No |
 | View/edit enum/global system settings | No, unless also Darpan Admin | No | No |
-| Use legacy debug or Darpan core management screens | No, unless also Darpan Admin | No | No |
 
 ## Page and Action Matrix
 
@@ -103,7 +101,6 @@ Current implementation notes:
 | Run history and result detail | View/download/delete where supported. | View/download/delete where tenant policy permits. | View/download only. |
 | Schema library/editor | View/edit/create/delete. | View/edit/create/delete active tenant schemas. | View only. |
 | Ruleset manager/editor | View/edit/create/delete. | View/edit/create/delete active tenant rules. | View only. |
-| AI/LLM settings | No access unless also Darpan Admin. | No access. | No access. |
 | Global enum/system settings | No access unless also Darpan Admin. | No access. | No access. |
 | Admin app: tenants, users, memberships, migrations, schedule board | View/edit. | No access. | No access. |
 | Debug and operational diagnostics | No access unless also Darpan Admin. | No access unless a future tenant-safe diagnostic surface is explicitly created. | No access unless a future tenant-safe diagnostic surface is explicitly created. |
@@ -136,7 +133,7 @@ Minimum fields:
 | `canViewActiveTenantData` | Explicit read capability for tenant pages. |
 | `canEditActiveTenantData` | Can create/update/delete tenant-owned configuration and saved data. |
 | `canRunActiveTenantReconciliation` | Can upload files and execute reconciliation in the active tenant. This must be true for Tenant User even when `canEditActiveTenantData` is false. |
-| `canManageDarpanCore` | Can access Darpan app-level settings and private core management screens. This is granted by Moqui `ADMIN` or `DARPAN_ADMIN`, not by `DARPAN_SUPER_ADMIN` alone. |
+| `canManageDarpanCore` | Can access Darpan app-level settings. This is granted by Moqui `ADMIN` or `DARPAN_ADMIN`, not by `DARPAN_SUPER_ADMIN` alone. |
 
 The UI derives `canViewTenantSettings`, `canRunActiveTenantReconciliation`, `canEditTenantSettings`, and `canManageGlobalSettings` from these backend session fields. Run/upload execution is intentionally separate from configuration edit so Tenant User can run reconciliation without being able to mutate schemas or saved runs.
 

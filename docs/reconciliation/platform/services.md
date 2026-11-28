@@ -34,8 +34,7 @@ Production multi-user setup depends on these current facade and entity contracts
 | Schemas | JSON schema facade services use `darpan.reconciliation.JsonSchema`. | Tenant-owned via `companyUserGroupId`; `list#JsonSchemas` should only return active-tenant schemas. |
 | Saved runs and mappings | Reconciliation facade services use `darpan.mapping.ReconciliationMapping` and saved-run support. | Treat saved runs and mappings as tenant-level operational setup, not personal preferences. |
 | Results | Reconciliation output support uses `darpan.reconciliation.ReconciliationRunResult` first, with generated-output metadata as a fallback for migration files. | Results are tenant evidence shared by users in the same active tenant; verify result list/detail/delete does not cross active tenants. |
-| AI/LLM settings | `get#LlmSettings` and `save#LlmSettings`. | Darpan Admin only (`DARPAN_ADMIN` or Moqui `ADMIN`) and app-global. The settings are stored; no product feature reads them yet. |
-| Enum/global settings | `list#EnumOptions`. | Darpan Admin only; do not delegate to tenant editors. |
+| Enum/global settings | `list#EnumOptions`. | Darpan Admin only (`DARPAN_ADMIN` or Moqui `ADMIN`); do not delegate to tenant editors. |
 
 ## Current Repo Footprint
 
@@ -45,7 +44,7 @@ Production multi-user setup depends on these current facade and entity contracts
 - Auth/session facade: `runtime/component/darpan/service/facade/AuthFacadeServices.xml`
 - Settings facade: `runtime/component/darpan/service/facade/SettingsFacadeServices.xml`
 - Spark-based compare services: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`
-- NetSuite inventory retrieval lives in `runtime/component/netsuite-darpan/service/reconciliation/NetSuiteInventoryServices.xml`; Darpan no longer carries inventory retrieval wrappers.
+- NetSuite inventory retrieval (the RESTlet/bulk inventory-adjustment path in `netsuite-darpan`) was deleted unused (DAR-OPS-029 S41c); inventory reconciliation never went live.
 
 ## UI Facade Contracts
 
@@ -64,4 +63,4 @@ Production multi-user setup depends on these current facade and entity contracts
 - All heavy computation occurs inside the platform database and services
 - Tenant isolation enforced at storage and rule execution levels
 - Tenant-scoped settings are shared tenant assets; pins and saved UI preferences remain user-level.
-- AI/LLM, enum/global, and app-wide operational config are not tenant-editor surfaces in the current implementation.
+- Enum/global and app-wide operational config are not tenant-editor surfaces in the current implementation.

@@ -514,6 +514,56 @@ class AuditAutomationSmokeTests {
         assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [finding("C1").stateEnumId, finding("C2").stateEnumId])
     }
 
+    // D11 (Aditi 2026-11-28, "U1, but show the rest"), in R8's shape (2026-11-06: 25k Unexplained). A statement whose link takes
+    // any type owns an Unexplained row only in a bucket its run's conclusion tree targets; a link naming the type keeps every one.
+    // The rows no statement owns are not lost: they are the check's outside-rules group, stored on its run.
+    @Test
+    void anUnexplainedRowNoRuleTargetsIsOutsideTheRulesNotLost() {
+        insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_R8", ruleSetName: "R8 run", companyUserGroupId: TENANT])
+        insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "TAUTO_SCOPE_R8", ruleSetId: "TAUTO_RS_R8", companyUserGroupId: TENANT])
+        // The tree covers only the problems: rule rows (bucket RULE).
+        insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "TAUTO_SCOPE_R8", sequenceNum: 10L, conclusionEnumId: "CONC_X",
+                companyUserGroupId: TENANT, appliesToBucket: "RULE"])
+        statement("TAUTO_R8ANY", AUDIT, "R8ANY")
+        statement("TAUTO_R8NAMED", AUDIT, "R8NAMED")
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_R8C", companyUserGroupId: TENANT, checkCode: "r8-any", label: "r8 any",
+                savedRunId: "TAUTO_RS_R8"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_R8C", statementId: "TAUTO_R8ANY", companyUserGroupId: TENANT, sequenceNum: 1L])
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_R8D", companyUserGroupId: TENANT, checkCode: "r8-named", label: "r8 named",
+                savedRunId: "TAUTO_RS_R8"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_R8D", statementId: "TAUTO_R8NAMED", companyUserGroupId: TENANT,
+                sequenceNum: 1L, diffTypes: "MISSING_IN_FILE_2"])
+        List<Map> rows = [row("FIELD_MISMATCH", "P1", "status differs", "UNEXPLAINED"),
+                          row("MISSING_IN_FILE_2", "M1", "missing in NetSuite", "UNEXPLAINED"),
+                          row("MISSING_IN_FILE_2", "M2", "missing in NetSuite", "CONC_X")]
+
+        Map outside = [:]
+        List<Map> any = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_R8C", savedRunId: "TAUTO_RS_R8"],
+                new File(diff("r8any", rows)), omsSource, nsSource, [:], null, null, outside)
+        assertEquals([["R8ANY", "M2"], ["R8ANY", "P1"]], any.collect { [it.statementCode, it.recordKey] },
+                "a cause counts as before; Unexplained in the targeted bucket (RULE) counts")
+        assertEquals(1, outside.count)
+        assertEquals([["M1", "MISSING_IN_FILE_2", "MISSING_FROM_FILE_2", "missing in NetSuite"]],
+                (outside.rows as List<Map>).collect { [it.recordKey, it.diffType, it.bucket, it.note] }, "M1 is outside the rules, not dropped")
+        assertTrue(((outside.rows as List<Map>)[0].records as List).size() > 0, "it carries its records as a finding would")
+
+        Map none = [:]
+        List<Map> named = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_R8D", savedRunId: "TAUTO_RS_R8"],
+                new File(diff("r8named", rows)), omsSource, nsSource, [:], null, null, none)
+        assertEquals([["R8NAMED", "M1"], ["R8NAMED", "M2"]], named.collect { [it.statementCode, it.recordKey] },
+                "a link naming the type keeps every Unexplained row (Aditi 2026-11-24)")
+        assertEquals([count: 0, rows: []], none)
+
+        // Stored on the check's run for the morning (S13), so the report (S10) can show the group.
+        Map r8c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAUTO_R8C").useCache(false).one().getMap()
+        AuditAutomationSupport.recordWindow(ec, automation, [r8c], window("2026-09-02", ["P1", "M1", "M2"], ["P1"]), omsSource, nsSource,
+                [recordCount: 3], [recordCount: 1], [diffLocation: diff("r8run", rows)], null)
+        Map run = ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", "TAUTO_R8C")
+                .condition("reportDate", Date.valueOf("2026-09-02")).useCache(false).one().getMap()
+        assertEquals(["AUDCS_RAN", 1], [run.statusEnumId, run.outsideRulesCount as Integer])
+        assertTrue((run.outsideRulesJson as String).contains('"M1"'), run.outsideRulesJson as String)
+    }
+
     @Test
     void aFailedReadIsRecordedAndClosesNothing() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-10", ["F1"], []), omsSource, nsSource,

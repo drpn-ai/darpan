@@ -5,6 +5,7 @@ import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.conclusion.ConclusionTreeSupport
+import darpan.reconciliation.conclusion.RunConclusionSupport
 import groovy.json.JsonSlurper
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
@@ -51,6 +52,8 @@ class AuditAutomationSupport {
     private static final String WHY = "audit run hook on a scheduled thread: explicit companyUserGroupId condition applied"
     /** DAR-OPS-029 S11: why a check whose compare left no readable result closes nothing. */
     static final String NO_RESULT_REASON = "The compare finished but its result could not be read, so nothing was judged."
+    /** D11: at most this many outside-rules rows are handed to the ledger; the count is the true total. */
+    static final int OUTSIDE_RULES_ROWS = 200
     /** DAR-OPS-029 S11: why a check whose findings the ledger refused reads as not run, never as ran with none. */
     static final String FINDINGS_NOT_RECORDED_REASON = "The check ran but its findings could not be recorded."
 
@@ -383,14 +386,16 @@ class AuditAutomationSupport {
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
         Map<String, Map> explained = [:]
         Set<String> unjudgedStatementIds = new LinkedHashSet<String>()
+        Map outsideRules = [count: 0, rows: []]
         List<Map> findings = null
         Map recorded = null
         String notRecordedReason = FINDINGS_NOT_RECORDED_REASON
         // From here the check's health reads ran (or partial): any failure to judge or record its findings restates it.
         try {
             findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds,
-                    unjudgedStatementIds).findAll { !unjudged.contains(it.recordKey as String) } : []
-            recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings])
+                    unjudgedStatementIds, outsideRules, unjudged).findAll { !unjudged.contains(it.recordKey as String) } : []
+            // D11: the outside-rules group rides with the findings; the ledger stores it on the morning's run (S13).
+            recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings, outsideRules: outsideRules])
         } catch (IncompleteResultException e) {
             logger.error("Audit check ${check.checkId} (${window.auditPeriod}): ${e.message} Nothing judged.")
             notRecordedReason = truncate(e.message, REASON_MAX)
@@ -536,11 +541,14 @@ class AuditAutomationSupport {
      * expected (DAR-BE-196: the run marks conclusion.expected; Unexplained counts unless its run marked it, DAR-BE-198). One finding per statement and
      * record; the row's record lives on the side(s) its type names. `explained` gets recordKey -> {conclusionEnumId,
      * diagnosisText, headline} for each row of a linked diff type whose cause is expected (DAR-BE-118), kept on the closed
-     * finding.
+     * finding. Whether a link counts a row is countsRow (D11). unjudgedStatementIds gets the statements this run cannot judge
+     * (OC33); outsideRules gets {count, rows ≤ OUTSIDE_RULES_ROWS} of the Unexplained rows no link owns (D11), leaving out
+     * unjudgedKeys. A result file that cannot be read whole throws IncompleteResultException (OC47).
      */
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source,
                                   Map<String, Map> explained, Map<String, String> sideConfigIds = null,
-                                  Set<String> unjudgedStatementIds = null) {
+                                  Set<String> unjudgedStatementIds = null, Map outsideRules = null,
+                                  Set<String> unjudgedKeys = null) {
         List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("checkId", check.checkId)
                 .orderBy("sequenceNum").list()*.getMap()
         // DAR-UI-063. A statement turned off records no findings, so this run does not judge it (OC33: it closes nothing).
@@ -563,6 +571,11 @@ class AuditAutomationSupport {
         // DAR-OPS-029 S11 (H5): two rows for one statement and record (rule rows of one key under a link that takes any rule,
         // duplicates) keep the row that ranks first by its content, not whichever the compare happened to write first.
         Map<String, String> keptRank = [:]
+        // D11 (Aditi 2026-11-28, "U1, but show the rest"): the buckets the run's conclusion tree targets, for the Unexplained rows
+        // of links that take any type; the Unexplained rows no link owns are the check's outside-rules group.
+        Set<String> targeted = normalize(check.savedRunId) ?
+                AuditSettingsSupport.targetedBuckets(ec, tenantId, check.savedRunId as String) : ([] as Set<String>)
+        Map<String, Map> outside = new LinkedHashMap<>()
         DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say
             // type / id / note. Read either.
@@ -574,6 +587,7 @@ class AuditAutomationSupport {
             boolean expected = raw.conclusion instanceof Map && ((Map) raw.conclusion).expected == true &&
                     (code != ConclusionTreeSupport.UNEXPLAINED || ((Map) raw.conclusion).unexplainedExpected == true)
             String ruleId = normalize(raw.ruleId)
+            boolean owned = false, unowned = false
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer
                 // closure's metaclass and fails with "argument type mismatch".
@@ -583,8 +597,13 @@ class AuditAutomationSupport {
                             diagnosisText: row.conclusionLabel,
                             headline: AuditAutomationSupport.headline(check, row, AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source))])
                 }
-                if (expected || !AuditAutomationSupport.matchesDiffType(link.diffTypes as String, type) ||
-                        !AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) return
+                if (!AuditAutomationSupport.countsRow(link, type, ruleId, expected, code, targeted)) {
+                    // Taken by type and rule but not owned: an Unexplained row in a bucket the tree never targets (D11).
+                    if (!expected && AuditAutomationSupport.matchesDiffType(link.diffTypes as String, type) &&
+                            AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) unowned = true
+                    return
+                }
+                owned = true
                 String statementCode = codeById.get(link.statementId as String)
                 String recordKey = row.id as String
                 if (!statementCode || !recordKey) return
@@ -600,10 +619,19 @@ class AuditAutomationSupport {
                         records         : records,
                         checks          : AuditAutomationSupport.checksOf(row.checks)] + AuditAutomationSupport.amountsOf(check, row))
             }
+            if (unowned && !owned && row.id && !unjudgedKeys?.contains(row.id as String) && AuditAutomationSupport.keeps(keptRank, "outside|${row.id}".toString(), rank)) {
+                outside.put(row.id as String, [recordKey: row.id, diffType: type, bucket: RunConclusionSupport.bucketOf([diffType: type], null, null),
+                        note: row.note, records: AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source, sideConfigIds)])
+            }
         }
         // OC47 (S21a): a file cut off mid-rows, without its differences section, or with a row that does not parse reads as
         // fewer rows; judged as it reads, the missing rows' findings would close. Nothing is judged from it.
         if (!scan.complete) throw new IncompleteResultException(scan.problem())
+        if (outsideRules != null) {
+            List<String> outsideKeys = outside.keySet().sort()
+            outsideRules.put("count", outsideKeys.size())
+            outsideRules.put("rows", outsideKeys.take(OUTSIDE_RULES_ROWS).collect { outside.get(it) })
+        }
         // In key order, so the ledger meets them (and numbers new findings) the same way whatever order the compare wrote.
         return byKey.keySet().sort().collect { byKey.get(it) } as List<Map>
     }
@@ -728,6 +756,32 @@ class AuditAutomationSupport {
     static boolean matchesDiffType(String allowed, String type) {
         List<String> named = (allowed ?: "").split(",")*.trim().findAll { it }
         return named ? (type != null && named.contains(type)) : !(type?.endsWith("_PAIRED"))
+    }
+
+    /**
+     * D11. Whether a statement's link counts a diff row as its finding: findingsFrom's one decision (AuditChangeBacktest asks
+     * it too). A row whose cause is expected never counts; its type must match the link (matchesDiffType) and its rule the
+     * link's rules. An Unexplained row counts on a link that names its type (an explicit claim; Aditi 2026-11-24, Unexplained
+     * findings are valid) and, on a link that takes any type, only when the run's conclusion tree targets the row's bucket
+     * (targetedBuckets: AuditSettingsSupport.targetedBuckets; empty means no tree, and every row counts as before). A row with
+     * a cause, or with no conclusion at all, counts as before.
+     */
+    static boolean countsRow(Map link, String type, String ruleId, boolean expected, String conclusionCode, Set<String> targetedBuckets) {
+        if (expected || !matchesDiffType(link?.diffTypes as String, type) || !matches(link?.ruleIds as String, ruleId)) return false
+        if (conclusionCode != ConclusionTreeSupport.UNEXPLAINED || namesTypes(link?.diffTypes as String)) return true
+        return treeTargets(targetedBuckets, type)
+    }
+
+    /** D11. A link's diffTypes names at least one type (blank: any type). */
+    static boolean namesTypes(String diffTypes) {
+        return (diffTypes ?: "").split(",")*.trim().any { it }
+    }
+
+    /** D11. Whether a tree's targeted buckets reach a row of this type: no tree, a node for any bucket, a single-sided tree (FINDING), or the row's own bucket. */
+    static boolean treeTargets(Set<String> targetedBuckets, String type) {
+        if (!targetedBuckets) return true
+        if (targetedBuckets.contains(AuditSettingsSupport.ANY_BUCKET) || targetedBuckets.contains("FINDING")) return true
+        return targetedBuckets.contains(RunConclusionSupport.bucketOf([diffType: type], null, null))
     }
 
     static boolean matches(String allowed, String value) {

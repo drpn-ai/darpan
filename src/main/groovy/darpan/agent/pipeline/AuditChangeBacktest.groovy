@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.audit.AuditAutomationSupport
 import darpan.audit.AuditReportAssembler
+import darpan.audit.AuditSettingsSupport
 import darpan.datasource.DataDefinedExtract
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -180,7 +181,7 @@ class AuditChangeBacktest {
             }
             held.each { String k ->
                 links.each { Map link ->
-                    if (!AuditAutomationSupport.matches(link.diffTypes as String, newType) ||
+                    if (!AuditAutomationSupport.matchesDiffType(link.diffTypes as String, newType) ||
                             !AuditAutomationSupport.matches(link.ruleIds as String, null)) return
                     String id = findingId(link.checkId, link.statementId, k)
                     if (!otherKnown || causesMayBeExpected) { undecided = true; maybeKept.add(id); return }
@@ -277,10 +278,14 @@ class AuditChangeBacktest {
         Map<String, Set<String>> changedByBasis = [:]
         Set<String> savedReported = new HashSet<String>()
         Set<String> candidateReported = new HashSet<String>()
+        // D11: each tree's own targeted buckets decide which Unexplained rows a link that takes any type owns.
+        Set<String> savedTargets = AuditSettingsSupport.targetedBucketsFrom(saved)
+        Set<String> candidateTargets = AuditSettingsSupport.targetedBucketsFrom(candidate)
         bases.each { Map basis ->
             Set<String> changed = new HashSet<String>()
             changedByBasis[basis.executionId as String] = changed
-            Map args = conclusionArgs(ec, compareScopeId, basis, evaluate)
+            // S03a asOf: conclude as the original run did, so a WITHIN_HOURS cause reads the hours that run saw.
+            Map args = conclusionArgs(ec, compareScopeId, basis, evaluate) + [asOf: basis.ranAt]
             List<String> savedCodes = []
             List<Boolean> savedExpected = []
             boolean unexplained = unexplainedExpected(scope)
@@ -301,8 +306,8 @@ class AuditChangeBacktest {
                 String ruleId = normalize(row.ruleId)
                 links.each { Map link ->
                     String id = findingId(link.checkId, link.statementId, recordKey)
-                    if (counts(link, type, beforeExpected, ruleId)) savedReported.add(id)
-                    if (counts(link, type, afterExpected, ruleId)) candidateReported.add(id)
+                    if (AuditAutomationSupport.countsRow(link, type, ruleId, beforeExpected, before, savedTargets)) savedReported.add(id)
+                    if (AuditAutomationSupport.countsRow(link, type, ruleId, afterExpected, after, candidateTargets)) candidateReported.add(id)
                 }
             }
         }
@@ -355,12 +360,6 @@ class AuditChangeBacktest {
                 file1: spec(ExtractReplaySupport.SIDE_1), file2: singleSided ? null : spec(ExtractReplaySupport.SIDE_2)]
     }
 
-    /** As AuditAutomationSupport.findingsFrom decides it (DAR-BE-196): a type and rule the link counts, and a cause not expected. */
-    private static boolean counts(Map link, String type, boolean expected, String ruleId) {
-        return !expected && AuditAutomationSupport.matches(link.diffTypes as String, type) &&
-                AuditAutomationSupport.matches(link.ruleIds as String, ruleId)
-    }
-
     /**
      * As the run writes conclusion.expected: an EXPECTED rule of the cause, or an expected step on its path; Unexplained only
      * when the run says its Unexplained rows are expected (DAR-BE-198 b, set on the run, not by a tree edit).
@@ -399,7 +398,9 @@ class AuditChangeBacktest {
                 try { zone = ZoneId.of(normalize(automation.windowTimeZone) ?: "UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
                 Timestamp start = (Timestamp) (execution.childWindowStartDate ?: execution.windowStartDate)
                 Timestamp end = (Timestamp) (execution.childWindowEndDate ?: execution.windowEndDate)
+                // ranAt: when that run concluded (its end; else its start), the asOf its replay concludes at.
                 out << [automationId: automationId, executionId: execution.automationExecutionId, tenantId: tenantId, files: files,
+                        ranAt: (execution.completedDate ?: execution.startedDate) as Timestamp,
                         firstDay: start ? start.toInstant().atZone(zone).toLocalDate() : null,
                         lastDay : end ? new Timestamp(end.time - 1).toInstant().atZone(zone).toLocalDate() : null]
                 break

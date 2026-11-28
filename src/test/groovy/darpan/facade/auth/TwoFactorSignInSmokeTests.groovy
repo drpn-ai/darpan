@@ -275,6 +275,40 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         assertFalse(TwoFactorRecords.enabled(ec, USER_ID))
     }
 
+    /**
+     * DAR-OPS-029 S23 (adversarial review, property 5): a stolen session key could guess at a setup the person began in their own
+     * tab, without limit, and a hit turned the app on for the guesser with a fresh key (and, for a first factor, the recovery
+     * codes). Wrong codes on a setup are now counted on its pending row, as a sign-in challenge counts them: the fifth ends the
+     * setup, and even the right code is then refused as expired. Fewer than five leave the right code working.
+     */
+    @Test
+    @DisplayName("a setup ends after five wrong codes, so a stolen session cannot guess at it")
+    void aSetupEndsAfterFiveWrongCodes() {
+        Map begun = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
+        assertEquals([], begun.errors)
+        String secret = begun.out.secret as String
+        String wrong = code(secret) == "000000" ? "111111" : "000000"
+        (1..4).each { int n ->
+            Map refused = signedIn(USERNAME, "confirm#TwoFactorSetup", [code: wrong], false)
+            assertEquals("CODE", refused.out.reason, "wrong code ${n}")
+        }
+        assertEquals("CODE", signedIn(USERNAME, "confirm#TwoFactorSetup", [code: wrong], false).out.reason, "the fifth is refused as a code")
+        Map late = signedIn(USERNAME, "confirm#TwoFactorSetup", [code: code(secret)], false)
+        assertEquals("SETUP_EXPIRED", late.out.reason, "the setup ended at the fifth wrong code")
+        assertFalse(TwoFactorRecords.enabled(ec, USER_ID))
+        assertEquals("SETUP_FAILED", ec.entity.find(TwoFactorRecords.FACTOR).condition("userId", USER_ID)
+                .condition("factorTypeEnumId", TwoFactorRecords.TYPE_TOTP).disableAuthz().useCache(false).list()
+                .find { it.statusId == TwoFactorRecords.ENDED }?.endedReason)
+
+        Map again = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
+        String fresh = again.out.secret as String
+        String wrongAgain = code(fresh) == "000000" ? "111111" : "000000"
+        (1..4).each { signedIn(USERNAME, "confirm#TwoFactorSetup", [code: wrongAgain], false) }
+        Map confirmed = signedIn(USERNAME, "confirm#TwoFactorSetup", [code: code(fresh)], false)
+        assertEquals([], confirmed.errors, "four wrong codes leave the setup open")
+        assertTrue(TwoFactorRecords.enabled(ec, USER_ID))
+    }
+
     @Test
     @DisplayName("one right code sent with two sign-ins at once signs in only one (the replay check runs under the app row's lock)")
     void oneCodeTwoSignInsAtOnce() {

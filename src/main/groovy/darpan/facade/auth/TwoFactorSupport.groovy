@@ -40,6 +40,8 @@ class TwoFactorSupport {
     static final int LOCK_AFTER_FAILURES = 20
     static final long LOCK_WINDOW_MILLIS = 24L * 3_600_000L
     static final int RECOVERY_CODE_COUNT = 10
+    /** Wrong codes a pending app setup takes before it ends (as a sign-in challenge's SignInChallenges.MAX_FAILURES). */
+    static final int SETUP_MAX_FAILURES = 5
     /** A refused code waits at least this long. Above the login floor (25 ms): a code check writes rows in its own
      *  transaction, so the floor must clear that, as PasswordResetSupport's does. */
     static final long CODE_REFUSAL_FLOOR_MILLIS = 250L
@@ -321,13 +323,20 @@ class TwoFactorSupport {
      * The first right code from the new app, under the person lock: the pending row becomes ACTIVE (an older ACTIVE app
      * ends, REPLACED), the person is emailed, and factorConfirmed ends their sign-ins. Returns [ok, recoveryCodes (a first
      * factor only)], or [ok: false, expired] (no live setup) / [ok: false].
+     *
+     * <p>A wrong code counts on the pending row (DAR-OPS-029 S23, OC76): the SETUP_MAX_FAILURES-th ends the setup (SETUP_FAILED),
+     * so a stolen session key cannot guess at a setup the person began in their own tab. Counted here, in the caller's
+     * transaction (its refusal does not roll back), not as a failed login: that write takes the UserAccount row this holds.
      */
     static Map<String, Object> confirmSetup(def ec, String userId, Object code) {
         TwoFactorRecords.lockPerson(ec, userId)
         def pending = pendingApp(ec, userId)
         if (pending == null) return [ok: false, expired: true]
         Long step = TotpSupport.matchStep((String) pending.secret, normalizeTotp(code), codeClock.call(), null)
-        if (step == null) return [ok: false]
+        if (step == null) {
+            countSetupFailure(ec, userId, pending)
+            return [ok: false]
+        }
         boolean first = !TwoFactorRecords.enabled(ec, userId)
         TwoFactorRecords.endFactors(ec, TwoFactorRecords.factorsOf(ec, userId, "self-scoped auth: end the person's replaced authenticator app")
                 .condition("factorTypeEnumId", TwoFactorRecords.TYPE_TOTP).condition("statusId", TwoFactorRecords.ACTIVE), "REPLACED")
@@ -340,6 +349,20 @@ class TwoFactorSupport {
         // A factor nobody was told about is the account-takeover step: say so, as a new passkey does (review M2).
         TwoFactorRecords.notify(ec, userId, TEMPLATE_APP_ADDED, [:])
         return [ok: true, recoveryCodes: factorConfirmed(ec, userId, first)]
+    }
+
+    /** One wrong code against a pending setup; the SETUP_MAX_FAILURES-th ends it (ENDED, SETUP_FAILED). */
+    private static void countSetupFailure(def ec, String userId, def pending) {
+        int failures = ((pending.failedCodeCount ?: 0) as int) + 1
+        pending.failedCodeCount = failures
+        boolean ending = failures >= SETUP_MAX_FAILURES
+        if (ending) {
+            pending.statusId = TwoFactorRecords.ENDED
+            pending.endedDate = ec.user.nowTimestamp
+            pending.endedReason = "SETUP_FAILED"
+        }
+        pending.update()
+        TwoFactorRecords.event(ec, userId, ending ? "SETUP_FAILED" : "CODE_FAILED")
     }
 
     /**

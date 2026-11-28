@@ -15,6 +15,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-209. A user asks for the CLI in their active tenant; a Darpan admin approves (one grant) or declines (a note the
@@ -37,16 +39,16 @@ class CliAccessRequestSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "cli-access-request")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             [T1, T2].each { String t ->
-                upsert("moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+                upsert(ec, "moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
             }
             [VIEWER, STAFF].each { String u ->
-                upsert("moqui.security.UserAccount", [userId: u, username: u.toLowerCase(), userFullName: u, emailAddress: "${u.toLowerCase()}@example.com".toString(),
+                upsert(ec, "moqui.security.UserAccount", [userId: u, username: u.toLowerCase(), userFullName: u, emailAddress: "${u.toLowerCase()}@example.com".toString(),
                         disabled: "N", requirePasswordChange: "N"])
             }
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: STAFF, fromDate: FROM])
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: VIEWER, fromDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: STAFF, fromDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: VIEWER, fromDate: FROM])
             [T1, T2].each { String t -> member(t, VIEWER) }
         }
     }
@@ -56,7 +58,7 @@ class CliAccessRequestSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem {
+        asSystem(ec) {
             [CliAccessRequests.REQUEST, CliAccess.EVENT, CliAccess.GRANT].each { ec.entity.find(it).deleteAll() }
             [T1, T2].each { String t -> member(t, VIEWER) }
         }
@@ -110,13 +112,13 @@ class CliAccessRequestSmokeTests {
         Map again = asUser(STAFF, T1) { CliAccessRequests.adminApprove(it, id, null, null) }
         assertNull(again.result)
         assertTrue((again.errors as List).any { it.contains("already approved") }, "${again.errors}")
-        assertEquals(1L, asSystem { ec.entity.find(CliAccess.GRANT).useCache(false).count() })
+        assertEquals(1L, asSystem(ec) { ec.entity.find(CliAccess.GRANT).useCache(false).count() })
     }
 
     @Test
     void approveAfterTheMembershipIsGoneIsRefused() {
         String id = asUser(VIEWER, T1) { CliAccessRequests.request(it, null) }.result.requestId as String
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("userId", VIEWER)
                     .condition("tenantUserGroupId", T1).deleteAll()
         }
@@ -124,7 +126,7 @@ class CliAccessRequestSmokeTests {
         assertNull(refused.result)
         assertTrue((refused.errors as List).any { it.contains("not a member") }, "${refused.errors}")
         assertEquals(CliAccessRequests.PENDING, row(id).statusId)
-        assertEquals(0L, asSystem { ec.entity.find(CliAccess.GRANT).useCache(false).count() })
+        assertEquals(0L, asSystem(ec) { ec.entity.find(CliAccess.GRANT).useCache(false).count() })
     }
 
     @Test
@@ -194,21 +196,14 @@ class CliAccessRequestSmokeTests {
     }
 
     private void member(String tenant, String user) {
-        upsert("moqui.security.UserGroupMember", [userGroupId: tenant, userId: user, fromDate: FROM])
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: tenant, userId: user,
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: tenant, userId: user, fromDate: FROM])
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: tenant, userId: user,
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, fromDate: FROM])
     }
 
     private Map row(String requestId) {
-        asSystem { ec.entity.find(CliAccessRequests.REQUEST).condition("requestId", requestId).useCache(false).one()?.getMap() }
+        asSystem(ec) { ec.entity.find(CliAccessRequests.REQUEST).condition("requestId", requestId).useCache(false).one()?.getMap() }
     }
 
-    private long count() { asSystem { ec.entity.find(CliAccessRequests.REQUEST).useCache(false).count() } }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
-
-    private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
+    private long count() { asSystem(ec) { ec.entity.find(CliAccessRequests.REQUEST).useCache(false).count() } }
 }

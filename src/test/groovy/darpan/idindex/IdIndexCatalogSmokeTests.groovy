@@ -11,6 +11,7 @@ import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /** DAR-BE-374: the index's field catalog through Moqui — tenant rows, tenant isolation, and the save guard. */
 @SharedMoqui
@@ -25,7 +26,7 @@ class IdIndexCatalogSmokeTests {
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "idindex-catalog")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
@@ -38,7 +39,7 @@ class IdIndexCatalogSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem {
+        asSystem(ec) {
             ["darpan.idindex.IdIndexSource", "darpan.idindex.IdIndexField", "darpan.idindex.TenantIdIndexField", "darpan.idindex.RecordIdIndexCursor"].each { ec.entity.find(it).deleteAll() }
             row("darpan.idindex.IdIndexSource", [systemEnumId: "SHOPIFY", systemCode: "SHOPIFY", recordKind: "ORDER", idField: "id", isActive: "Y"])
             row("darpan.idindex.IdIndexSource", [systemEnumId: "OMS_GQL", systemCode: "OMS", recordKind: "ORDER", idField: "orderId", isActive: "Y"])
@@ -50,7 +51,7 @@ class IdIndexCatalogSmokeTests {
 
     @Test
     void "fields merge the tenant's rows, and another tenant's rows are invisible"() {
-        asSystem {
+        asSystem(ec) {
             row("darpan.idindex.TenantIdIndexField", [companyUserGroupId: MINE, systemEnumId: "SHOPIFY", fieldId: "ORDER_NAME", isActive: "N"])
             row("darpan.idindex.TenantIdIndexField", [companyUserGroupId: OTHER, systemEnumId: "SHOPIFY", fieldId: "ORDER_ID", isActive: "N"])
             row("darpan.idindex.TenantIdIndexField", [companyUserGroupId: OTHER, systemEnumId: "SHOPIFY", fieldId: "OTHER_ONLY", fieldPath: "x", role: "OWN"])
@@ -93,12 +94,12 @@ class IdIndexCatalogSmokeTests {
 
     @Test
     void "a field change marks that system's kept copies for re-indexing"() {
-        asSystem {
+        asSystem(ec) {
             row("darpan.idindex.RecordIdIndexCursor", [companyUserGroupId: MINE, datasetId: "D1", systemEnumId: "SHOPIFY", indexedVersion: "v7"])
             row("darpan.idindex.RecordIdIndexCursor", [companyUserGroupId: MINE, datasetId: "D2", systemEnumId: "OMS_GQL", indexedVersion: "v3"])
         }
         assertFalse(call([systemEnumId: "SHOPIFY", fieldId: "NEW", fieldPath: "x", role: "OWN"]).hadError as boolean)
-        Map<String, String> versions = asSystem { ec.entity.find("darpan.idindex.RecordIdIndexCursor").condition("companyUserGroupId", MINE).list()
+        Map<String, String> versions = asSystem(ec) { ec.entity.find("darpan.idindex.RecordIdIndexCursor").condition("companyUserGroupId", MINE).list()
                 .collectEntries { [(it.datasetId): it.indexedVersion] } }
         assertEquals([D1: null, D2: "v3"], versions)
     }
@@ -127,7 +128,7 @@ class IdIndexCatalogSmokeTests {
     }
 
     private void setPermissions(List<String> groups) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", MINE)
                     .condition("userId", ec.user.userId).deleteAll()
             groups.each { String g ->
@@ -138,9 +139,4 @@ class IdIndexCatalogSmokeTests {
     }
 
     private void row(String entity, Map fields) { ec.entity.makeValue(entity).setAll(fields).createOrUpdate() }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean was = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!was) ec.artifactExecution.enableAuthz() }
-    }
 }

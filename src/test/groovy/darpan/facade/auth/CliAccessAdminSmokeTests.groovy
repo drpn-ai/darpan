@@ -17,6 +17,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-195. Only a Darpan admin turns the CLI on, changes, pauses, unpauses or revokes it; a tenant admin, editor or
@@ -45,18 +47,18 @@ class CliAccessAdminSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "cli-access-admin")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: ALPHA, description: "Alpha Co", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: ALPHA, description: "Alpha Co", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
             [TADMIN, EDITOR, VIEWER, OUTSIDER, SUPER_ID].each { String u ->
-                upsert("moqui.security.UserAccount", [userId: u, username: u.toLowerCase(), userFullName: u, emailAddress: "${u.toLowerCase()}@example.com".toString(),
+                upsert(ec, "moqui.security.UserAccount", [userId: u, username: u.toLowerCase(), userFullName: u, emailAddress: "${u.toLowerCase()}@example.com".toString(),
                         disabled: "N", requirePasswordChange: "N"])
             }
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
             [[TADMIN, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID], [EDITOR, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
              [VIEWER, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID]].each { List m ->
-                upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: m[0], fromDate: FROM])
-                upsert("moqui.security.UserGroupMember", [userGroupId: ALPHA, userId: m[0], fromDate: FROM])
-                upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: ALPHA, userId: m[0],
+                upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: m[0], fromDate: FROM])
+                upsert(ec, "moqui.security.UserGroupMember", [userGroupId: ALPHA, userId: m[0], fromDate: FROM])
+                upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: ALPHA, userId: m[0],
                         permissionUserGroupId: m[1], fromDate: FROM])
             }
         }
@@ -67,7 +69,7 @@ class CliAccessAdminSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem { [CliAccess.EVENT, CliAccess.GRANT].each { ec.entity.find(it).deleteAll() } }
+        asSystem(ec) { [CliAccess.EVENT, CliAccess.GRANT].each { ec.entity.find(it).deleteAll() } }
     }
 
     @Test
@@ -109,7 +111,7 @@ class CliAccessAdminSmokeTests {
         assertNotNull(adminOk("update#CliAccessGrant", [grantId: id, days: 10]).grant.thruDate)
         assertEquals("REVOKED", adminOk("revoke#CliAccessGrant", [grantId: id]).grant.statusId)
         assertTrue(admin("unpause#CliAccessGrant", [grantId: id]).hasError as boolean, "a revoked grant stays revoked")
-        List<Map> evts = asSystem { ec.entity.find(CliAccess.EVENT).condition("grantId", id).orderBy("eventId").useCache(false).list()*.getMap() }
+        List<Map> evts = asSystem(ec) { ec.entity.find(CliAccess.EVENT).condition("grantId", id).orderBy("eventId").useCache(false).list()*.getMap() }
         assertEquals(["GRANT", "PAUSE", "UNPAUSE", "CHANGE", "REVOKE"], evts*.action)
         assertTrue(evts.every { it.byUserId == SUPER_ID })
     }
@@ -127,9 +129,9 @@ class CliAccessAdminSmokeTests {
                 .collect { "${SVC}.${it}".toString() }, auditRows(id)*.serviceName, "one row per change; the refused unpause adds none")
         assertTrue(auditRows(id).every { it.adminUserId == SUPER_ID && it.targetType == "CliAccessGrant" && it.detailText })
 
-        asSystem {
+        asSystem(ec) {
             ["CAA_REQ_1", "CAA_REQ_2"].each { String r ->
-                upsert(CliAccessRequests.REQUEST, [requestId: r, userId: VIEWER, companyUserGroupId: ALPHA, statusId: CliAccessRequests.PENDING, requestedDate: FROM])
+                upsert(ec, CliAccessRequests.REQUEST, [requestId: r, userId: VIEWER, companyUserGroupId: ALPHA, statusId: CliAccessRequests.PENDING, requestedDate: FROM])
             }
         }
         Map approved = adminOk("approve#CliAccessRequest", [requestId: "CAA_REQ_1", days: 7])
@@ -142,7 +144,7 @@ class CliAccessAdminSmokeTests {
     }
 
     private List<Map> auditRows(String targetId) {
-        asSystem { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", targetId).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
+        asSystem(ec) { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", targetId).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
     }
 
     // ------------------------------------------------------------------ helpers
@@ -160,10 +162,10 @@ class CliAccessAdminSmokeTests {
     }
 
     private Map grantRow(String grantId) {
-        asSystem { ec.entity.find(CliAccess.GRANT).condition("grantId", grantId).useCache(false).one()?.getMap() }
+        asSystem(ec) { ec.entity.find(CliAccess.GRANT).condition("grantId", grantId).useCache(false).one()?.getMap() }
     }
 
-    private long grantCount() { asSystem { ec.entity.find(CliAccess.GRANT).useCache(false).count() } }
+    private long grantCount() { asSystem(ec) { ec.entity.find(CliAccess.GRANT).useCache(false).count() } }
 
     private Map onThread(String username, String serviceName, Map params, boolean bypassFence) {
         Map holder = [:]
@@ -187,11 +189,4 @@ class CliAccessAdminSmokeTests {
         if (holder.failure) throw (Throwable) holder.failure
         return holder
     }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
-
-    private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
 }

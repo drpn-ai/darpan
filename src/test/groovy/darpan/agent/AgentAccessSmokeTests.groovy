@@ -13,6 +13,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-194. A user's AI access in one tenant: whether their grant is live, what it has spent (the ledger's own
@@ -33,7 +34,7 @@ class AgentAccessSmokeTests {
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "agent-access")
-        asSystem {
+        asSystem(ec) {
             [ALPHA, BETA].each { String t ->
                 ec.entity.makeValue("darpan.agent.AgentConversation").setAll([conversationId: "${t}_CONV".toString(), companyUserGroupId: t,
                         userId: ANN, createdDate: now()]).createOrUpdate()
@@ -46,7 +47,7 @@ class AgentAccessSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem {
+        asSystem(ec) {
             ["darpan.agent.AgentTurn", "darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"].each { ec.entity.find(it).deleteAll() }
         }
     }
@@ -56,26 +57,21 @@ class AgentAccessSmokeTests {
     private static Timestamp inHours(long h) { new Timestamp(System.currentTimeMillis() + h * HOUR) }
 
     private void grant(String id, String tenant, String user, Map extra = [:]) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("darpan.agent.AgentAccessGrant").setAll([grantId: id, companyUserGroupId: tenant, userId: user,
                     fromDate: inHours(-1), statusId: "ACTIVE"] + extra).create()
         }
     }
 
     private void turn(String id, String grantId, String tenant, long micros) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("darpan.agent.AgentTurn").setAll([turnId: id, conversationId: "${tenant}_CONV".toString(), companyUserGroupId: tenant,
                     userId: ANN, grantId: grantId, role: "AUTHOR", costMicros: micros, startedDate: now()]).create()
         }
     }
 
     private List<Map> events(String grantId) {
-        asSystem { ec.entity.find("darpan.agent.AgentAccessGrantEvent").condition("grantId", grantId).useCache(false).list()*.getMap() }
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        asSystem(ec) { ec.entity.find("darpan.agent.AgentAccessGrantEvent").condition("grantId", grantId).useCache(false).list()*.getMap() }
     }
 
     @Test
@@ -93,7 +89,7 @@ class AgentAccessSmokeTests {
     void "a Darpan admin is LIVE in every tenant with no grant and no limit, even beside a paused one"() {
         // DAR-BE-246. Read outside asSystem, as the agent reads it for the signed-in person.
         String admin = "AAS_ADMIN"
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_SUPER_ADMIN", description: "Darpan super admin"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.admin", disabled: "N"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_SUPER_ADMIN", userId: admin, fromDate: inHours(-1)]).createOrUpdate()
@@ -105,11 +101,11 @@ class AgentAccessSmokeTests {
             }
             grant("G_ADMIN_PAUSED", ALPHA, admin, [statusId: "PAUSED", pauseReason: "ADMIN"])
             assertEquals(AgentAccess.LIVE, AgentAccess.access(ec, ALPHA, admin).state, "a leftover grant does not limit an admin")
-            asSystem { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: now()]) }
+            asSystem(ec) { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: now()]) }
             assertEquals(AgentAccess.PAUSED, AgentAccess.access(ec, ALPHA, admin).state, "an ended membership falls back to the grant")
             assertEquals(AgentAccess.NOT_GRANTED, AgentAccess.access(ec, ALPHA, ANN).state, "a plain user still needs a grant")
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
                 ec.entity.find("darpan.agent.AgentAccessGrant").condition("userId", admin).deleteAll()
                 ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
@@ -121,7 +117,7 @@ class AgentAccessSmokeTests {
     void "a Darpan admin has live AI in every tenant without a grant"() {
         // DAR-BE-296: the DARPAN_ADMIN role alone (no super admin) is enough.
         String admin = "AAS_DARPAN_ADMIN"
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_ADMIN", description: "Darpan admin"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.darpan.admin", disabled: "N"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: admin, fromDate: inHours(-1)]).createOrUpdate()
@@ -131,7 +127,7 @@ class AgentAccessSmokeTests {
             assertEquals(AgentAccess.LIVE, a.state)
             assertEquals(null, a.grantId)
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
                 ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
             }
@@ -142,7 +138,7 @@ class AgentAccessSmokeTests {
     void "an ended Darpan admin role ends AI access, and an open one restores it"() {
         // DAR-BE-296 review focus: the date filter must really apply (real entity engine, not a stub).
         String admin = "AAS_ENDED_ADMIN"
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_ADMIN", description: "Darpan admin"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.ended.admin", disabled: "N"]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: admin,
@@ -151,11 +147,11 @@ class AgentAccessSmokeTests {
         try {
             assertEquals(false, AgentAccess.isDarpanAdminUser(ec, admin), "an ended role is not an admin role")
             assertEquals(AgentAccess.NOT_GRANTED, AgentAccess.access(ec, "GORJANA", admin).state)
-            asSystem { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: null]) }
+            asSystem(ec) { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: null]) }
             assertEquals(true, AgentAccess.isDarpanAdminUser(ec, admin), "an open role is an admin role")
             assertEquals(AgentAccess.LIVE, AgentAccess.access(ec, "GORJANA", admin).state)
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
                 ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
             }
@@ -193,7 +189,7 @@ class AgentAccessSmokeTests {
         turn("T1", "G_CAP", ALPHA, 500L)
         assertEquals(AgentAccess.PAUSED, AgentAccess.access(ec, ALPHA, ANN).state, "at the limit is no longer live, even before the pause is written")
         assertTrue(AgentAccess.pauseIfOverLimit(ec, "G_CAP"))
-        Map row = asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", "G_CAP").useCache(false).one().getMap() }
+        Map row = asSystem(ec) { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", "G_CAP").useCache(false).one().getMap() }
         assertEquals(["PAUSED", "COST_LIMIT"], [row.statusId, row.pauseReason])
         assertNotNull(row.pausedDate)
         assertTrue(AgentAccess.pauseIfOverLimit(ec, "G_CAP"), "still paused")

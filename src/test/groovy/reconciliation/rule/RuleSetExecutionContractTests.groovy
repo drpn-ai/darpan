@@ -65,7 +65,7 @@ class RuleSetExecutionContractTests {
         assertFalse(saveRule.attributes().containsKey("location"))
         assertTrue(saveRule.actions.size() == 1)
 
-        // save#RuleSet (and its create#darpan.rule.RuleSet) was deleted in DAR-OPS-029 S99-027 (d8931ccf); save#Rule stays.
+        // save#RuleSet (and its create#darpan.rule.RuleSet) was deleted in DAR-OPS-029 S99-079 (d8931ccf); save#Rule stays.
         String serviceText = Files.readString(serviceXml)
         assertTrue(serviceText.contains('name="create#darpan.rule.Rule"'))
     }

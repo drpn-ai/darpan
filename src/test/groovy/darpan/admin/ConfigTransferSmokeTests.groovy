@@ -23,6 +23,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-ADMIN-006. The admin.TransferAdminServices catalog, export and import, through the real service engine as a
@@ -73,20 +74,20 @@ class ConfigTransferSmokeTests {
                 // The connector registry names the entity behind a lookup's or a derived source type's config id.
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
 
-        upsert("moqui.security.UserAccount", [userId: "XFER_SUPER", username: SUPER_USERNAME, userFullName: "Xfer Super",
+        upsert(ec, "moqui.security.UserAccount", [userId: "XFER_SUPER", username: SUPER_USERNAME, userFullName: "Xfer Super",
                 emailAddress: "xfer.super@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserAccount", [userId: "XFER_PLAIN", username: PLAIN_USERNAME, userFullName: "Xfer Plain",
+        upsert(ec, "moqui.security.UserAccount", [userId: "XFER_PLAIN", username: PLAIN_USERNAME, userFullName: "Xfer Plain",
                 emailAddress: "xfer.plain@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: "XFER_SUPER", fromDate: T0])
-        upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: "XFER_PLAIN", fromDate: T0])
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: "XFER_SUPER", fromDate: T0])
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: "XFER_PLAIN", fromDate: T0])
         [SRC, OTHER, DST].each { String t ->
-            upsert("moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(),
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(),
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
         }
         // The super admin is "in" OTHER: nothing the transfer reads or writes may follow the session's tenant.
-        upsert("moqui.security.UserPreference", [userId: "XFER_SUPER", preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
+        upsert(ec, "moqui.security.UserPreference", [userId: "XFER_SUPER", preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
                 preferenceValue: OTHER])
-        upsert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+        upsert(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
 
         seedSource()
         seedOther()
@@ -567,7 +568,7 @@ class ConfigTransferSmokeTests {
         Closure dropRemote = {
             ec.entity.find("moqui.service.message.SystemMessageRemote").condition("systemMessageRemoteId", "HOTWAX_ORDERS_API").disableAuthz().deleteAll()
         }
-        upsert("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API", description: "Orders API"])
+        upsert(ec, "moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API", description: "Orders API"])
         create("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "XFER_OMS", description: "gorjana oms",
                 companyUserGroupId: SRC, baseUrl: "https://oms.example"])
         create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS_OMS", ruleSetName: "OMS returns", version: "1.0", companyUserGroupId: SRC])
@@ -1591,8 +1592,8 @@ class ConfigTransferSmokeTests {
     void anUnscheduledAuditsAutomationRunsInItsOwnTenantsZoneNotTheAdminsActiveTenants() {
         withAutomation {
             linkChecks("XFER_AUTO")
-            upsert("darpan.auth.TenantSetting", [companyUserGroupId: OTHER, timeZone: "America/New_York"])
-            upsert("darpan.auth.TenantSetting", [companyUserGroupId: DST, timeZone: "Asia/Kolkata"])
+            upsert(ec, "darpan.auth.TenantSetting", [companyUserGroupId: OTHER, timeZone: "America/New_York"])
+            upsert(ec, "darpan.auth.TenantSetting", [companyUserGroupId: DST, timeZone: "Asia/Kolkata"])
             try {
                 Map applied = applyPlan(DST, exportWhole(), [(AUTH_REF): "CREATE"])
                 assertNoErrors(applied)
@@ -2192,10 +2193,6 @@ class ConfigTransferSmokeTests {
             }
         }
         if (ownCodes) ec.entity.find("moqui.basic.Enumeration").condition("enumId", "in", ownCodes).disableAuthz().deleteAll()
-    }
-
-    private void upsert(String entityName, Map fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 
     private void create(String entityName, Map fields) {

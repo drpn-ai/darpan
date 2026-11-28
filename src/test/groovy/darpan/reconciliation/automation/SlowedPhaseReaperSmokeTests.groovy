@@ -15,6 +15,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-328 against a real Moqui: an extract phase slowed on purpose by a peak period (HotWax share, NetSuite one at a
@@ -62,8 +63,8 @@ class SlowedPhaseReaperSmokeTests {
         runningRun("REAP_RR_IDLE", "REAP_EX_IDLE", phaseStart)
 
         // A page of the slowed extract lands now.
-        asSystem { RunObservability.heartbeatStageProgress(ec, "REAP_RR_SLOW", RunObservability.STAGE_EXTRACT_FILE2, 500, null) }
-        asSystem { StuckRunReaper.sweep(ec) }
+        asSystem(ec) { RunObservability.heartbeatStageProgress(ec, "REAP_RR_SLOW", RunObservability.STAGE_EXTRACT_FILE2, 500, null) }
+        asSystem(ec) { StuckRunReaper.sweep(ec) }
 
         assertEquals(StuckRunReaper.STATUS_RUNNING, status(EXECUTION_ENTITY, "automationExecutionId", "REAP_EX_SLOW"),
                 "the heartbeating run's execution is not reaped")
@@ -79,21 +80,21 @@ class SlowedPhaseReaperSmokeTests {
         Timestamp stale = new Timestamp(System.currentTimeMillis() - 300 * 60_000L)
         runningRun("REAP_RR_TICK", "REAP_EX_TICK", stale)
 
-        asSystem { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 10, null) }
+        asSystem(ec) { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 10, null) }
         assertTrue(stamp("REAP_EX_TICK") > stale.time, "the first heartbeat touches the execution")
 
         restamp("REAP_EX_TICK", stale)
         clockMs += 59_000L
-        asSystem { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 20, null) }
+        asSystem(ec) { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 20, null) }
         assertEquals(stale.time, stamp("REAP_EX_TICK"), "a heartbeat within the minute leaves the execution alone")
 
         clockMs += 1_000L
-        asSystem { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 30, null) }
+        asSystem(ec) { RunObservability.heartbeatStageProgress(ec, "REAP_RR_TICK", RunObservability.STAGE_EXTRACT_FILE2, 30, null) }
         assertTrue(stamp("REAP_EX_TICK") > stale.time, "a minute after the last touch it is touched again")
     }
 
     private void runningRun(String runId, String executionId, Timestamp lastWritten) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue(RUN_ENTITY).setAll([reconciliationRunResultId: runId, companyUserGroupId: TENANT,
                     statusEnumId: StuckRunReaper.STATUS_RUNNING, currentStage: RunObservability.STAGE_EXTRACT_FILE2,
                     startedDate: lastWritten, lastUpdatedDate: lastWritten, lastUpdatedStamp: lastWritten]).create()
@@ -108,7 +109,7 @@ class SlowedPhaseReaperSmokeTests {
     }
 
     private void restamp(String executionId, Timestamp at) {
-        asSystem {
+        asSystem(ec) {
             def row = ec.entity.find(EXECUTION_ENTITY).condition("automationExecutionId", executionId).useCache(false).one()
             row.set("lastUpdatedDate", new Timestamp(at.time + 1L))
             row.set("lastUpdatedStamp", at)
@@ -117,22 +118,13 @@ class SlowedPhaseReaperSmokeTests {
     }
 
     private long stamp(String executionId) {
-        return asSystem {
+        return asSystem(ec) {
             ((Timestamp) ec.entity.find(EXECUTION_ENTITY).condition("automationExecutionId", executionId).useCache(false).one()
                     .get("lastUpdatedStamp")).time
         } as long
     }
 
     private String status(String entity, String pkField, String id) {
-        return asSystem { ec.entity.find(entity).condition(pkField, id).useCache(false).one().get("statusEnumId") } as String
-    }
-
-    private Object asSystem(Closure work) {
-        boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
-        }
+        return asSystem(ec) { ec.entity.find(entity).condition(pkField, id).useCache(false).one().get("statusEnumId") } as String
     }
 }

@@ -14,6 +14,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-304 Task 3. Run health and the stuck-run reaper read one set of thresholds from DarpanSettings: a row changes
@@ -40,7 +41,7 @@ class RunHealthSettingsSmokeTests {
 
     @AfterEach
     void clean() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(ENTITY).condition("settingKey", "like", PREFIX + "%").deleteAll()
             ec.entity.find(RUN_RESULT).condition("reconciliationRunResultId", REAPED_ID).deleteAll()
         }
@@ -54,7 +55,7 @@ class RunHealthSettingsSmokeTests {
 
     private void saveRow(String key, String value) {
         ec.transaction.runRequireNew(60, "test save") {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.makeValue(ENTITY).setAll([settingKey: key, settingValue: value, lastChangedDate: new Timestamp(System.currentTimeMillis())]).createOrUpdate()
                 DarpanSettings.expireAfterCommit(ec)
             }
@@ -68,7 +69,7 @@ class RunHealthSettingsSmokeTests {
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ec.transaction.runRequireNew(60, "test create") {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.makeValue(RUN_RESULT).setAll([
                         reconciliationRunResultId: REAPED_ID,
                         companyUserGroupId: "KREWE", createdByUserId: "TEST_CUSTOMER_USER",
@@ -76,13 +77,13 @@ class RunHealthSettingsSmokeTests {
                         lastUpdatedDate: minutesAgo(minutes), lastUpdatedStamp: minutesAgo(minutes)]).create()
             }
         }
-        Timestamp stamp = asSystem { ec.entity.find(RUN_RESULT).condition("reconciliationRunResultId", REAPED_ID).useCache(false).one() }
+        Timestamp stamp = asSystem(ec) { ec.entity.find(RUN_RESULT).condition("reconciliationRunResultId", REAPED_ID).useCache(false).one() }
                 .get("lastUpdatedStamp") as Timestamp
         assertTrue(stamp.time < System.currentTimeMillis() - (minutes - 5) * 60_000L, "lastUpdatedStamp was reset to now: ${stamp}")
     }
 
     private String statusOfCreated() {
-        return asSystem { ec.entity.find(RUN_RESULT).condition("reconciliationRunResultId", REAPED_ID).useCache(false).one() }
+        return asSystem(ec) { ec.entity.find(RUN_RESULT).condition("reconciliationRunResultId", REAPED_ID).useCache(false).one() }
                 .get("statusEnumId") as String
     }
 
@@ -156,14 +157,5 @@ class RunHealthSettingsSmokeTests {
         assertNotNull(DarpanSettings.problem(REAPER, "60"))
         assertNotNull(DarpanSettings.problem(REAPER, "90"))
         assertNull(DarpanSettings.problem(REAPER, "91"))
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
     }
 }

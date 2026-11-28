@@ -17,6 +17,7 @@ import org.moqui.context.ExecutionContext
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-306. Retention and purge periods as data: instance settings plus per-tenant rows, edited by a real DARPAN_SUPER_ADMIN
@@ -59,7 +60,7 @@ class RetentionPeriodAdminSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, *(JOB_SEEDS + [APPLY]))
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")   // run status enums for the run-result rows
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             [A, B, C].each { String t ->
                 ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: t, description: "${t} Co".toString(),
                         groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
@@ -72,7 +73,7 @@ class RetentionPeriodAdminSmokeTests {
 
     @BeforeEach
     void resetFixtures() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.config.DarpanSetting").deleteAll()
             ec.entity.find("darpan.retention.TenantRetentionPeriod").deleteAll()
             ec.entity.find("darpan.agent.AgentQueryLog").deleteAll()
@@ -113,7 +114,7 @@ class RetentionPeriodAdminSmokeTests {
     void tenantPeriodsWinAndStayInTheirTenant() {
         setSetting(QL_KEY, "30")
         setSetting("darpan.retention.runResult.days", "30")
-        asSystem {
+        asSystem(ec) {
             tenantPeriod(A, 10)
             tenantPeriod(B, null)   // keep forever, whatever the instance says
             // the other table has different tenant rows, so a bug that ignores tableKey shows: A keeps run results forever
@@ -137,7 +138,7 @@ class RetentionPeriodAdminSmokeTests {
 
     @Test
     void aTenantPeriodAloneDeletesEvenWhenTheInstanceKeepsForever() {
-        asSystem { tenantPeriod(A, 10) }
+        asSystem(ec) { tenantPeriod(A, 10) }
         Map out = runAsJob("run#Retention", [:])
         assertEquals(["${A}_Q5".toString()], logIds(A))
         assertEquals(3, logIds(B).size(), "no instance period and no row: kept")
@@ -156,7 +157,7 @@ class RetentionPeriodAdminSmokeTests {
 
         // inherit previews following the instance period; forever previews nothing
         setSetting(QL_KEY, "30")
-        asSystem { tenantPeriod(A, 10) }
+        asSystem(ec) { tenantPeriod(A, 10) }
         Map inherit = ok(svc("dryRun#Retention", [tenantUserGroupId: A, tenantPeriodDays: [(QUERY_LOG): "inherit"]])).result
         assertEquals(1L, (inherit.tables as List<Map>).find { it.table == QUERY_LOG }.rows)
         Map forever = ok(svc("dryRun#Retention", [tenantUserGroupId: A, tenantPeriodDays: [(QUERY_LOG): "forever"]])).result
@@ -267,7 +268,7 @@ class RetentionPeriodAdminSmokeTests {
     @Test
     void getShowsTheInstanceTenantsPurgeDaysBatchSizeAndTheJob() {
         setSetting(QL_KEY, "90")
-        asSystem { tenantPeriod(B, null) }
+        asSystem(ec) { tenantPeriod(B, null) }
         Map got = ok(svc("get#RetentionPeriods", [:])).result.retention
         assertEquals(5, got.instance.size())
         assertEquals([90, "ROW"], got.instance.find { it.table == QUERY_LOG }.with { [it.periodDays, it.source] })
@@ -279,7 +280,7 @@ class RetentionPeriodAdminSmokeTests {
     @Test
     void shorteningAPeriodWhileTheJobRunsNeedsAFreshPreviewAndLengtheningDoesNot() {
         setSetting(QL_KEY, "400")
-        asSystem {
+        asSystem(ec) {
             (1..120).each { int n -> queryLog("RPA_BULK_${n}".toString(), A, 50) }
             setJobPaused("N")
         }
@@ -309,7 +310,7 @@ class RetentionPeriodAdminSmokeTests {
 
     @Test
     void foreverToDaysAndATenantsShorterPeriodAlsoNeedAPreviewWhileTheJobRuns() {
-        asSystem { tenantPeriod(B, null); setJobPaused("N") }
+        asSystem(ec) { tenantPeriod(B, null); setJobPaused("N") }
         Map none = svc("update#RetentionPeriods", [tenantUserGroupId: B, periods: [(QUERY_LOG): 30]])
         assertTrue(none.errors.any { it.contains("Preview first") }, "${none.errors}")
         assertNull(tenantRow(B).periodDays)
@@ -324,7 +325,7 @@ class RetentionPeriodAdminSmokeTests {
         ok(svc("update#RetentionPeriods", [tenantUserGroupId: B, periods: [(QUERY_LOG): "forever"]]))
         assertNull(tenantRow(B).periodDays)
         // while the job is paused, shortening needs none
-        asSystem { setJobPaused("Y") }
+        asSystem(ec) { setJobPaused("Y") }
         ok(svc("update#RetentionPeriods", [tenantUserGroupId: B, periods: [(QUERY_LOG): 7]]))
         assertEquals(7, tenantRow(B).periodDays)
     }
@@ -410,25 +411,25 @@ class RetentionPeriodAdminSmokeTests {
     }
 
     private List<String> runIds(String tenant) {
-        return asSystem { ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("companyUserGroupId", tenant).orderBy("reconciliationRunResultId").useCache(false).list()*.reconciliationRunResultId }
+        return asSystem(ec) { ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("companyUserGroupId", tenant).orderBy("reconciliationRunResultId").useCache(false).list()*.reconciliationRunResultId }
     }
 
     private void setSetting(String key, String value) {
-        asSystem { ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: key, settingValue: value]).createOrUpdate() }
+        asSystem(ec) { ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: key, settingValue: value]).createOrUpdate() }
         DarpanSettings.expire()
     }
 
     private Map tenantRow(String tenant) {
-        Map row = asSystem { ec.entity.find("darpan.retention.TenantRetentionPeriod").condition([tenantUserGroupId: tenant, tableKey: QUERY_LOG]).useCache(false).one()?.getMap() }
+        Map row = asSystem(ec) { ec.entity.find("darpan.retention.TenantRetentionPeriod").condition([tenantUserGroupId: tenant, tableKey: QUERY_LOG]).useCache(false).one()?.getMap() }
         return row == null ? null : new LinkedHashMap(row + [periodDays: row.periodDays == null ? null : (row.periodDays as Integer)])
     }
 
     private List<String> logIds(String tenant) {
-        return asSystem { ec.entity.find("darpan.agent.AgentQueryLog").condition("companyUserGroupId", tenant).orderBy("agentQueryLogId").useCache(false).list()*.agentQueryLogId }
+        return asSystem(ec) { ec.entity.find("darpan.agent.AgentQueryLog").condition("companyUserGroupId", tenant).orderBy("agentQueryLogId").useCache(false).list()*.agentQueryLogId }
     }
 
     private long count(String entity, Map where = [:]) {
-        return asSystem {
+        return asSystem(ec) {
             def find = ec.entity.find(entity).useCache(false)
             where.each { String k, Object v -> find.condition(k, org.moqui.entity.EntityCondition.IN, v) }
             return find.count()
@@ -436,7 +437,7 @@ class RetentionPeriodAdminSmokeTests {
     }
 
     private List<String> settingKeys() {
-        return asSystem { ec.entity.find("darpan.config.DarpanSetting").useCache(false).list()*.settingKey }
+        return asSystem(ec) { ec.entity.find("darpan.config.DarpanSetting").useCache(false).list()*.settingKey }
     }
 
     private List auditRows() {
@@ -495,10 +496,5 @@ class RetentionPeriodAdminSmokeTests {
         assertNull(out.authzDenied, "unexpected authz denial: ${out.authzDenied}")
         assertFalse(out.hasError as boolean, "unexpected errors: ${out.errors}")
         return out
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
     }
 }

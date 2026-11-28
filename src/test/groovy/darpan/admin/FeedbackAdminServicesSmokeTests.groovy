@@ -18,6 +18,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-361. Aditi lists feedback across tenants and answers one by email. Calls run on a thread of their own with authz ON,
@@ -64,25 +65,25 @@ class FeedbackAdminServicesSmokeTests {
             ec.entity.find(it).disableAuthz().deleteAll()
         }
         AuditLogTestSupport.wipe(ec)
-        upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: "fbadm.super", userFullName: "Admin Super",
+        upsert(ec, "moqui.security.UserAccount", [userId: SUPER_ID, username: "fbadm.super", userFullName: "Admin Super",
                 emailAddress: "fbadm.super@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserAccount", [userId: PLAIN_ID, username: "fbadm.plain", userFullName: "Plain User",
+        upsert(ec, "moqui.security.UserAccount", [userId: PLAIN_ID, username: "fbadm.plain", userFullName: "Plain User",
                 emailAddress: "fbadm.plain@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserAccount", [userId: SENDER_ID, username: "fbadm.sender", userFullName: "Sam Sender",
+        upsert(ec, "moqui.security.UserAccount", [userId: SENDER_ID, username: "fbadm.sender", userFullName: "Sam Sender",
                 emailAddress: "fbadm.sender@example.com", disabled: "N", requirePasswordChange: "N"])
         [[ALPHA, "Alpha Co"], [BRAVO, "Bravo Co"]].each { List g ->
-            upsert("moqui.security.UserGroup", [userGroupId: g[0], description: g[1],
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: g[0], description: g[1],
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("darpan.audit.Audit", [auditId: "${g[0]}_A".toString(), companyUserGroupId: g[0], auditCode: "fb-audit",
+            upsert(ec, "darpan.audit.Audit", [auditId: "${g[0]}_A".toString(), companyUserGroupId: g[0], auditCode: "fb-audit",
                     auditName: "Feedback", periodEnumId: "AUDP_MONTH"])
-            upsert("darpan.audit.AuditStatement", [statementId: "${g[0]}_R1".toString(), companyUserGroupId: g[0],
+            upsert(ec, "darpan.audit.AuditStatement", [statementId: "${g[0]}_R1".toString(), companyUserGroupId: g[0],
                     auditId: "${g[0]}_A".toString(), statementCode: "R1", categoryEnumId: "AUDC_ORDERS",
                     weightEnumId: "AUDSW_FIRM", sequenceNum: 1L, statementText: "Every order is billed."])
         }
         create("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: T0])
         create("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: PLAIN_ID, fromDate: T0])
         create("moqui.security.UserGroupMember", [userGroupId: ALPHA, userId: SUPER_ID, fromDate: T0])
-        upsert("moqui.security.UserPreference", [userId: SUPER_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
+        upsert(ec, "moqui.security.UserPreference", [userId: SUPER_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
                 preferenceValue: ALPHA])
         ec.message.clearErrors()
     }
@@ -204,6 +205,5 @@ class FeedbackAdminServicesSmokeTests {
                 answeredByUserId: answer ? SUPER_ID : null, answeredStamp: answer ? sent : null])
     }
 
-    private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
     private void create(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).create() }
 }

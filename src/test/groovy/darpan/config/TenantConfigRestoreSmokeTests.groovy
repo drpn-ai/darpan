@@ -14,6 +14,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-160 phase A. Restoring a tenant config version: the audit behaves exactly as it did then. Everything the version
@@ -44,15 +46,15 @@ class TenantConfigRestoreSmokeTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
                     description: "Can view tenant-scoped Darpan data", groupTypeEnumId: "UgtDarpanPermission"])
-            upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TCR_NS_AUTH", description: "krewe netsuite",
+            upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TCR_NS_AUTH", description: "krewe netsuite",
                     companyUserGroupId: MINE, authType: "BASIC", username: "svc-user", password: "S3cret-Tcr-Pass"])
             // A query no run uses: a version never holds it, so it must not read as "added since" (browser pass 2026-10-30).
-            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCR_UNUSED_QUERY", companyUserGroupId: MINE,
+            upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCR_UNUSED_QUERY", companyUserGroupId: MINE,
                     description: "Cash sales that never shipped", recordType: "cashsale"])
         }
     }
@@ -66,20 +68,20 @@ class TenantConfigRestoreSmokeTests {
     @BeforeEach
     void reset() {
         ec.message.clearErrors()
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", MINE).deleteAll()
             ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", MINE).deleteAll()
-            upsert("darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
+            upsert(ec, "darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
-            upsert("darpan.audit.AuditStatement", [statementId: R2_ID, companyUserGroupId: MINE, auditId: "${MINE}_MC".toString(),
+            upsert(ec, "darpan.audit.AuditStatement", [statementId: R2_ID, companyUserGroupId: MINE, auditId: "${MINE}_MC".toString(),
                     statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                     statementText: R2_TEXT, isActive: "Y"])
-            upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
                     checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
-            upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_EXTRA".toString(), companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "${MINE}_EXTRA".toString(), companyUserGroupId: MINE,
                     checkCode: "credit-memos-open", label: "Open credit memos"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
                     companyUserGroupId: MINE, sequenceNum: 1L])
             setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
         }
@@ -125,18 +127,18 @@ class TenantConfigRestoreSmokeTests {
     @Test
     void aRestoreBringsTheEarlierScriptAndItsDeploymentBack() {
         try {
-            asSystem {
-                upsert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCR_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
+            asSystem(ec) {
+                upsert(ec, "darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCR_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
                         isActive: "Y"])
-                upsert("jexl.script.UserScript", [userScriptId: "TCR_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
+                upsert(ec, "jexl.script.UserScript", [userScriptId: "TCR_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
                         scriptProfile: "QUERY", scriptBody: "'version one'", isActive: "Y"])
-                upsert("jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCR_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCR_SCRIPT",
+                upsert(ec, "jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCR_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCR_SCRIPT",
                         cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
-                upsert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCR_DEPLOY", deliverySeqId: "01",
+                upsert(ec, "jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCR_DEPLOY", deliverySeqId: "01",
                         deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"TCR_SPACE"}', isActive: "Y"])
             }
             Map v1 = snapshot()
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCR_SCRIPT").one().set("scriptBody", "'version two'").update()
                 ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCR_DEPLOY").one()
                         .set("cronExpression", "0 30 17 * * ?").update()
@@ -147,7 +149,7 @@ class TenantConfigRestoreSmokeTests {
 
             Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
             assertFalse(out.hadError as boolean, out.errorText as String)
-            asSystem {
+            asSystem(ec) {
                 assertEquals("'version one'", ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCR_SCRIPT").useCache(false).one().scriptBody)
                 def deployment = ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
                 def chat = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
@@ -156,7 +158,7 @@ class TenantConfigRestoreSmokeTests {
             }
             assertEquals(v1.hash, out.after.hash, "the config is exactly version 1 again")
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCR_DEPLOY").deleteAll()
                 ec.entity.find("jexl.script.UserScriptDeployment").condition("companyUserGroupId", MINE).deleteAll()
                 ec.entity.find("jexl.script.UserScript").condition("companyUserGroupId", MINE).deleteAll()
@@ -168,8 +170,8 @@ class TenantConfigRestoreSmokeTests {
     @Test
     void aStatementAddedSinceIsSwitchedOffNotDeleted() {
         Map v1 = snapshot()
-        asSystem {
-            upsert("darpan.audit.AuditStatement", [statementId: "${MINE}_R9".toString(), companyUserGroupId: MINE,
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditStatement", [statementId: "${MINE}_R9".toString(), companyUserGroupId: MINE,
                     auditId: "${MINE}_MC".toString(), statementCode: "R9", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
                     sequenceNum: 9L, statementText: "Every refund reaches NetSuite.", isActive: "Y"])
         }
@@ -178,7 +180,7 @@ class TenantConfigRestoreSmokeTests {
 
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
         assertTrue(out.restored as boolean, out.errorText as String)
-        def r9 = asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R9".toString()).one() }
+        def r9 = asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R9".toString()).one() }
         assertNotNull(r9, "findings may point at R9, so it stays")
         assertEquals("N", r9.isActive)
     }
@@ -186,8 +188,8 @@ class TenantConfigRestoreSmokeTests {
     @Test
     void aCheckLinkedSinceIsUnlinkedButKept() {
         Map v1 = snapshot()
-        asSystem {
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_EXTRA".toString(), statementId: R2_ID,
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "${MINE}_EXTRA".toString(), statementId: R2_ID,
                     companyUserGroupId: MINE, sequenceNum: 2L])
         }
         Map preview = call("preview#TenantConfigRestore", [id: v1.id])
@@ -196,7 +198,7 @@ class TenantConfigRestoreSmokeTests {
 
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
         assertTrue(out.restored as boolean, out.errorText as String)
-        asSystem {
+        asSystem(ec) {
             assertEquals(["invoices-without-etail-id"], ec.entity.find("darpan.audit.AuditStatementCheck").condition("statementId", R2_ID)
                     .list().collect { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", it.checkId).one().checkCode })
             assertNotNull(ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "${MINE}_EXTRA".toString()).one())
@@ -213,12 +215,12 @@ class TenantConfigRestoreSmokeTests {
         assertTrue(out.hadError as boolean)
         assertFalse(out.restored as boolean)
         assertEquals("Second edit, after the preview.", r2Row().statementText)
-        assertEquals(1L, asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }, "no version written")
+        assertEquals(1L, asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }, "no version written")
     }
 
     @Test
     void anotherTenantsVersionCannotBePreviewedOrRestored() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue(VERSION).setAll([configVersionId: "TCR_OTHERS", companyUserGroupId: OTHER, versionSeq: 1L,
                     contentHash: "0" * 64, bundleVersion: 1L, packJson: '{"bundleVersion":1,"audits":[]}', changeSource: "MANUAL",
                     createdDate: ec.user.nowTimestamp]).create()
@@ -237,7 +239,7 @@ class TenantConfigRestoreSmokeTests {
     void aViewOnlyUserCanPreviewButNotRestore() {
         Map v1 = snapshot()
         setR2Text("Edited.")
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map preview = call("preview#TenantConfigRestore", [id: v1.id])
         assertFalse(preview.hadError as boolean, preview.errorText as String)
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
@@ -253,11 +255,11 @@ class TenantConfigRestoreSmokeTests {
     }
 
     private void setR2Text(String text) {
-        asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one().set("statementText", text).update() }
+        asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one().set("statementText", text).update() }
     }
 
     private def r2Row() {
-        return asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one() }
+        return asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one() }
     }
 
     private Map call(String verbNoun, Map params = [:]) {
@@ -270,20 +272,7 @@ class TenantConfigRestoreSmokeTests {
     private void setPermission(String permissionGroupId) {
         ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
                 .condition("tenantUserGroupId", MINE).condition("userId", USER).deleteAll()
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
                 permissionUserGroupId: permissionGroupId, fromDate: FROM])
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

@@ -19,6 +19,8 @@ import java.sql.Date
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-159. Before a person approves an agent's change, Darpan shows which open findings it would close and which
@@ -67,20 +69,20 @@ class AuditChangeBacktestSmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedData.xml", "component://darpan/data/MappingSeedData.xml",
                 "component://darpan/data/SystemMessageRemoteSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
+        asSystem(ec) {
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
-            upsert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+            upsert(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
             ["CONC_TBT_A": "Memo left open", "CONC_TBT_B": "Store kept the item"].each { String id, String label ->
-                upsert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
+                upsert(ec, "moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
             }
-            upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TBT_AUTH", companyUserGroupId: MINE, authType: "NONE",
+            upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TBT_AUTH", companyUserGroupId: MINE, authType: "NONE",
                     isActive: "Y", description: "test"])
             ["TBT_Q": "open credit memos", "TBT_Q2": "credit memo applications"].each { String q, String label ->
-                upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: q, nsAuthConfigId: "TBT_AUTH",
+                upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: q, nsAuthConfigId: "TBT_AUTH",
                         recordType: "CustCred", companyUserGroupId: MINE, isActive: "Y", description: label])
                 [["tranId", "tranid"], ["memoOrigin", "memoorigin"], ["status", "status"]].eachWithIndex { List f, int i ->
-                    upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: q, recordFieldName: f[0],
+                    upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: q, recordFieldName: f[0],
                             sourceColumn: f[1], sequenceNum: (i + 1) as Long])
                 }
             }
@@ -102,46 +104,46 @@ class AuditChangeBacktestSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         run2Id = run2.savedRun.savedRunId as String
         scope2Id = run2.savedRun.compareScopeId as String
-        asSystem {
-            upsert("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1L,
+        asSystem(ec) {
+            upsert(ec, "darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1L,
                     fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: "HOTWAX", companyUserGroupId: MINE])
-            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO, automationName: "credit memos",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO, automationName: "credit memos",
                     companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: runId, savedRunType: "ruleset",
                     ruleSetId: runId, compareScopeId: scopeId, isActive: "N", relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
                     windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
-            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO, fileSide: "FILE_1",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO, fileSide: "FILE_1",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                     safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"TBT_Q"}}'])
-            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO2, automationName: "memos against applications",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO2, automationName: "memos against applications",
                     companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: run2Id, savedRunType: "ruleset",
                     ruleSetId: run2Id, compareScopeId: scope2Id, isActive: "N", relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
                     windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
             ["FILE_1": "TBT_Q", "FILE_2": "TBT_Q2"].each { String side, String q ->
-                upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: side,
+                upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: side,
                         companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                         safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"' + q + '"}}'])
             }
-            upsert("darpan.audit.Audit", [auditId: "${MINE}_TBT".toString(), companyUserGroupId: MINE, auditCode: "month-close-tbt",
+            upsert(ec, "darpan.audit.Audit", [auditId: "${MINE}_TBT".toString(), companyUserGroupId: MINE, auditCode: "month-close-tbt",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
             ["R1", "R2", "R3", "R4"].eachWithIndex { String code, int i ->
-                upsert("darpan.audit.AuditStatement", [statementId: "TBT_${code}".toString(), companyUserGroupId: MINE,
+                upsert(ec, "darpan.audit.AuditStatement", [statementId: "TBT_${code}".toString(), companyUserGroupId: MINE,
                         auditId: "${MINE}_TBT".toString(), statementCode: code, categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM",
                         sequenceNum: (i + 1) as Long, statementText: "${code} text".toString(), isActive: "Y"])
             }
-            upsert("darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: MINE, checkCode: "credits-open-tbt",
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: MINE, checkCode: "credits-open-tbt",
                     label: "Open credit memos", savedRunId: runId, automationId: AUTO, headlineTemplate: "Memo {tranId} is open"])
             // R1 and R2 count every row whose cause is not expected (DAR-BE-196: a cause is expected on its run, not on a link).
-            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R1", companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R1", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R2", companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R2", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
             // The two-sided check: R3 counts a memo with no application row on file 1's side missing; R4 a mismatch or a
             // memo with no application.
-            upsert("darpan.audit.AuditCheck", [checkId: CHECK2, companyUserGroupId: MINE, checkCode: "memos-applied-tbt",
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: CHECK2, companyUserGroupId: MINE, checkCode: "memos-applied-tbt",
                     label: "Memos applied", savedRunId: run2Id, automationId: AUTO2, headlineTemplate: "Memo {tranId}"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R3", companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R3", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "MISSING_IN_FILE_1"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R4", companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R4", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_2"])
         }
         // A memo still Open or Pending is left open; any other memo with an origin, the store kept the item.
@@ -153,7 +155,7 @@ class AuditChangeBacktestSmokeTests {
                          conditions: [[field: "memoOrigin", operator: "NOT_BLANK", checkLabel: "Has an origin"]]]]]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
 
-        asSystem {
+        asSystem(ec) {
             // The basis: succeeded, its extract and result still on disk.
             execution("TBT_EXEC1", "AUT_STAT_SUCCESS", "2026-11-02 06:10:00", true)
             // Newer and succeeded, but its files are gone: not a basis.
@@ -173,7 +175,7 @@ class AuditChangeBacktestSmokeTests {
     @BeforeEach
     void reset() {
         actAs(MINE)
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(FINDING).condition("companyUserGroupId", MINE).deleteAll()
             finding("F-TBT1", "TBT_R1", "CM-1", "AUDFS_OPEN", "CONC_TBT_A")
             finding("F-TBT2", "TBT_R1", "CM-2", "AUDFS_OPEN", "CONC_TBT_B")
@@ -263,10 +265,10 @@ class AuditChangeBacktestSmokeTests {
 
     @Test
     void "expected causes close that cause's open findings on every check of the run, from the findings alone"() {
-        asSystem {
-            upsert("darpan.audit.AuditCheck", [checkId: "TBT_CHK_TWO", companyUserGroupId: MINE, checkCode: "credits-open-tbt-two",
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "TBT_CHK_TWO", companyUserGroupId: MINE, checkCode: "credits-open-tbt-two",
                     label: "Open credit memos again", savedRunId: runId])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "TBT_CHK_TWO", statementId: "TBT_R3", companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "TBT_CHK_TWO", statementId: "TBT_R3", companyUserGroupId: MINE,
                     sequenceNum: 2L, diffTypes: "FINDING"])
             finding("F-TBT31", "TBT_R3", "CM-9", "AUDFS_OPEN", "CONC_TBT_B", "2026-11", "TBT_CHK_TWO")
         }
@@ -287,7 +289,7 @@ class AuditChangeBacktestSmokeTests {
             assertEquals(["CLOSES_ONLY"], out.limits)
             assertEquals(before, snapshot())
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find(FINDING).condition("findingId", "F-TBT31").deleteAll()
                 ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TBT_CHK_TWO").deleteAll()
                 ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TBT_CHK_TWO").deleteAll()
@@ -300,7 +302,7 @@ class AuditChangeBacktestSmokeTests {
         Map target = [savedRunId: runId]
         // "Left open" is expected on the run; it now means Closed: CM-1 (Open) falls to "the store kept the item", which
         // counts, and CM-2 (Closed) becomes "left open", which no statement counts.
-        asSystem { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
+        asSystem(ec) { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
                 .useCache(false).list().each { it.set("outcome", "EXPECTED"); it.update() } }
         Map merged = AuditChangeLevers.merge("CONCLUSION_ROWS", AuditChangeLevers.current(ec, "CONCLUSION_ROWS", target),
                 [rows: [[conclusionCode: "CONC_TBT_A", conditions: [[fieldExpression: "status", operator: "IN", checkValue: "Closed"]]]]])
@@ -352,7 +354,7 @@ class AuditChangeBacktestSmokeTests {
         assertTrue("OPENED_NOT_COMPUTED" in undecided.limits)
 
         // DAR-BE-198 (b): a run that marks only its Unexplained rows expected leaves the new row undecided as well.
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.rule.RuleSetConclusionCondition").condition("compareScopeId", scope2Id).deleteAll()
             ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope2Id).deleteAll()
             ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", scope2Id).one().set("unexplainedOutcome", "EXPECTED").update()
@@ -365,7 +367,7 @@ class AuditChangeBacktestSmokeTests {
     @Test
     void "an undecided link never lists the finding the new missing row may keep"() {
         // R4 now also counts a memo whose application stands alone, unless its cause is the run's expected one.
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R4")
                     .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_1"]).update()
         }
@@ -390,11 +392,11 @@ class AuditChangeBacktestSmokeTests {
         withConnector([filterParameterName: null]) {
             assertEquals("SOURCE_TAKES_NO_FILTERS", backtest('$.records[*].tranId').reason)
         }
-        asSystem {
-            upsert("darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF", definitionName: "memos", protocol: "GRAPHQL",
+        asSystem(ec) {
+            upsert(ec, "darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF", definitionName: "memos", protocol: "GRAPHQL",
                     definitionVersion: 1L, statusId: "ACTIVE",
                     definitionJson: JsonOutput.toJson([steps: [[id: "exclusions", kind: "filter", fields: ["tranId", "memoOrigin", "batch"]]]])])
-            upsert("darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF_NONE", definitionName: "memos", protocol: "GRAPHQL",
+            upsert(ec, "darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF_NONE", definitionName: "memos", protocol: "GRAPHQL",
                     definitionVersion: 1L, statusId: "ACTIVE", definitionJson: JsonOutput.toJson([steps: [[id: "read", kind: "query"]]])])
         }
         withConnector([extractServiceName: "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource",
@@ -496,7 +498,7 @@ class AuditChangeBacktestSmokeTests {
     // ------------------------------------------------------------------ DAR-OPS-029 S30a: no hollow green (QA refutation)
 
     private Map conclusionChange() {
-        asSystem { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
+        asSystem(ec) { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
                 .useCache(false).list().each { it.set("outcome", "EXPECTED"); it.update() } }
         return AuditChangeLevers.merge("CONCLUSION_ROWS", AuditChangeLevers.current(ec, "CONCLUSION_ROWS", [savedRunId: runId]),
                 [rows: [[conclusionCode: "CONC_TBT_A", conditions: [[fieldExpression: "status", operator: "IN", checkValue: "Closed"]]]]])
@@ -544,13 +546,13 @@ class AuditChangeBacktestSmokeTests {
     /** OC-C: an execution with no completed or started date has no time to conclude at; it is no basis (asOf was now). */
     @Test
     void "a succeeded execution with neither a completed nor a started date is no basis"() {
-        asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one().setAll([completedDate: null, startedDate: null]).update() }
+        asSystem(ec) { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one().setAll([completedDate: null, startedDate: null]).update() }
         try {
             Map out = exclusionOfCm2()
             assertEquals(false, out.supported, out.toString())
             assertEquals("NO_LANDED_EXTRACT", out.reason)
         } finally {
-            asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one()
+            asSystem(ec) { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").one()
                     .set("completedDate", Timestamp.valueOf("2026-11-02 06:10:00")).update() }
         }
     }
@@ -559,7 +561,7 @@ class AuditChangeBacktestSmokeTests {
     @Test
     void "a record whose open finding is another period's is still opened in the basis period"() {
         Map merged = conclusionChange()
-        asSystem { finding("F-TBT-OCT", "TBT_R2", "CM-1", "AUDFS_OPEN", "CONC_TBT_A", "2026-10") }
+        asSystem(ec) { finding("F-TBT-OCT", "TBT_R2", "CM-1", "AUDFS_OPEN", "CONC_TBT_A", "2026-10") }
         Map out = AuditChangeBacktest.run(ec, MINE, "CONCLUSION_ROWS", [savedRunId: runId], merged)
         assertEquals(true, out.supported, out.toString())
         assertEquals(["CM-1"], out.opened, "October's open R2 finding is another period's; November's would be new")
@@ -572,12 +574,12 @@ class AuditChangeBacktestSmokeTests {
      */
     @Test
     void "a non-UTC tenant's basis window is read in its own zone at the month boundary"() {
-        def automation = asSystem { ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).useCache(false).one() }
-        def execution = asSystem { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").useCache(false).one() }
+        def automation = asSystem(ec) { ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).useCache(false).one() }
+        def execution = asSystem(ec) { ec.entity.find(EXECUTION).condition("automationExecutionId", "TBT_EXEC1").useCache(false).one() }
         String zoneBefore = automation.windowTimeZone
         Timestamp startBefore = execution.windowStartDate as Timestamp, endBefore = execution.windowEndDate as Timestamp
         try {
-            asSystem {
+            asSystem(ec) {
                 automation.set("windowTimeZone", "Asia/Kolkata"); automation.update()
                 execution.set("windowStartDate", Timestamp.from(java.time.Instant.parse("2026-10-31T18:30:00Z")))
                 execution.set("windowEndDate", Timestamp.from(java.time.Instant.parse("2026-11-01T18:30:00Z")))
@@ -593,7 +595,7 @@ class AuditChangeBacktestSmokeTests {
             assertEquals("TBT_EXEC1", out.basisExecutionId, out.toString())
             assertEquals(["F-TBT2", "F-TBT3"], out.closed, "IST's November 1 is a November day; October's F-TBT7 stays open")
         } finally {
-            asSystem {
+            asSystem(ec) {
                 automation.set("windowTimeZone", zoneBefore); automation.update()
                 execution.set("windowStartDate", startBefore); execution.set("windowEndDate", endBefore); execution.update()
             }
@@ -620,7 +622,7 @@ class AuditChangeBacktestSmokeTests {
         String dir = "${RUNS}/${id}/20261102-060000000"
         String extractPath = "${dir}/memos.json"
         String resultPath = "${dir}/${id}-result.json"
-        upsert(EXECUTION, [automationExecutionId: id, automationId: AUTO, companyUserGroupId: MINE, statusEnumId: status,
+        upsert(ec, EXECUTION, [automationExecutionId: id, automationId: AUTO, companyUserGroupId: MINE, statusEnumId: status,
                 completedDate: Timestamp.valueOf(completed), createdDate: Timestamp.valueOf(completed),
                 windowStartDate: Timestamp.valueOf("2026-11-01 00:00:00"), windowEndDate: Timestamp.valueOf("2026-11-02 00:00:00"),
                 file1Name: "memos.json", file1DataManagerPath: extractPath, file1RecordCount: RECORDS.size() as Long,
@@ -647,7 +649,7 @@ class AuditChangeBacktestSmokeTests {
 
     private void twoSidedExecution(String id) {
         String dir = "${RUNS}/${id}/20261102-060000000"
-        upsert(EXECUTION, [automationExecutionId: id, automationId: AUTO2, companyUserGroupId: MINE, statusEnumId: "AUT_STAT_SUCCESS",
+        upsert(ec, EXECUTION, [automationExecutionId: id, automationId: AUTO2, companyUserGroupId: MINE, statusEnumId: "AUT_STAT_SUCCESS",
                 completedDate: Timestamp.valueOf("2026-11-02 06:10:00"), createdDate: Timestamp.valueOf("2026-11-02 06:10:00"),
                 windowStartDate: Timestamp.valueOf("2026-11-01 00:00:00"), windowEndDate: Timestamp.valueOf("2026-11-02 00:00:00"),
                 file1Name: "memos.json", file1DataManagerPath: "${dir}/memos.json".toString(),
@@ -662,7 +664,7 @@ class AuditChangeBacktestSmokeTests {
 
     /** The run's NETSUITE_SUITEQL connector with these fields for the closure, then as it was. */
     private void withConnector(Map fields, Closure work) {
-        Map was = asSystem {
+        Map was = asSystem(ec) {
             def row = ec.entity.find(CONNECTOR).condition("systemEnumId", "NETSUITE_SUITEQL").one()
             Map before = fields.keySet().collectEntries { [(it): row.get(it)] }
             row.setAll(fields).update()
@@ -671,13 +673,13 @@ class AuditChangeBacktestSmokeTests {
         try {
             work.call()
         } finally {
-            asSystem { ec.entity.find(CONNECTOR).condition("systemEnumId", "NETSUITE_SUITEQL").one().setAll(was).update() }
+            asSystem(ec) { ec.entity.find(CONNECTOR).condition("systemEnumId", "NETSUITE_SUITEQL").one().setAll(was).update() }
         }
     }
 
     private void finding(String id, String statementId, String recordKey, String state, String conclusion, String period = "2026-11",
                          String checkId = CHECK) {
-        upsert(FINDING, [findingId: id, companyUserGroupId: MINE, statementId: statementId, checkId: checkId, recordKey: recordKey,
+        upsert(ec, FINDING, [findingId: id, companyUserGroupId: MINE, statementId: statementId, checkId: checkId, recordKey: recordKey,
                 period: period, stateEnumId: state, headline: "Memo ${recordKey} is open".toString(),
                 firstFoundDate: Date.valueOf("2026-11-01"), lastSeenDate: Date.valueOf("2026-11-02"), timesSeen: 1L,
                 conclusionEnumId: conclusion])
@@ -694,7 +696,7 @@ class AuditChangeBacktestSmokeTests {
 
     /** Every row and file the backtest must leave alone. */
     private Map snapshot() {
-        Map rows = asSystem {
+        Map rows = asSystem(ec) {
             [findings  : ec.entity.find(FINDING).condition("companyUserGroupId", MINE).orderBy("findingId").useCache(false).list()
                     .collect { [it.findingId, it.stateEnumId, it.lastSeenDate, it.timesSeen, it.closedStamp, it.conclusionEnumId] },
              executions: ec.entity.find(EXECUTION).orderBy("automationExecutionId").useCache(false).list()
@@ -716,18 +718,5 @@ class AuditChangeBacktestSmokeTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenant)
         TenantAccessSupport.syncUserContext(ec)
         ec.message.clearAll()
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

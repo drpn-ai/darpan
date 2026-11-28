@@ -19,6 +19,7 @@ import java.sql.Timestamp
 import java.time.Instant
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-304 Task 2. A DarpanSetting row changes what run admission, the retry backoff and the window ceiling do, with no
@@ -42,7 +43,7 @@ class RunSettingsSmokeTests {
 
     @AfterEach
     void clean() {
-        asSystem { ec.entity.find(ENTITY).condition("settingKey", "like", "darpan.reconciliation.automation.%").deleteAll() }
+        asSystem(ec) { ec.entity.find(ENTITY).condition("settingKey", "like", "darpan.reconciliation.automation.%").deleteAll() }
         DarpanSettings.resetForTest()
     }
 
@@ -53,7 +54,7 @@ class RunSettingsSmokeTests {
 
     private void saveRow(String key, String value) {
         ec.transaction.runRequireNew(60, "test save") {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.makeValue(ENTITY).setAll([settingKey: key, settingValue: value, lastChangedDate: new Timestamp(System.currentTimeMillis())]).createOrUpdate()
                 DarpanSettings.expireAfterCommit(ec)
             }
@@ -103,13 +104,4 @@ class RunSettingsSmokeTests {
     }
 
     private static Timestamp ts(String iso) { return Timestamp.from(Instant.parse(iso)) }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
 }

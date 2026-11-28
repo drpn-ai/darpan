@@ -15,6 +15,7 @@ import java.nio.file.Path
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * Gate coverage for facade.SettingsFacadeServices.test#SourceConnection.
@@ -56,7 +57,7 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
 
         // Tenant-owned config the diagnostics can resolve, plus one owned by a different tenant.
         // SftpServer.companyUserGroupId is FK-checked, so the foreign tenant needs a real UserGroup.
-        upsert("moqui.security.UserGroup", [
+        upsert(ec, "moqui.security.UserGroup", [
                 userGroupId    : FOREIGN_TENANT_ID,
                 description    : "Diagnostics foreign-tenant fixture",
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
@@ -163,9 +164,9 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
 
     /** The KREWE test user holds exactly this tenant role. */
     private void actAs(String roleId) {
-        upsert("moqui.security.UserGroup", [userGroupId: roleId, groupTypeEnumId: "UgtDarpanPermission"])
+        upsert(ec, "moqui.security.UserGroup", [userGroupId: roleId, groupTypeEnumId: "UgtDarpanPermission"])
         makeActiveTenantReadOnly()
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: TENANT_ID,
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: TENANT_ID,
                 userId: TEST_USER_ID, permissionUserGroupId: roleId, fromDate: java.sql.Timestamp.valueOf("2026-04-21 00:00:00")])
         ec.message.clearErrors()
     }
@@ -194,7 +195,7 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
     }
 
     private void upsertConnector(String systemEnumId, String healthCheckServiceName) {
-        upsert(CONNECTOR_ENTITY, [
+        upsert(ec, CONNECTOR_ENTITY, [
                 systemEnumId            : systemEnumId,
                 expectedSourceConfigType: "${systemEnumId}_TYPE".toString(),
                 configParameterName     : "sftpServerId",
@@ -206,7 +207,7 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
     }
 
     private void upsertSftpServer(String sftpServerId, String companyUserGroupId) {
-        upsert("darpan.reconciliation.SftpServer", [
+        upsert(ec, "darpan.reconciliation.SftpServer", [
                 sftpServerId      : sftpServerId,
                 description       : "Diagnostics fixture ${sftpServerId}".toString(),
                 companyUserGroupId: companyUserGroupId,
@@ -214,10 +215,6 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
                 port              : 22,
                 username          : "fixture",
         ])
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 
     /**

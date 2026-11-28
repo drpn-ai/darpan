@@ -18,6 +18,8 @@ import java.sql.Date
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-266. Retention through the real service engine on H2: unset periods keep everything, a dry run counts per table
@@ -49,15 +51,15 @@ class RetentionSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             [A, B].each { String t ->
-                upsert("moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-                upsert("darpan.audit.Audit", [auditId: "${t}_MC".toString(), companyUserGroupId: t, auditCode: "month-close",
+                upsert(ec, "moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+                upsert(ec, "darpan.audit.Audit", [auditId: "${t}_MC".toString(), companyUserGroupId: t, auditCode: "month-close",
                         auditName: "Month close", periodEnumId: "AUDP_MONTH"])
-                upsert("darpan.audit.AuditStatement", [statementId: "${t}_R1".toString(), companyUserGroupId: t, auditId: "${t}_MC".toString(),
+                upsert(ec, "darpan.audit.AuditStatement", [statementId: "${t}_R1".toString(), companyUserGroupId: t, auditId: "${t}_MC".toString(),
                         statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 1L, statementText: "Every order is in both."])
-                upsert("darpan.audit.AuditCheck", [checkId: "${t}_CHK".toString(), companyUserGroupId: t, checkCode: "orders", label: "Orders"])
-                upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: "${t}_AUTO".toString(), automationName: "${t}_AUTO".toString(),
+                upsert(ec, "darpan.audit.AuditCheck", [checkId: "${t}_CHK".toString(), companyUserGroupId: t, checkCode: "orders", label: "Orders"])
+                upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: "${t}_AUTO".toString(), automationName: "${t}_AUTO".toString(),
                         companyUserGroupId: t, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "${t}_RUN".toString()])
             }
         }
@@ -72,7 +74,7 @@ class RetentionSmokeTests {
     @BeforeEach
     void reset() {
         clearProperties()
-        asSystem {
+        asSystem(ec) {
             WIPE.each { ec.entity.find(it).deleteAll() }
             ec.entity.find("darpan.retention.TenantRetentionPeriod").deleteAll()
             [A, B].each { String t -> seedTenant(t) }
@@ -97,21 +99,21 @@ class RetentionSmokeTests {
 
     @Test
     void "sync pulse samples and closed pulse orders expire at 30 days and an open order stays"() {
-        asSystem {
+        asSystem(ec) {
             [A, B].each { String t ->
-                upsert("darpan.pulse.SyncPair", [syncPairId: "${t}_SP".toString(), companyUserGroupId: t, automationId: "${t}_AUTO".toString(),
+                upsert(ec, "darpan.pulse.SyncPair", [syncPairId: "${t}_SP".toString(), companyUserGroupId: t, automationId: "${t}_AUTO".toString(),
                         upstreamSide: "FILE_1", allowanceMinutes: 60L])
                 [OLD: OLD, NEW: RECENT].each { String age, Timestamp when ->
-                    upsert("darpan.pulse.SyncPulseSample", [sampleId: "${t}_S_${age}".toString(), syncPairId: "${t}_SP".toString(),
+                    upsert(ec, "darpan.pulse.SyncPulseSample", [sampleId: "${t}_S_${age}".toString(), syncPairId: "${t}_SP".toString(),
                             companyUserGroupId: t, sampleStamp: when])
-                    upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_${age}".toString(), syncPairId: "${t}_SP".toString(),
+                    upsert(ec, "darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_${age}".toString(), syncPairId: "${t}_SP".toString(),
                             companyUserGroupId: t, recordKey: "#${age}".toString(), firstPastStamp: OLD, closedStamp: when])
                 }
                 [OLD: new Timestamp(System.currentTimeMillis() - 3L * DAY), NEW: RECENT].each { String age, Timestamp when ->
-                    upsert("darpan.pulse.SyncPulsePresentKey", [syncPairId: "${t}_SP".toString(), recordKey: "#P_${age}".toString(),
+                    upsert(ec, "darpan.pulse.SyncPulsePresentKey", [syncPairId: "${t}_SP".toString(), recordKey: "#P_${age}".toString(),
                             companyUserGroupId: t, sourceCreatedStamp: when])
                 }
-                upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_OPEN".toString(), syncPairId: "${t}_SP".toString(),
+                upsert(ec, "darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_OPEN".toString(), syncPairId: "${t}_SP".toString(),
                         companyUserGroupId: t, recordKey: "#OPEN", firstPastStamp: OLD, closedStamp: null])
             }
         }
@@ -148,7 +150,7 @@ class RetentionSmokeTests {
     @Test
     void "a tenant row written outside the service with a period under one day keeps that tenant's rows"() {
         setSetting("darpan.retention.auditFinding.days", "30")
-        asSystem {
+        asSystem(ec) {
             // what a data load or a DB console could leave: zero and negative days would put the cutoff at or after now
             ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: A, tableKey: RetentionSupport.AUDIT_FINDING, periodDays: 0]).create()
             ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: B, tableKey: RetentionSupport.AUDIT_FINDING, periodDays: -5]).create()
@@ -189,12 +191,12 @@ class RetentionSmokeTests {
     void auditFindingSweepDeletesAcknowledgements() {
         // DAR-BE-361: an acknowledgement follows its finding; feedback is a message to Darpan and outlives it.
         setSetting("darpan.retention.auditFinding.days", "30")
-        asSystem {
-            upsert("darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_OLD".toString(), companyUserGroupId: A, note: "known",
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_OLD".toString(), companyUserGroupId: A, note: "known",
                     acknowledgedStamp: RECENT])
-            upsert("darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_NEW".toString(), companyUserGroupId: A, note: "known",
+            upsert(ec, "darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_NEW".toString(), companyUserGroupId: A, note: "known",
                     acknowledgedStamp: RECENT])
-            upsert("darpan.audit.AuditFindingFeedback", [feedbackId: "FB-RET-1", companyUserGroupId: A, findingId: "${A}_F_OLD".toString(),
+            upsert(ec, "darpan.audit.AuditFindingFeedback", [feedbackId: "FB-RET-1", companyUserGroupId: A, findingId: "${A}_F_OLD".toString(),
                     statementId: "${A}_R1".toString(), note: "wrong", sentByUserId: "u1", sentStamp: RECENT])
         }
         run("run#Retention", [tenantUserGroupId: A])
@@ -219,7 +221,7 @@ class RetentionSmokeTests {
         ["darpan.reconciliation.ReconciliationRunResult", "darpan.agent.AgentMessage", "darpan.agent.AgentQueryLog"].each { String other ->
             assertEquals(before[other], after[other], "${other} has no period: untouched")
         }
-        List<Map> audit = asSystem { ec.entity.find("darpan.admin.AdminAuditLog").useCache(false).list()*.getMap() }
+        List<Map> audit = asSystem(ec) { ec.entity.find("darpan.admin.AdminAuditLog").useCache(false).list()*.getMap() }
         assertEquals(1, audit.size(), "one audit row for the run")
         assertEquals(["retention.RetentionServices.run#Retention", "Retention", A], [audit[0].serviceName, audit[0].targetType, audit[0].targetId])
         assertTrue((audit[0].detailText as String).contains("AUDIT_FINDING 30d: 1"), "${audit[0].detailText}")
@@ -239,7 +241,7 @@ class RetentionSmokeTests {
                     .containsAll(["${t}_RR_NEW".toString(), "${t}_RR_RUNNING".toString()]), "a recent run and an unfinished old run stay")
             assertFalse(ids("darpan.reconciliation.ReconciliationRunResult", "reconciliationRunResultId", t).contains("${t}_RR_OLD".toString()))
             assertEquals(["${t}_STEP_NEW".toString()], ids("darpan.reconciliation.ReconciliationRunStep", "reconciliationRunStepId", t))
-            Map execution = asSystem { ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+            Map execution = asSystem(ec) { ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
                     .condition("automationExecutionId", "${t}_EX".toString()).useCache(false).one().getMap() }
             assertNull(execution.reconciliationRunResultId, "the execution stays and forgets the deleted run result")
             assertEquals(5L, execution.differenceCount, "its own counts stay")
@@ -260,36 +262,36 @@ class RetentionSmokeTests {
     private void seedTenant(String t) {
         [OLD: OLD, NEW: RECENT].each { String age, Timestamp when ->
             String f = "${t}_F_${age}".toString()
-            upsert("darpan.audit.AuditFinding", [findingId: f, companyUserGroupId: t, statementId: "${t}_R1".toString(), checkId: "${t}_CHK".toString(),
+            upsert(ec, "darpan.audit.AuditFinding", [findingId: f, companyUserGroupId: t, statementId: "${t}_R1".toString(), checkId: "${t}_CHK".toString(),
                     recordKey: f, period: "2025-10", stateEnumId: "AUDFS_OPEN", headline: "missing", firstFoundDate: new Date(when.time),
                     lastSeenDate: new Date(when.time)])
-            upsert("darpan.audit.AuditFindingRecord", [findingId: f, recordSeqId: "01", companyUserGroupId: t, systemEnumId: "NETSUITE",
+            upsert(ec, "darpan.audit.AuditFindingRecord", [findingId: f, recordSeqId: "01", companyUserGroupId: t, systemEnumId: "NETSUITE",
                     recordType: "order", recordId: f])
-            upsert("darpan.audit.AuditFindingCondition", [findingId: f, sequenceNum: 1L, companyUserGroupId: t, label: "in both", passed: "N"])
-            upsert("darpan.audit.AuditFindingEvent", [findingId: f, eventSeqId: "01", companyUserGroupId: t, eventStamp: when,
+            upsert(ec, "darpan.audit.AuditFindingCondition", [findingId: f, sequenceNum: 1L, companyUserGroupId: t, label: "in both", passed: "N"])
+            upsert(ec, "darpan.audit.AuditFindingEvent", [findingId: f, eventSeqId: "01", companyUserGroupId: t, eventStamp: when,
                     eventDate: new Date(when.time), eventTypeEnumId: "AUDFE_FOUND", byTypeEnumId: "AUDAT_CHECK"])
-            upsert("darpan.agent.AgentQueryLog", [agentQueryLogId: "${t}_Q_${age}".toString(), companyUserGroupId: t, outcome: "OK", createdDate: when])
+            upsert(ec, "darpan.agent.AgentQueryLog", [agentQueryLogId: "${t}_Q_${age}".toString(), companyUserGroupId: t, outcome: "OK", createdDate: when])
         }
         [[id: "OLD", created: OLD, status: "AUT_STAT_SUCCESS"], [id: "NEW", created: RECENT, status: "AUT_STAT_SUCCESS"],
          [id: "RUNNING", created: OLD, status: "AUT_STAT_RUNNING"]].each { Map r ->
-            upsert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "${t}_RR_${r.id}".toString(), companyUserGroupId: t,
+            upsert(ec, "darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "${t}_RR_${r.id}".toString(), companyUserGroupId: t,
                     statusEnumId: r.status, createdDate: r.created])
         }
         ["OLD", "NEW"].each { String age ->
-            upsert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: "${t}_STEP_${age}".toString(),
+            upsert(ec, "darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: "${t}_STEP_${age}".toString(),
                     reconciliationRunResultId: "${t}_RR_${age}".toString(), companyUserGroupId: t, stageCode: "COMPARE", statusEnumId: "AUT_STAT_SUCCESS"])
         }
-        upsert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "${t}_EX".toString(), automationId: "${t}_AUTO".toString(),
+        upsert(ec, "darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "${t}_EX".toString(), automationId: "${t}_AUTO".toString(),
                 companyUserGroupId: t, statusEnumId: "AUT_STAT_SUCCESS", reconciliationRunResultId: "${t}_RR_OLD".toString(), differenceCount: 5L])
         // OLD: started and last ran long ago. ACT: started long ago, ran yesterday. NEW: started yesterday.
         [[c: "OLD", created: OLD, turn: OLD, messages: ["${t}_M_OLD1", "${t}_M_OLD2"]], [c: "ACT", created: OLD, turn: RECENT, messages: ["${t}_M_ACT"]],
          [c: "NEW", created: RECENT, turn: null, messages: ["${t}_M_NEW"]]].each { Map c ->
             String conv = "${t}_C_${c.c}".toString()
-            upsert("darpan.agent.AgentConversation", [conversationId: conv, companyUserGroupId: t, createdDate: c.created])
-            if (c.turn) upsert("darpan.agent.AgentTurn", [turnId: "${t}_T_${c.c}".toString(), conversationId: conv, companyUserGroupId: t,
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: conv, companyUserGroupId: t, createdDate: c.created])
+            if (c.turn) upsert(ec, "darpan.agent.AgentTurn", [turnId: "${t}_T_${c.c}".toString(), conversationId: conv, companyUserGroupId: t,
                     startedDate: c.turn, costMicros: 10L])
             (c.messages as List).eachWithIndex { Object m, int i ->
-                upsert("darpan.agent.AgentMessage", [messageId: m.toString(), conversationId: conv, companyUserGroupId: t, sequenceNum: (long) i,
+                upsert(ec, "darpan.agent.AgentMessage", [messageId: m.toString(), conversationId: conv, companyUserGroupId: t, sequenceNum: (long) i,
                         kind: "USER", contentJson: "{}"])
             }
         }
@@ -334,40 +336,33 @@ class RetentionSmokeTests {
     private static Map table(Map out, String key) { (out.tables as List<Map>).find { it.table == key } }
 
     private Map snapshot() {
-        asSystem { WIPE.collectEntries { String e -> [(e): ec.entity.find(e).useCache(false).count()] } }
+        asSystem(ec) { WIPE.collectEntries { String e -> [(e): ec.entity.find(e).useCache(false).count()] } }
     }
 
     private List<String> presentKeys(String tenant) { return ids("darpan.pulse.SyncPulsePresentKey", "recordKey", tenant) }
 
     private List<String> ids(String entity, String pk, String tenant = null) {
-        asSystem {
+        asSystem(ec) {
             def find = ec.entity.find(entity)
             if (tenant) find.condition("companyUserGroupId", tenant)
             find.orderBy(pk).useCache(false).list().collect { it.get(pk) as String }.unique()
         }
     }
 
-    private long auditRowCount() { asSystem { ec.entity.find("darpan.admin.AdminAuditLog").useCache(false).count() } }
+    private long auditRowCount() { asSystem(ec) { ec.entity.find("darpan.admin.AdminAuditLog").useCache(false).count() } }
 
     /** A production value, the way the admin services leave it: a DarpanSetting row, live at once. */
     private void setSetting(String key, String value) {
-        asSystem { ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: key, settingValue: value]).createOrUpdate() }
+        asSystem(ec) { ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: key, settingValue: value]).createOrUpdate() }
         DarpanSettings.expire()
     }
 
     private void clearProperties() {
-        asSystem {
+        asSystem(ec) {
             (RetentionSupport.TABLE_SETTINGS.values() + [RetentionSupport.BATCH_SIZE_SETTING]).each {
                 ec.entity.find("darpan.config.DarpanSetting").condition("settingKey", it).deleteAll()
             }
         }
         DarpanSettings.expire()
     }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
-
-    private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
 }

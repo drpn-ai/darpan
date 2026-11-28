@@ -16,6 +16,7 @@ import org.moqui.entity.EntityValue
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-305: admin.ScheduleAdminServices job services through the real service engine, authz ON, as a real
@@ -54,7 +55,7 @@ class ScheduleAdminServicesSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/PasswordResetEmailSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, *(JOB_SEEDS + [APPLY]))
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TENANT, description: "Sched Co",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
         }
@@ -68,7 +69,7 @@ class ScheduleAdminServicesSmokeTests {
 
     @BeforeEach
     void resetFixtures() {
-        asSystem {
+        asSystem(ec) {
             ReconciliationSmokeTestSupport.loadSeedData(ec, *(JOB_SEEDS + [APPLY]))
             // back to the shipped state: unedited, defaults applied, no extra parameter rows
             ec.entity.find("moqui.service.job.ServiceJob").condition("defaultCronExpression", org.moqui.entity.EntityCondition.NOT_EQUAL, null).useCache(false).list().each {
@@ -108,7 +109,7 @@ class ScheduleAdminServicesSmokeTests {
 
     @Test
     void theListShowsEverySeededJobWithItsDefaultsAndNextRuns() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.service.job.ServiceJobRun").setAll([jobRunId: "SCHJ_RUN_1", jobName: EXTRACTS,
                     startTime: new Timestamp(System.currentTimeMillis() - 3600_000L), endTime: new Timestamp(System.currentTimeMillis() - 3500_000L), hasError: "N"]).createOrUpdate()
         }
@@ -245,14 +246,14 @@ class ScheduleAdminServicesSmokeTests {
     @Test
     void aCronChangeCountsAsARunMadeNowSoTheRunnerDoesNotCatchUpAtOnce() {
         Timestamp before = new Timestamp(System.currentTimeMillis() - 1000L)
-        asSystem { ec.entity.find("moqui.service.job.ServiceJobRunLock").condition("jobName", EXTRACTS).deleteAll() }
+        asSystem(ec) { ec.entity.find("moqui.service.job.ServiceJobRunLock").condition("jobName", EXTRACTS).deleteAll() }
         ok(svc("update#ServiceJob", [jobName: EXTRACTS, paused: "Y"]))
         assertNull(lock(EXTRACTS), "a pause change is not a cron change")
         ok(svc("update#ServiceJob", [jobName: EXTRACTS, cronExpression: "0 0 4 * * ?"]))
         assertNotNull(lock(EXTRACTS))
         assertFalse(lock(EXTRACTS).lastRunTime.before(before), "lastRunTime is now, so a time already past today is not a missed run")
         // an existing lock keeps its jobRunId and gets a new lastRunTime
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.service.job.ServiceJobRun").setAll([jobRunId: "SCHJ_RUN", jobName: EXTRACTS]).createOrUpdate()
             ec.entity.makeValue("moqui.service.job.ServiceJobRunLock").setAll([jobName: EXTRACTS, jobRunId: "SCHJ_RUN", lastRunTime: new Timestamp(0L)]).update()
         }
@@ -260,7 +261,7 @@ class ScheduleAdminServicesSmokeTests {
         assertEquals("SCHJ_RUN", lock(EXTRACTS).jobRunId)
         assertFalse(lock(EXTRACTS).lastRunTime.before(before))
         // a reset that moves the cron back does the same
-        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJobRunLock").setAll([jobName: EXTRACTS, lastRunTime: new Timestamp(0L)]).update() }
+        asSystem(ec) { ec.entity.makeValue("moqui.service.job.ServiceJobRunLock").setAll([jobName: EXTRACTS, lastRunTime: new Timestamp(0L)]).update() }
         ok(svc("reset#ServiceJob", [jobName: EXTRACTS]))
         assertFalse(lock(EXTRACTS).lastRunTime.before(before))
     }
@@ -270,12 +271,12 @@ class ScheduleAdminServicesSmokeTests {
         String service = "reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
         ["outputLocation": "not editable here", "retentionDays": "is a setting"].each { String name, String why ->
             Map out = [:]
-            asSystem { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+            asSystem(ec) { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
                     .parameters([serviceName: service, parameterName: name, value: "x"]).call() }
             assertTrue((out.problem as String)?.contains(why), "${name}: ${out.problem}")
         }
         Map extract = [:]
-        asSystem { extract = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+        asSystem(ec) { extract = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
                 .parameters([serviceName: "reconciliation.ReconciliationGenericServices.purge#ExtractFiles", parameterName: "retentionDays", value: "3"]).call() }
         assertTrue((extract.problem as String)?.contains("is a setting, not a job parameter. Set it in Settings (darpan.purge.extract.days)"),
                 "the extract purge's period: ${extract.problem}")
@@ -286,7 +287,7 @@ class ScheduleAdminServicesSmokeTests {
         String service = "reconciliation.ReconciliationGenericServices.reconcile#GenericFiles"
         Closure<String> problem = { String v ->
             Map out = [:]
-            asSystem { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+            asSystem(ec) { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
                     .parameters([serviceName: service, parameterName: "hasHeader", value: v]).call() }
             return out.problem as String
         }
@@ -299,12 +300,12 @@ class ScheduleAdminServicesSmokeTests {
         String other = "sweep_RuleChildTenantStamps_hourly"
         ok(svc("update#ServiceJob", [jobName: SCAN, cronExpression: "0 0/10 * * * ?"]))
         // a shipped default moved on for a different, unedited job; resetting the scan job must not apply it
-        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 0 5 * * ?"]).update() }
+        asSystem(ec) { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 0 5 * * ?"]).update() }
         try {
             ok(svc("reset#ServiceJob", [jobName: SCAN]))
             assertEquals("0 15 * * * ?", job(other).cronExpression)
         } finally {
-            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 15 * * * ?"]).update() }
+            asSystem(ec) { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 15 * * * ?"]).update() }
         }
     }
 
@@ -323,7 +324,7 @@ class ScheduleAdminServicesSmokeTests {
     @Test
     void resumeNeedsAFreshPreview() {
         System.setProperty("darpan.retention.agentQueryLog.days", "30")
-        asSystem { (1..300).each { n ->
+        asSystem(ec) { (1..300).each { n ->
             ec.entity.makeValue("darpan.agent.AgentQueryLog").setAll([agentQueryLogId: "SCHJ_Q_${n}".toString(), companyUserGroupId: TENANT,
                     outcome: "OK", createdDate: new Timestamp(System.currentTimeMillis() - 400L * DAY)]).createOrUpdate()
         } }
@@ -400,7 +401,7 @@ class ScheduleAdminServicesSmokeTests {
         ok(svc("reset#ServiceJob", [jobName: RETENTION]))
         assertEquals("Y", job(RETENTION).paused)
         // flip the shipped default to running: a reset would resume
-        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: RETENTION, defaultPaused: "N"]).update() }
+        asSystem(ec) { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: RETENTION, defaultPaused: "N"]).update() }
         try {
             ok(svc("update#ServiceJob", [jobName: RETENTION, cronExpression: "0 30 4 * * ?"]))
             Map out = svc("reset#ServiceJob", [jobName: RETENTION])
@@ -410,7 +411,7 @@ class ScheduleAdminServicesSmokeTests {
             ok(svc("reset#ServiceJob", [jobName: RETENTION, previewedRows: 0L]))
             assertEquals("N", job(RETENTION).paused)
         } finally {
-            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: RETENTION, defaultPaused: "Y"]).update() }
+            asSystem(ec) { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: RETENTION, defaultPaused: "Y"]).update() }
         }
     }
 
@@ -453,11 +454,6 @@ class ScheduleAdminServicesSmokeTests {
 
     private List auditRows() {
         return ec.entity.find("darpan.admin.AdminAuditLog").orderBy("auditTimestamp").disableAuthz().useCache(false).list()
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
     }
 
     private Map svc(String method, Map params, String username = SUPER) {

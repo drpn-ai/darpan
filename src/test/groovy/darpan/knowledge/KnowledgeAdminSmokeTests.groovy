@@ -22,6 +22,7 @@ import java.sql.Timestamp
 import java.time.LocalDate
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-161. admin.KnowledgeAdminServices over darpan.knowledge.KnowledgeSupport: staff search and write the knowledge
@@ -58,26 +59,26 @@ class KnowledgeAdminSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "knowledge-admin")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
 
-        upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME, userFullName: "KB Super",
+        upsert(ec, "moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME, userFullName: "KB Super",
                 emailAddress: "kb.super@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserAccount", [userId: EDITOR_ID, username: EDITOR_USERNAME, userFullName: "KB Editor",
+        upsert(ec, "moqui.security.UserAccount", [userId: EDITOR_ID, username: EDITOR_USERNAME, userFullName: "KB Editor",
                 emailAddress: "kb.editor@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: T0])
-        upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: T0])
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: T0])
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: T0])
         [(ACME): "Acme Synthetic", (BETA): "Beta Synthetic", (GAMMA): "Fencepost"].each { String tenant, String label ->
-            upsert("moqui.security.UserGroup", [userGroupId: tenant, description: label,
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: tenant, description: label,
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
         }
-        upsert("moqui.security.UserGroupMember", [userGroupId: ACME, userId: EDITOR_ID, fromDate: T0])
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: ACME, userId: EDITOR_ID,
+        upsert(ec, "moqui.security.UserGroupMember", [userGroupId: ACME, userId: EDITOR_ID, fromDate: T0])
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: ACME, userId: EDITOR_ID,
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: T0])
-        upsert("moqui.security.UserPreference", [userId: SUPER_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
+        upsert(ec, "moqui.security.UserPreference", [userId: SUPER_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
                 preferenceValue: ACME])
-        upsert("moqui.security.UserPreference", [userId: EDITOR_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
+        upsert(ec, "moqui.security.UserPreference", [userId: EDITOR_ID, preferenceKey: TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY,
                 preferenceValue: ACME])
-        upsert("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: "KB_ACME_SHOP", companyUserGroupId: ACME,
+        upsert(ec, "darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: "KB_ACME_SHOP", companyUserGroupId: ACME,
                 shopApiUrl: "https://${SHOPIFY_HOST}/admin/api".toString(), apiVersion: "2025-01"])
-        upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "KB_BETA_NS", companyUserGroupId: BETA,
+        upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "KB_BETA_NS", companyUserGroupId: BETA,
                 tokenUrl: "https://${NS_ACCOUNT}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token".toString()])
 
         productRoot = Files.createTempDirectory("kb-product-")
@@ -446,9 +447,5 @@ class KnowledgeAdminSmokeTests {
     private static void assertNoErrors(Map out) {
         assertNull(out.authzDenied, "unexpected authz denial: ${out.authzDenied}")
         assertFalse(out.hasError as boolean, "unexpected errors: ${out.errors} ${out.validationErrors}")
-    }
-
-    private void upsert(String entityName, Map fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

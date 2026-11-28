@@ -15,6 +15,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-160 phase A. Automatic config versions. A committed write to any table a config version holds marks its tenant
@@ -44,19 +46,19 @@ class TenantConfigAutoVersionSmokeTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
+            upsert(ec, "darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
-            upsert("darpan.audit.AuditStatement", [statementId: R2_ID, companyUserGroupId: MINE, auditId: "${MINE}_MC".toString(),
+            upsert(ec, "darpan.audit.AuditStatement", [statementId: R2_ID, companyUserGroupId: MINE, auditId: "${MINE}_MC".toString(),
                     statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                     statementText: "Every invoice carries the Etail id.", isActive: "Y"])
-            upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
                     checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
                     companyUserGroupId: MINE, sequenceNum: 1L])
-            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCA_QUERY", companyUserGroupId: MINE,
+            upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCA_QUERY", companyUserGroupId: MINE,
                     description: "Open credit memos", recordType: "creditmemo"])
         }
     }
@@ -70,7 +72,7 @@ class TenantConfigAutoVersionSmokeTests {
     void reset() {
         ec.message.clearErrors()
         settle()
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find(PENDING).deleteAll()
         }
@@ -102,7 +104,7 @@ class TenantConfigAutoVersionSmokeTests {
     void oneSaveOfManyRowsCountsOnce() {
         inTransaction {
             setR2Text("Three rows, one save.")
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "${MINE}_INV".toString()).one().set("label", "Invoices missing an Etail id").update()
                 ec.entity.find("darpan.audit.Audit").condition("auditId", "${MINE}_MC".toString()).one().set("auditName", "Month-end close").update()
             }
@@ -115,22 +117,22 @@ class TenantConfigAutoVersionSmokeTests {
     @Test
     void aReplayWritingAChecksPairFactTypeIdMarksNothingButARealEditStillDoes() {
         String checkId = "${MINE}_INV".toString()
-        asSystem { ec.entity.find(PENDING).deleteAll() }
+        asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
         try {
             inTransaction {
-                asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().set("pairFactTypeId", "TCA_FACT_1").update() }
+                asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().set("pairFactTypeId", "TCA_FACT_1").update() }
             }
             settle()
             assertNull(pendingOf(MINE), "the first replay's pair fact type id is no config change")
-            assertEquals("TCA_FACT_1", asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).useCache(false).one().pairFactTypeId })
+            assertEquals("TCA_FACT_1", asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).useCache(false).one().pairFactTypeId })
 
             inTransaction {
-                asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().setAll([pairFactTypeId: "TCA_FACT_2", label: "Invoices with no Etail id"]).update() }
+                asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().setAll([pairFactTypeId: "TCA_FACT_2", label: "Invoices with no Etail id"]).update() }
             }
             assertNotNull(waitForPending(MINE), "a real edit beside it still marks the tenant")
         } finally {
             settle()
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().setAll([pairFactTypeId: null, label: "Invoices missing an Etail id"]).update()
                 ec.entity.find(PENDING).deleteAll()
             }
@@ -142,14 +144,14 @@ class TenantConfigAutoVersionSmokeTests {
     void aScriptSaveMarksItsTenantAndADeploymentRunDoesNot() {
         try {
             inTransaction {
-                asSystem {
-                    upsert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCA_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
+                asSystem(ec) {
+                    upsert(ec, "darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCA_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
                             isActive: "Y"])
-                    upsert("jexl.script.UserScript", [userScriptId: "TCA_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
+                    upsert(ec, "jexl.script.UserScript", [userScriptId: "TCA_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
                             scriptProfile: "QUERY", scriptBody: "'hello'", isActive: "Y"])
-                    upsert("jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCA_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCA_SCRIPT",
+                    upsert(ec, "jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCA_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCA_SCRIPT",
                             cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
-                    upsert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCA_DEPLOY", deliverySeqId: "01",
+                    upsert(ec, "jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCA_DEPLOY", deliverySeqId: "01",
                             deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"TCA_SPACE"}', isActive: "Y"])
                 }
             }
@@ -159,9 +161,9 @@ class TenantConfigAutoVersionSmokeTests {
             Map pack = TenantConfigVersionSupport.currentPack(ec, MINE)
             assertEquals(["Digest"], (pack.scripts as List<Map>)*.fields*.scriptName, "the version holds the script")
 
-            asSystem { ec.entity.find(PENDING).deleteAll() }
+            asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
             inTransaction {
-                asSystem {
+                asSystem(ec) {
                     ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCA_DEPLOY").one()
                             .setAll([lastRunDate: T, lastRunStatus: "SENT", lastRunMessage: "posted", nextRunDate: T]).update()
                     ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition([scriptDeploymentId: "TCA_DEPLOY", deliverySeqId: "01"]).one()
@@ -172,7 +174,7 @@ class TenantConfigAutoVersionSmokeTests {
             assertNull(pendingOf(MINE), "a run of the deployment changes no config")
         } finally {
             settle()
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCA_DEPLOY").deleteAll()
                 ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCA_DEPLOY").deleteAll()
                 ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCA_SCRIPT").deleteAll()
@@ -184,22 +186,22 @@ class TenantConfigAutoVersionSmokeTests {
     // DAR-BE-348: a reason's own priority is tenant config like its statement.
     @Test
     void aReasonPriorityChangeMarksItsTenant() {
-        asSystem {
-            upsert("moqui.basic.Enumeration", [enumId: "TCA_PRIO_CONC", enumTypeId: "AuditCategory", enumCode: "TCA_PRIO_CONC",
+        asSystem(ec) {
+            upsert(ec, "moqui.basic.Enumeration", [enumId: "TCA_PRIO_CONC", enumTypeId: "AuditCategory", enumCode: "TCA_PRIO_CONC",
                     description: "Tracker test cause"])
         }
-        asSystem { ec.entity.find(PENDING).deleteAll() }
+        asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
         try {
             inTransaction {
-                asSystem {
-                    upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TCA_RP1", statementId: R2_ID, companyUserGroupId: MINE,
+                asSystem(ec) {
+                    upsert(ec, "darpan.audit.AuditReasonPriority", [reasonPriorityId: "TCA_RP1", statementId: R2_ID, companyUserGroupId: MINE,
                             conclusionEnumId: "TCA_PRIO_CONC", priorityEnumId: "AUDP_KNOWN"])
                 }
             }
             assertNotNull(waitForPending(MINE), "a reason's priority marks the statement's tenant")
         } finally {
             settle()
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("darpan.audit.AuditReasonPriority").condition("reasonPriorityId", "TCA_RP1").deleteAll()
                 ec.entity.find(PENDING).deleteAll()
             }
@@ -209,8 +211,8 @@ class TenantConfigAutoVersionSmokeTests {
     @Test
     void aRowWithoutATenantColumnIsTracedToItsParent() {
         inTransaction {
-            asSystem {
-                upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: "TCA_QUERY",
+            asSystem(ec) {
+                upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: "TCA_QUERY",
                         recordFieldName: "amountUnapplied", sourceColumn: "amountunapplied"])
             }
         }
@@ -257,7 +259,7 @@ class TenantConfigAutoVersionSmokeTests {
 
         Map quiet = call("snapshot#PendingTenantConfigs", [nowStamp: new Timestamp(T.time + 61_000L)])
         assertEquals("VERSIONED", outcomeOf(quiet, MINE))
-        def version = asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).one() }
+        def version = asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).one() }
         assertEquals("SETTINGS_SAVE", version.changeSource)
         assertEquals(USER, version.createdByUserId, "credited to whoever saved last")
         assertNull(pendingOf(MINE), "done")
@@ -304,7 +306,7 @@ class TenantConfigAutoVersionSmokeTests {
                 "darpan.judge.CheckParameter", "darpan.judge.CheckAsk"])
         assertEquals(held, watchedEntities() as Set<String>,
                 "a table a version holds but nothing watches would change without a version")
-        asSystem {
+        asSystem(ec) {
             held.findAll { ec.entity.isEntityDefined(it) }.each { String entityName ->
                 boolean stamped = ec.entity.getEntityDefinition(entityName).isField("companyUserGroupId")
                 assertTrue(stamped || TenantConfigChangeTracker.PARENTS.containsKey(entityName), "${entityName} cannot name its tenant")
@@ -323,14 +325,14 @@ class TenantConfigAutoVersionSmokeTests {
     }
 
     private void markPending(String tenant, Timestamp at) {
-        asSystem {
-            upsert(PENDING, [companyUserGroupId: tenant, firstChangeDate: at, lastChangeDate: at, lastChangedByUserId: USER,
+        asSystem(ec) {
+            upsert(ec, PENDING, [companyUserGroupId: tenant, firstChangeDate: at, lastChangeDate: at, lastChangedByUserId: USER,
                     changeCount: 1L])
         }
     }
 
     private Map pendingOf(String tenant) {
-        def row = asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", tenant).useCache(false).one() }
+        def row = asSystem(ec) { ec.entity.find(PENDING).condition("companyUserGroupId", tenant).useCache(false).one() }
         return row == null ? null : new HashMap(row.getMap())
     }
 
@@ -351,11 +353,11 @@ class TenantConfigAutoVersionSmokeTests {
     }
 
     private long versionCount() {
-        return asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }
+        return asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }
     }
 
     private void setR2Text(String text) {
-        asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one().set("statementText", text).update() }
+        asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", R2_ID).one().set("statementText", text).update() }
     }
 
     /** The entities TenantConfig.eecas.xml watches (create, update and delete), read from the file itself. */
@@ -374,18 +376,5 @@ class TenantConfigAutoVersionSmokeTests {
 
     private void inTransaction(Closure work) {
         ec.transaction.runRequireNew(60, "test save", work)
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

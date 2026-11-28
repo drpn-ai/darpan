@@ -13,6 +13,7 @@ import org.moqui.context.ExecutionContext
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /** DAR-BE-374: search#RecordIds and get#IdIndexStatus through Moqui — the active tenant's rows only, view access enough. */
 @SharedMoqui
@@ -28,7 +29,7 @@ class IdIndexSearchSmokeTests {
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "idindex-search")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
@@ -42,7 +43,7 @@ class IdIndexSearchSmokeTests {
     @BeforeEach
     void reset() {
         setPermissions([])
-        asSystem {
+        asSystem(ec) {
             ["darpan.idindex.RecordIdIndex", "darpan.idindex.RecordIdIndexCursor", "darpan.dataset.Dataset", "darpan.idindex.IdIndexSource"].each { ec.entity.find(it).deleteAll() }
             IdIndexer.upsertRows(ec, MINE, "SHOP", [r("5551", "id", "5551"), r("GOR123", "name", "5551")])
             IdIndexer.upsertRows(ec, OTHER, "SHOP_X", [r("GOR123", "name", "9999")])
@@ -67,7 +68,7 @@ class IdIndexSearchSmokeTests {
 
     @Test
     void "status lists each kept copy of an indexed system: indexed, behind, or failed"() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("darpan.idindex.IdIndexSource").setAll([systemEnumId: "SHOPIFY", systemCode: "SHOPIFY", recordKind: "ORDER",
                     idField: "id", isActive: "Y"]).createOrUpdate()
             [[datasetId: "D_OK", companyUserGroupId: MINE, currentVersion: "v2"], [datasetId: "D_BEHIND", companyUserGroupId: MINE, currentVersion: "v5"],
@@ -105,7 +106,7 @@ class IdIndexSearchSmokeTests {
     }
 
     private void setPermissions(List<String> groups) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", MINE)
                     .condition("userId", ec.user.userId).deleteAll()
             groups.each { String g ->
@@ -113,10 +114,5 @@ class IdIndexSearchSmokeTests {
                         userId: ec.user.userId, permissionUserGroupId: g, fromDate: Timestamp.valueOf("2026-01-01 00:00:00")]).create()
             }
         }
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean was = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!was) ec.artifactExecution.enableAuthz() }
     }
 }

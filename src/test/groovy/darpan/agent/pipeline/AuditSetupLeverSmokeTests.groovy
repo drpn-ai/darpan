@@ -15,6 +15,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-220. AUDIT_SETTINGS and ADD_STATEMENT drafted changes plan, apply and revert through save#AuditSettings (which
@@ -56,17 +58,17 @@ class AuditSetupLeverSmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedData.xml", "component://darpan/data/MappingSeedData.xml",
                 "component://darpan/data/SystemMessageRemoteSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
-            upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TAS_AUTH", companyUserGroupId: MINE, authType: "NONE", isActive: "Y"])
-            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TAS_Q", nsAuthConfigId: "TAS_AUTH",
+            upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TAS_AUTH", companyUserGroupId: MINE, authType: "NONE", isActive: "Y"])
+            upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TAS_Q", nsAuthConfigId: "TAS_AUTH",
                     recordType: "CustCred", companyUserGroupId: MINE, isActive: "Y", description: "open credit memos"])
             [["tranId", "tranid"], ["status", "status"]].eachWithIndex { List f, int i ->
-                upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: "TAS_Q", recordFieldName: f[0],
+                upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: "TAS_Q", recordFieldName: f[0],
                         sourceColumn: f[1], sequenceNum: (i + 1) as Long])
             }
         }
@@ -81,35 +83,35 @@ class AuditSetupLeverSmokeTests {
             runIds << runId
             int i = runIds.size() - 1
             if (i >= AUTOMATIONS.size()) return
-            asSystem {
-                upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATIONS[i], automationName: name,
+            asSystem(ec) {
+                upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATIONS[i], automationName: name,
                         companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: runId, savedRunType: "ruleset",
                         ruleSetId: runId, compareScopeId: run.savedRun.compareScopeId, isActive: "N",
                         relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY", windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
-                upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATIONS[i], fileSide: "FILE_1",
+                upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATIONS[i], fileSide: "FILE_1",
                         companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                         safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"TAS_Q"}}'])
             }
         }
-        asSystem {
-            upsert("darpan.audit.Audit", [auditId: AUDIT_ID, companyUserGroupId: MINE, auditCode: "month-close",
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.Audit", [auditId: AUDIT_ID, companyUserGroupId: MINE, auditCode: "month-close",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
             ["R1", "R2"].eachWithIndex { String code, int i ->
-                upsert("darpan.audit.AuditStatement", [statementId: "${MINE}_${code}".toString(), companyUserGroupId: MINE,
+                upsert(ec, "darpan.audit.AuditStatement", [statementId: "${MINE}_${code}".toString(), companyUserGroupId: MINE,
                         auditId: AUDIT_ID, statementCode: code, categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM",
                         sequenceNum: (i + 1) as Long, statementText: "${code} text".toString(), isActive: "Y"])
-                upsert("darpan.audit.AuditCheck", [checkId: "TAS_CHK${i + 1}".toString(), companyUserGroupId: MINE,
+                upsert(ec, "darpan.audit.AuditCheck", [checkId: "TAS_CHK${i + 1}".toString(), companyUserGroupId: MINE,
                         checkCode: "check-${i + 1}".toString(), label: "Check ${i + 1}".toString(), savedRunId: runIds[i],
                         automationId: AUTOMATIONS[i], headlineTemplate: "Memo {tranId} is open"])
-                upsert("darpan.audit.AuditStatementCheck", [checkId: "TAS_CHK${i + 1}".toString(), statementId: "${MINE}_${code}".toString(),
+                upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "TAS_CHK${i + 1}".toString(), statementId: "${MINE}_${code}".toString(),
                         companyUserGroupId: MINE, sequenceNum: 1L, diffTypes: "FINDING"])
             }
-            upsert("darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER,
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER,
                     auditId: AUDIT_ID, createdDate: FROM])
-            upsert("darpan.agent.AgentConversation", [conversationId: CONV_OTHER, companyUserGroupId: OTHER, userId: USER,
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: CONV_OTHER, companyUserGroupId: OTHER, userId: USER,
                     createdDate: FROM])
             // The person names the run the new check reads (provenance: a run id must come from them or the config).
-            upsert("darpan.agent.AgentMessage", [messageId: "TAS_MSG1", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 1L,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAS_MSG1", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 1L,
                     kind: "USER", contentJson: JsonOutput.toJson("Add a check on run ${runIds[2]} to the first statement".toString())])
         }
     }
@@ -122,10 +124,10 @@ class AuditSetupLeverSmokeTests {
     @BeforeEach
     void reset() {
         actAs(MINE)
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
                     .condition("tenantUserGroupId", MINE).condition("userId", USER).deleteAll()
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
             ec.entity.find(PROPOSAL).deleteAll()
             ec.entity.find(VERSION).deleteAll()
@@ -171,7 +173,7 @@ class AuditSetupLeverSmokeTests {
         assertEquals("APPLIED", out.status)
         assertEquals(["0 30 7 * * ?", "0 30 7 * * ?"], automationField("scheduleExpr"))
         assertEquals(["Y", "Y"], automationField("isActive"))
-        List versions = asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list() }
+        List versions = asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list() }
         assertEquals(["AGENT_APPLY", "AGENT_APPLY"], versions*.changeSource)
 
         Map r = call("revert#AuditChange", [proposalId: p.proposalId])
@@ -205,8 +207,8 @@ class AuditSetupLeverSmokeTests {
         Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals(["R1", "R2", "R3"], statementCodes())
-        assertEquals(NEW_TEXT, asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${AUDIT_ID}_R3").one().statementText })
-        assertEquals(["AGENT_APPLY", "AGENT_APPLY"], asSystem {
+        assertEquals(NEW_TEXT, asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${AUDIT_ID}_R3").one().statementText })
+        assertEquals(["AGENT_APPLY", "AGENT_APPLY"], asSystem(ec) {
             ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list()*.changeSource })
 
         Map again = propose("ADD_STATEMENT", [auditId: "month-close"], [text: NEW_TEXT, category: "returns"])
@@ -254,7 +256,7 @@ class AuditSetupLeverSmokeTests {
             assertEquals((was.isActive ?: "Y") != "N", (now.isActive ?: "Y") != "N")
             assertEquals("REVERTED", proposal(p.proposalId).status)
         } finally {
-            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
                     .setAll([statementText: was.statementText, isActive: was.isActive]).update() }
         }
     }
@@ -283,7 +285,7 @@ class AuditSetupLeverSmokeTests {
 
     @Test
     void "a check is added on the audit's schedule and revert pauses and removes it"() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.audit.Audit").condition("auditId", AUDIT_ID).one()
                     .setAll([scheduleTime: "07:30", scheduleTimeZone: "UTC", scheduleActive: "Y"]).update()
         }
@@ -301,14 +303,14 @@ class AuditSetupLeverSmokeTests {
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals("APPLIED", out.status)
         assertEquals(["check-1", "check-2", NEW_CODE], checkCodes())
-        def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkCode", NEW_CODE).useCache(false).one() }
+        def check = asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkCode", NEW_CODE).useCache(false).one() }
         assertEquals(runIds[2], check.savedRunId)
         List automations = runAutomations()
         assertEquals([check.automationId], automations*.automationId, "the check runs through one automation of its run")
         assertEquals(["0 30 7 * * ?"], automations*.scheduleExpr)
         assertEquals(["UTC"], automations*.windowTimeZone)
         assertEquals(["Y"], automations*.isActive)
-        assertEquals(["AGENT_APPLY", "AGENT_APPLY"], asSystem {
+        assertEquals(["AGENT_APPLY", "AGENT_APPLY"], asSystem(ec) {
             ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list()*.changeSource })
 
         Map again = propose("ADD_CHECK", [auditId: "month-close"], [label: NEW_CHECK, savedRunId: runIds[2], statementCode: "R1"])
@@ -389,7 +391,7 @@ class AuditSetupLeverSmokeTests {
         Map was = statementRow("R1")
         Map target = [auditId: "month-close", statementCode: "R1"]
         try {
-            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", null).update() }
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", null).update() }
             // unset -> P0 (a level alone is a whole proposal), reverted to unset
             Map p = propose("STATEMENT_EDIT", target, [priority: "P0"])
             assertEquals("PLANNED", p.status, p.statusMessage as String)
@@ -401,7 +403,7 @@ class AuditSetupLeverSmokeTests {
             assertNull(statementRow("R1").priorityEnumId, "unset stays unset, not P2")
 
             // P1 -> KNOWN, reverted to P1
-            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", "AUDP_P1").update() }
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", "AUDP_P1").update() }
             Map k = propose("STATEMENT_EDIT", target, [priority: "KNOWN"])
             applyPlanned(k)
             assertEquals("AUDP_KNOWN", statementRow("R1").priorityEnumId)
@@ -421,7 +423,7 @@ class AuditSetupLeverSmokeTests {
             assertTrue(propose("STATEMENT_EDIT", target, [priority: "URGENT"]).hadError as boolean)
             assertEquals("AUDP_P1", statementRow("R1").priorityEnumId)
         } finally {
-            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
                     .set("priorityEnumId", was.priorityEnumId).update() }
         }
     }
@@ -443,7 +445,7 @@ class AuditSetupLeverSmokeTests {
             assertEquals([], reasonLevels(statementId, "TAS_C_OPEN"), "no row before, no row after")
 
             // P0 -> KNOWN: the revert restores P0
-            asSystem { upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP1", companyUserGroupId: MINE,
+            asSystem(ec) { upsert(ec, "darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP1", companyUserGroupId: MINE,
                     statementId: statementId, conclusionEnumId: "TAS_C_OPEN", priorityEnumId: "AUDP_P0"]) }
             Map k = propose("REASON_PRIORITY", target, [priority: "KNOWN"])
             applyPlanned(k)
@@ -462,12 +464,12 @@ class AuditSetupLeverSmokeTests {
             assertEquals("INVALID", propose("REASON_PRIORITY", target, [priority: "P0"]).status, "already this level")
             assertTrue(propose("REASON_PRIORITY", target, [:]).hadError as boolean, "the level is required, null clears")
             assertTrue(propose("REASON_PRIORITY", target, [priority: "P3"]).hadError as boolean)
-            asSystem { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll() }
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll() }
             Map none = propose("REASON_PRIORITY", target, [priority: null])
             assertEquals("INVALID", none.status, "nothing to clear")
             assertEquals(AuditChangeLevers.NO_CHANGE_PRIORITY_MESSAGE, none.statusMessage)
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll()
                 ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("conclusionEnumId", "in", ["TAS_C_OPEN", "TAS_C_ALL"]).deleteAll()
             }
@@ -490,20 +492,20 @@ class AuditSetupLeverSmokeTests {
                     [priority: "P0"]).status, "a statement the audit does not have")
             assertEquals([], reasonLevels(statementId, "TAS_C_ALL"))
         } finally {
-            asSystem { ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("conclusionEnumId", "in", ["TAS_C_OPEN", "TAS_C_ALL"]).deleteAll() }
+            asSystem(ec) { ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("conclusionEnumId", "in", ["TAS_C_OPEN", "TAS_C_ALL"]).deleteAll() }
         }
     }
 
     @Test
     void "the two priority services refuse another tenant's statement and write nothing"() {
         String foreign = "${OTHER}_R1".toString()
-        asSystem {
-            upsert("darpan.audit.Audit", [auditId: "TAS_OTHER_AUDIT", companyUserGroupId: OTHER, auditCode: "other-audit",
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.Audit", [auditId: "TAS_OTHER_AUDIT", companyUserGroupId: OTHER, auditCode: "other-audit",
                     auditName: "Other audit", periodEnumId: "AUDP_MONTH"])
-            upsert("darpan.audit.AuditStatement", [statementId: foreign, companyUserGroupId: OTHER, auditId: "TAS_OTHER_AUDIT",
+            upsert(ec, "darpan.audit.AuditStatement", [statementId: foreign, companyUserGroupId: OTHER, auditId: "TAS_OTHER_AUDIT",
                     statementCode: "R1", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", sequenceNum: 1L,
                     statementText: "other R1", isActive: "Y", priorityEnumId: "AUDP_P1"])
-            upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP_OTHER", companyUserGroupId: OTHER,
+            upsert(ec, "darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP_OTHER", companyUserGroupId: OTHER,
                     statementId: foreign, conclusionEnumId: "TAS_C_OPEN", priorityEnumId: "AUDP_KNOWN"])
         }
         try {
@@ -519,11 +521,11 @@ class AuditSetupLeverSmokeTests {
                     .parameters([companyUserGroupId: MINE, statementId: foreign, conclusionEnumId: "TAS_C_OPEN"]).call()
             assertTrue(ec.message.hasError(), "clearing reaches nothing either")
             ec.message.clearAll()
-            assertEquals("AUDP_P1", asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", foreign).useCache(false).one().priorityEnumId })
+            assertEquals("AUDP_P1", asSystem(ec) { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", foreign).useCache(false).one().priorityEnumId })
             assertEquals(["AUDP_KNOWN"], reasonLevels(foreign, "TAS_C_OPEN"), "the other tenant's override is untouched")
-            assertEquals(1, asSystem { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", foreign).useCache(false).count() })
+            assertEquals(1, asSystem(ec) { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", foreign).useCache(false).count() })
         } finally {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", foreign).deleteAll()
                 ec.entity.find("darpan.audit.AuditStatement").condition("statementId", foreign).deleteAll()
                 ec.entity.find("darpan.audit.Audit").condition("auditId", "TAS_OTHER_AUDIT").deleteAll()
@@ -551,7 +553,7 @@ class AuditSetupLeverSmokeTests {
     }
 
     private List<String> reasonLevels(String statementId, String conclusion) {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId)
                     .condition("conclusionEnumId", conclusion).useCache(false).list()*.priorityEnumId
         } as List<String>
@@ -559,15 +561,15 @@ class AuditSetupLeverSmokeTests {
 
     /** Two reasons on R1's run: TAS_C_OPEN is expected nowhere (it can take a level), TAS_C_ALL is expected on every check. */
     private void reasonFixtures() {
-        asSystem {
-            upsert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+        asSystem(ec) {
+            upsert(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
             [TAS_C_OPEN: "Still open", TAS_C_ALL: "Recorded late"].each { String id, String label ->
-                upsert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
+                upsert(ec, "moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
             }
             String scopeId = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", runIds[0]).useCache(false).list().first().compareScopeId
             [[1L, "TAS_C_OPEN", null], [2L, "TAS_C_ALL", "EXPECTED"]].each { List r ->
                 ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("sequenceNum", r[0]).deleteAll()
-                upsert("darpan.rule.RuleSetConclusionRule", [compareScopeId: scopeId, sequenceNum: r[0], conclusionEnumId: r[1],
+                upsert(ec, "darpan.rule.RuleSetConclusionRule", [compareScopeId: scopeId, sequenceNum: r[0], conclusionEnumId: r[1],
                         outcome: r[2], companyUserGroupId: MINE])
             }
         }
@@ -586,11 +588,11 @@ class AuditSetupLeverSmokeTests {
     }
 
     private def proposal(Object id) {
-        return asSystem { ec.entity.find(PROPOSAL).condition("proposalId", id).useCache(false).one() }
+        return asSystem(ec) { ec.entity.find(PROPOSAL).condition("proposalId", id).useCache(false).one() }
     }
 
     private List<String> automationField(String field) {
-        return asSystem {
+        return asSystem(ec) {
             AUTOMATIONS.collect { String id ->
                 ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", id).useCache(false).one().get(field) as String
             }
@@ -598,26 +600,26 @@ class AuditSetupLeverSmokeTests {
     }
 
     private List<String> checkCodes() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", MINE).orderBy("checkCode").useCache(false).list()*.checkCode
         } as List<String>
     }
 
     private List runAutomations() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("savedRunId", runIds[2]).useCache(false).list()
         } as List
     }
 
     private Map statementRow(String code) {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatement").condition("auditId", AUDIT_ID).condition("statementCode", code)
                     .useCache(false).list().find()?.getMap()
         } as Map
     }
 
     private List<String> statementCodes() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatement").condition("auditId", AUDIT_ID).orderBy("sequenceNum").useCache(false).list()*.statementCode
         } as List<String>
     }
@@ -627,18 +629,5 @@ class AuditSetupLeverSmokeTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenant)
         TenantAccessSupport.syncUserContext(ec)
         ec.message.clearAll()
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

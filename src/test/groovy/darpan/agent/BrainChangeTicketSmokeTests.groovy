@@ -18,6 +18,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-159. Brain change tickets: the agent raises one for a request that needs code; the tenant lists its own; staff
@@ -50,17 +52,17 @@ class BrainChangeTicketSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "brain-change-ticket")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
-            upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME, userFullName: "BCT Super",
+            upsert(ec, "moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME, userFullName: "BCT Super",
                     emailAddress: "bct.super@example.com", disabled: "N", requirePasswordChange: "N"])
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
-            upsert("darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER, createdDate: FROM])
-            upsert("darpan.agent.AgentConversation", [conversationId: CONV_OTHER, companyUserGroupId: OTHER, userId: USER, createdDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER, createdDate: FROM])
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: CONV_OTHER, companyUserGroupId: OTHER, userId: USER, createdDate: FROM])
         }
     }
 
@@ -69,7 +71,7 @@ class BrainChangeTicketSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem { ec.entity.find(TICKET).disableAuthz().deleteAll() }
+        asSystem(ec) { ec.entity.find(TICKET).disableAuthz().deleteAll() }
         actAs(MINE)
     }
 
@@ -78,19 +80,19 @@ class BrainChangeTicketSmokeTests {
     void readEconomyTicketIsFoundOpenPerTenantAndKey() {
         // DAR-BE-320 phase 1b: the read reviewer raises one open ticket per tenant, flag and connection.
         String hash = BrainTicketSupport.sha256("read-economy|DUPLICATE_READ|SHOPIFY|STORE_US")
-        asSystem {
-            upsert(TICKET, [ticketId: "BCT_RE_SHIPPED", companyUserGroupId: MINE, category: "READ_ECONOMY_EXTRACT", textHash: hash,
+        asSystem(ec) {
+            upsert(ec, TICKET, [ticketId: "BCT_RE_SHIPPED", companyUserGroupId: MINE, category: "READ_ECONOMY_EXTRACT", textHash: hash,
                             verbatimText: "read 3 times", status: "SHIPPED"])
-            upsert(TICKET, [ticketId: "BCT_RE_OTHER", companyUserGroupId: OTHER, category: "READ_ECONOMY_EXTRACT", textHash: hash,
+            upsert(ec, TICKET, [ticketId: "BCT_RE_OTHER", companyUserGroupId: OTHER, category: "READ_ECONOMY_EXTRACT", textHash: hash,
                             verbatimText: "read 3 times", status: "RECEIVED"])
-            upsert(TICKET, [ticketId: "BCT_RE_CHAT", companyUserGroupId: MINE, category: "MISSING_FIELD", textHash: hash,
+            upsert(ec, TICKET, [ticketId: "BCT_RE_CHAT", companyUserGroupId: MINE, category: "MISSING_FIELD", textHash: hash,
                             verbatimText: "same hash, a chat ticket", status: "RECEIVED"])
         }
-        assertNull(asSystem { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) },
+        assertNull(asSystem(ec) { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) },
                 "shipped, another tenant's, or not a read-economy ticket: none open")
-        asSystem { upsert(TICKET, [ticketId: "BCT_RE_OPEN", companyUserGroupId: MINE, category: "READ_ECONOMY_BRAIN", textHash: hash,
+        asSystem(ec) { upsert(ec, TICKET, [ticketId: "BCT_RE_OPEN", companyUserGroupId: MINE, category: "READ_ECONOMY_BRAIN", textHash: hash,
                                    verbatimText: "read 3 times", status: "ACCEPTED"]) }
-        assertEquals("BCT_RE_OPEN", asSystem { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) })
+        assertEquals("BCT_RE_OPEN", asSystem(ec) { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) })
         assertFalse(BrainTicketSupport.CATEGORIES.contains("READ_ECONOMY_EXTRACT"), "the chat agent cannot raise one")
     }
 
@@ -107,7 +109,7 @@ class BrainChangeTicketSmokeTests {
         Map other = create(CONV, "MISSING_FIELD", "Show the warehouse on every finding.")
         assertNotEquals(first.ticketId, other.ticketId)
         assertEquals(2L, count(MINE))
-        def row = asSystem { ec.entity.find(TICKET).condition("ticketId", first.ticketId).useCache(false).one() }
+        def row = asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", first.ticketId).useCache(false).one() }
         assertEquals("RECEIVED", row.status)
         assertEquals(MINE, row.companyUserGroupId)
         assertEquals(USER, row.createdByUserId)
@@ -122,7 +124,7 @@ class BrainChangeTicketSmokeTests {
                 [orderRef: "M-1", customer: [email: "jane.doe@example.com", phone: "+1 415 555 0134", notes: ["gid://shopify/Order/12345", "M-2"]]],
                 [lever: "display"])
         assertFalse(out.hadError as boolean, out.errorText as String)
-        def row = asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }
+        def row = asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }
         String evidence = row.evidenceJson
         assertFalse(evidence.contains("jane.doe"), evidence)
         assertFalse(evidence.contains("555"), evidence)
@@ -162,12 +164,12 @@ class BrainChangeTicketSmokeTests {
     void viewerCannotListTickets() {
         String id = create(CONV, "DISPLAY", "Only editors read this.").ticketId
         String viewer = "BCT_VIEWER"
-        asSystem {
-            upsert("moqui.security.UserAccount", [userId: viewer, username: "bct.viewer", userFullName: "BCT Viewer",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserAccount", [userId: viewer, username: "bct.viewer", userFullName: "BCT Viewer",
                     emailAddress: "bct.viewer@example.com", disabled: "N", requirePasswordChange: "N"])
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: viewer, fromDate: FROM])
-            upsert("moqui.security.UserGroupMember", [userGroupId: MINE, userId: viewer, fromDate: FROM])
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: viewer,
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: viewer, fromDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: MINE, userId: viewer, fromDate: FROM])
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: viewer,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, fromDate: FROM])
         }
         try {
@@ -238,9 +240,9 @@ class BrainChangeTicketSmokeTests {
         assertFalse(update(a, [status: "SHIPPED", shippedVersion: "v2.2.0"]).hasError as boolean)
         assertEquals("SHIPPED", status(a))
         assertFalse(update(b, [status: "DECLINED", statusReason: "Works as designed."]).hasError as boolean)
-        def row = asSystem { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }
+        def row = asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }
         assertEquals("v2.2.0", row.shippedVersion)
-        assertEquals("Works as designed.", asSystem { ec.entity.find(TICKET).condition("ticketId", b).useCache(false).one() }.statusReason)
+        assertEquals("Works as designed.", asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", b).useCache(false).one() }.statusReason)
         assertTrue(update("NOPE", [status: "ACCEPTED"]).hasError as boolean)
         assertEquals([a], (onThread(SUPER_USERNAME, "${ADMIN}.list#AllBrainChangeTickets", [status: "SHIPPED"], false).result.tickets as List<Map>)*.ticketId)
         // the tenant sees the status its ticket reached
@@ -256,12 +258,12 @@ class BrainChangeTicketSmokeTests {
                  "jane.doe@example.com": "x", "gid://shopify/Order/1": "y", "free text key": "z", rows: [[id: "INV-1"], "ship to 12 Elm St"]],
                 [target: "invoices-without-etail-id"])
         assertFalse(out.hadError as boolean, out.errorText as String)
-        String ev = asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.evidenceJson
+        String ev = asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.evidenceJson
         ["Jane", "Elm", "Springfield", "jane.doe", "gid://", "free text", "ship to"].each { assertFalse(ev.contains(it), "${it} in ${ev}") }
         assertTrue(ev.contains('"customerNote":"<populated>"'), ev)
         ["OPEN", "12.5", "\"count\":3", "true", "2026-10-08", "INV-1"].each { assertTrue(ev.contains(it), "${it} missing in ${ev}") }
         assertEquals(3, ev.count("<populated>#"), ev)
-        assertTrue(asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.refsJson.contains("M1088731"))
+        assertTrue(asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.refsJson.contains("M1088731"))
     }
 
     @Test
@@ -289,12 +291,12 @@ class BrainChangeTicketSmokeTests {
     void transitions() {
         String a = create(CONV, "PRODUCT_BUG", "Move me.").ticketId
         assertFalse(update(a, [status: "ACCEPTED", statusReason: "stale", shippedVersion: "v0"]).hasError as boolean)
-        def row = asSystem { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }
+        def row = asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }
         assertNull(row.statusReason); assertNull(row.shippedVersion)
         assertTrue(update(a, [status: "RECEIVED"]).hasError as boolean)
         assertTrue(update(a, [status: "SHIPPED", shippedVersion: "v" + "9" * 300]).hasError as boolean)
         assertFalse(update(a, [status: "SHIPPED", shippedVersion: "v2.2.0", statusReason: "ignored"]).hasError as boolean)
-        assertNull(asSystem { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }.statusReason)
+        assertNull(asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }.statusReason)
         assertTrue(update(a, [status: "ACCEPTED"]).hasError as boolean)
         assertTrue(update(a, [status: "DECLINED", statusReason: "late"]).hasError as boolean)
         String d = create(CONV, "PRODUCT_BUG", "Decline me.").ticketId
@@ -306,7 +308,7 @@ class BrainChangeTicketSmokeTests {
         assertFalse(update(v, [status: "ACCEPTED"]).hasError as boolean)
         Map fits = update(v, [status: "SHIPPED", shippedVersion: "v" + "9" * 254])
         assertFalse(fits.hasError as boolean, "a 255-character version fits its column: ${fits}")
-        assertEquals(255, (asSystem { ec.entity.find(TICKET).condition("ticketId", v).useCache(false).one() }.shippedVersion as String).length())
+        assertEquals(255, (asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", v).useCache(false).one() }.shippedVersion as String).length())
     }
 
     // ------------------------------------------------------------------ helpers
@@ -332,11 +334,11 @@ class BrainChangeTicketSmokeTests {
     private List<String> listIds() { return (call(FACADE, "list#BrainChangeTickets", [:]).tickets as List<Map>)*.ticketId }
 
     private long count(String tenant) {
-        return asSystem { ec.entity.find(TICKET).condition("companyUserGroupId", tenant).useCache(false).count() }
+        return asSystem(ec) { ec.entity.find(TICKET).condition("companyUserGroupId", tenant).useCache(false).count() }
     }
 
     private String status(String id) {
-        return asSystem { ec.entity.find(TICKET).condition("ticketId", id).useCache(false).one() }.status
+        return asSystem(ec) { ec.entity.find(TICKET).condition("ticketId", id).useCache(false).one() }.status
     }
 
     private void actAs(String tenant) {
@@ -368,14 +370,5 @@ class BrainChangeTicketSmokeTests {
         worker.join()
         if (holder.failure) throw (Throwable) holder.failure
         return holder
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

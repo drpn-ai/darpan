@@ -19,6 +19,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * The admin.* tenant, user and membership services, exercised through the real service engine
@@ -148,26 +149,26 @@ class AdminServicesSmokeTests {
                 .disableAuthz().deleteAll()
         AuditLogTestSupport.wipe(ec)
 
-        upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME,
+        upsert(ec, "moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME,
                 userFullName: "Admin Super", emailAddress: "admsvc.super@example.com", disabled: "N", requirePasswordChange: "N"])
-        upsert("moqui.security.UserAccount", [userId: PLAIN_ID, username: PLAIN_USERNAME,
+        upsert(ec, "moqui.security.UserAccount", [userId: PLAIN_ID, username: PLAIN_USERNAME,
                 userFullName: "Plain Tenant Admin", emailAddress: "admsvc.plain@example.com", disabled: "N", requirePasswordChange: "N",
                 sessionsEndedDate: null])
-        upsert("moqui.security.UserAccount", [userId: TARGET_ID, username: TARGET_USERNAME,
+        upsert(ec, "moqui.security.UserAccount", [userId: TARGET_ID, username: TARGET_USERNAME,
                 userFullName: "Target User", emailAddress: "admsvc.target@example.com", disabled: "N", requirePasswordChange: "N",
                 sessionsEndedDate: null])
-        upsert("moqui.security.UserAccount", [userId: DORMANT_ID, username: "admsvc.dormant",
+        upsert(ec, "moqui.security.UserAccount", [userId: DORMANT_ID, username: "admsvc.dormant",
                 userFullName: "Dormant User", emailAddress: "admsvc.dormant@example.com", disabled: "Y", requirePasswordChange: "Y"])
 
-        upsert("moqui.security.UserGroup", [userGroupId: ALPHA, description: "Alpha Co",
+        upsert(ec, "moqui.security.UserGroup", [userGroupId: ALPHA, description: "Alpha Co",
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-        upsert("moqui.security.UserGroup", [userGroupId: BRAVO, description: "Bravo Co",
+        upsert(ec, "moqui.security.UserGroup", [userGroupId: BRAVO, description: "Bravo Co",
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
         // No description and no TenantSetting: label falls back to the id, disabled reads false.
-        upsert("moqui.security.UserGroup", [userGroupId: CHARLIE, description: null,
+        upsert(ec, "moqui.security.UserGroup", [userGroupId: CHARLIE, description: null,
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
         // Lower-case label: a case-insensitive sort would put it before "Bravo Co".
-        upsert("moqui.security.UserGroup", [userGroupId: DELTA, description: "beta lower",
+        upsert(ec, "moqui.security.UserGroup", [userGroupId: DELTA, description: "beta lower",
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
 
         create("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA, timeZone: "America/Chicago",
@@ -692,7 +693,7 @@ class AdminServicesSmokeTests {
                 "Added ${PLAIN_ID} to ${DELTA} as DARPAN_TENANT_USER.")
 
         // A disabled account, and one with no email address, still get the grant; the email is skipped, not an error.
-        upsert("moqui.security.UserAccount", [userId: TARGET_ID, emailAddress: null])
+        upsert(ec, "moqui.security.UserAccount", [userId: TARGET_ID, emailAddress: null])
         Map dormant = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
                 [userId: DORMANT_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_COMPANY_VIEW_ONLY"])
         Map noEmail = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
@@ -793,13 +794,13 @@ class AdminServicesSmokeTests {
                 [userId: userId, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER", sendWelcome: false]))
 
         // Past darpan.admin.tempPasswordKeepDays (default 7).
-        upsert(TempPasswordKeeper.ENTITY, [userId: userId, keptDate: new Timestamp(System.currentTimeMillis() - 8 * 86_400_000L)])
+        upsert(ec, TempPasswordKeeper.ENTITY, [userId: userId, keptDate: new Timestamp(System.currentTimeMillis() - 8 * 86_400_000L)])
         callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome", [userId: userId, tenantUserGroupId: DELTA])
         assertNull(sent[-1].params.tempPassword)
         assertNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
 
         // Still in the keep period, but some other path set a different temporary password (still Y, so no drop).
-        upsert(TempPasswordKeeper.ENTITY, [userId: userId, tempPassword: STRONG_PASSWORD, keptDate: ec.user.nowTimestamp])
+        upsert(ec, TempPasswordKeeper.ENTITY, [userId: userId, tempPassword: STRONG_PASSWORD, keptDate: ec.user.nowTimestamp])
         ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal").parameters([userId: userId,
                 newPassword: "Other#Temp4321", newPasswordVerify: "Other#Temp4321", requirePasswordChange: "Y"]).call()
         assertNotNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
@@ -909,7 +910,7 @@ class AdminServicesSmokeTests {
                 [userId: DORMANT_ID, tenantUserGroupId: ALPHA])
         assertEquals(["admsvc.dormant is disabled."], disabled.errors)
 
-        upsert("moqui.security.UserAccount", [userId: PLAIN_ID, emailAddress: "  "])
+        upsert(ec, "moqui.security.UserAccount", [userId: PLAIN_ID, emailAddress: "  "])
         Map noEmail = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
                 [userId: PLAIN_ID, tenantUserGroupId: ALPHA])
         assertEquals(["${PLAIN_USERNAME} has no email address.".toString()], noEmail.errors)
@@ -1353,10 +1354,6 @@ class AdminServicesSmokeTests {
         }
     }
 
-    private void upsert(String entityName, Map fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
-    }
-
     private void create(String entityName, Map fields) {
         ec.entity.makeValue(entityName).setAll(fields).create()
     }
@@ -1371,7 +1368,7 @@ class AdminServicesSmokeTests {
     }
 
     private void preference(String userId, String tenantId) {
-        upsert("moqui.security.UserPreference", [userId: userId, preferenceKey: PREF_KEY, preferenceValue: tenantId])
+        upsert(ec, "moqui.security.UserPreference", [userId: userId, preferenceKey: PREF_KEY, preferenceValue: tenantId])
     }
 
     /** A live CLI session and a CLI sign-in the person approved that their CLI has not collected yet. */

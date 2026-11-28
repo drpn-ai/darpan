@@ -19,6 +19,7 @@ import java.sql.Date
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-161. darpan.knowledge.KnowledgeEntry, the tenant tier of the knowledge base: two tenants may use the same entry
@@ -74,7 +75,7 @@ class KnowledgeEntrySmokeTests {
     void reset() {
         ec.message.clearErrors()
         actAs(ACME)
-        asSystem {
+        asSystem(ec) {
             [ENTRY, PENDING, VERSION].each { ec.entity.find(it).deleteAll() }
             entry("KE_ACME_1", ACME, "join-keys", "Join keys").create()
             entry("KE_BETA_1", BETA, "join-keys", "Beta join keys").create()
@@ -84,7 +85,7 @@ class KnowledgeEntrySmokeTests {
 
     @Test
     void sameKeyTwoTenants() {
-        asSystem {
+        asSystem(ec) {
             assertEquals(2L, ec.entity.find(ENTRY).condition("entryKey", "join-keys").count())
             List<String> mine = ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).condition("entryKey", "join-keys")
                     .list()*.knowledgeEntryId.collect { it as String }
@@ -114,7 +115,7 @@ class KnowledgeEntrySmokeTests {
         Map got = call("get#TenantConfigVersion", [id: version.id])
         Map pack = (Map) ((Map) got.version).pack
         assertEquals(["join-keys"], (pack.knowledge as List<Map>).collect { ((Map) it.fields).entryKey })
-        String raw = asSystem { ec.entity.find(VERSION).condition("configVersionId", version.id).one().packJson as String }
+        String raw = asSystem(ec) { ec.entity.find(VERSION).condition("configVersionId", version.id).one().packJson as String }
         assertFalse(raw.contains("Beta join keys"), "nothing of another tenant")
         assertFalse(raw.contains(BETA))
     }
@@ -123,17 +124,17 @@ class KnowledgeEntrySmokeTests {
     void saveMarksTenantPending() {
         // The mark is async: let reset's own marks land first, so the ones counted below are this save's.
         assertNotNull(awaitPending(BETA), "reset's KB_BETA row marks KB_BETA pending")
-        asSystem { ec.entity.find(PENDING).deleteAll() }
-        asSystem { entry("KE_ACME_2", ACME, "second", "Second").create() }
+        asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
+        asSystem(ec) { entry("KE_ACME_2", ACME, "second", "Second").create() }
         assertNotNull(awaitPending(ACME))
-        assertNull(asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", BETA).one() })
+        assertNull(asSystem(ec) { ec.entity.find(PENDING).condition("companyUserGroupId", BETA).one() })
     }
 
     /** The tenant's pending row, polled for up to 10 s (TenantConfigChangeTracker marks it in an async call). */
     private def awaitPending(String tenant) {
         long until = System.currentTimeMillis() + 10_000L
         while (true) {
-            def row = asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", tenant).useCache(false).one() }
+            def row = asSystem(ec) { ec.entity.find(PENDING).condition("companyUserGroupId", tenant).useCache(false).one() }
             if (row != null || System.currentTimeMillis() > until) return row
             Thread.sleep(100L)
         }
@@ -141,10 +142,10 @@ class KnowledgeEntrySmokeTests {
 
     @Test
     void retiredEntriesTravelInTheBundle() {
-        asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "RETIRED").update() }
-        Map bundle = asSystem { ConfigTransferExporter.bundle(ec, ACME, [], [], [], "local") }
+        asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "RETIRED").update() }
+        Map bundle = asSystem(ec) { ConfigTransferExporter.bundle(ec, ACME, [], [], [], "local") }
         assertEquals(["RETIRED"], (bundle.knowledge as List<Map>).collect { ((Map) it.fields).statusId })
-        Map none = asSystem { ConfigTransferExporter.bundle(ec, COPY, [], [], [], "local") }
+        Map none = asSystem(ec) { ConfigTransferExporter.bundle(ec, COPY, [], [], [], "local") }
         assertFalse(none.containsKey("knowledge"), "a tenant with no entries carries no knowledge key")
     }
 
@@ -154,11 +155,11 @@ class KnowledgeEntrySmokeTests {
     @Test
     void sameTenantTransferWritesEntries() {
         Map bundle = exportAcme()
-        asSystem { ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).deleteAll() }
+        asSystem(ec) { ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).deleteAll() }
         Map plan = applyBundle(ACME, bundle)
         assertTrue((plan.warnings as List<Map>).any { it.code == "KNOWLEDGE_WRITTEN" &&
                 (it.message as String).contains("1 knowledge entries will be written to tenant ${ACME}") }, "${plan.warnings}")
-        asSystem {
+        asSystem(ec) {
             List rows = ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).list()
             assertEquals(["join-keys"], rows*.entryKey)
             assertTrue((rows[0].knowledgeEntryId as String).startsWith("KE_"))
@@ -177,7 +178,7 @@ class KnowledgeEntrySmokeTests {
         assertEquals("1 knowledge entries not copied: they belong to tenant ${ACME}.".toString(), warning?.message, "${plan.warnings}")
         assertFalse((plan.lines as List<Map>).any { it.kind == "KNOWLEDGE" }, "no knowledge line: ${plan.lines}")
         assertFalse((plan.warnings as List<Map>).any { it.code == "KNOWLEDGE_WRITTEN" })
-        asSystem {
+        asSystem(ec) {
             assertEquals(0L, ec.entity.find(ENTRY).condition("companyUserGroupId", COPY).count())
             assertEquals(1L, ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).count())
             assertEquals(1L, ec.entity.find(ENTRY).condition("companyUserGroupId", BETA).count())
@@ -193,18 +194,18 @@ class KnowledgeEntrySmokeTests {
         Map bundle = exportAcme()
         Map rec = (bundle.knowledge as List<Map>)[0]
         ((Map) rec.fields).body = "Rows here also come from ${BETA}.".toString()
-        Map plan = asSystem { ConfigTransferImporter.plan(ec, ACME, bundle, [:]) }
+        Map plan = asSystem(ec) { ConfigTransferImporter.plan(ec, ACME, bundle, [:]) }
         Map refused = (plan.blocking as List<Map>).find { it.code == "KNOWLEDGE_REFUSED" }
         assertNotNull(refused, "${plan.blocking}")
         assertEquals("Knowledge entry join-keys was not imported: it holds another tenant's tenantId.", refused.message)
         assertFalse((refused.message as String).contains(BETA), "never the matched value")
 
         ((Map) rec.fields).body = "Ask ops@acme.example about it."
-        Map email = asSystem { ConfigTransferImporter.preview(ec, ACME, bundle, [:]) }
+        Map email = asSystem(ec) { ConfigTransferImporter.preview(ec, ACME, bundle, [:]) }
         assertTrue(((Map) email.plan).blocking.any { it.code == "KNOWLEDGE_REFUSED" && (it.message as String).contains("customer data (email)") })
-        assertNull(asSystem { ConfigTransferImporter.apply(ec, ACME, bundle, [:], email.planHash as String, "local") }, "a blocked plan writes nothing")
+        assertNull(asSystem(ec) { ConfigTransferImporter.apply(ec, ACME, bundle, [:], email.planHash as String, "local") }, "a blocked plan writes nothing")
         ec.message.clearErrors()
-        assertEquals("Synthetic body for join-keys.", asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().body })
+        assertEquals("Synthetic body for join-keys.", asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().body })
     }
 
     /** The version-restore path (ownVersion) runs the same write check. */
@@ -212,7 +213,7 @@ class KnowledgeEntrySmokeTests {
     void versionRestoreRunsTheWriteCheck() {
         Map bundle = exportAcme()
         ((Map) (bundle.knowledge as List<Map>)[0].fields).body = "Shared with ${BETA}.".toString()
-        Map preview = asSystem { ConfigTransferImporter.preview(ec, ACME, bundle, [:], null, true) }
+        Map preview = asSystem(ec) { ConfigTransferImporter.preview(ec, ACME, bundle, [:], null, true) }
         assertTrue(((Map) preview.plan).blocking.any { it.code == "KNOWLEDGE_REFUSED" }, "${((Map) preview.plan).blocking}")
     }
 
@@ -226,7 +227,7 @@ class KnowledgeEntrySmokeTests {
         ((Map) rec.fields).title = "Overwritten"
         Map plan = applyBundle(ACME, bundle, true)
         assertEquals("CREATE", (plan.lines as List<Map>).find { it.ref == "KNOWLEDGE:KE_BETA_1" }?.action, "${plan.lines}")
-        asSystem {
+        asSystem(ec) {
             def beta = ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_BETA_1").one()
             assertEquals(BETA, beta.companyUserGroupId)
             assertEquals("Beta join keys", beta.title)
@@ -251,7 +252,7 @@ class KnowledgeEntrySmokeTests {
     @Test
     void versionRestoreRefreshesTheTenantIndex() {
         Map bundle = exportAcme()
-        asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("title", "Join keys edited").update() }
+        asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("title", "Join keys edited").update() }
         KnowledgeSupport.invalidate(ACME)
         assertEquals(["Join keys edited"], searchTitles(ACME, "join"))
         applyBundle(ACME, bundle, true)
@@ -262,22 +263,22 @@ class KnowledgeEntrySmokeTests {
     @Test
     void retireReachesTheTarget() {
         assertEquals(["Join keys"], searchTitles(ACME, "join"))
-        asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "RETIRED").update() }
+        asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "RETIRED").update() }
         Map bundle = exportAcme()
         // the target still holds the entry ACTIVE (and searched), as prod would before the transfer
-        asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "ACTIVE").update() }
+        asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().set("statusId", "ACTIVE").update() }
         KnowledgeSupport.invalidate(ACME)
         assertEquals(["Join keys"], searchTitles(ACME, "join"))
         Map plan = applyBundle(ACME, bundle)
         assertEquals("UPDATE", (plan.lines as List<Map>).find { it.kind == "KNOWLEDGE" }?.action, "${plan.lines}")
-        assertEquals("RETIRED", asSystem { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().statusId })
+        assertEquals("RETIRED", asSystem(ec) { ec.entity.find(ENTRY).condition("knowledgeEntryId", "KE_ACME_1").one().statusId })
         assertEquals([], searchTitles(ACME, "join"))
     }
 
     // ---------------------------------------------------------------- helpers
 
     private Map exportAcme() {
-        Map bundle = asSystem { ConfigTransferExporter.bundle(ec, ACME, [], [], [], "local") }
+        Map bundle = asSystem(ec) { ConfigTransferExporter.bundle(ec, ACME, [], [], [], "local") }
         assertNotNull(bundle, ec.message.errorsString)
         assertEquals(1, (bundle.knowledge as List).size())
         return bundle
@@ -285,7 +286,7 @@ class KnowledgeEntrySmokeTests {
 
     /** Preview then apply; answers the plan. Fails on a blocking line or a refused apply. */
     private Map applyBundle(String tenant, Map bundle, boolean ownVersion = false) {
-        return asSystem {
+        return asSystem(ec) {
             Map preview = ConfigTransferImporter.preview(ec, tenant, bundle, [:], null, ownVersion)
             Map plan = (Map) preview.plan
             assertTrue((plan.blocking as List).isEmpty(), "${plan.blocking}")
@@ -296,7 +297,7 @@ class KnowledgeEntrySmokeTests {
     }
 
     private List<String> searchTitles(String tenant, String words) {
-        return asSystem { (KnowledgeSupport.search(ec, tenant, words, null, null, 20).hits as List<Map>).collect { it.title as String } }
+        return asSystem(ec) { (KnowledgeSupport.search(ec, tenant, words, null, null, 20).hits as List<Map>).collect { it.title as String } }
     }
 
     private def entry(String id, String tenant, String key, String title) {
@@ -317,15 +318,6 @@ class KnowledgeEntrySmokeTests {
         ec.user.setPreference(PREF_KEY, tenant)
         TenantAccessSupport.syncUserContext(ec)
         ec.message.clearErrors()
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
     }
 
     private void underFacadeGrant(Closure body) {

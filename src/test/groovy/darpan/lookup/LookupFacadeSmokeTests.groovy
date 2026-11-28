@@ -15,6 +15,7 @@ import org.moqui.context.ExecutionContext
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-374: lookup#Order answers from what Darpan already holds — the ID index and the tenant's open findings — and calls no
@@ -33,7 +34,7 @@ class LookupFacadeSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "lookup-facade")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue("darpan.audit.Audit").setAll([auditId: "LKP_MC", companyUserGroupId: MINE, auditCode: "month-close",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"]).createOrUpdate()
             ec.entity.makeValue("darpan.audit.AuditStatement").setAll([statementId: "LKP_R1", companyUserGroupId: MINE, auditId: "LKP_MC",
@@ -52,7 +53,7 @@ class LookupFacadeSmokeTests {
     @BeforeEach
     void reset() {
         setPermissions([])
-        asSystem {
+        asSystem(ec) {
             ["darpan.idindex.RecordIdIndex", "darpan.audit.AuditFinding"].each { ec.entity.find(it).deleteAll() }
             IdIndexer.upsertRows(ec, MINE, "SHOP", [row("SHOPIFY", "ORDER", "5551", "id", "5551"), row("SHOPIFY", "ORDER", "5551", "name", "#GOR1")])
             IdIndexer.upsertRows(ec, MINE, "OMS", [row("OMS", "ORDER", "OMS100", "orderId", "OMS100"),
@@ -114,7 +115,7 @@ class LookupFacadeSmokeTests {
     }
 
     private void setPermissions(List<String> groups) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", MINE)
                     .condition("userId", ec.user.userId).deleteAll()
             groups.each { String g ->
@@ -122,10 +123,5 @@ class LookupFacadeSmokeTests {
                         userId: ec.user.userId, permissionUserGroupId: g, fromDate: FROM]).create()
             }
         }
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean was = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!was) ec.artifactExecution.enableAuthz() }
     }
 }

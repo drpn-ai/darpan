@@ -17,6 +17,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-159. An agent's draft proposal becomes a live change only through the existing saves, only when a person applies
@@ -58,25 +60,25 @@ class AuditChangeApplySmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedData.xml", "component://darpan/data/MappingSeedData.xml",
                 "component://darpan/data/SystemMessageRemoteSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-            upsert("moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
-            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: OTHER, userId: USER, fromDate: FROM])
+            upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: OTHER, userId: USER,
                     permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM])
-            upsert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
                     description: "Can view tenant-scoped Darpan data", groupTypeEnumId: "UgtDarpanPermission"])
-            upsert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+            upsert(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
             ["CONC_TAC_A": "Memo left open", "CONC_TAC_B": "Store kept the item", "CONC_TAC_C": "Memo voided"].each { String id, String label ->
-                upsert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
+                upsert(ec, "moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
             }
             // R25: no description, as many real NetSuite connections have; every config version must still be kept.
-            upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TAC_AUTH", companyUserGroupId: MINE, authType: "NONE", isActive: "Y"])
+            upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TAC_AUTH", companyUserGroupId: MINE, authType: "NONE", isActive: "Y"])
             ["TAC_Q": "open credit memos", "TAC_Q2": "credit memo applications"].each { String q, String label ->
-                upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: q, nsAuthConfigId: "TAC_AUTH",
+                upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: q, nsAuthConfigId: "TAC_AUTH",
                         recordType: "CustCred", companyUserGroupId: MINE, isActive: "Y", description: label])
                 [["tranId", "tranid"], ["memoOrigin", "memoorigin"], ["status", "status"]].eachWithIndex { List f, int i ->
-                    upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: q, recordFieldName: f[0],
+                    upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: q, recordFieldName: f[0],
                             sourceColumn: f[1], sequenceNum: (i + 1) as Long])
                 }
             }
@@ -97,38 +99,38 @@ class AuditChangeApplySmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         run2Id = run2.savedRun.savedRunId as String
         scope2Id = run2.savedRun.compareScopeId as String
-        asSystem {
-            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO, automationName: "credit memos",
+        asSystem(ec) {
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO, automationName: "credit memos",
                     companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: runId, savedRunType: "ruleset",
                     ruleSetId: runId, compareScopeId: scopeId, isActive: "N", relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
                     windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
-            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO, fileSide: "FILE_1",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO, fileSide: "FILE_1",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                     safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"TAC_Q"}}'])
-            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO2, automationName: "memos against applications",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO2, automationName: "memos against applications",
                     companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: run2Id, savedRunType: "ruleset",
                     ruleSetId: run2Id, compareScopeId: scope2Id, isActive: "N", relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
                     windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
             ["FILE_1": "TAC_Q", "FILE_2": "TAC_Q2"].each { String side, String q ->
-                upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: side,
+                upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: side,
                         companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                         safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"' + q + '"}}'])
             }
-            upsert("darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
+            upsert(ec, "darpan.audit.Audit", [auditId: "${MINE}_MC".toString(), companyUserGroupId: MINE, auditCode: "month-close",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
             ["R1", "R2"].eachWithIndex { String code, int i ->
-                upsert("darpan.audit.AuditStatement", [statementId: "${MINE}_${code}".toString(), companyUserGroupId: MINE,
+                upsert(ec, "darpan.audit.AuditStatement", [statementId: "${MINE}_${code}".toString(), companyUserGroupId: MINE,
                         auditId: "${MINE}_MC".toString(), statementCode: code, categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM",
                         sequenceNum: (i + 1) as Long, statementText: "${code} text".toString(), isActive: "Y"])
             }
-            upsert("darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER,
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: CONV, companyUserGroupId: MINE, userId: USER,
                     auditId: "${MINE}_MC".toString(), createdDate: FROM])
-            upsert("darpan.agent.AgentMessage", [messageId: "TAC_MSG1", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 1,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAC_MSG1", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 1,
                     kind: "USER", contentJson: '[{"type":"text","text":"Exclude M1088731 from R1; it is a test order. Memos marked Voided are fine."}]'])
             // A tool result naming an id is never the human's word, even inside a USER row's blocks.
-            upsert("darpan.agent.AgentMessage", [messageId: "TAC_MSG2", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 2,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAC_MSG2", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 2,
                     kind: "USER", contentJson: '[{"type":"tool_result","content":"M7777777"}]'])
-            upsert("darpan.agent.AgentMessage", [messageId: "TAC_MSG3", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 3,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAC_MSG3", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 3,
                     kind: "TOOL_RESULT", contentJson: '{"text":"M7777777"}'])
         }
     }
@@ -142,26 +144,26 @@ class AuditChangeApplySmokeTests {
     @BeforeEach
     void reset() {
         actAs(MINE)
-        asSystem {
+        asSystem(ec) {
             setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
             ec.entity.find(PROPOSAL).deleteAll()
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", runId).one().set("ruleSetName", "Open credit memos").update()
             [scopeId, scope2Id].each { String scope -> ec.entity.find(FILTER).condition("compareScopeId", scope).deleteAll() }
-            upsert(FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1L, fieldExpression: '$.records[*].memoOrigin',
+            upsert(ec, FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1L, fieldExpression: '$.records[*].memoOrigin',
                     operator: "INCLUDE_IN", filterValues: "HOTWAX", companyUserGroupId: MINE])
-            upsert(FILTER, [compareScopeId: scope2Id, fileSide: "FILE_1", sequenceNum: 1L, fieldExpression: '$.records[*].memoOrigin',
+            upsert(ec, FILTER, [compareScopeId: scope2Id, fileSide: "FILE_1", sequenceNum: 1L, fieldExpression: '$.records[*].memoOrigin',
                     operator: "INCLUDE_IN", filterValues: "HOTWAX", companyUserGroupId: MINE])
-            upsert(FILTER, [compareScopeId: scope2Id, fileSide: "FILE_2", sequenceNum: 1L, fieldExpression: '$.records[*].status',
+            upsert(ec, FILTER, [compareScopeId: scope2Id, fileSide: "FILE_2", sequenceNum: 1L, fieldExpression: '$.records[*].status',
                     operator: "EXCLUDE_IN", filterValues: "DRAFT", companyUserGroupId: MINE])
-            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: "FILE_2",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: "FILE_2",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL"])
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", MINE).deleteAll()
-            upsert("darpan.audit.AuditCheck", [checkId: "TAC_CHK", companyUserGroupId: MINE, checkCode: "credits-open",
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "TAC_CHK", companyUserGroupId: MINE, checkCode: "credits-open",
                     label: "Open credit memos", savedRunId: runId, headlineTemplate: "Memo {tranId} is open"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R1".toString(), companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R1".toString(), companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
-            upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R2".toString(), companyUserGroupId: MINE,
+            upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R2".toString(), companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
         }
         Map tree = ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: runId,
@@ -173,7 +175,7 @@ class AuditChangeApplySmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertNotNull(tree)
         // DAR-BE-198: the save keeps a rule's outcome, so an EXPECTED a test set would outlive it; every test starts with none.
-        asSystem { ruleRows().each { if (it.outcome != null) { it.set("outcome", null); it.update() } } }
+        asSystem(ec) { ruleRows().each { if (it.outcome != null) { it.set("outcome", null); it.update() } } }
         // Each automation starts exactly in sync with its run, as Sync leaves it.
         [AUTO, AUTO2].each { sync(it) }
         assertEquals(filterRows(), automationFilterRows())
@@ -185,8 +187,8 @@ class AuditChangeApplySmokeTests {
     @Test
     void "a finding's run names the system on each side, so an exclusion can name FILE_1 or FILE_2"() {
         // The first paid eval (2026-11-04): the agent saw only system names and asked the person which side to exclude on.
-        asSystem {
-            upsert("darpan.audit.AuditFinding", [findingId: "F-TAC-SIDES", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditFinding", [findingId: "F-TAC-SIDES", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
                     checkId: "TAC_CHK", recordKey: "M1", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo M1 is open",
                     firstFoundDate: java.sql.Date.valueOf("2026-10-08"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")])
         }
@@ -208,7 +210,7 @@ class AuditChangeApplySmokeTests {
     @Test
     void "plan validates without persisting"() {
         settle()
-        asSystem { ec.entity.find(PENDING).deleteAll() }
+        asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
         List<Map> before = filterRows()
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         assertFalse(p.hadError as boolean, p.errorText as String)
@@ -224,7 +226,7 @@ class AuditChangeApplySmokeTests {
         assertFalse(plan.before.toString().contains("M1088731"))
         assertEquals(before, filterRows(), "the validating save was rolled back")
         settle()
-        assertNull(asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", MINE).useCache(false).one() },
+        assertNull(asSystem(ec) { ec.entity.find(PENDING).condition("companyUserGroupId", MINE).useCache(false).one() },
                 "a rolled-back save marks no tenant pending")
 
         Map bad = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: '$.records[*]', filterValues: ["M1088731"]])
@@ -238,7 +240,7 @@ class AuditChangeApplySmokeTests {
     void "a proposal off the contract is refused and nothing is written"() {
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, values: ["M1088731"]])
         assertTrue(p.hadError as boolean, "unknown key 'values'")
-        assertEquals(0L, asSystem { ec.entity.find(PROPOSAL).count() })
+        assertEquals(0L, asSystem(ec) { ec.entity.find(PROPOSAL).count() })
         Map t = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_3"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         assertTrue(t.hadError as boolean, "unknown side")
     }
@@ -276,7 +278,7 @@ class AuditChangeApplySmokeTests {
                       [fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: "M1088731"]], rows)
         assertEquals(rows, automationFilterRows(), "the automation was synced with its run")
         assertEquals(sourceBefore, sourceRow(), "the whole-run save resends the run's setup unchanged")
-        List versions = asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list() }
+        List versions = asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list() }
         assertEquals(["AGENT_APPLY", "AGENT_APPLY"], versions*.changeSource)
         String reason = "Agent proposal ${p.proposalId} for ${USER}, approved by ${USER}".toString()
         assertEquals([reason, reason], versions*.reasonText)
@@ -421,8 +423,8 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "the finding the person names vouches for its own key"() {
-        asSystem {
-            upsert("darpan.audit.AuditFinding", [findingId: "F-TAC-PERSON", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditFinding", [findingId: "F-TAC-PERSON", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
                     checkId: "TAC_CHK", recordKey: "M5550009", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo M5550009 is open",
                     firstFoundDate: java.sql.Date.valueOf("2026-10-08"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")])
         }
@@ -434,7 +436,7 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "a view-only member cannot propose a change through the facade"() {
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map r = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
         assertTrue(r.hadError as boolean)
         assertTrue((r.errorText as String).contains("Your role can't change this audit; an editor can."), r.errorText as String)
@@ -481,7 +483,7 @@ class AuditChangeApplySmokeTests {
     @Test
     void "a view-only member cannot list or read proposals, as in the app where only editors reach them"() {
         Map p = call("propose#AuditChange", personParams(["M5550001"], "M5550001 is a test order"))
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map got = call("get#AuditChangeProposal", [proposalId: p.proposalId])
         assertTrue(got.hadError as boolean)
         assertNull(got.proposal)
@@ -507,8 +509,8 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "exclusion apply refuses automation drift"() {
-        asSystem {
-            upsert(AUTO_FILTER, [automationId: AUTO, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
+        asSystem(ec) {
+            upsert(ec, AUTO_FILTER, [automationId: AUTO, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
                     operator: "EXCLUDE_IN", filterValues: "DRAFT", companyUserGroupId: MINE])
         }
         List<Map> before = filterRows()
@@ -532,7 +534,7 @@ class AuditChangeApplySmokeTests {
         Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
         Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
         assertFalse(out.hadError as boolean, out.errorText as String)
-        def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
+        def check = asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
         assertEquals("Memo {tranId} is open", check.headlineTemplate, "resent, not nulled")
         assertEquals("FIELD_MISMATCH", link("R1").diffTypes)
         assertEquals("FINDING", link("R2").diffTypes, "the other statement's link is untouched")
@@ -543,7 +545,7 @@ class AuditChangeApplySmokeTests {
         Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
         Map p = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_TAC_A"]])
         assertTrue(p.hadError as boolean, "unknown key 'conclusionCodes'")
-        assertEquals(0L, asSystem { ec.entity.find(PROPOSAL).count() })
+        assertEquals(0L, asSystem(ec) { ec.entity.find(PROPOSAL).count() })
     }
 
     @Test
@@ -558,7 +560,7 @@ class AuditChangeApplySmokeTests {
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals("APPLIED", out.status)
         assertEquals([CONC_TAC_A: null, CONC_TAC_B: "EXPECTED"], ruleOutcomes())
-        def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
+        def check = asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
         assertEquals("Memo {tranId} is open", check.headlineTemplate, "the check is resent whole")
         assertEquals(["FINDING", "FINDING"], [link("R1").diffTypes, link("R2").diffTypes], "the links are resent unchanged")
         assertEquals(versions + 2, versionCount(), "two AGENT_APPLY versions")
@@ -566,7 +568,7 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "expected causes add to the run's set, and an unchanged set or a cause the run does not conclude is INVALID"() {
-        asSystem { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
+        asSystem(ec) { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
         Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
         assertEquals("PLANNED", p.status, p.statusMessage as String)
         assertEquals(["CONC_TAC_A", "CONC_TAC_B"], call("plan#AuditChange", [proposalId: p.proposalId]).after.check.expectedCodes)
@@ -581,7 +583,7 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "reverting expected causes restores the run's exact earlier set"() {
-        asSystem { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
+        asSystem(ec) { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
         Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
         applied(p)
         assertEquals([CONC_TAC_A: "EXPECTED", CONC_TAC_B: "EXPECTED"], ruleOutcomes())
@@ -591,8 +593,8 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "an expected-causes plan names the other checks on its run, which it also changes"() {
-        asSystem {
-            upsert("darpan.audit.AuditCheck", [checkId: "TAC_CHK2", companyUserGroupId: MINE, checkCode: "credits-open-two",
+        asSystem(ec) {
+            upsert(ec, "darpan.audit.AuditCheck", [checkId: "TAC_CHK2", companyUserGroupId: MINE, checkCode: "credits-open-two",
                     label: "Open credit memos again", savedRunId: runId])
         }
         try {
@@ -600,7 +602,7 @@ class AuditChangeApplySmokeTests {
             assertEquals("PLANNED", p.status, p.statusMessage as String)
             assertEquals(["credits-open-two"], call("plan#AuditChange", [proposalId: p.proposalId]).after.otherChecks)
         } finally {
-            asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK2").deleteAll() }
+            asSystem(ec) { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK2").deleteAll() }
         }
     }
 
@@ -662,7 +664,7 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "apply, reject and revert each leave one operator message naming the proposal and status"() {
-        asSystem { ec.entity.find("darpan.agent.AgentMessage").condition("conversationId", CONV).condition("kind", "OPERATOR").deleteAll() }
+        asSystem(ec) { ec.entity.find("darpan.agent.AgentMessage").condition("conversationId", CONV).condition("kind", "OPERATOR").deleteAll() }
         Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
         applied(p)
         assertEquals(["Proposal ${p.proposalId} is now APPLIED.".toString()], operatorTexts())
@@ -677,7 +679,7 @@ class AuditChangeApplySmokeTests {
     }
 
     private List<String> operatorTexts() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.agent.AgentMessage").condition("conversationId", CONV).condition("kind", "OPERATOR")
                     .orderBy("sequenceNum").useCache(false).list().collect { ((List<Map>) new JsonSlurper().parseText(it.contentJson as String))[0].text as String }
         }
@@ -732,8 +734,8 @@ class AuditChangeApplySmokeTests {
     void "exclusion apply refuses drift on the other side's filters or a source"() {
         Map p = propose("EXCLUSION_FILTER", [savedRunId: run2Id, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         String hash = call("plan#AuditChange", [proposalId: p.proposalId]).planHash
-        asSystem {
-            upsert(AUTO_FILTER, [automationId: AUTO2, fileSide: "FILE_2", sequenceNum: 2L, fieldExpression: '$.records[*].memoOrigin',
+        asSystem(ec) {
+            upsert(ec, AUTO_FILTER, [automationId: AUTO2, fileSide: "FILE_2", sequenceNum: 2L, fieldExpression: '$.records[*].memoOrigin',
                     operator: "EXCLUDE_IN", filterValues: "SHOPIFY", companyUserGroupId: MINE])
         }
         Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash])
@@ -743,7 +745,7 @@ class AuditChangeApplySmokeTests {
         assertEquals(2, automationFilterRowsOf(AUTO2, "FILE_2").size(), "the operator's FILE_2 filter is left alone")
 
         sync(AUTO2)
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition([automationId: AUTO2, fileSide: "FILE_2"]).one()
                     .set("systemEnumId", "NETSUITE").update()
         }
@@ -757,7 +759,7 @@ class AuditChangeApplySmokeTests {
 
     @Test
     void "a viewer's proposal waits for an editor and a viewer cannot plan"() {
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
         assertFalse(p.hadError as boolean, p.errorText as String)
         assertEquals("DRAFT", p.status)
@@ -768,7 +770,7 @@ class AuditChangeApplySmokeTests {
         Map viewerPlan = call("plan#AuditChange", [proposalId: p.proposalId])
         assertTrue(viewerPlan.hadError as boolean, "a viewer cannot plan")
         assertEquals("DRAFT", proposal(p.proposalId).status)
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID) }
         Map editorPlan = call("plan#AuditChange", [proposalId: p.proposalId])
         assertFalse(editorPlan.hadError as boolean, editorPlan.errorText as String)
         assertEquals("PLANNED", editorPlan.status)
@@ -780,8 +782,8 @@ class AuditChangeApplySmokeTests {
         Map after = [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]]
         Map p = propose("EXCLUSION_FILTER", target, after)
         String stored = call("plan#AuditChange", [proposalId: p.proposalId]).planHash
-        asSystem {
-            upsert(FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
+        asSystem(ec) {
+            upsert(ec, FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
                     operator: "EXCLUDE_IN", filterValues: "VOIDED", companyUserGroupId: MINE])
         }
         sync(AUTO)
@@ -799,12 +801,12 @@ class AuditChangeApplySmokeTests {
     void "apply goes stale when another part of the run changes"() {
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         String hash = call("plan#AuditChange", [proposalId: p.proposalId]).planHash
-        asSystem { ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", runId).one().set("ruleSetName", "Renamed memos").update() }
+        asSystem(ec) { ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", runId).one().set("ruleSetName", "Renamed memos").update() }
         assertEquals("STALE", call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash]).status, "a renamed run")
 
         Map q = propose("EXCLUSION_FILTER", [savedRunId: run2Id, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         String hash2 = call("plan#AuditChange", [proposalId: q.proposalId]).planHash
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(FILTER).condition([compareScopeId: scope2Id, fileSide: "FILE_2", sequenceNum: 1L]).one().set("filterValues", "DRAFT,VOID").update()
         }
         assertEquals("STALE", call("apply#AuditChange", [proposalId: q.proposalId, planHash: hash2]).status, "the other side's filter")
@@ -816,8 +818,8 @@ class AuditChangeApplySmokeTests {
     void "reverting an exclusion takes out only its own filter"() {
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
         assertFalse(call("apply#AuditChange", [proposalId: p.proposalId, planHash: call("plan#AuditChange", [proposalId: p.proposalId]).planHash]).hadError as boolean)
-        asSystem {
-            upsert(FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 3L, fieldExpression: '$.records[*].status',
+        asSystem(ec) {
+            upsert(ec, FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 3L, fieldExpression: '$.records[*].status',
                     operator: "EXCLUDE_IN", filterValues: "VOIDED", companyUserGroupId: MINE])
         }
         sync(AUTO)
@@ -835,14 +837,14 @@ class AuditChangeApplySmokeTests {
         Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo for {tranId}"])
         assertFalse(call("apply#AuditChange", [proposalId: p.proposalId, planHash: call("plan#AuditChange", [proposalId: p.proposalId]).planHash]).hadError as boolean)
         Map r = call("revert#AuditChange", [proposalId: p.proposalId])
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TAC_B")
                     .list().each { it.set("fixActionTemplate", "Ask the store twice").update() }
         }
         assertEquals("STALE", call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash]).status)
         Map again = call("revert#AuditChange", [proposalId: p.proposalId])
         assertTrue(again.hadError as boolean, "the stale revert is still open")
-        asSystem { ec.entity.find(PROPOSAL).condition("proposalId", r.newProposalId).one().set("status", "INVALID").update() }
+        asSystem(ec) { ec.entity.find(PROPOSAL).condition("proposalId", r.newProposalId).one().set("status", "INVALID").update() }
         assertTrue(call("revert#AuditChange", [proposalId: p.proposalId]).hadError as boolean, "an invalid one too")
         assertFalse(call("reject#AuditChange", [proposalId: r.newProposalId, reason: "superseded"]).hadError as boolean)
         assertFalse(call("revert#AuditChange", [proposalId: p.proposalId]).hadError as boolean, "once rejected, a new revert may start")
@@ -864,7 +866,7 @@ class AuditChangeApplySmokeTests {
         assertFalse(call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash]).hadError as boolean, "a person outside the loop may")
         Map reverted = AgentCallMarker.run { this.call("revert#AuditChange", [proposalId: p.proposalId]) }
         assertTrue((reverted.errorText as String).contains("AGENT_CANNOT_APPROVE"), reverted.errorText as String)
-        assertEquals(1L, asSystem { ec.entity.find(PROPOSAL).count() }, "no revert proposal was made")
+        assertEquals(1L, asSystem(ec) { ec.entity.find(PROPOSAL).count() }, "no revert proposal was made")
     }
 
     // ------------------------------------------------------------------ Task 5 fix round 1
@@ -982,7 +984,7 @@ class AuditChangeApplySmokeTests {
     @Test
     void "with no single primary id expression the exclusion is INVALID, never a guess"() {
         Map run = newRun("Memos with no key")
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", run.compareScopeId).condition("fileSide", "FILE_1")
                     .one().set("primaryIdExpression", null).update()
         }
@@ -1001,8 +1003,8 @@ class AuditChangeApplySmokeTests {
 
     /** The run's FILE_1 exclusion on NEW_FIELD, as config already holds it; its automation synced to it. */
     private void existingFilter(String operator, String values) {
-        asSystem {
-            upsert(FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: NEW_FIELD, operator: operator,
+        asSystem(ec) {
+            upsert(ec, FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: NEW_FIELD, operator: operator,
                     filterValues: values, companyUserGroupId: MINE])
         }
         sync(AUTO)
@@ -1075,7 +1077,7 @@ class AuditChangeApplySmokeTests {
             assertTrue(p.hadError as boolean, op)
             assertTrue((p.errorText as String).contains("EXCLUDE_IN"), p.errorText as String)
         }
-        assertEquals(0L, asSystem { ec.entity.find(PROPOSAL).count() }, "nothing was written")
+        assertEquals(0L, asSystem(ec) { ec.entity.find(PROPOSAL).count() }, "nothing was written")
         assertThrows(IllegalArgumentException) {
             AuditChangeLevers.merge("EXCLUSION_FILTER", AuditChangeLevers.current(ec, "EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"]),
                     [fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: ["HOTWAX", "STORE"]])
@@ -1103,7 +1105,7 @@ class AuditChangeApplySmokeTests {
 
     // ------------------------------------------------------------------ R55: a revert never undoes a later change
 
-    private long proposalCount() { asSystem { ec.entity.find(PROPOSAL).count() } }
+    private long proposalCount() { asSystem(ec) { ec.entity.find(PROPOSAL).count() } }
 
     private void refusedStale(Object proposalId) {
         long proposals = proposalCount(), versions = versionCount()
@@ -1150,7 +1152,7 @@ class AuditChangeApplySmokeTests {
         existingFilter("EXCLUDE_IN", "M1000001,M1000002")
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
         applied(p)
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(FILTER).condition([compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L]).one()
                     .set("filterValues", "M1000001,M1000002,M1088731,M5555555").update()
         }
@@ -1199,20 +1201,20 @@ class AuditChangeApplySmokeTests {
         String conv = "TAC_CONV_LONG"
         String longText = ("Exclude nothing yet; this is a long note. " * 250).take(10_000)
         assertEquals(10_000, longText.length())
-        asSystem {
-            upsert("darpan.agent.AgentConversation", [conversationId: conv, companyUserGroupId: MINE, userId: USER,
+        asSystem(ec) {
+            upsert(ec, "darpan.agent.AgentConversation", [conversationId: conv, companyUserGroupId: MINE, userId: USER,
                     auditId: "${MINE}_MC".toString(), createdDate: FROM])
-            upsert("darpan.agent.AgentMessage", [messageId: "TAC_LONG_USER", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 1,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAC_LONG_USER", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 1,
                     kind: "USER", contentJson: groovy.json.JsonOutput.toJson([[type: "text", text: longText]])])
-            upsert("darpan.agent.AgentMessage", [messageId: "TAC_LONG_TOOL", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 2,
+            upsert(ec, "darpan.agent.AgentMessage", [messageId: "TAC_LONG_TOOL", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 2,
                     kind: "TOOL_RESULT", contentJson: groovy.json.JsonOutput.toJson([text: longText])])
         }
-        def stored = asSystem { ec.entity.find("darpan.agent.AgentMessage").condition("messageId", "TAC_LONG_TOOL").useCache(false).one() }
+        def stored = asSystem(ec) { ec.entity.find("darpan.agent.AgentMessage").condition("messageId", "TAC_LONG_TOOL").useCache(false).one() }
         assertTrue((stored.contentJson as String).length() > 10_000, "the whole tool result is kept")
 
         Map ticket = call("create#BrainChangeTicket", [conversationId: conv, category: "FIX_WORDING", verbatimText: longText])
         assertFalse(ticket.hadError as boolean, ticket.errorText as String)
-        def ticketRow = asSystem { ec.entity.find("darpan.agent.BrainChangeTicket").condition("ticketId", ticket.ticketId).useCache(false).one() }
+        def ticketRow = asSystem(ec) { ec.entity.find("darpan.agent.BrainChangeTicket").condition("ticketId", ticket.ticketId).useCache(false).one() }
         assertEquals(longText, ticketRow.verbatimText)
 
         // A tree whose state is well over 4 KB, so the plan's beforeJson is too.
@@ -1238,7 +1240,7 @@ class AuditChangeApplySmokeTests {
     }
 
     private void setRule(Long sequenceNum, Map fields) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("sequenceNum", sequenceNum)
                     .one().setAll(fields).update()
         }
@@ -1279,18 +1281,18 @@ class AuditChangeApplySmokeTests {
     }
 
     private def proposal(Object id) {
-        return asSystem { ec.entity.find(PROPOSAL).condition("proposalId", id).useCache(false).one() }
+        return asSystem(ec) { ec.entity.find(PROPOSAL).condition("proposalId", id).useCache(false).one() }
     }
 
     private List<Map> filterRows() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find(FILTER).condition("compareScopeId", scopeId).condition("fileSide", "FILE_1").orderBy("sequenceNum")
                     .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
         }
     }
 
     private Map sourceRow() {
-        return asSystem {
+        return asSystem(ec) {
             def s = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", scopeId).condition("fileSide", "FILE_1")
                     .useCache(false).one()
             ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "sourceConfigId", "sourceConfigType",
@@ -1300,14 +1302,14 @@ class AuditChangeApplySmokeTests {
     }
 
     private List<Map> filterRowsOf(String scope, String side) {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find(FILTER).condition("compareScopeId", scope).condition("fileSide", side).orderBy("sequenceNum")
                     .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
         }
     }
 
     private List<Map> automationFilterRowsOf(String automationId, String side) {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find(AUTO_FILTER).condition("automationId", automationId).condition("fileSide", side).orderBy("sequenceNum")
                     .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
         }
@@ -1322,19 +1324,19 @@ class AuditChangeApplySmokeTests {
     private void setPermission(String permissionGroupId) {
         ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
                 .condition("tenantUserGroupId", MINE).condition("userId", USER).deleteAll()
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
                 permissionUserGroupId: permissionGroupId, fromDate: FROM])
     }
 
     private List<Map> automationFilterRows() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find(AUTO_FILTER).condition("automationId", AUTO).condition("fileSide", "FILE_1").orderBy("sequenceNum")
                     .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
         }
     }
 
     private def link(String statementCode) {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TAC_CHK")
                     .condition("statementId", "${MINE}_${statementCode}".toString()).useCache(false).list().find()
         }
@@ -1346,7 +1348,7 @@ class AuditChangeApplySmokeTests {
 
     /** The run's conclusion rules (RuleSetConclusionRule), read as system. */
     private List ruleRows() {
-        return asSystem {
+        return asSystem(ec) {
             ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).orderBy("sequenceNum").useCache(false).list()
         }
     }
@@ -1368,7 +1370,7 @@ class AuditChangeApplySmokeTests {
     }
 
     private long versionCount() {
-        return asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }
+        return asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() }
     }
 
     private void actAs(String tenant) {
@@ -1381,18 +1383,5 @@ class AuditChangeApplySmokeTests {
     /** Async pending marks from earlier saves land before a test looks. */
     private void settle() {
         sleep(1000)
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

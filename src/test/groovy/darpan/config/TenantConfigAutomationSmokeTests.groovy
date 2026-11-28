@@ -17,6 +17,8 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-160 phase A. A config version holds the tenant's automations too, because the morning audit runs an automation's
@@ -53,10 +55,10 @@ class TenantConfigAutomationSmokeTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
-            upsert("darpan.rule.RuleSet", [ruleSetId: RUN_ID, ruleSetName: "Morning invoices", companyUserGroupId: MINE])
+        asSystem(ec) {
+            upsert(ec, "darpan.rule.RuleSet", [ruleSetId: RUN_ID, ruleSetName: "Morning invoices", companyUserGroupId: MINE])
             // Used by the automation alone: a version must still hold it.
-            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: QUERY_ID, companyUserGroupId: MINE,
+            upsert(ec, "darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: QUERY_ID, companyUserGroupId: MINE,
                     description: "Invoices with no Etail id", recordType: "invoice"])
         }
     }
@@ -71,21 +73,21 @@ class TenantConfigAutomationSmokeTests {
     @BeforeEach
     void reset() {
         ec.message.clearErrors()
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find(FILTER).condition("companyUserGroupId", MINE).deleteAll()
             ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("companyUserGroupId", MINE).deleteAll()
             ec.entity.find(AUTOMATION).condition("companyUserGroupId", MINE).deleteAll()
-            upsert(AUTOMATION, [automationId: AUTO_ID, automationName: "Morning invoices", companyUserGroupId: MINE,
+            upsert(ec, AUTOMATION, [automationId: AUTO_ID, automationName: "Morning invoices", companyUserGroupId: MINE,
                     inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: RUN_ID, scheduleExpr: MORNING, windowTimeZone: "America/Los_Angeles",
                     isActive: "Y", nextScheduledFireTime: Timestamp.valueOf("2026-10-31 13:00:00")])
-            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO_ID, fileSide: "FILE_1",
+            upsert(ec, "darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO_ID, fileSide: "FILE_1",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                     safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"' + QUERY_ID + '"}}'])
-            upsert(FILTER, [automationId: AUTO_ID, fileSide: "FILE_1", sequenceNum: 1L, companyUserGroupId: MINE,
+            upsert(ec, FILTER, [automationId: AUTO_ID, fileSide: "FILE_1", sequenceNum: 1L, companyUserGroupId: MINE,
                     fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["Closed"]'])
         }
-        asSystem { ec.entity.find(PENDING).deleteAll() }
+        asSystem(ec) { ec.entity.find(PENDING).deleteAll() }
         marks.clear()   // the fixture's own writes marked KREWE: recorded, never sent
     }
 
@@ -115,20 +117,20 @@ class TenantConfigAutomationSmokeTests {
     void firingOrPausingAnAutomationIsNotAConfigChange() {
         Map first = snapshot()
         inTransaction {
-            asSystem {
+            asSystem(ec) {
                 ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one().setAll([isActive: "N",
                         lastScheduledFireTime: Timestamp.valueOf("2026-10-30 13:00:00"),
                         nextScheduledFireTime: Timestamp.valueOf("2026-11-01 13:00:00")]).update()
             }
         }
         assertEquals([], marks, "pausing or firing sends no pending mark")
-        assertNull(asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", MINE).one() }, "no version is owed")
+        assertNull(asSystem(ec) { ec.entity.find(PENDING).condition("companyUserGroupId", MINE).one() }, "no version is owed")
         Map again = call("snapshot#TenantConfig")
         assertFalse(again.created as boolean)
         assertEquals(first.id, again.version.id)
         // Positive control: a real config change on the same automation does send one, so the empty list above is meaningful.
         inTransaction {
-            asSystem { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().set("filterValues", '["Closed","Void"]').update() }
+            asSystem(ec) { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().set("filterValues", '["Closed","Void"]').update() }
         }
         assertEquals([MINE], marks*.tenantId, "a filter edit marks its tenant once the save commits")
     }
@@ -136,7 +138,7 @@ class TenantConfigAutomationSmokeTests {
     @Test
     void aRestorePutsTheAutomationsFilterAndScheduleBackAndLeavesItOn() {
         Map v1 = snapshot()
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().set("filterValues", '["Closed","Cancelled"]').update()
             ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one().setAll([scheduleExpr: "0 0 9 * * ?",
                     nextScheduledFireTime: Timestamp.valueOf("2026-10-31 16:00:00")]).update()
@@ -150,7 +152,7 @@ class TenantConfigAutomationSmokeTests {
         Timestamp restoredFrom = new Timestamp(System.currentTimeMillis())
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
         assertTrue(out.restored as boolean, out.errorText as String)
-        def automation = asSystem { ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one() }
+        def automation = asSystem(ec) { ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one() }
         assertEquals(MORNING, automation.scheduleExpr)
         assertEquals("Y", automation.isActive, "a restore never pauses or starts an automation")
         // The next firing follows the restored schedule: the first 6:00 in the automation's own zone after the restore.
@@ -160,22 +162,22 @@ class TenantConfigAutomationSmokeTests {
         assertEquals(LocalTime.of(6, 0), nextLocal.toLocalTime(), "6:00 in Los Angeles, the restored schedule: ${nextLocal}")
         assertTrue(next.after(restoredFrom) && next.time - restoredFrom.time <= 86_400_000L,
                 "the first 6:00 after the restore, not a later one: ${nextLocal}, restored at ${restoredFrom}")
-        assertEquals('["Closed"]', asSystem { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().filterValues })
+        assertEquals('["Closed"]', asSystem(ec) { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().filterValues })
         assertEquals(v1.hash, out.after.hash, "exactly version 1 again")
     }
 
     @Test
     void anAutomationAddedSinceIsKeptAndListed() {
         Map v1 = snapshot()
-        asSystem {
-            upsert(AUTOMATION, [automationId: "TCAU_LATER", automationName: "Evening invoices", companyUserGroupId: MINE,
+        asSystem(ec) {
+            upsert(ec, AUTOMATION, [automationId: "TCAU_LATER", automationName: "Evening invoices", companyUserGroupId: MINE,
                     inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: RUN_ID, scheduleExpr: "0 0 18 * * ?", isActive: "N"])
         }
         Map preview = call("preview#TenantConfigRestore", [id: v1.id])
         assertTrue((preview.plan.kept as List<Map>).contains([kind: "AUTOMATION", label: "Evening invoices"]), "${preview.plan.kept}")
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
         assertTrue(out.restored as boolean, out.errorText as String)
-        assertNotNull(asSystem { ec.entity.find(AUTOMATION).condition("automationId", "TCAU_LATER").one() }, "kept, not deleted")
+        assertNotNull(asSystem(ec) { ec.entity.find(AUTOMATION).condition("automationId", "TCAU_LATER").one() }, "kept, not deleted")
     }
 
     private Map snapshot() {
@@ -193,18 +195,5 @@ class TenantConfigAutomationSmokeTests {
 
     private void inTransaction(Closure work) {
         ec.transaction.runRequireNew(60, "test save", work)
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

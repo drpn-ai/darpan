@@ -14,6 +14,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-160 phase A. facade.TenantConfigFacadeServices: the ACTIVE tenant's config (audits, statements, checks, runs,
@@ -43,24 +45,24 @@ class TenantConfigVersionSmokeTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
-        asSystem {
-            upsert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
+        asSystem(ec) {
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant",
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
             // seedCompanyScope makes only the editor permission group.
-            upsert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
+            upsert(ec, "moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
                     description: "Can view tenant-scoped Darpan data", groupTypeEnumId: "UgtDarpanPermission"])
             [MINE, OTHER].each { String t ->
-                upsert("darpan.audit.Audit", [auditId: "${t}_MC".toString(), companyUserGroupId: t, auditCode: "month-close",
+                upsert(ec, "darpan.audit.Audit", [auditId: "${t}_MC".toString(), companyUserGroupId: t, auditCode: "month-close",
                         auditName: "Month close", periodEnumId: "AUDP_MONTH"])
-                upsert("darpan.audit.AuditStatement", [statementId: "${t}_R2".toString(), companyUserGroupId: t, auditId: "${t}_MC".toString(),
+                upsert(ec, "darpan.audit.AuditStatement", [statementId: "${t}_R2".toString(), companyUserGroupId: t, auditId: "${t}_MC".toString(),
                         statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                         statementText: STATEMENT_TEXT])
-                upsert("darpan.audit.AuditCheck", [checkId: "${t}_INV".toString(), companyUserGroupId: t,
+                upsert(ec, "darpan.audit.AuditCheck", [checkId: "${t}_INV".toString(), companyUserGroupId: t,
                         checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
-                upsert("darpan.audit.AuditStatementCheck", [checkId: "${t}_INV".toString(), statementId: "${t}_R2".toString(),
+                upsert(ec, "darpan.audit.AuditStatementCheck", [checkId: "${t}_INV".toString(), statementId: "${t}_R2".toString(),
                         companyUserGroupId: t, sequenceNum: 1L])
             }
-            upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TCV_NS_AUTH", description: "krewe netsuite",
+            upsert(ec, "darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TCV_NS_AUTH", description: "krewe netsuite",
                     companyUserGroupId: MINE, authType: "BASIC", username: "svc-user", password: PASSWORD])
         }
     }
@@ -73,7 +75,7 @@ class TenantConfigVersionSmokeTests {
     @BeforeEach
     void reset() {
         ec.message.clearErrors()
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R2".toString()).one()
                     .set("statementText", STATEMENT_TEXT).update()
@@ -110,13 +112,13 @@ class TenantConfigVersionSmokeTests {
         assertFalse(again.hadError as boolean, again.errorText as String)
         assertFalse(again.created as boolean)
         assertEquals(first.id, ((Map) again.version).id)
-        assertEquals(1L, asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() })
+        assertEquals(1L, asSystem(ec) { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).count() })
     }
 
     @Test
     void aChangeMakesANewVersionChainedToTheLast() {
         Map first = (Map) call("snapshot#TenantConfig").version
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R2".toString()).one()
                     .set("statementText", "Every invoice has an Etail id.").update()
         }
@@ -131,7 +133,7 @@ class TenantConfigVersionSmokeTests {
     @Test
     void versionsAreListedNewestFirstWithoutThePack() {
         call("snapshot#TenantConfig")
-        asSystem {
+        asSystem(ec) {
             ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R2".toString()).one()
                     .set("statementText", "Reworded.").update()
         }
@@ -146,7 +148,7 @@ class TenantConfigVersionSmokeTests {
 
     @Test
     void anotherTenantsVersionReadsAsNotFound() {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue(VERSION).setAll([configVersionId: "TCV_OTHERS", companyUserGroupId: OTHER, versionSeq: 1L,
                     contentHash: "0" * 64, bundleVersion: 1L, packJson: '{"audits":[]}', changeSource: "MANUAL",
                     createdDate: ec.user.nowTimestamp]).create()
@@ -163,7 +165,7 @@ class TenantConfigVersionSmokeTests {
     @Test
     void aViewOnlyUserCanReadButNotSnapshot() {
         call("snapshot#TenantConfig")
-        asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
+        asSystem(ec) { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map denied = call("snapshot#TenantConfig", [reason: "viewer"])
         assertEquals("Your active tenant only has view access, so it cannot keep a config version.", (denied.errorText as String).trim(),
                 "a viewer cannot write a version")
@@ -180,28 +182,15 @@ class TenantConfigVersionSmokeTests {
     }
 
     private String rawPack(String id) {
-        return asSystem { ec.entity.find(VERSION).condition("configVersionId", id).one().packJson as String }
+        return asSystem(ec) { ec.entity.find(VERSION).condition("configVersionId", id).one().packJson as String }
     }
 
     private void setPermission(String permissionGroupId) {
         ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
                 .condition("tenantUserGroupId", MINE).condition("userId", USER)
                 .deleteAll()
-        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE,
+        upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE,
                 userId: USER, permissionUserGroupId: permissionGroupId,
                 fromDate: FROM])
-    }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            return work.call()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-    }
-
-    private void upsert(String entityName, Map<String, Object> fields) {
-        ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
 }

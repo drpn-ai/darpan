@@ -14,6 +14,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
 
 /**
  * DAR-BE-195. Who may use the CLI, where, and how long a sign-in lasts (DAR-BE-261: 7 days for every role, admins included).
@@ -39,7 +40,7 @@ class CliAccessSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "cli-access")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             [ANN, ED, STAFF].each { String u ->
                 ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: u, username: u.toLowerCase(), userFullName: u,
                         emailAddress: "${u.toLowerCase()}@example.com".toString(), disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
@@ -64,7 +65,7 @@ class CliAccessSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem { [CliAccess.EVENT, CliAccess.GRANT].each { ec.entity.find(it).deleteAll() } }
+        asSystem(ec) { [CliAccess.EVENT, CliAccess.GRANT].each { ec.entity.find(it).deleteAll() } }
     }
 
     private void role(String tenant, String user, String group, Map extra = [:]) {
@@ -73,18 +74,13 @@ class CliAccessSmokeTests {
     }
 
     private void grant(String id, String tenant, String user, Map extra = [:]) {
-        asSystem {
+        asSystem(ec) {
             ec.entity.makeValue(CliAccess.GRANT).setAll([grantId: id, companyUserGroupId: tenant, userId: user, fromDate: ago(HOUR),
                     statusId: "ACTIVE"] + extra).create()
         }
     }
 
     private static Timestamp ago(long ms) { new Timestamp(System.currentTimeMillis() - ms) }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
 
     @Test
     void "DAR-BE-261: a sign-in lasts 7 days for every role, a tenant admin or Darpan admin no longer than the rest, 0 for no role"() {
@@ -146,7 +142,7 @@ class CliAccessSmokeTests {
     void "a paused grant or a removed role counts on the next call"() {
         grant("G_A", ALPHA, ANN)
         assertNull(CliAccess.tenantProblem(ec, ANN, ALPHA))
-        asSystem {
+        asSystem(ec) {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", ALPHA)
                     .condition("userId", ANN).deleteAll()
         }
@@ -155,7 +151,7 @@ class CliAccessSmokeTests {
         } finally {
             role(ALPHA, ANN, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID)
         }
-        asSystem { ec.entity.find(CliAccess.GRANT).condition("grantId", "G_A").updateAll([statusId: "PAUSED"]) }
+        asSystem(ec) { ec.entity.find(CliAccess.GRANT).condition("grantId", "G_A").updateAll([statusId: "PAUSED"]) }
         assertTrue(CliAccess.tenantProblem(ec, ANN, ALPHA)?.contains("not turned on"), "paused")
     }
 }

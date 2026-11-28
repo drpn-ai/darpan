@@ -18,6 +18,8 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
+import static darpan.reconciliation.support.TestHelpers.asSystem
+import static darpan.reconciliation.support.TestHelpers.upsert
 
 /**
  * DAR-BE-194. Only a Darpan admin grants, changes, pauses, unpauses or revokes a user's AI access, and reads usage; a
@@ -48,21 +50,21 @@ class AgentAccessAdminSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "agent-access-admin")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        asSystem {
+        asSystem(ec) {
             [ALPHA, BETA].each { String t ->
-                upsert("moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
-                upsert("darpan.agent.AgentConversation", [conversationId: "${t}_CONV".toString(), companyUserGroupId: t, userId: EDITOR, createdDate: FROM])
+                upsert(ec, "moqui.security.UserGroup", [userGroupId: t, description: "${t} Co".toString(), groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+                upsert(ec, "darpan.agent.AgentConversation", [conversationId: "${t}_CONV".toString(), companyUserGroupId: t, userId: EDITOR, createdDate: FROM])
             }
             [[VIEWER, VIEWER_USERNAME], [OUTSIDER, "aaa.outsider"], [SUPER_ID, SUPER_USERNAME]].each { List u ->
-                upsert("moqui.security.UserAccount", [userId: u[0], username: u[1], userFullName: u[1], emailAddress: "${u[1]}@example.com".toString(),
+                upsert(ec, "moqui.security.UserAccount", [userId: u[0], username: u[1], userFullName: u[1], emailAddress: "${u[1]}@example.com".toString(),
                         disabled: "N", requirePasswordChange: "N"])
             }
-            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
+            upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: FROM])
             [[EDITOR, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], [VIEWER, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID]].each { List m ->
-                upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: m[0], fromDate: FROM])
+                upsert(ec, "moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: m[0], fromDate: FROM])
                 [ALPHA, BETA].each { String t ->
-                    upsert("moqui.security.UserGroupMember", [userGroupId: t, userId: m[0], fromDate: FROM])
-                    upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: t, userId: m[0],
+                    upsert(ec, "moqui.security.UserGroupMember", [userGroupId: t, userId: m[0], fromDate: FROM])
+                    upsert(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: t, userId: m[0],
                             permissionUserGroupId: m[1], fromDate: FROM])
                 }
             }
@@ -74,7 +76,7 @@ class AgentAccessAdminSmokeTests {
 
     @BeforeEach
     void reset() {
-        asSystem { ["darpan.agent.AgentTurn", "darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"].each { ec.entity.find(it).deleteAll() } }
+        asSystem(ec) { ["darpan.agent.AgentTurn", "darpan.agent.AgentAccessGrantEvent", "darpan.agent.AgentAccessGrant"].each { ec.entity.find(it).deleteAll() } }
     }
 
     // ------------------------------------------------------------------ helpers
@@ -92,18 +94,18 @@ class AgentAccessAdminSmokeTests {
     }
 
     private Map grantRow(String grantId) {
-        asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", grantId).useCache(false).one()?.getMap() }
+        asSystem(ec) { ec.entity.find("darpan.agent.AgentAccessGrant").condition("grantId", grantId).useCache(false).one()?.getMap() }
     }
 
     private List<Map> events(String grantId) {
-        asSystem { ec.entity.find("darpan.agent.AgentAccessGrantEvent").condition("grantId", grantId).orderBy("eventId").useCache(false).list()*.getMap() }
+        asSystem(ec) { ec.entity.find("darpan.agent.AgentAccessGrantEvent").condition("grantId", grantId).orderBy("eventId").useCache(false).list()*.getMap() }
     }
 
-    private long grantCount() { asSystem { ec.entity.find("darpan.agent.AgentAccessGrant").useCache(false).count() } }
+    private long grantCount() { asSystem(ec) { ec.entity.find("darpan.agent.AgentAccessGrant").useCache(false).count() } }
 
     private void turn(String id, String grantId, String tenant, String user, String role, String model, long micros, Timestamp started) {
-        asSystem {
-            upsert("darpan.agent.AgentTurn", [turnId: id, conversationId: "${tenant}_CONV".toString(), companyUserGroupId: tenant, userId: user,
+        asSystem(ec) {
+            upsert(ec, "darpan.agent.AgentTurn", [turnId: id, conversationId: "${tenant}_CONV".toString(), companyUserGroupId: tenant, userId: user,
                     grantId: grantId, role: role, model: model, requestCount: 2L, inputTokens: 10L, outputTokens: 100L, cacheReadTokens: 1000L,
                     cacheWriteTokens: 50L, costMicros: micros, startedDate: started])
         }
@@ -131,13 +133,6 @@ class AgentAccessAdminSmokeTests {
         if (holder.failure) throw (Throwable) holder.failure
         return holder
     }
-
-    private <T> T asSystem(Closure<T> work) {
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try { return work.call() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-    }
-
-    private void upsert(String entityName, Map fields) { ec.entity.makeValue(entityName).setAll(fields).createOrUpdate() }
 
     // ------------------------------------------------------------------ tests
 
@@ -186,7 +181,7 @@ class AgentAccessAdminSmokeTests {
         assertTrue(h.hasError as boolean, "a Darpan admin is refused a grant")
         assertTrue((h.errors as String).contains("Darpan admin"), "the refusal says why: ${h.errors}")
         assertEquals(0L, grantCount(), "nothing written")
-        assertEquals(AgentAccess.LIVE, asSystem { AgentAccess.access(ec, ALPHA, SUPER_ID) }.state)
+        assertEquals(AgentAccess.LIVE, asSystem(ec) { AgentAccess.access(ec, ALPHA, SUPER_ID) }.state)
         assertTrue(admin("create#AgentAccessGrant", [costCapUsd: 5, userId: OUTSIDER, tenantUserGroupId: ALPHA]).hasError as boolean, "a plain non-member is still refused")
     }
 
@@ -261,7 +256,7 @@ class AgentAccessAdminSmokeTests {
         adminOk("update#AgentAccessGrant", [grantId: id, costCapUsd: 2])
         adminOk("revoke#AgentAccessGrant", [grantId: id])
         assertTrue(admin("unpause#AgentAccessGrant", [grantId: id]).hasError as boolean)
-        List<Map> rows = asSystem { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", id).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
+        List<Map> rows = asSystem(ec) { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", id).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
         assertEquals(["create#AgentAccessGrant", "pause#AgentAccessGrant", "unpause#AgentAccessGrant", "update#AgentAccessGrant", "revoke#AgentAccessGrant"]
                 .collect { "${SVC}.${it}".toString() }, rows*.serviceName, "one row per change; the refused unpause adds none")
         assertTrue(rows.every { it.adminUserId == SUPER_ID && it.targetType == "AgentAccessGrant" })

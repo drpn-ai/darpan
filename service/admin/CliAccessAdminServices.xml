@@ -7,7 +7,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="list" noun="CliAccessGrants" allow-remote="true" authenticate="true">
+    <service verb="list" noun="CliAccessGrants" allow-remote="true" authenticate="true" authz-action="view">
         <description>CLI grants across tenants with their state and the sign-in lifetime they give, by tenant, user or status.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId"/>
@@ -117,7 +117,7 @@
     </service>
 
     <!-- DAR-BE-209: users ask for the CLI from the app; a Darpan admin approves (making the grant) or declines. -->
-    <service verb="list" noun="CliAccessRequests" allow-remote="true" authenticate="true">
+    <service verb="list" noun="CliAccessRequests" allow-remote="true" authenticate="true" authz-action="view">
         <description>CLI access requests across tenants, newest first; PENDING unless a status is given.</description>
         <in-parameters>
             <parameter name="statusId"><description>PENDING (default), APPROVED or DECLINED.</description></parameter>

@@ -2,7 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="get" noun="AdminSessionInfo" allow-remote="true">
+    <service verb="get" noun="AdminSessionInfo" allow-remote="true" authz-action="view">
         <description>Fence probe + admin-app route guard: returns the operator identity when the caller
             passes the DARPAN_ADMIN_API artifact fence and the isSuperAdmin() content gate.
             A non-super-admin caller is denied at the artifact layer before this body runs.</description>

@@ -8,7 +8,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="list" noun="AgentAccessGrants" allow-remote="true" authenticate="true">
+    <service verb="list" noun="AgentAccessGrants" allow-remote="true" authenticate="true" authz-action="view">
         <description>Grants across tenants with their spend and state, by tenant, user or status.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId"/>
@@ -120,7 +120,7 @@
         </actions>
     </service>
 
-    <service verb="get" noun="AgentUsage" allow-remote="true" authenticate="true">
+    <service verb="get" noun="AgentUsage" allow-remote="true" authenticate="true" authz-action="view">
         <description>AI spend for a user, a tenant or both over the last days: totals, by day, by role and model, and the grants.</description>
         <in-parameters>
             <parameter name="userId"/>

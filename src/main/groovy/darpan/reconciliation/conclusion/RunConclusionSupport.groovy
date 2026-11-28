@@ -127,7 +127,7 @@ class RunConclusionSupport {
         try {
             Map prepared = evidenceOf(args)
             Closure<Map> finding = (Closure<Map>) prepared.finding
-            DiffDocumentStreamSupport.forEachRow((File) args.diffFile) { Map row ->
+            readRows((File) args.diffFile) { Map row ->
                 Map f = finding(row)
                 visit.call(row, engine ? engine.conclude([f], asOf)[0] :
                         ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides, asOf)))
@@ -159,7 +159,7 @@ class RunConclusionSupport {
         // Pass 1: which keys do the findings need?
         Set<String> neededKeys = new HashSet<>()
         Set<String> neededFirstFields = new HashSet<>()
-        DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+        readRows(diffFile) { Map row ->
             String key = row.get("primaryId")?.toString()
             if (key) {
                 neededKeys.add(key)
@@ -250,14 +250,14 @@ class RunConclusionSupport {
             // DAR-BE-151: only the rows its statements read count toward the cap; the tree concludes the others. OC198 (DAR-OPS-029
             // S03b): past the cap the brain takes the first by key, not by row order, so pass 1 reads only the keys.
             List<String> brainKeys = []
-            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+            readRows(diffFile) { Map row ->
                 if (finding(row).bucket in darpan.conclusion.brain.BrainConclude.BUCKETS) brainKeys.add(row.get("primaryId")?.toString() ?: "")
             }
             int total = brainKeys.size()
             Set<String> taken = total > maxBrainFindings ? (brainKeys.sort(false).take(maxBrainFindings) as Set<String>) : null
             brainKeys = null
             List<Map> findings = []
-            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+            readRows(diffFile) { Map row ->
                 Map f = finding(row)
                 if (!(f.bucket in darpan.conclusion.brain.BrainConclude.BUCKETS)) return
                 String key = row.get("primaryId")?.toString()
@@ -363,7 +363,7 @@ class RunConclusionSupport {
                                                                       Set<String> hiddenCodes) {
         Map<String, Map<String, String>> hidingCode = [:]
         Map<String, Set<String>> shown = [:]
-        DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+        readRows(diffFile) { Map row ->
             String bucket = (String) finding(row).bucket
             String key = row.get("primaryId")?.toString()
             if (!key || !(bucket in ["DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2"])) return
@@ -389,6 +389,15 @@ class RunConclusionSupport {
         return hiddenRepeats.get(repeatingSide)?.get(key)
     }
 
+    /**
+     * DAR-OPS-029 S99-018: every read-only pass reads the whole document or refuses. A cut-off or unparseable result file
+     * holds fewer rows than the run found, and fewer rows must never read as fewer findings (the rewrite already refuses, OC56).
+     */
+    private static void readRows(File diffFile, Closure visit) {
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(diffFile, visit)
+        if (!scan.complete) throw new IllegalStateException("Not concluded: ${scan.problem()}".toString())
+    }
+
     /** DAR-BE-151: what BrainFactAdapter reads of a finding, and nothing else. */
     private static Map slimFinding(Map f, String key) {
         Map sides = (Map) (f.sides ?: [:])
@@ -408,7 +417,7 @@ class RunConclusionSupport {
         if (!lookups || fetch == null) return [:]
         Map plan = ConclusionLookupSupport.plan(ConclusionRuleLogicGenerator.assignNodes(rules), lookups)
         Map<String, Set<String>> wanted = lookups.collectEntries { [(it.name): new LinkedHashSet<String>()] }
-        DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+        readRows(diffFile) { Map row ->
             Map f = finding(row)
             String reached = engine.conclude([f], asOf)[0].nodeId
             lookups.each { Map l ->

@@ -55,10 +55,12 @@ class QuestionOutcomeSupport {
     static Set<String> findingKeys(File resultDocument) {
         Set<String> keys = new HashSet<String>()
         if (resultDocument == null || !resultDocument.isFile()) return keys
-        DiffDocumentStreamSupport.forEachRow(resultDocument) { Map row ->
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(resultDocument) { Map row ->
             Object key = row.get("primaryId") ?: row.get("id")
             if (key != null && key.toString().trim()) keys.add(key.toString().trim())
         }
+        // DAR-OPS-029 S99-018: a cut-off document's missing findings would pass their records down as "yes".
+        if (!scan.complete) throw new IllegalStateException("The question's result is incomplete: ${scan.problem()}".toString())
         return keys
     }
 }

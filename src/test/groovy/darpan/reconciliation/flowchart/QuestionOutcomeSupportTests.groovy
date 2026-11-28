@@ -7,6 +7,8 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-UI-048. What "yes" and "no" mean for each kind of question. */
 class QuestionOutcomeSupportTests {
@@ -31,6 +33,18 @@ class QuestionOutcomeSupportTests {
     }
 
     Map split(Map m) { return QuestionOutcomeSupport.split([outDir: tmp.toFile(), token: "q"] + m) }
+
+    /** DAR-OPS-029 S99-018: a cut-off result document fails the question; its missing findings must never read as "yes". */
+    @Test
+    void aCutOffDocumentFailsInsteadOfPassingRecordsAsYes() {
+        File whole = doc("d", ['{"type":"MISSING_IN_FILE_2","id":"K1"}', '{"type":"MISSING_IN_FILE_2","id":"K2"}'])
+        File cut = tmp.resolve("cut").toFile()
+        cut.text = whole.text.readLines().take(4).join("\n") + "\n"
+        IllegalStateException refused = assertThrows(IllegalStateException) {
+            split(scopeMode: "COMPARE", file1KeysFile: keys("f1", ["K1", "K2", "K3"]), resultDocument: cut)
+        }
+        assertTrue(refused.message.contains("cut off"), refused.message)
+    }
 
     @Test
     void theStartIsAllYes() {

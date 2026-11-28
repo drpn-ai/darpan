@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -363,6 +364,20 @@ class RunConclusionSupportTests {
         File today = doc()
         RunConclusionSupport.concludeRun(args(today, rules))
         assertEquals("UNEXPLAINED", onlyConclusion(today).code, "no run time: the clock, years later")
+    }
+
+    /** DAR-OPS-029 S99-018: a cut-off result document is no answer for the read-only pass either (the rewrite already refuses, OC56). */
+    @Test
+    void concludeEachRefusesACutOffDocument() {
+        File whole = writeDiffDocument([missingRow("A${SEP}1", FILE1, FILE2), missingRow("B${SEP}1", FILE1, FILE2)])
+        File cut = new File(tempDir, "cut-${whole.name}")
+        String text = whole.text
+        cut.text = text.substring(0, text.lastIndexOf("]"))
+        List<String> visited = []
+        IllegalStateException refused = assertThrows(IllegalStateException) {
+            RunConclusionSupport.concludeEach(args(cut, BACKORDER_RULES)) { Map row, Map c -> visited << (c.code as String) }
+        }
+        assertTrue(refused.message.contains("cut off"), refused.message)
     }
 
     @Test

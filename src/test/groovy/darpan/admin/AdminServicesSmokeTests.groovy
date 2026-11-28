@@ -478,10 +478,30 @@ class AdminServicesSmokeTests {
         assertAudit("admin.UserAdminServices.create#UserAccount", "User", userId, "Created user ${username}.")
     }
 
+    // OC85 (standing rule: every user creation saves an email): password reset mails its code there, so an account made
+    // without one is a support ticket later. Blank and missing are both refused, before the framework creates anything.
+    @Test
+    void createUserWithoutAnEmailIsRefusedAndCreatesNothing() {
+        [null, "   "].each { String email ->
+            String username = uniqueUsername()
+            Map params = [username: username, tempPassword: STRONG_PASSWORD]
+            if (email != null) params.emailAddress = email
+            Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.create#UserAccount", params)
+
+            assertTrue(out.hasError as boolean, "no email must be refused: ${out}")
+            assertNotEquals(true, out.result?.ok)
+            assertNull(out.result?.userId)
+            assertEquals(0, ec.entity.find("moqui.security.UserAccount").condition("username", username)
+                    .disableAuthz().useCache(false).count())
+        }
+        assertNoAudit()
+    }
+
     @Test
     void createUserWithADuplicateUsernameWritesNoMembershipOrAudit() {
         Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.create#UserAccount",
-                [username: TARGET_USERNAME, tempPassword: STRONG_PASSWORD])
+                [username: TARGET_USERNAME, emailAddress: "dup.${uniqueUsername()}@created.example.org".toString(),
+                 tempPassword: STRONG_PASSWORD])
 
         assertTrue(out.errors.any { it.contains("already in use") }, "framework refusal surfaces: ${out.errors}")
         assertNotEquals(true, out.result?.ok)
@@ -493,7 +513,7 @@ class AdminServicesSmokeTests {
     void createUserWithAWeakPasswordCreatesNothing() {
         String username = uniqueUsername()
         Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.create#UserAccount",
-                [username: username, tempPassword: "weak"])
+                [username: username, emailAddress: "${username}@created.example.org".toString(), tempPassword: "weak"])
 
         assertTrue(out.hasError)
         assertNotEquals(true, out.result?.ok)
@@ -1004,7 +1024,8 @@ class AdminServicesSmokeTests {
                 "admin.TenantAdminServices.update#Tenant"          : [tenantUserGroupId: ALPHA, label: "Hijacked"],
                 "admin.TenantAdminServices.deactivate#Tenant"      : [tenantUserGroupId: ALPHA],
                 "admin.TenantAdminServices.reactivate#Tenant"      : [tenantUserGroupId: BRAVO],
-                "admin.UserAdminServices.create#UserAccount"       : [username: "sneaky.user", tempPassword: STRONG_PASSWORD],
+                "admin.UserAdminServices.create#UserAccount"       : [username: "sneaky.user", emailAddress: "sneaky@example.com",
+                                                                      tempPassword: STRONG_PASSWORD],
                 "admin.UserAdminServices.update#UserAccount"       : [userId: TARGET_ID, userFullName: "Hijacked"],
                 "admin.UserAdminServices.disable#UserAccount"      : [userId: TARGET_ID],
                 "admin.UserAdminServices.enable#UserAccount"       : [userId: DORMANT_ID],

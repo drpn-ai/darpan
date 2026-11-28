@@ -9,7 +9,8 @@
         <in-parameters>
             <parameter name="username" required="true"><description>Login username.</description></parameter>
             <parameter name="userFullName"><description>Display name.</description></parameter>
-            <parameter name="emailAddress"><description>Contact email; must be unique when provided.</description>
+            <parameter name="emailAddress" required="true"><description>Contact email, required and unique: password
+                reset sends its code here (standing rule: every user creation saves an email).</description>
                 <text-email/></parameter>
             <parameter name="tempPassword" required="true"><description>Temporary password; user must change it at first login.</description></parameter>
         </in-parameters>
@@ -21,11 +22,12 @@
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!username?.trim()"><return error="true" message="Username is required."/></if>
+            <if condition="!emailAddress?.trim()"><return error="true" message="An email address is required: password reset sends its code there."/></if>
             <if condition="!tempPassword"><return error="true" message="Temporary password is required."/></if>
             <!-- All credential work (password policy, hashing, history) stays in the framework service. -->
             <service-call name="org.moqui.impl.UserServices.create#UserAccount" out-map="createdAccount"
                     in-map="[username: username.trim(), userFullName: userFullName?.trim(),
-                        emailAddress: emailAddress?.trim() ?: null,
+                        emailAddress: emailAddress.trim(),
                         newPassword: tempPassword, newPasswordVerify: tempPassword, requirePasswordChange: 'Y']"/>
             <if condition="!createdAccount?.userId"><return/></if>
             <!-- ok turns true once the framework call succeeds, as it always has: a later write that

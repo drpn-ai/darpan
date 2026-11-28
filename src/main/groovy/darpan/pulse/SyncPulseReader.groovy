@@ -71,7 +71,8 @@ class SyncPulseReader {
     static void resetForTests() { resetHooks() }
 
     /**
-     * The upstream side of the pair's check for [from, thru) on its window field, with the side's filters.
+     * The upstream side of the pair's check from from to thru on its window field (read as the check's extractor reads its
+     * window pair), with the side's filters.
      *
      * <p>DAR-BE-377: each record is dated and named by the fields the upstream endpoint's connector names
      * (SyncPulseSupport.pulseFieldsOf: orderDate / orderName for HotWax orders, createdAt / name for Shopify orders).</p>
@@ -165,7 +166,7 @@ class SyncPulseReader {
     }
 
     /** keys split into those a read by key accepts (each once, in order) and those it would refuse. */
-    static Map validKeys(Collection keys) {
+    private static Map validKeys(Collection keys) {
         LinkedHashSet<String> valid = new LinkedHashSet<String>()
         List<String> invalid = []
         (keys ?: []).each { Object k ->
@@ -226,7 +227,7 @@ class SyncPulseReader {
      * .keep.json beside the file) the extract also holds the records Keep set aside, and only the kept ones are visited
      * (KeepArtifacts.forEachKeptRecord); with no .keep.json every record, as before.
      */
-    static void forEachPresentRecord(File file, Closure visit) {
+    private static void forEachPresentRecord(File file, Closure visit) {
         if (KeepArtifacts.keepFile(file).isFile()) KeepArtifacts.forEachKeptRecord(file, visit)
         else JsonRecordStream.forEachRecord(file, "records", visit)
     }

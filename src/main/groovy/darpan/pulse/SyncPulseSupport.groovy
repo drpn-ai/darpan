@@ -32,8 +32,8 @@ import static darpan.common.ValueSupport.normalize
  * reads its check's upstream side for a short window, asks the target side which of those records it holds, and writes
  * one SyncPulseSample. A record absent past its allowance gets one open SyncPulseOrder, closed when the record arrives.
  *
- * <p><strong>Window.</strong> orderDate in (now − allowance − 2 × cadence, now], with the effective allowance and
- * cadence for the tenant-local date (a peak period's PeakPeriodSync values, else the pair's own). The extra cadence is
+ * <p><strong>Window.</strong> orderDate from now − allowance − margin to now (pulseWindow; its bounds are read as the
+ * check's extractor reads its window pair), with the effective allowance and cadence for the tenant-local date (a peak period's PeakPeriodSync values, else the pair's own). The extra cadence is
  * the margin that lets one skipped pulse lose nothing. Open orders are re-asked by key every pulse, so an order that has
  * left the window still closes when it arrives.</p>
  *
@@ -78,8 +78,6 @@ class SyncPulseSupport {
         if (upstream != null) upstreamRead = upstream
         if (target != null) targetRead = target
     }
-
-    static Closure getUpstreamReader() { return upstreamRead }
 
     static void resetHooks() { upstreamRead = null; targetRead = null }
 
@@ -282,7 +280,8 @@ class SyncPulseSupport {
     }
 
     /**
-     * The read window of one pulse: (now − allowance − margin, now]. The margin is the longest gap between two pulses after
+     * The read window of one pulse: now − allowance − margin to now, read as the check's extractor reads its window pair
+     * (the margin makes the edges moot). The margin is the longest gap between two pulses after
      * a skip, 2 × cadence + DUE_SLACK + one tick, so an order passing the allowance in that gap is still read. A null
      * cadence adds no margin.
      */
@@ -505,7 +504,7 @@ class SyncPulseSupport {
      * DAR-BE-382. A sample's message cut to fit its column, "..." marking the cut. Prod 2026-11-26: a Spark error past 255
      * characters rolled back the FAILED sample itself (the old cut was at 4,000).
      */
-    static String sampleMessage(String message) {
+    private static String sampleMessage(String message) {
         if (message == null || message.length() <= MESSAGE_MAX) return message
         return message.take(MESSAGE_MAX - 3) + "..."
     }
@@ -580,7 +579,7 @@ class SyncPulseSupport {
      * pulse's read window yet the upstream read did not return it, or it is older than the window and has been open longer
      * than the allowance + 24h (the daily check owns it from there).
      */
-    static boolean leftTheCheck(Map order, Instant now, int allowanceMinutes, Instant windowFrom, Set<String> upstreamKeys) {
+    private static boolean leftTheCheck(Map order, Instant now, int allowanceMinutes, Instant windowFrom, Set<String> upstreamKeys) {
         Object created = order.get("sourceCreatedStamp")
         if (created != null) {
             Instant createdAt = created instanceof Instant ? (Instant) created : ((Date) created).toInstant()
@@ -630,7 +629,7 @@ class SyncPulseSupport {
      * The pair's check, when it may pulse: present in the pair's tenant, active, not archived, and an endpoint a pulse can
      * read upstream (canPulse) on the pair's upstream side. Else null.
      */
-    static Map pulseableAutomation(def ec, Map pair) {
+    private static Map pulseableAutomation(def ec, Map pair) {
         String tenantId = normalize(pair?.get("companyUserGroupId"))
         String automationId = normalize(pair?.get("automationId"))
         String upstreamSide = normalize(pair?.get("upstreamSide"))
@@ -784,14 +783,14 @@ class SyncPulseSupport {
     }
 
     /** "hourly", "every 2h", "every 30m". */
-    static String everyWords(Integer minutes) {
+    private static String everyWords(Integer minutes) {
         int m = Math.max(0, minutes ?: 0)
         if (m == 60) return "hourly"
         return "every ${allowanceWords(m)}".toString()
     }
 
     /** One pair's period line: "HotWax → NetSuite · hourly · late after 6h", "(2 pairs)" when several say the same. */
-    static String itemWords(Map i) {
+    private static String itemWords(Map i) {
         return "${i.label}${DOT}${everyWords(i.cadence as Integer)}${DOT}late after ${allowanceWords(i.allowance as Integer)}${pairsWords(i.count as int)}".toString()
     }
 
@@ -800,12 +799,12 @@ class SyncPulseSupport {
     }
 
     /** The past message: two lines. */
-    static String pastText(String label, Integer allowance, int pastCount, Map oldest, Integer waiting) {
+    private static String pastText(String label, Integer allowance, int pastCount, Map oldest, Integer waiting) {
         return "${label}: ${pastCount} past the ${allowanceWords(allowance)} allowance.\n".toString() +
                 "Oldest ${oldest?.get('orderName') ?: 'unknown'}, ${oldestWords(oldest)}${DOT}${waiting ?: 0} waiting".toString()
     }
 
-    static String clearText(String label, Integer allowance, Map oldest, Integer waiting, int closedCount, int droppedCount = 0) {
+    private static String clearText(String label, Integer allowance, Map oldest, Integer waiting, int closedCount, int droppedCount = 0) {
         return "${label}: caught up. Nothing past the ${allowanceWords(allowance)} allowance.\n".toString() +
                 "${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${closedCount} ${closedCount == 1 ? 'finding' : 'findings'} closed".toString() +
                 (droppedCount > 0 ? "${DOT}${droppedCount} left the check".toString() : "")
@@ -857,7 +856,7 @@ class SyncPulseSupport {
                         sections: [[widgets: widgets]]]]]]
     }
 
-    static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
+    private static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
         return "${label}: ${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${pastCount} past allowance".toString()
     }
 
@@ -865,7 +864,7 @@ class SyncPulseSupport {
      * DAR-BE-382. The alerts-room notice for two pulses in a row that did not finish (FAILED or SKIPPED): the tenant, the
      * pair, and the last pulse's own reason. It never goes to the pair's chat space, which is the client's room.
      */
-    static String failureText(String tenantId, String label, String lastReason) {
+    private static String failureText(String tenantId, String label, String lastReason) {
         return ("${tenantId}${DOT}${label}: 2 pulses in a row did not finish." +
                 (lastReason ? "\nLast: ${lastReason}" : "")).toString()
     }
@@ -897,8 +896,8 @@ class SyncPulseSupport {
         }
         if (past == 0 && prior > 0) {
             // the episode's own counts when the caller read them; this pulse's alone otherwise (an episode that began before they were kept)
-            int closedCount = (result.get("episodeClosed") ?: ((result.get("closed") ?: []) as List).size()) as int
-            int droppedCount = (result.get("episodeDropped") ?: ((result.get("dropped") ?: []) as List).size()) as int
+            int closedCount = (result.containsKey("episodeClosed") ? result.get("episodeClosed") : ((result.get("closed") ?: []) as List).size()) as int
+            int droppedCount = (result.containsKey("episodeDropped") ? result.get("episodeDropped") : ((result.get("dropped") ?: []) as List).size()) as int
             return [kind: "clear", text: clearText(label, allowance, oldest, waiting, closedCount, droppedCount),
                     card: clearCard(label, allowance, closedCount, droppedCount), lastPostedPastCount: 0]
         }
@@ -979,8 +978,7 @@ class SyncPulseSupport {
                 episodeDropped: closedRows.count { normalize(it.get("closeReason")) == DROPPED }]
     }
 
-    /** One post; false when it could not be delivered. Never throws. */
-    /** A pulse or period message (a card with fallbackText, or plain text) to a room: a Slack room takes the words as text. Never throws. */
+    /** A pulse or period message (a card with fallbackText, or plain text) to a room: a Slack room takes the words as text. False when it could not be delivered. Never throws. */
     private static boolean postMessage(def ec, String tenantId, String chatSpaceId, Map message) {
         if (!tenantId || !chatSpaceId || !message) return false
         try {
@@ -1065,7 +1063,7 @@ class SyncPulseSupport {
     }
 
     /** clientLines' items by room: [label, cadence, allowance, count], in row order. */
-    static Map<String, List<Map>> clientItems(List<Map> rows, Map<String, Map> pairsById, Map<String, String> labelByPair) {
+    private static Map<String, List<Map>> clientItems(List<Map> rows, Map<String, Map> pairsById, Map<String, String> labelByPair) {
         Map<String, Map<List, Map>> bySpace = [:]
         (rows ?: []).each { Map row ->
             String id = normalize(row.get("syncPairId"))

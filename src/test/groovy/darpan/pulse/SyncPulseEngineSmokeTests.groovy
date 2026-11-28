@@ -102,7 +102,7 @@ class SyncPulseEngineSmokeTests {
         SyncPulseSupport.setReaders({ def rec, Map p, Map automation, Instant from, Instant thru ->
             upstreamCalls << [syncPairId: p.syncPairId, from: from, thru: thru, thread: Thread.currentThread().name]
             if (upstreamFailure != null) return upstreamFailure
-            // the window is (from, thru]
+            // the stub reads (from, thru]; the pulse's margin makes the edges moot
             List records = upstream.findAll { String k, Instant at -> at.isAfter(from) && !at.isAfter(thru) }
                     .collect { String k, Instant at -> [key: k, orderName: k, createdAt: at, otherKey: k] }
             return [ok: true, records: records, errors: [], warnings: []]
@@ -769,10 +769,9 @@ class SyncPulseEngineSmokeTests {
     @Test
     void oneBadPairNeverStopsTheOthers() {
         pair("SPE_BAD", AUTO, 60, 60)
-        Closure upstreamRead = SyncPulseSupport.upstreamReader
         SyncPulseSupport.setReaders({ def rec, Map p, Map automation, Instant from, Instant thru ->
             if (p.syncPairId == "SPE_BAD") throw new IllegalStateException("a reader bug")
-            upstreamRead.call(rec, p, automation, from, thru)
+            return [ok: true, records: [], errors: [], warnings: []]
         }, null)
         Map out = runJob(T0)
         assertEquals([], out.errors)

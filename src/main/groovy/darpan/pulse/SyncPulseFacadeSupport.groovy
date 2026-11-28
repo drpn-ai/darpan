@@ -125,7 +125,7 @@ class SyncPulseFacadeSupport {
         return row == null ? null : new LinkedHashMap(row.getMap())
     }
 
-    static String systemOf(def ec, String tenantId, String automationId, String side) {
+    private static String systemOf(def ec, String tenantId, String automationId, String side) {
         def source = rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
                 .condition("automationId", automationId).condition("fileSide", side).list()?.find()
         return normalize(source?.get("systemEnumId"))
@@ -250,7 +250,7 @@ class SyncPulseFacadeSupport {
      * (Instants; the window is what the run's execution read, null when unrecorded). With oldest, only runs whose window
      * ends after it (or has no recorded end): a run that read nothing from that point on cannot have reported an order created then.
      */
-    static List<Map> pairRuns(def ec, String tenantId, String automationId, Instant oldest = null) {
+    private static List<Map> pairRuns(def ec, String tenantId, String automationId, Instant oldest = null) {
         if (!automationId) return []
         Map<String, Map> windows = [:]
         def execFind = rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId)

@@ -3,8 +3,10 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
     <!-- DAR-CLI-003. Browser-approved CLI sign-in. Both entities belong to a person, not a tenant: no
-         DARPAN_ACTIVE_COMPANY_SCOPE filter. Every read of a CliSession conditions on userId = ec.user.userId;
-         a CliDeviceCode is found by the hash of the CLI's device code or by the user code the person types. -->
+         DARPAN_ACTIVE_COMPANY_SCOPE filter. A person's own CliSession reads (list, revoke, logout) condition on
+         userId = ec.user.userId; the pre-auth checks (CliAuthSupport: is this request a CLI key, is it still good) find
+         one by the hash of the key the request carries. A CliDeviceCode is found by the hash of the CLI's device code or
+         by the user code the person types. -->
 
     <entity entity-name="CliDeviceCode" package="darpan.auth" use="transactional" cache="never">
         <description>One CLI sign-in request (device code flow). The CLI holds the device code and polls with it;

@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInfo
 import org.moqui.context.ExecutionContext
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.nio.file.Paths
 
@@ -27,6 +29,7 @@ import java.nio.file.Paths
  */
 @Tag("mysql")
 class LoginDeadlockRegressionTests {
+    private static final Logger logger = LoggerFactory.getLogger(LoginDeadlockRegressionTests)
     static ExecutionContext ec
     static final String PASSWORD = "Testpass@12345"
     /** Usernames are unique per JVM run: the MySQL fixture database is not dropped between runs, and
@@ -61,13 +64,13 @@ class LoginDeadlockRegressionTests {
         // behind by the previous test would short-circuit this one into a fast, meaningless failure.
         ec.message.clearAll()
         testStartedNanos = System.nanoTime()
-        println "[deadlock-test] START ${testInfo.testMethod.get().name}"
+        logger.info("[deadlock-test] START {}", testInfo.testMethod.get().name)
     }
 
     @AfterEach
     void reportElapsed(TestInfo testInfo) {
         long elapsedMillis = (System.nanoTime() - testStartedNanos).intdiv(1_000_000L)
-        println "[deadlock-test] END ${testInfo.testMethod.get().name} elapsedMs=${elapsedMillis}"
+        logger.info("[deadlock-test] END {} elapsedMs={}", testInfo.testMethod.get().name, elapsedMillis)
         try { ec.user.logoutUser() } catch (Throwable ignored) { }
         ec.message.clearAll()
     }
@@ -120,7 +123,7 @@ class LoginDeadlockRegressionTests {
             })
         } finally {
             long elapsedMillis = (System.nanoTime() - startedNanos).intdiv(1_000_000L)
-            println "[deadlock-test] loginSession(${username}) took ${elapsedMillis}ms"
+            logger.info("[deadlock-test] loginSession({}) took {}ms", username, elapsedMillis)
         }
         return result
     }

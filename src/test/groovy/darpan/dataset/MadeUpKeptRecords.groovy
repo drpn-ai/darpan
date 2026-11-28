@@ -29,13 +29,17 @@ class MadeUpKeptRecords {
         }
         if (!ctx.recordsFile) return [:]
         long count = 0
+        String last = null
         new File(ctx.outputFile as String).withWriter("UTF-8") { Writer w ->
             new File(ctx.recordsFile as String).eachLine("UTF-8") { String line ->
                 Map record = (Map) new JsonSlurper().parseText(line)
-                w.write(JsonOutput.toJson(keep == null ? record : record.findAll { k, v -> k in keep }))
+                last = JsonOutput.toJson(keep == null ? record : record.findAll { k, v -> k in keep })
+                w.write(last)
                 w.write("\n")
                 count++
             }
+            // hostile mode M3 (S99-214, S16a Q2): one line more than it declares; only core's written-line count can see it
+            if ("hostileLines" in ((side.keepFields ?: []) as List) && last != null) { w.write(last); w.write("\n") }
         }
         String name = (ctx.fileName as String).replaceAll(/\.json$/, "") + ".madeup.json"
         File dir = DataManagerSupport.resolveDirectoryFile(ec, ctx.outputLocation as String, true)

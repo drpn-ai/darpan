@@ -1030,6 +1030,20 @@ class KeptCopySupportTests {
         }
     }
 
+    /** S99-214 (S16a Q2): a projection service that writes more record lines than the kept records is refused, whatever it declares. */
+    @Test
+    void aProjectionThatWritesMoreLinesThanItKeptIsNotServed() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-lines", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", hostileLines: 1]], "id", "createdAt")
+        Map params = projParams(connector, ["id", "hostileLines"], "proj-lines", null)
+        params.projConfigId = "conn-proj-lines"
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END]))
+        assertFalse(served.served as boolean)
+        assertTrue((served.reason as String).contains("wrote 2 record lines of 1"), served.reason as String)
+    }
+
     /** A test-only connector row of a made-up system that names the test-only extract and projection service. */
     private void loadProjectionConnector() {
         ec.entity.makeDataLoader().location("classpath://dataset/MadeUpProjectionConnector.xml").dummyFks(true).load()

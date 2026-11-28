@@ -14,6 +14,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -50,6 +51,8 @@ class ConnectionKeptDataDropTests {
         ec.message.clearAll()
         List<String> mine = ["DROP_A1", "DROP_A2", "DROP_B1"]
         ec.entity.find("darpan.idindex.RecordIdIndex").condition("rowKey", "like", "rk-%-DROP_%").deleteAll()
+        ec.entity.find("darpan.idindex.RecordIdIndexDrop").condition("companyUserGroupId", "in", [A, B])
+                .condition("connectionId", "in", ["conn-1", "conn-2"]).deleteAll()
         ["darpan.idindex.RecordIdIndexCursor", "darpan.dataset.DatasetRead", "darpan.dataset.Dataset"].each {
             ec.entity.find(it).condition("datasetId", "in", mine).deleteAll()
         }
@@ -97,7 +100,30 @@ class ConnectionKeptDataDropTests {
         assertTrue(present(B, "DROP_B1"))
     }
 
+    /** S99-214 (OC104, S14): each drop marks its connections; a repeat advances the mark, and nothing else is marked. */
+    @Test
+    void eachDropMarksItsConnectionsAndARepeatAdvancesTheMark() {
+        Timestamp first = Timestamp.valueOf("2026-11-20 10:00:00")
+        Timestamp later = Timestamp.valueOf("2026-11-21 10:00:00")
+        try {
+            ec.user.setEffectiveTime(first)
+            drop(A, ["conn-1", "conn-2"])
+            assertEquals([first, first], ["conn-1", "conn-2"].collect { marker(A, it)?.droppedAt })
+            ec.user.setEffectiveTime(later)
+            drop(A, ["conn-1"])
+            assertEquals(later, marker(A, "conn-1")?.droppedAt, "a repeat drop advances its connection's mark")
+            assertEquals(first, marker(A, "conn-2")?.droppedAt, "a connection not dropped again keeps its mark")
+            assertNull(marker(B, "conn-1"), "another tenant's same connection id is never marked")
+        } finally {
+            ec.user.setEffectiveTime(null)
+        }
+    }
+
     // ---- helpers -------------------------------------------------------------------------------
+
+    private def marker(String tenant, String connection) {
+        return ec.entity.find("darpan.idindex.RecordIdIndexDrop").condition([companyUserGroupId: tenant, connectionId: connection]).useCache(false).one()
+    }
 
     private Map drop(String tenant, List<String> connections) {
         return (Map) ec.service.sync().name(SERVICE).parameters([companyUserGroupId: tenant, sourceConfigIds: connections])

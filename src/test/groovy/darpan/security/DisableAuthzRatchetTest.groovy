@@ -193,7 +193,10 @@ class DisableAuthzRatchetTest {
             "darpan service+screen XML disable-authz=\"true\""    : 36,
             // DAR-BE-318: script/rules/RulesTenantGuard.xml, the moqui-rules write guard the rules.* EECAs run. Its one
             // unfiltered read (rulesGuardFind) loads the row written, or a row it names, by primary key to check its owner.
-            "darpan script XML .disableAuthz("                    : 1,
+            // 2 since DAR-OPS-029 S35: script/rules/RuleChildTenantStamp.xml (stampFind), run by entity/RuleChildTenant.eecas.xml,
+            // reads a rule-set child's parent by primary key to copy its tenant; filtered, a caller of another or no tenant
+            // would leave the child blank and invisible to every tenant.
+            "darpan script XML .disableAuthz("                    : 2,
             "darpan-hotwax Groovy .disableAuthz("                 : 6,
             "darpan-hotwax service+screen XML .disableAuthz("     : 0,
             "darpan-hotwax service+screen XML disable-authz=\"true\"": 0,

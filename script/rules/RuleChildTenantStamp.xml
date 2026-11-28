@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-OPS-029 S35 (S02 R2). Run by entity/RuleChildTenant.eecas.xml before each create of a rule set's child row, with
+  entityValue and stampFrom ('ruleSet' or 'scope') in the context. A child belongs to its parent's tenant, so a BLANK
+  companyUserGroupId takes the parent's: Rule and RuleSetCompareScope from their RuleSet; RuleSetCompareSource and its Filter
+  and KeyField rows from their compare scope (its stamp, else its RuleSet's), the parents RuleTenantStampSupport's sweep uses.
+  An explicit stamp is never changed, and a parent that does not exist leaves the row blank.
+
+  The parent is read by primary key across tenants (stampFind, the one unfiltered read). Under the active-tenant filter a
+  caller whose tenant is not the parent's, or who has none, would see no parent and leave the row blank: invisible to every
+  tenant, with no sweep left to heal it. This is a copy of the parent's tenant, not an access check: facade writers check that
+  the caller owns the rule set before they write.
+-->
+<actions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-actions-3.xsd">
+    <set field="stampFind" from="{ String findEntity, Map findPk -> ec.entity.find(findEntity).condition(findPk).disableAuthz().useCache(false).one() }"/>
+    <set field="stampScope" from="stampFrom == 'scope' ? stampFind('darpan.rule.RuleSetCompareScope', [compareScopeId: entityValue.compareScopeId]) : null"/>
+    <set field="stampTenant" from="stampScope?.companyUserGroupId"/>
+    <set field="stampRuleSetId" from="stampFrom == 'scope' ? stampScope?.ruleSetId : entityValue.ruleSetId"/>
+    <if condition="!stampTenant &amp;&amp; stampRuleSetId">
+        <set field="stampTenant" from="stampFind('darpan.rule.RuleSet', [ruleSetId: stampRuleSetId])?.companyUserGroupId"/></if>
+    <if condition="stampTenant"><script>entityValue.set('companyUserGroupId', stampTenant)</script></if>
+</actions>

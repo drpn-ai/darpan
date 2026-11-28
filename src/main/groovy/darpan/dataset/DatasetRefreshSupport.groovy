@@ -211,10 +211,15 @@ class DatasetRefreshSupport {
 
     /**
      * The derived copy id of a record under a composite idField: the field values in order, joined by '|' (a missing value
-     * is empty). A one-field list gives that field's value alone.
+     * is empty), each value's '\\' and '|' escaped first (DAR-OPS-029 S16a, OC129), so two different records never share an
+     * id ("A|1"+"2" and "A"+"1|2" were both "A|1|2", and a merge replaced one with the other). An id with neither character
+     * keeps its exact key, so existing copies keep matching. A one-field list gives that field's value alone, unescaped.
      */
     static String copyId(Map record, List<String> idFields) {
-        return idFields.collect { String f -> record.get(f) == null ? "" : String.valueOf(record.get(f)) }.join("|")
+        if (idFields.size() == 1) return record.get(idFields[0]) == null ? "" : String.valueOf(record.get(idFields[0]))
+        return idFields.collect { String f ->
+            record.get(f) == null ? "" : String.valueOf(record.get(f)).replace("\\", "\\\\").replace("|", "\\|")
+        }.join("|")
     }
 
     /** The manifest's idField, stampField and windowField equal the dataset's. */

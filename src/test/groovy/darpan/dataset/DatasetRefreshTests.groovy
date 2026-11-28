@@ -308,6 +308,29 @@ class DatasetRefreshTests {
         assertEquals(62, find("darpan.dataset.Dataset", [datasetId: dataset("cs-default")]).horizonDays as int)
     }
 
+    // DAR-OPS-029 S16a, OC129 (moqui-qa-technician): a composite id's values are escaped before they are joined, so two
+    // different records never share a copy id across reads, and an id with no '|' or '\\' keeps its exact key.
+    @Test
+    void compositeIdsWithTheSeparatorInAValueNeverCollideAcrossReads() {
+        assertEquals("1|2|3", DatasetRefreshSupport.copyId([a: 1, b: "2", c: 3], ["a", "b", "c"]), "plain ids keep their key")
+        assertNotEquals(DatasetRefreshSupport.copyId([orderId: "A|1", orderItemSeqId: "2"], ["orderId", "orderItemSeqId"]),
+                DatasetRefreshSupport.copyId([orderId: "A", orderItemSeqId: "1|2"], ["orderId", "orderItemSeqId"]))
+        // joined plainly both read "A\\||B": the escape must cover the backslash too
+        assertNotEquals(DatasetRefreshSupport.copyId([orderId: "A\\", orderItemSeqId: "|B"], ["orderId", "orderItemSeqId"]),
+                DatasetRefreshSupport.copyId([orderId: "A\\|", orderItemSeqId: "B"], ["orderId", "orderItemSeqId"]))
+        String id = dataset("composite-pipe", [idField: "orderId,orderItemSeqId"])
+        Map first = unit(1, 2, 1, 5, 5) + [orderId: "A|1", orderItemSeqId: "2"]
+        assertEquals([], refresh(id, stub([], [first])).errors)
+        // the next day's incremental read brings a different record whose plain join would equal the first one's
+        Map second = unit(1, 2, 1, 4, 0, "other") + [orderId: "A", orderItemSeqId: "1|2"]
+        Map res = refresh(id, stub([], [second]))
+        assertEquals([], res.errors)
+        assertEquals("DRK_INCREMENTAL", res.out.readKindEnumId)
+        List<Map> kept = KeptCopyStore.records(dir(id)).collect { it.record as Map }
+        assertEquals([["A", "1|2"], ["A|1", "2"]], kept.collect { [it.orderId, it.orderItemSeqId] }.sort { it.join('/') },
+                "both records stay in the copy")
+    }
+
     /** Review Focus 2: two units of one order share orderId and line, and stay two copy records. */
     @Test
     void twoUnitsOfOneOrderStayTwoCopyRecords() {

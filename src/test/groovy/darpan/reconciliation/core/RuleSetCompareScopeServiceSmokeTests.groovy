@@ -640,6 +640,11 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(warnings.any { String message -> message.contains("broken DRL preservation behavior") })
         assertFalse(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE") })
         assertTrue(warnings.any { String message -> message.contains("preserved base missing-object diffs") })
+        // DAR-OPS-029 S99-205b: with darpan.rules.allowRawDrl off, as in production, the broken rule is refused at OC6's
+        // compile gate (not by the Drools compiler), and the refusal names the rule, never its logic.
+        assertTrue(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_RULE carries rule logic that is not a generated field comparison") },
+                "the gate refused the broken rule: ${warnings}")
+        assertFalse(warnings.any { String message -> message.contains("BROKEN end") }, "a refusal never quotes the logic: ${warnings}")
 
         List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
         assertEquals(2, diffs.size())

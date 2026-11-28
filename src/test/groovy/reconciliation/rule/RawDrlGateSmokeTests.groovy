@@ -15,13 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-OPS-029 S99-205 (OC6, end to end). The compile gate as production runs it: darpan.rules.allowRawDrl OFF.
- * ReconciliationSmokeTestSupport turns that property on for every smoke JVM, because many fixtures seed hand-written
- * DRL (the fixture migration is S99-205b), so no other Moqui test reaches the real gate; RuleEngineSupportCompileGateTests
- * proves it without Moqui. Here a stored tenant rule goes through execute#RuleSetMatchedPairs: a hand-written one is
- * refused loudly, a generator-made one runs.
+ * Since S99-205b every smoke fixture seeds generated rules and no smoke JVM turns the property on, so every Moqui rule
+ * run goes through the gate; this class is the gate's own proof: a stored tenant rule goes through
+ * execute#RuleSetMatchedPairs, a hand-written one is refused loudly, a generator-made one runs.
  *
- * Not @SharedMoqui on purpose: it clears a System property for its own JVM (forkEvery=1), which a shared-JVM class
- * may not do, and restores it in @AfterAll.
+ * Not @SharedMoqui on purpose: it clears the System property for its own JVM (forkEvery=1) in case the environment set
+ * it, which a shared-JVM class may not do, and restores it in @AfterAll.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RawDrlGateSmokeTests {

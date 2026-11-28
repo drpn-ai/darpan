@@ -7,6 +7,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -93,6 +94,24 @@ class SharedConfigAccessSupportTests {
         assertTrue(SharedConfigAccessSupport.listMemberTenantIds(ec, "SCFG_MADE_UP", "OMS_HW_1").isEmpty())
         assertTrue(finder.conditions.isEmpty(),
                 "an unknown config type must short-circuit before any query is built")
+    }
+
+    /**
+     * S26a: a grant read that fails must fail the caller, never read as "not shared". Reads stay closed either way (an
+     * error grants nothing), but hasActiveGrants is the delete guard of every shareable config: an empty answer there let
+     * the owner delete a config its peers still run on.
+     */
+    @Test
+    void aGrantReadThatFailsIsNotReportedAsNotShared() {
+        def ec = executionContext(entity: new EntityFacadeStub(finders: [
+                "darpan.auth.ConfigTenantAccess": new FinderStub(listFailure: new IllegalStateException("db down"))]))
+
+        assertThrows(IllegalStateException) {
+            SharedConfigGrantSupport.hasActiveGrants(ec, "SCFG_HOTWAX_OMS", "OMS_HW_1")
+        }
+        assertThrows(IllegalStateException) {
+            SharedConfigAccessSupport.isSharedWithTenant(ec, "SCFG_HOTWAX_OMS", "OMS_HW_1", "BETSEY_JOHNSON")
+        }
     }
 
     // --- per-tenant lookup ----------------------------------------------
@@ -380,6 +399,7 @@ class SharedConfigAccessSupportTests {
         Map<String, Object> conditions = [:]
         Object oneResult
         List listResult = []
+        RuntimeException listFailure
 
         FinderStub condition(String field, Object value) { conditions[field] = value; this }
         FinderStub conditionDate(String f, String t, Object m) { this }
@@ -402,6 +422,7 @@ class SharedConfigAccessSupportTests {
         }
 
         List list() {
+            if (listFailure != null) throw listFailure
             listResult.findAll { row ->
                 if (!(row instanceof Map)) return true
                 conditions.every { k, v -> row[k] == v }

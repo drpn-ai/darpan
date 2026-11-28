@@ -2,8 +2,6 @@ package darpan.facade.common
 
 import darpan.common.DarpanEntityConstants
 import groovy.transform.CompileDynamic
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 import static darpan.common.ValueSupport.normalize
 
@@ -19,7 +17,7 @@ import static darpan.common.ValueSupport.normalize
  * {@link TenantScopedFinder#findGlobalUnscoped}, the explicitly-named and allowlisted opt-out. That
  * is the same shape {@code SftpAutomationSupport.tenantGroupServerAllowsTenant} has used since the
  * SFTP tenant-group feature shipped. {@code findTenantScoped} is untouched by this class, and no
- * bare {@code disableAuthz()} is introduced — {@code DisableAuthzRatchetTest} stays at 12.</p>
+ * bare {@code disableAuthz()} is introduced (see {@code DisableAuthzRatchetTest}).</p>
  *
  * <p><strong>Extending.</strong> A new shareable config type needs one new
  * {@code DarpanSharedConfigType} Enumeration value and one {@link #CONFIG_TYPE_REGISTRY} row.
@@ -29,8 +27,6 @@ import static darpan.common.ValueSupport.normalize
  */
 @CompileDynamic
 class SharedConfigAccessSupport {
-
-    private static final Logger logger = LoggerFactory.getLogger(SharedConfigAccessSupport.class)
 
     static final String CONFIG_TYPE_HOTWAX_OMS = "SCFG_HOTWAX_OMS"
     static final String CONFIG_TYPE_SHOPIFY_AUTH = "SCFG_SHOPIFY_AUTH"
@@ -103,9 +99,7 @@ class SharedConfigAccessSupport {
 
     /** True when an active grant puts this tenant in this config's peer group. */
     static boolean isSharedWithTenant(def ec, String configTypeEnumId, String configId, String tenantUserGroupId) {
-        String normalizedConfigId = normalize(configId)
-        if (!normalizedConfigId) return false
-        return normalizedConfigId in listSharedConfigIdsForTenant(ec, configTypeEnumId, tenantUserGroupId)
+        return !listActiveGrantRows(ec, configTypeEnumId, configId, tenantUserGroupId).isEmpty()
     }
 
     /**
@@ -219,27 +213,20 @@ class SharedConfigAccessSupport {
     }
 
     /**
-     * Reads grant rows and drops revoked ones IN GROOVY rather than via {@code conditionDate}.
+     * Reads grant rows and drops revoked ones IN GROOVY rather than via {@code conditionDate}: a null or future
+     * {@code thruDate} is active. It is also the only form the stub-based tests can prove ({@code FinderStub.conditionDate}
+     * is a no-op).
      *
-     * <p>Uses the same notion of an active row as the admin membership services ({@code thruDate}
-     * null). It is also the only form the stub-based tests can actually prove:
-     * {@code FinderStub.conditionDate} is a no-op, so a conditionDate-based expiry check would pass
-     * a stub test without filtering anything.</p>
+     * <p>A failed read throws. It used to answer "not shared", which kept reads closed but opened the delete guard
+     * ({@code SharedConfigGrantSupport.hasActiveGrants}): an owner could delete a config its peers still run on.</p>
      */
     private static List activeGrants(def ec, Closure applyConditions) {
-        try {
-            def finder = TenantScopedFinder.findGlobalUnscoped(ec,
-                    DarpanEntityConstants.CONFIG_TENANT_ACCESS, GRANT_READ_REASON)
-            applyConditions(finder)
-            finder.useCache(false)
+        def finder = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.CONFIG_TENANT_ACCESS, GRANT_READ_REASON)
+        applyConditions(finder)
+        finder.useCache(false)
 
-            def now = ec?.user?.nowTimestamp
-            return (finder.list() ?: []).findAll { row -> isActiveGrant(row, now) }
-        } catch (Exception e) {
-            // Fail CLOSED: a resolver failure must withhold access, never widen it.
-            logger.warn("Failed to read shared-config grants; treating as not shared", e)
-            return []
-        }
+        def now = ec?.user?.nowTimestamp
+        return (finder.list() ?: []).findAll { row -> isActiveGrant(row, now) }
     }
 
     private static boolean isActiveGrant(def row, def now) {

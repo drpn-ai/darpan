@@ -475,6 +475,7 @@ tasks.register('mysqlTest', Test) {
     include '**/AuditCheckRunOutsideRulesMysqlTests.class'
     include '**/OrphanSchemaDropsMoquiMysqlTests.class'
     include '**/AgentTurnConversationNullableMoquiMysqlTests.class'
+    include '**/NsRestletDropMoquiMysqlTests.class'
     include '**/SettingValueWideningMysqlTests.class'
     filter {
         includeTestsMatching '*LoginDeadlockRegressionTests'
@@ -484,6 +485,7 @@ tasks.register('mysqlTest', Test) {
         includeTestsMatching '*AuditCheckRunOutsideRulesMysqlTests'
         includeTestsMatching '*OrphanSchemaDropsMoquiMysqlTests'
         includeTestsMatching '*AgentTurnConversationNullableMoquiMysqlTests'
+        includeTestsMatching '*NsRestletDropMoquiMysqlTests'
         includeTestsMatching '*SettingValueWideningMysqlTests'
         failOnNoMatchingTests = true
     }

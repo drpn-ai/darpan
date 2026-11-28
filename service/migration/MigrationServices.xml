@@ -295,6 +295,34 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-424: registered migration NSRESTLET_DROP (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="NsRestletDrop" authenticate="false" allow-remote="false">
+        <description>One-time, re-runnable (DAR-BE-424): removes what the retired NetSuite RESTlet connection type left in the
+            database, the list in darpan.migration.NsRestletDrop: its sharing rows, enumeration and tenant filter row, the
+            NS_RESTLET_CONFIG_ID columns of RULE_SET_COMPARE_SOURCE and RECONCILIATION_AUTOMATION_SOURCE (their foreign keys
+            first), the NS_RESTLET_CONFIG table, and NS_AUTH_CONFIG.NETSUITE_ACCOUNT. Every run reports the RESTlet configs per
+            tenant, the rule-set, automation and audit-check sides still naming one, and the shares. Refused while an active
+            rule set or automation still names a RESTlet; does nothing while the entity model still defines any of it.
+            Idempotent: a second run has nothing to do. Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.NsRestletDrop.run(ec, dryRun as boolean)"/>
+            <iterate list="result.errors" entry="dropError"><message error="true">${dropError}</message></iterate>
+            <set field="rowsUpdated" from="result.changed" type="Integer"/>
+            <set field="messages" from="result.messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
     <!-- DAR-OPS-029 S02 (OC6 release check): registered migration RULE_LOGIC_SHAPE_CHECK (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="RuleLogicShapeCheck" authenticate="false" allow-remote="false">
         <description>Report only, changes nothing (dry run or not). Lists every enabled Rule whose stored ruleLogic the compile

@@ -117,6 +117,17 @@
                 may hold 2000 characters (errors.email.ignorePatterns ships 1,363) and the column was VARCHAR(255). Schema only.
                 The dry run shows the statement. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
 
+    <darpan.migration.DarpanMigration migrationId="NSRESTLET_DROP" componentName="darpan"
+            serviceName="migration.MigrationServices.migrate#NsRestletDrop"
+            sequenceNum="175" supportsDryRun="Y" enabled="N"
+            description="Remove what the retired NetSuite RESTlet connection type left (DAR-BE-424): its sharing rows, enumeration and
+                tenant filter row, the NS_RESTLET_CONFIG_ID columns of RULE_SET_COMPARE_SOURCE and RECONCILIATION_AUTOMATION_SOURCE
+                (foreign keys first), the NS_RESTLET_CONFIG table with its __TABLE_BOOTSTRAP__ placeholder, and
+                NS_AUTH_CONFIG.NETSUITE_ACCOUNT. The dry run reports RESTlet configs per tenant, the rule-set, automation and
+                audit-check sides still naming one, and the shares: read it on prod and SM before enabling. Refused while an active
+                rule set or automation names a RESTlet. Does nothing before the release that deletes the entity. Idempotent.
+                Ships disabled (a seed load keeps it so): enable it to run it."/>
+
     <darpan.migration.DarpanMigration migrationId="RULE_LOGIC_SHAPE_CHECK" componentName="darpan"
             serviceName="migration.MigrationServices.migrate#RuleLogicShapeCheck"
             sequenceNum="230" supportsDryRun="Y" enabled="N"

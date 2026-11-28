@@ -36,6 +36,9 @@ class StaticSeamResetGuardTests {
             "BrainConclude.fetchBatch": "test seam, 0 by default; resetForTests removed 2026-11-23, a test that sets it restores it",
             "BrainEngine.CACHE": "compiled rule engines keyed by pack list; a stale entry is still correct; resetForTests removed 2026-11-23",
             "RunConclusionStep.lastCaptureMillis": "monotonic capture-name clock; only ever moves forward, never asserted; resetForTests removed 2026-11-23",
+            // darpan-agent (S99-217)
+            "AgentConfigDefaults.TEXTS": "pure memo of class-path prompt files keyed by path; a stale entry is still correct",
+            "AgentToolExecutor.DEFINITIONS": "pure memo of built tools keyed by name and description, emptied past MAX_MEMO; a stale entry is still correct",
     ]
 
     private static final Pattern FIELD = Pattern.compile(
@@ -46,14 +49,18 @@ class StaticSeamResetGuardTests {
     private static final Pattern MUTABLE_TYPE = Pattern.compile('(^|[.])(Atomic\\w+|Concurrent\\w+|ThreadLocal|InheritableThreadLocal|\\w*Cache|\\w*Queue|\\w*Deque)(<|$)')
     private static final Pattern MUTABLE_INIT = Pattern.compile('^(new\\s+(?:java\\.util\\.(?:concurrent\\.)?)?\\w*(?:Map|List|Set|Queue|Deque|Cache|Atomic\\w*|Counter|Stack|Vector|Array|Collection)\\b|\\[:?\\]\\s*(as\\b.*)?$|bounded\\w+\\(|Collections\\.synchronized\\w*|Collections\\.newSetFromMap|(?:[\\w.]*\\.)?Concurrent\\w+\\.|(?:[\\w.]*\\.)?newKeySet\\b|\\w+\\.SHARED\\b)')
 
+    /** S99-217: darpan-agent holds the same kind of seams (its classes run inside this harness's Moqui too). */
     @Test
     void everyMutableStaticSeamHasResetForTests() {
         Path root = findMainGroovy()
+        Path agent = root.parent.parent.parent.parent.resolve('darpan-agent/src/main/groovy')
+        assertTrue(Files.isDirectory(agent), "cannot find darpan-agent's src/main/groovy at ${agent}")
+        Path componentRoot = root.parent.parent.parent.parent
         List<String> violations = []
         Set<String> used = [] as Set
         int scanned = 0
         List<Path> files = []
-        root.toFile().eachFileRecurse { File f -> if (f.name.endsWith('.groovy')) files << f.toPath() }
+        [root, agent].each { Path r -> r.toFile().eachFileRecurse { File f -> if (f.name.endsWith('.groovy')) files << f.toPath() } }
         files.sort().with { List<Path> sorted ->
             sorted.each { Path file ->
                 scanned++
@@ -64,9 +71,9 @@ class StaticSeamResetGuardTests {
                     String key = "${cls}.${f.name}".toString()
                     if (ALLOWLIST.containsKey(key)) { used << key; return }
                     if (!hasReset) {
-                        violations << "${root.relativize(file)}:${f.line} ${f.kind} static '${f.name}' but ${cls} has no static void resetForTests()".toString()
+                        violations << "${componentRoot.relativize(file)}:${f.line} ${f.kind} static '${f.name}' but ${cls} has no static void resetForTests()".toString()
                     } else if (!resetMentions(text, f.name as String)) {
-                        violations << "${root.relativize(file)}:${f.line} ${cls}.${f.name} is a ${f.kind} static that ${cls}.resetForTests() never touches".toString()
+                        violations << "${componentRoot.relativize(file)}:${f.line} ${cls}.${f.name} is a ${f.kind} static that ${cls}.resetForTests() never touches".toString()
                     }
                 }
             }

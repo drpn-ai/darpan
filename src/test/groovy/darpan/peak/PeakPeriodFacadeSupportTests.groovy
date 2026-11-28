@@ -126,6 +126,18 @@ class PeakPeriodFacadeSupportTests {
         assertEquals('12:00', rows[0].normalTime)
     }
 
+    /**
+     * DAR-OPS-029 S17b. Held runs list by their usual time, then name. The sort keyed each row by a [time, name] List,
+     * which is not Comparable, so Groovy fell back to comparing hash codes: a run at 08:00 could list after one at 12:00.
+     */
+    @Test
+    void heldRunsListByTimeThenName() {
+        Map audit = [auditId: 'AUD1', auditName: 'Month close']
+        List<Map> rows = PeakPeriodFacadeSupport.heldRuns([automation('C1', '0 0 12 * * ?', audit), automation('A1', '0 0 8 * * ?'),
+                                                           automation('B1', '0 0 12 * * ?')], window(), LA)
+        assertEquals([['08:00', 'Run A1'], ['12:00', 'Month close'], ['12:00', 'Run B1']], rows.collect { [it.normalTime, it.targetLabel] })
+    }
+
     @Test
     void runOutsidePeakHoursNotListed() {
         assertEquals([], PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], window(), LA))

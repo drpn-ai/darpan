@@ -11,7 +11,6 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 
 import static darpan.common.ValueSupport.normalize
 
@@ -27,16 +26,16 @@ class PeakPeriodFacadeSupport {
     private static final String WHY = "peak period facade reads the active tenant's automations and audits: explicit companyUserGroupId condition applied"
 
     /** Days of a period scanned for held runs: enough to see every distinct local fire time of a daily-or-slower schedule. */
-    static final int HELD_RUN_SCAN_DAYS = 7
+    private static final int HELD_RUN_SCAN_DAYS = 7
     /** Hard stop on fires examined per automation, for a schedule that fires every minute. */
-    static final int HELD_RUN_MAX_FIRES = 500
+    private static final int HELD_RUN_MAX_FIRES = 500
 
     /** Error sentences for a period about to be saved; empty when valid. otherActivePeriods: the tenant's other active periods. */
     static List<String> validatePeriod(Map period, List<Map> otherActivePeriods) {
         List<String> errors = []
         if (!normalize(period?.get("periodName"))) errors << "Name is required."
-        LocalDate from = toLocalDate(period?.get("fromDate"))
-        LocalDate thru = toLocalDate(period?.get("thruDate"))
+        LocalDate from = PeakPeriodSupport.toLocalDate(period?.get("fromDate"))
+        LocalDate thru = PeakPeriodSupport.toLocalDate(period?.get("thruDate"))
         boolean datesOk = from != null && thru != null
         if (!datesOk) errors << "Dates are required."
         else if (thru.isBefore(from)) errors << "The end date is before the start date."
@@ -61,8 +60,8 @@ class PeakPeriodFacadeSupport {
         if (errors.isEmpty() && selfActive) {
             for (Map other in (otherActivePeriods ?: [])) {
                 if (normalize(other.get("isActive")) == "N") continue
-                LocalDate oFrom = toLocalDate(other.get("fromDate"))
-                LocalDate oThru = toLocalDate(other.get("thruDate"))
+                LocalDate oFrom = PeakPeriodSupport.toLocalDate(other.get("fromDate"))
+                LocalDate oThru = PeakPeriodSupport.toLocalDate(other.get("thruDate"))
                 if (oFrom == null || oThru == null) continue
                 if (!from.isAfter(oThru) && !thru.isBefore(oFrom)) {
                     errors << "Overlaps ${normalize(other.get('periodName'))} (${oFrom.format(MONTH_DAY)} – ${oThru.format(MONTH_DAY)}).".toString()
@@ -93,10 +92,10 @@ class PeakPeriodFacadeSupport {
             String target = automationId ?: auditId
             if (!target || tenantTargetIds == null || !tenantTargetIds.contains(target)) errors << "Choose a run."
         }
-        LocalDate onDate = toLocalDate(runTime?.get("onDate"))
+        LocalDate onDate = PeakPeriodSupport.toLocalDate(runTime?.get("onDate"))
         if (onDate != null) {
-            LocalDate from = toLocalDate(period?.get("fromDate"))
-            LocalDate thru = toLocalDate(period?.get("thruDate"))
+            LocalDate from = PeakPeriodSupport.toLocalDate(period?.get("fromDate"))
+            LocalDate thru = PeakPeriodSupport.toLocalDate(period?.get("thruDate"))
             if (from == null || thru == null || onDate.isBefore(from) || onDate.isAfter(thru)) errors << "That date is outside this period."
         }
         if (parseTime(normalize(runTime?.get("runTime"))) == null) errors << "Time must be HH:mm."
@@ -174,7 +173,7 @@ class PeakPeriodFacadeSupport {
             String normalTime = times.size() == 1 ? times.first() : "${times.first()}–${times.last()}".toString()
             String why = row.peak ? "is in peak hours" : "waits for the sync lag allowance"
             [targetLabel: row.label, normalTime: normalTime, startsAt: row.latest, reason: "${normalTime} ${why}".toString()]
-        }.sort { Map r -> [r.normalTime, r.targetLabel] as List<String> } as List<Map>
+        }.sort { Map a, Map b -> (a.normalTime as String) <=> (b.normalTime as String) ?: (a.targetLabel as String) <=> (b.targetLabel as String) } as List<Map>
     }
 
     /**
@@ -198,20 +197,19 @@ class PeakPeriodFacadeSupport {
 
     /** upcoming | on | off | ended, by the tenant's local today. */
     static String stateOf(Map period, LocalDate today) {
-        LocalDate from = toLocalDate(period.get("fromDate"))
-        LocalDate thru = toLocalDate(period.get("thruDate"))
+        LocalDate from = PeakPeriodSupport.toLocalDate(period.get("fromDate"))
+        LocalDate thru = PeakPeriodSupport.toLocalDate(period.get("thruDate"))
         if (thru != null && thru.isBefore(today)) return "ended"
         if (normalize(period.get("isActive")) == "N") return "off"
         if (from != null && from.isAfter(today)) return "upcoming"
         return "on"
     }
 
-
     /** The list rows: id, name, ISO dates, isActive, state, ordered by sortForList. */
     static List<Map> listRows(List<Map> periods, LocalDate today) {
         List<Map> rows = (periods ?: []).collect { Map p ->
-            [peakPeriodId: p.get("peakPeriodId"), periodName: p.get("periodName"), fromDate: toLocalDate(p.get("fromDate")),
-             thruDate    : toLocalDate(p.get("thruDate")), isActive: normalize(p.get("isActive")) ?: "Y", state: stateOf(p, today)]
+            [peakPeriodId: p.get("peakPeriodId"), periodName: p.get("periodName"), fromDate: PeakPeriodSupport.toLocalDate(p.get("fromDate")),
+             thruDate    : PeakPeriodSupport.toLocalDate(p.get("thruDate")), isActive: normalize(p.get("isActive")) ?: "Y", state: stateOf(p, today)]
         }
         return sortForList(rows).collect { Map r ->
             r + [fromDate: r.fromDate?.toString(), thruDate: r.thruDate?.toString()]
@@ -235,14 +233,14 @@ class PeakPeriodFacadeSupport {
             Set<String> ids = automationId ? ([automationId] as Set<String>) :
                     ((scheduled ?: []).findAll { Map a -> auditId && normalize(a.get("auditId")) == auditId }
                             .collect { Map a -> normalize(a.get("automationId")) }.findAll { it } as Set<String>)
-            return ids ? new RunTimeMove(ids.asImmutable(), toLocalDate(rt.get("onDate")), at) : null
+            return ids ? new RunTimeMove(ids.asImmutable(), PeakPeriodSupport.toLocalDate(rt.get("onDate")), at) : null
         }.findAll { it != null } as List<RunTimeMove>
         return new PeakWindow(normalize(periodRow.get("peakPeriodId")), normalize(periodRow.get("periodName")),
-                toLocalDate(periodRow.get("fromDate")), toLocalDate(periodRow.get("thruDate")), start, end, moves)
+                PeakPeriodSupport.toLocalDate(periodRow.get("fromDate")), PeakPeriodSupport.toLocalDate(periodRow.get("thruDate")), start, end, moves)
     }
 
     /** Not ended by start date, then ended by end date, newest first. Rows carry state, fromDate, thruDate (LocalDate). */
-    static List<Map> sortForList(List<Map> periods) {
+    private static List<Map> sortForList(List<Map> periods) {
         List<Map> live = periods.findAll { it.state != "ended" }.sort { Map p -> p.fromDate as LocalDate }
         List<Map> ended = periods.findAll { it.state == "ended" }.sort { Map p -> p.thruDate as LocalDate }.reverse()
         return live + ended
@@ -293,7 +291,7 @@ class PeakPeriodFacadeSupport {
         rows(ec, "darpan.peak.PeakPeriodRunTime", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
     }
 
-    static final List<Integer> PULSE_CHOICES = [0, 60, 120, 180, 240, 360]
+    private static final List<Integer> PULSE_CHOICES = [0, 60, 120, 180, 240, 360]
 
     /** Validation of one pair's period override: allowance 15 minutes to 48 hours or null; pulse 0/1/2/3/4/6 hours or null. */
     static List<String> validateSync(Integer allowanceMinutes, Integer pulseEveryMinutes) {
@@ -365,20 +363,6 @@ class PeakPeriodFacadeSupport {
     /** Per-request reads (every page load, every scheduler tick): the DEBUG twin of findGlobalUnscoped, so no INFO line each time. */
     static def rows(def ec, String entityName, String tenantId) {
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
-    }
-
-    static LocalDate toLocalDate(Object value) {
-        if (value == null) return null
-        if (value instanceof LocalDate) return (LocalDate) value
-        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate()
-        if (value instanceof Date) return new java.sql.Date(((Date) value).time).toLocalDate()
-        String text = normalize(value)
-        if (!text) return null
-        try {
-            return LocalDate.parse(text.take(10))
-        } catch (DateTimeParseException ignored) {
-            return null
-        }
     }
 
     private static boolean isScheduled(Map automation) {

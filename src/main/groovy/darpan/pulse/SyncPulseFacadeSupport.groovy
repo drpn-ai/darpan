@@ -183,8 +183,11 @@ class SyncPulseFacadeSupport {
         return out.sort { Map r -> r.label as String }
     }
 
-    /** get#SyncPair pieces for one of the tenant's pairs (the row map): syncPair, samplesToday, pastOrders. */
-    static Map detail(def ec, String tenantId, Map pair, Instant now = Instant.now()) {
+    /**
+     * get#SyncPair pieces for one of the tenant's pairs (the row map): syncPair, samplesToday, pastOrders. now is the
+     * caller's effective time (ec.user.nowTimestamp), so a pinned clock pins the page too.
+     */
+    static Map detail(def ec, String tenantId, Map pair, Instant now) {
         String id = normalize(pair.get("syncPairId"))
         ZoneId zone = TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)
         LocalDate today = now.atZone(zone).toLocalDate()

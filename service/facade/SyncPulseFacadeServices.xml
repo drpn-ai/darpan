@@ -63,7 +63,7 @@
                 <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; pairRow != null">
-                <set field="pairDetail" from="darpan.pulse.SyncPulseFacadeSupport.detail(ec, tenantId, pairRow.getMap())"/>
+                <set field="pairDetail" from="darpan.pulse.SyncPulseFacadeSupport.detail(ec, tenantId, pairRow.getMap(), ec.user.nowTimestamp.toInstant())"/>
                 <set field="syncPair" from="pairDetail.syncPair"/>
                 <set field="samplesToday" from="pairDetail.samplesToday"/>
                 <set field="pastOrders" from="pairDetail.pastOrders"/>

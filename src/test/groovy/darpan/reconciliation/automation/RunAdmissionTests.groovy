@@ -133,6 +133,25 @@ class RunAdmissionTests {
         executor.finish(0)
         assertEquals(2, executor.started.size())
         assertEquals(0, admission.snapshot().queued)
+        assertFalse(admission.busy("boom"), "its label is released too")
+    }
+
+    /** DAR-OPS-029 S07a QA: a settings read that fails as a run ends used to skip the release and keep the slot for good. */
+    @Test
+    void aSettingsReadThatFailsAsARunEndsStillFreesItsSlot() {
+        HandExecutor executor = new HandExecutor()
+        boolean failReads = false
+        RunAdmission admission = new RunAdmission({ ->
+            if (failReads) throw new IllegalStateException("settings catalog not loaded")
+            return 1
+        }, { -> 1 }, { -> 85 }, { -> null }, executor, { -> 50 })
+        admission.submit("A", "a1", work("a1"))
+        failReads = true
+        executor.finish(0)
+        failReads = false
+        assertEquals(0, admission.snapshot().running)
+        assertFalse(admission.busy("a1"))
+        assertEquals(false, admission.submit("A", "a2", work("a2")).queued, "the slot came back")
     }
 
     @Test
@@ -191,6 +210,7 @@ class RunAdmissionTests {
         assertNotNull(submitted.error)
         assertEquals(false, submitted.submitted)
         assertEquals(0, admission.snapshot().running)
+        assertFalse(admission.busy("a1"), "a refused start leaves no label behind")
 
         executor.reject = false
         assertEquals(false, admission.submit("A", "a2", work("a2")).queued)

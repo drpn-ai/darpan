@@ -294,10 +294,13 @@ class RunAdmission {
         } catch (Throwable t) {
             logger.error("Automation execution {} ended with an error: {}", entry.label, t.message ?: t.toString())
         } finally {
-            Limits l = limits()
-            synchronized (this) {
-                release(entry)
-                drainLocked(l)
+            // Release BEFORE reading the settings: a failing read (catalog not loaded, OOM) must never keep the slot.
+            synchronized (this) { release(entry) }
+            try {
+                drain()
+            } catch (Throwable t) {
+                logger.error("Could not start the next waiting run after {}: {}; the next submit or scan tick will",
+                        entry.label, t.toString())
             }
         }
     }

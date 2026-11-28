@@ -111,17 +111,26 @@ class StuckRunReaper {
 
     /**
      * DAR-OPS-029 S07a: a reaped run result is a failed run like any other (DAR-BE-362's notifySavedRunError: one card to
-     * Darpan's error space, the neutral line to its notify-me subscribers, never the error). A run already told, an
-     * automation's run whose execution was reaped above, is told nothing more. notifySavedRunError never throws.
+     * Darpan's error space, the neutral line to its notify-me subscribers, never the error). A run already told is told
+     * nothing more, and an automation's run is left to its execution (which reports it when it ends or is reaped), so a
+     * run result that goes stale a sweep before its execution posts no second card. notifySavedRunError never throws.
      */
     private static void afterRunResultReaped(ExecutionContext ec, EntityValue row) {
         if (row.get("notifiedDate") != null) return
+        if (ownedByAnExecution(ec, row.get("reconciliationRunResultId"))) return
         AutomationExecutionSupport.notifySavedRunError(ec, [
                 reconciliationRunResultId: row.get("reconciliationRunResultId"),
                 companyUserGroupId       : row.get("companyUserGroupId"),
                 savedRunId               : row.get("savedRunId"),
                 resultDataManagerPath    : row.get("resultDataManagerPath"),
         ] as Map, REAPED_REASON)
+    }
+
+    private static boolean ownedByAnExecution(ExecutionContext ec, Object runResultId) {
+        if (runResultId == null) return false
+        EntityFind finder = (EntityFind) TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                "system-cron cross-tenant sweep; StuckRunReaper checks whether a reaped run belongs to an automation execution")
+        return finder.condition("reconciliationRunResultId", runResultId).count() > 0
     }
 
     /**

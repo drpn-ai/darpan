@@ -115,6 +115,31 @@ class StuckRunReaperNotifyTests {
         assertEquals([StuckRunReaper.STATUS_RUNNING, "AUT_STAT_SUCCESS"], store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT]*.statusEnumId)
     }
 
+    /** DAR-OPS-029 S07a QA: the run result goes stale a sweep before its execution; the execution reports it, once. */
+    @Test
+    void aStaleRunResultOfALiveExecutionIsReapedButLeftToItsExecutionToReport() {
+        FakeStore store = storeWithStaleRunResult(StuckRunReaper.STATUS_RUNNING)
+        store.add(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION, [automationExecutionId: "EXEC_1", automationId: "AUTO_1",
+                companyUserGroupId: "TENANT_A", statusEnumId: StuckRunReaper.STATUS_RUNNING, reconciliationRunResultId: "RUN_1",
+                lastUpdatedStamp: new Timestamp(System.currentTimeMillis())])
+        List<Map> cards = []
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
+        List<Map> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload -> deliveries << payload; [ok: true, statusCode: 200] }
+        Map<String, Object> result
+        try {
+            result = StuckRunReaper.sweep(fakeEc(store))
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
+        }
+        assertEquals([0, 1], [result.reapedExecutionCount, result.reapedRunResultCount])
+        assertEquals(StuckRunReaper.REAPED_REASON, store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0].errorMessage)
+        assertEquals([], cards, "no card yet: the execution reports the run")
+        assertEquals([], deliveries)
+    }
+
     private static FakeStore storeWithStaleRunResult(String status) {
         FakeStore store = new FakeStore()
         Timestamp stale = new Timestamp(System.currentTimeMillis() - (200 * 60_000L))
@@ -299,6 +324,7 @@ class StuckRunReaperNotifyTests {
                     return match ? newEntityValue(match) : null
                 },
                 list       : { -> newEntityList(matchRows(store, entityName, eqConditions, opConditions)) },
+                count      : { -> matchRows(store, entityName, eqConditions, opConditions).size() as long },
                 updateAll  : { Map<String, Object> fieldsToSet ->
                     List<Map<String, Object>> matches = matchRows(store, entityName, eqConditions, opConditions)
                     matches.each { Map<String, Object> row -> fieldsToSet.each { k, v -> row.put(k as String, v) } }

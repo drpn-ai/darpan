@@ -47,7 +47,8 @@ class ReconciliationFacadeServicesSmokeTests {
     private static final String SWITCH_ID = "RFS_SWITCH_USER"
     private static final String SWITCH_USERNAME = "rfs.switch"
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
-    private static final String NOOP_RULE = 'rule "%s"\nwhen\n    $m : Map()\nthen\nend'
+    /** DAR-OPS-029 S99-205b: a field comparison the server generates, the only rule a tenant can author (it was a hand-written no-op). */
+    private static final String STATUS_COMPARISON = '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}'
 
     private ExecutionContext ec
 
@@ -180,7 +181,7 @@ class ReconciliationFacadeServicesSmokeTests {
     }
 
     private static Map<String, Object> rule(String name, int sequenceNum) {
-        return [sequenceNum: sequenceNum, ruleLogic: String.format(NOOP_RULE, name), enabled: "Y"] as Map<String, Object>
+        return [sequenceNum: sequenceNum, ruleName: name, ruleText: "status = status", ruleType: "FIELD_COMPARISON", expression: STATUS_COMPARISON, enabled: "Y"] as Map<String, Object>
     }
 
     private static Map<String, Object> ruleSetParams(String runName) {

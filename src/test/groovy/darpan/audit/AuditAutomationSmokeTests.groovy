@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import reconciliation.rule.FieldComparisonRuleLogicGenerator
 
 import java.nio.file.Path
 import java.sql.Connection
@@ -505,13 +506,22 @@ class AuditAutomationSmokeTests {
         assertEquals([TAUTO_R4: "AUDFS_FIXED", TAUTO_R8: "AUDFS_OPEN"], stateByStatement)
     }
 
+    /**
+     * DAR-OPS-029 S99-205b. The ruleLogic FieldComparisonRuleLogicGenerator writes for the nth field comparison of a rule
+     * saved without an id: its header is `rule "FIELD_COMPARISON_n"`, the DRL name its rows carry.
+     */
+    private static String idLessGeneratedRule(int n) {
+        return FieldComparisonRuleLogicGenerator.generate(
+                '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}', "", "", null, "WARN", n - 1)
+    }
+
     // OC33: a link whose rules are none of its run's (here deleted) can never report a row, so its statement is not judged
     // and the ledger closes none of its findings; a link naming a live rule, by id or by its DRL name, is judged.
     @Test
     void aLinkToRulesTheRunNoLongerHasIsNotJudged() {
         insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_GONE", ruleSetName: "Gone", companyUserGroupId: TENANT])
         insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_LIVE", ruleSetId: "TAUTO_RS_GONE", sequenceNum: 10L, enabled: "Y",
-                ruleLogic: 'rule "FIELD_COMPARISON_7"\nwhen\n    $m : Map()\nthen\nend'])
+                ruleLogic: idLessGeneratedRule(7)])
         statement("TAUTO_RGONE", AUDIT, "RGONE")
         statement("TAUTO_RLIVE", AUDIT, "RLIVE")
         insert("darpan.audit.AuditCheck", [checkId: "TAUTO_GONE", companyUserGroupId: TENANT, checkCode: "gone", label: "gone",
@@ -817,14 +827,14 @@ class AuditAutomationSmokeTests {
         // that name. Each link takes only its own rule's rows.
         insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_SHOP", ruleSetName: "Shopify vs HotWax", companyUserGroupId: TENANT])
         insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_PAID", ruleSetId: "TAUTO_RS_SHOP", sequenceNum: 10L, enabled: "Y",
-                ruleLogic: 'rule "FIELD_COMPARISON_1"\nwhen\n    $m : Map()\nthen\nend'])
+                ruleLogic: idLessGeneratedRule(1)])
         insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_FULFILLED", ruleSetId: "TAUTO_RS_SHOP", sequenceNum: 20L, enabled: "Y",
-                ruleLogic: 'rule "FIELD_COMPARISON_2"\nwhen\n    $m : Map()\nthen\nend'])
+                ruleLogic: idLessGeneratedRule(2)])
         // Another tenant's run of the same id-less names must lend none of them.
         insert("moqui.security.UserGroup", [userGroupId: "TAUTO_OTHER_TENANT", description: "Another tenant"])
         insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_OTHER", ruleSetName: "Other", companyUserGroupId: "TAUTO_OTHER_TENANT"])
         insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_OTHER", ruleSetId: "TAUTO_RS_OTHER", sequenceNum: 10L, enabled: "Y",
-                ruleLogic: 'rule "FIELD_COMPARISON_2"\nwhen\n    $m : Map()\nthen\nend'])
+                ruleLogic: idLessGeneratedRule(2)])
         statement("TAUTO_R3", AUDIT, "R3")
         statement("TAUTO_R4F", AUDIT, "R4F")
         insert("darpan.audit.AuditCheck", [checkId: "TAUTO_SHOP", companyUserGroupId: TENANT, checkCode: "shopify-vs-hotwax",

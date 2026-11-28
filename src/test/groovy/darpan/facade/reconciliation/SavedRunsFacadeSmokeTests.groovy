@@ -918,21 +918,8 @@ class SavedRunsFacadeSmokeTests {
 
     @Test
     void ruleSetRunCanBeCreatedWithInlineRulesAndExecutedThroughTheSavedRunFacade() {
-        String skuMismatchRule = '''rule "ORDER_STATUS_MISMATCH"
-when
-    $m : Map(this["file1"] != null, this["file2"] != null)
-    eval(reconciliation.rule.RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("status"), ((Map) $m.get("file2")).get("status")))
-then
-    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
-        $m,
-        kcontext.getRule().getName(),
-        "status",
-        ((Map) $m.get("file1")).get("status"),
-        ((Map) $m.get("file2")).get("status"),
-        "WARN",
-        "Status mismatch"
-    );
-end'''
+        // DAR-OPS-029 S99-205b: the rule a tenant authors (a field comparison the server generates), not hand-written DRL.
+        String statusRule = '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}'
 
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -947,7 +934,9 @@ end'''
                         rules                   : [
                                 [
                                         sequenceNum: 10,
-                                        ruleLogic  : skuMismatchRule,
+                                        ruleText   : "status = status",
+                                        ruleType   : "FIELD_COMPARISON",
+                                        expression : statusRule,
                                         enabled    : "Y",
                                 ],
                         ],
@@ -1643,12 +1632,6 @@ end'''
 
     @Test
     void jsonRuleSetRunUsesSavedSchemasForSourceSelectionAndExecutesThroughTheSavedRunFacade() {
-        String noopRule = '''rule "NOOP_JSON_RULE"
-when
-    $m : Map()
-then
-end'''
-
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
                 .parameters([
@@ -1661,13 +1644,8 @@ end'''
                         file2FileTypeEnumId     : "DftJson",
                         file2SchemaFileName     : "test-oms-orders.schema.json",
                         file2PrimaryIdExpression: '$.orders[0].order_id',
-                        rules                   : [
-                                [
-                                        sequenceNum: 10,
-                                        ruleLogic  : noopRule,
-                                        enabled    : "Y",
-                                ],
-                        ],
+                        // DAR-OPS-029 S99-205b: no rule (it held a hand-written no-op; nothing here reads a rule).
+                        rules                   : [],
                 ])
                 .disableAuthz()
                 .call()
@@ -1712,11 +1690,8 @@ end'''
 
     @Test
     void ruleSetRunSaveUpdatesRunSetupWithoutTouchingRules() {
-        String noopRule = '''rule "NOOP_SAVE_RULE"
-when
-    $m : Map()
-then
-end'''
+        // DAR-OPS-029 S99-205b: one stored rule, a generated field comparison (it was a hand-written no-op).
+        String noopRule = '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}'
 
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -1731,7 +1706,9 @@ end'''
                         rules                   : [
                                 [
                                         sequenceNum: 10,
-                                        ruleLogic  : noopRule,
+                                        ruleText   : "status = status",
+                                        ruleType   : "FIELD_COMPARISON",
+                                        expression : noopRule,
                                         enabled    : "Y",
                                 ],
                         ],
@@ -1778,12 +1755,6 @@ end'''
 
     @Test
     void ruleSetRunSavePersistsProvidedRulesAndReturnsEditableRuleMetadata() {
-        String totalRule = '''rule "TOTAL_MISMATCH"
-when
-    $m : Map(this["file1"] != null, this["file2"] != null)
-    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("total"), ((Map) $m.get("file2")).get("order_total")))
-then
-end'''
         String expression = '''{"type":"FIELD_COMPARISON","file1FieldPath":"total","file2FieldPath":"order_total","operator":"=","preActions":[{"fieldSide":"file1","action":"STRING_TO_INT"},{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]}'''
 
         Map<String, Object> createResult = ec.service.sync()
@@ -1818,7 +1789,7 @@ end'''
                         rules                   : [
                                 [
                                         sequenceNum: 1,
-                                        ruleLogic  : totalRule,
+                                        ruleText   : "total = order_total",
                                         ruleType   : "FIELD_COMPARISON",
                                         expression : expression,
                                         enabled    : "Y",
@@ -1989,7 +1960,7 @@ end'''
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
                 .parameters([runName: "BE-081 tenant scope", file1SystemEnumId: "OMS", file1FileTypeEnumId: "DftCsv", file1PrimaryIdExpression: "order_id",
                              file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv", file2PrimaryIdExpression: "order_id",
-                             rules: [[sequenceNum: 10, ruleLogic: 'rule "BE081"\nwhen\n    $m : Map()\nthen\nend', enabled: "Y"]]])
+                             rules: [[sequenceNum: 10, ruleText: "status = status", ruleType: "FIELD_COMPARISON", expression: '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}', enabled: "Y"]]])
                 .disableAuthz().call()
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         String savedRunId = created.savedRun.savedRunId as String
@@ -2021,11 +1992,8 @@ end'''
 
     @Test
     void savedRunDeleteRemovesRuleSetChildrenAndGeneratedOutputs() {
-        String noopRule = '''rule "NOOP_DELETE_RULE"
-when
-    $m : Map()
-then
-end'''
+        // DAR-OPS-029 S99-205b: one stored rule, a generated field comparison (it was a hand-written no-op).
+        String noopRule = '{"type":"FIELD_COMPARISON","file1FieldPath":"status","file2FieldPath":"status","operator":"="}'
 
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -2040,7 +2008,9 @@ end'''
                         rules                   : [
                                 [
                                         sequenceNum: 10,
-                                        ruleLogic  : noopRule,
+                                        ruleText   : "status = status",
+                                        ruleType   : "FIELD_COMPARISON",
+                                        expression : noopRule,
                                         enabled    : "Y",
                                 ],
                         ],
@@ -2473,8 +2443,7 @@ end'''
                 file1PrimaryIdExpression: '$.records[*].orderId',
                 file2PrimaryIdExpression: 'order_id',
                 rules                   : [
-                        [sequenceNum: 10, ruleLogic: 'rule "R1" when $m : Map() then end',
-                         ruleType   : "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
+                        [sequenceNum: 10, ruleText: "field comparison", ruleType: "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
                 ],
         ])
 
@@ -2533,8 +2502,7 @@ end'''
                 file1PrimaryIdExpression: '$.records[*].orderId',
                 file2PrimaryIdExpression: 'order_id',
                 rules                   : [
-                        [sequenceNum: 10, ruleLogic: 'rule "R1" when $m : Map() then end',
-                         ruleType   : "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
+                        [sequenceNum: 10, ruleText: "field comparison", ruleType: "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
                 ],
         ])
 

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
+import reconciliation.rule.FieldComparisonRuleLogicGenerator
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -1106,9 +1107,11 @@ class JudgeReplayTests {
                 fieldExpression: "orderInfo.financialStatus", operator: "IN", conditionValues: "refunded",
                 checkLabel: "Shopify refunded the order", companyUserGroupId: A])
         // A field rule, off unless a test turns it on (the byte-identity test runs the scope with and without one).
-        insert("darpan.rule.Rule", [ruleId: "JRT_AMOUNT_RULE", ruleSetId: "JRT_RS", sequenceNum: 10, enabled: "N", ruleType: "DRL",
-                severity: "WARN", companyUserGroupId: A, ruleText: "Refund amount equals the RMA amount",
-                ruleLogic: 'rule "JRT_AMOUNT_RULE" salience 100 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("refundAmount"), ((Map) $m.get("file2")).get("amount"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "refundAmount", ((Map) $m.get("file1")).get("refundAmount"), ((Map) $m.get("file2")).get("amount"), "WARN", "Refund amount differs"); end'])
+        // DAR-OPS-029 S99-205b: a generated field comparison (what a tenant can author), not hand-written DRL.
+        String amountExpression = '{"type":"FIELD_COMPARISON","file1FieldPath":"refundAmount","file2FieldPath":"amount","operator":"="}'
+        insert("darpan.rule.Rule", [ruleId: "JRT_AMOUNT_RULE", ruleSetId: "JRT_RS", sequenceNum: 10, enabled: "N", ruleType: "FIELD_COMPARISON",
+                severity: "WARN", companyUserGroupId: A, ruleText: "Refund amount equals the RMA amount", expression: amountExpression,
+                ruleLogic: FieldComparisonRuleLogicGenerator.generate(amountExpression, "", "", "JRT_AMOUNT_RULE", "WARN", 0)])
         insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "JRT_SCOPE", sequenceNum: 20, conclusionEnumId: "DKR5T_NO_RMA",
                 appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: A])
         insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "JRT_SCOPE", sequenceNum: 20, conditionSeq: 1, subject: "FILE_2",

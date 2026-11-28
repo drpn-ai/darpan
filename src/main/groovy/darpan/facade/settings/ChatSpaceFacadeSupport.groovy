@@ -93,8 +93,11 @@ class ChatSpaceFacadeSupport {
      * browser still running an older UI bundle reads only those two: mirroring makes it show a Slack
      * space as configured-but-mislabelled, where reading the legacy column would show every Slack
      * space as "Not configured" and invite an admin to "fix" it by pasting the URL again.</p>
+     *
+     * <p>OC122: withWebhookUrl false leaves both URL fields null (webhookConfigured still says whether one is set). A
+     * webhook URL lets anyone post into the space, so only someone who may edit the space reads it.</p>
      */
-    static Map<String, Object> toChatSpaceMap(def ec, def spaceRow, boolean inUse) {
+    static Map<String, Object> toChatSpaceMap(def ec, def spaceRow, boolean inUse, boolean withWebhookUrl = true) {
         if (spaceRow == null) return null
         String provider = TenantNotificationSupport.resolveChatProvider(spaceRow.chatProviderEnumId)
         String resolvedWebhookUrl = TenantNotificationSupport.resolveWebhookUrl(spaceRow)
@@ -118,9 +121,9 @@ class ChatSpaceFacadeSupport {
                 deliveryMode        : botConfigured ? TenantNotificationSupport.DELIVERY_SLACK_BOT :
                         TenantNotificationSupport.DELIVERY_WEBHOOK,
                 webhookConfigured   : configured,
-                webhookUrl          : resolvedWebhookUrl,
+                webhookUrl          : withWebhookUrl ? resolvedWebhookUrl : null,
                 googleChatConfigured: configured,
-                googleChatWebhookUrl: resolvedWebhookUrl,
+                googleChatWebhookUrl: withWebhookUrl ? resolvedWebhookUrl : null,
                 isActive            : ((spaceRow.isActive)?.toString()?.trim()) ?: "Y",
                 inUse               : inUse,
                 createdByUserId     : spaceRow.createdByUserId,

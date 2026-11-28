@@ -180,7 +180,9 @@
     </service>
 
     <service verb="list" noun="TenantChatSpaces" authz-action="view" allow-remote="true" authenticate="true">
-        <description>List active-tenant chat spaces (Google Chat or Slack), including the webhook URL in clear text.</description>
+        <description>List active-tenant chat spaces (Google Chat or Slack). The webhook URL comes in clear text only to those who
+            may edit a space (edit access, as save#TenantChatSpace, or a super admin); everyone else gets it null, and
+            webhookConfigured says whether one is set (OC122).</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
@@ -209,7 +211,8 @@
             <set field="automationSpaceIds" from="tenantId ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
             <set field="subscriptionSpaceIds" from="spaceRows ? (ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', 'in', spaceRows.collect { it.chatSpaceId }).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
             <set field="streaksSpaceId" from="darpan.facade.common.TenantAccessSupport.readStoredStreaksChatSpaceId(ec, tenantId)"/>
-            <set field="chatSpaces" from="spaceRows.collect { row -> darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, row, automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId) || row.chatSpaceId == streaksSpaceId) }"/>
+            <set field="withWebhookUrl" from="darpan.facade.common.TenantAccessSupport.canEditActiveTenantData(ec)"/>
+            <set field="chatSpaces" from="spaceRows.collect { row -> darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, row, automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId) || row.chatSpaceId == streaksSpaceId, withWebhookUrl) }"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

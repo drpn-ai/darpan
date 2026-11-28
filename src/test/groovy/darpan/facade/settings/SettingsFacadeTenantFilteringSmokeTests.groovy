@@ -88,8 +88,9 @@ class SettingsFacadeTenantFilteringSmokeTests {
         List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
         assertEquals(["KREWE_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
         assertTrue(chatSpaces.first().googleChatConfigured as boolean)
-        assertEquals("https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
-                chatSpaces.first().googleChatWebhookUrl as String)
+        // OC122: this user is view-only, so the URL (which lets anyone post into the space) is not sent; it is set, though.
+        assertNull(chatSpaces.first().webhookUrl)
+        assertNull(chatSpaces.first().googleChatWebhookUrl)
         assertNoRawCredentialFields(chatSpaces)
 
         ec.message.clearErrors()

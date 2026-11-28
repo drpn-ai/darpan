@@ -37792,7 +37792,7 @@
                 "properties": {
                     
                 },
-                "description": "List active-tenant chat spaces (Google Chat or Slack), including the webhook URL in clear text."
+                "description": "List active-tenant chat spaces (Google Chat or Slack). The webhook URL comes in clear text only to those who\n            may edit a space (edit access, as save#TenantChatSpace, or a super admin); everyone else gets it null, and\n            webhookConfigured says whether one is set (OC122)."
             },
             "ListTenantChatSpacesResult": {
                 "type": "object",

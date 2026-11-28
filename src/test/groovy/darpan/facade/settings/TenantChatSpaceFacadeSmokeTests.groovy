@@ -197,6 +197,45 @@ class TenantChatSpaceFacadeSmokeTests {
         assertEquals(movedWebhook, edited.chatSpace.webhookUrl as String)
     }
 
+    // OC122 (security): a webhook URL lets anyone post into the client's room, so list#TenantChatSpaces gives it only to
+    // those who may edit a space (save#TenantChatSpace's edit access). A viewer or a User still sees that it is set.
+    @Test
+    void onlyEditAccessReadsAChatSpacesWebhookUrl() {
+        def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [spaceName: "Webhook gate", webhookUrl: WEBHOOK, isActive: true])
+        assertTrue(save.ok as boolean)
+        String chatSpaceId = save.chatSpace.chatSpaceId
+        try {
+            assertEquals(WEBHOOK, listedSpace(chatSpaceId).webhookUrl as String, "an editor reads the URL")
+            ["DARPAN_COMPANY_VIEW_ONLY", "DARPAN_TENANT_USER"].each { String role ->
+                actAs(role)
+                Map row = listedSpace(chatSpaceId)
+                assertNull(row.webhookUrl, "${role} must not receive the webhook URL")
+                assertNull(row.googleChatWebhookUrl, "${role} must not receive it under the old name either")
+                assertTrue(row.webhookConfigured as boolean, "${role} still sees that the space is set up")
+            }
+        } finally {
+            actAs("DARPAN_COMPANY_EDITOR")
+            callFacade("facade.SettingsFacadeServices.delete#TenantChatSpace", [chatSpaceId: chatSpaceId])
+        }
+    }
+
+    private Map listedSpace(String chatSpaceId) {
+        def list = callFacade("facade.SettingsFacadeServices.list#TenantChatSpaces", [:])
+        assertTrue(list.ok as boolean)
+        return (Map) list.chatSpaces.find { it.chatSpaceId == chatSpaceId }
+    }
+
+    /** The KREWE test user (seedCompanyScope) holds exactly this tenant role. */
+    private void actAs(String roleId) {
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: roleId, groupTypeEnumId: "UgtDarpanPermission"])
+                .createOrUpdate()
+        ec.entity.find("darpan.auth.TenantUserPermissionGroupMember").condition("tenantUserGroupId", "KREWE")
+                .condition("userId", "TEST_CUSTOMER_USER").disableAuthz().deleteAll()
+        ec.entity.makeValue("darpan.auth.TenantUserPermissionGroupMember").setAll([tenantUserGroupId: "KREWE",
+                userId: "TEST_CUSTOMER_USER", permissionUserGroupId: roleId,
+                fromDate: java.sql.Timestamp.valueOf("2026-04-21 00:00:00")]).create()
+    }
+
     private Map<String, Object> callFacade(String serviceName, Map<String, Object> parameters) {
         return (Map<String, Object>) ec.service.sync()
                 .name(serviceName)

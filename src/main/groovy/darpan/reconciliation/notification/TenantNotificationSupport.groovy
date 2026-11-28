@@ -215,7 +215,6 @@ class TenantNotificationSupport {
                 Map<String, Object> delivery = deliverToDestination(destination, destinationPayload)
                 if (delivery.ok == true) {
                     deliveredCount++
-                    recordSlackMessage(ec, resultId, destination, delivery)
                     if (badgeGif) stampBadgeGif(ec, tenantId, (String) destination.chatSpaceId)
                 } else {
                     failedCount++
@@ -347,8 +346,7 @@ class TenantNotificationSupport {
      * Turns a chat-space row into a deliverable destination, or null when it cannot deliver.
      *
      * <p>A Slack space resolves two ways. If it names a workspace install, delivery goes through
-     * {@code chat.postMessage} with that install's bot token — the path that returns a message
-     * {@code ts}. If it has only a webhook URL, it falls back to incoming-webhook delivery, which is
+     * {@code chat.postMessage} with that install's bot token. If it has only a webhook URL, it falls back to incoming-webhook delivery, which is
      * what keeps Darpan usable in a workspace whose admins do not permit app installation. The bot
      * path wins when a space somehow has both, because it is strictly more capable.</p>
      */
@@ -549,32 +547,6 @@ class TenantNotificationSupport {
                 logger.warn("Failed to purge run notification subscription for result {} user {}: {}",
                         resultId, subscriptionRow?.userId, t.message)
             }
-        }
-    }
-
-    /**
-     * Stores the {@code ts} a Slack bot delivery returned, so the message can later be edited in
-     * place rather than followed by a second one.
-     *
-     * <p>Best-effort by design: the notification has already been delivered by the time this runs,
-     * and losing the edit handle must never turn a successful alert into a reported failure.</p>
-     */
-    private static void recordSlackMessage(def ec, String resultId, Map<String, Object> destination,
-                                           Map<String, Object> delivery) {
-        String messageTs = ((delivery?.ts)?.toString()?.trim())
-        if (!messageTs) return
-        try {
-            def messageRow = ec.entity.makeValue("darpan.reconciliation.SlackPostedMessage")
-            messageRow.set("reconciliationRunResultId", resultId)
-            messageRow.set("chatSpaceId", destination.chatSpaceId)
-            messageRow.set("slackChannelId", ((delivery.slackChannelId)?.toString()?.trim()) ?:
-                    ((destination.slackChannelId)?.toString()?.trim()))
-            messageRow.set("messageTs", messageTs)
-            messageRow.set("postedDate", ec.user.nowTimestamp)
-            messageRow.createOrUpdate()
-        } catch (Throwable t) {
-            logger.warn("Could not record the Slack message handle for result {} space {}: {}",
-                    resultId, destination?.chatSpaceId, t.message)
         }
     }
 
@@ -830,10 +802,7 @@ class TenantNotificationSupport {
             return [ok             : outcome.ok,
                     statusCode     : outcome.statusCode,
                     providerMessage: outcome.operatorMessage ?: outcome.errorCode,
-                    errorCode      : outcome.errorCode,
-                    transient      : outcome.transient,
-                    ts             : outcome.ts,
-                    slackChannelId : outcome.channelId]
+                    errorCode      : outcome.errorCode]
         }
         return slack ? deliverSlack(destinationRef, shaped) : deliverGoogleChat(destinationRef, shaped)
     }

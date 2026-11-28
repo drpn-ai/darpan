@@ -2766,7 +2766,7 @@ end'''
                         .disableAuthz().useCache(false).list())
                 .collect { it.get("reconciliationRunResultId") as String }.unique()
         if (runResultIds) {
-            ["darpan.reconciliation.ReconciliationRunStep", "darpan.reconciliation.SlackPostedMessage",
+            ["darpan.reconciliation.ReconciliationRunStep",
              "darpan.reconciliation.ReconciliationRunNotifySubscription", "darpan.reconciliation.ReconciliationAutomationExecution"].each { String child ->
                 ec.entity.find(child).condition("reconciliationRunResultId", "in", runResultIds).disableAuthz().useCache(false).deleteAll()
             }

@@ -29,29 +29,6 @@ import java.time.Duration
 class SlackApiClient {
     static final String API_BASE = "https://slack.com/api"
 
-    /**
-     * Failures that will keep failing until a human changes something — a channel was deleted, the
-     * bot was never invited, the app was uninstalled. These consume the notification's one delivery
-     * attempt legitimately; retrying them achieves nothing.
-     */
-    static final List<String> ACTIONABLE_ERRORS = [
-            "channel_not_found", "not_in_channel", "is_archived", "channel_is_archived",
-            "invalid_auth", "token_revoked", "token_expired", "account_inactive",
-            "missing_scope", "not_allowed_token_type", "restricted_action",
-            "restricted_action_read_only_channel", "no_permission",
-    ].asImmutable()
-
-    /**
-     * Failures that would plausibly succeed on a later attempt. Distinguished from the above so a
-     * rate-limited run reads as "Slack was busy" rather than "your channel is misconfigured" — the
-     * two demand completely different operator responses, and conflating them is how a transient
-     * blip gets debugged as a permissions problem.
-     */
-    static final List<String> TRANSIENT_ERRORS = [
-            "rate_limited", "ratelimited", "service_unavailable", "internal_error", "fatal_error",
-            "request_timeout",
-    ].asImmutable()
-
     private static Closure transportHook = null
 
     /** Test seam: receives (method, token, payload) and returns [statusCode, body]. */
@@ -61,13 +38,13 @@ class SlackApiClient {
 
     /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
     static void resetForTests() {
-        try { resetTransportHook() } catch (Throwable ignored) { }
+        transportHook = null
     }
 
     /**
      * Posts a message and returns the {@code ts} handle on success.
      *
-     * @return {@code [ok, channelId, ts, errorCode, transient, operatorMessage, statusCode]}
+     * @return {@code [ok, channelId, ts, errorCode, operatorMessage, statusCode]}
      */
     static Map<String, Object> postMessage(String botToken, String channelId, String text, List blocks = null) {
         Map<String, Object> params = [channel: channelId, text: text]
@@ -116,13 +93,6 @@ class SlackApiClient {
         // the point of the feature. Refusing it outright would block a working setup over a picker.
         outcome.put("missingScopes", REQUIRED_SCOPES.findAll { !granted.contains(it) })
         return outcome
-    }
-
-    /** Edits a message posted earlier, addressed by the ts {@link #postMessage} returned. */
-    static Map<String, Object> updateMessage(String botToken, String channelId, String messageTs, String text) {
-        Map<String, Object> response = call("chat.update", botToken,
-                [channel: channelId, ts: messageTs, text: text])
-        return interpretResponse((int) response.statusCode, (String) response.body)
     }
 
     /**
@@ -232,7 +202,6 @@ class SlackApiClient {
                     ok             : false,
                     statusCode     : statusCode,
                     errorCode      : rateLimited ? "rate_limited" : "unparseable_response",
-                    transient      : rateLimited || statusCode >= 500,
                     operatorMessage: rateLimited ? describeError("rate_limited") :
                             "Slack returned a response Darpan could not read (HTTP ${statusCode}).".toString(),
                     body           : null,
@@ -240,8 +209,7 @@ class SlackApiClient {
         }
 
         if (httpOk && parsed.get("ok") == true) {
-            return [ok: true, statusCode: statusCode, errorCode: null, transient: false,
-                    operatorMessage: null, body: parsed]
+            return [ok: true, statusCode: statusCode, errorCode: null, operatorMessage: null, body: parsed]
         }
 
         String errorCode = ((parsed.get("error"))?.toString()?.trim()) ?: "unknown_error"
@@ -249,15 +217,9 @@ class SlackApiClient {
                 ok             : false,
                 statusCode     : statusCode,
                 errorCode      : errorCode,
-                transient      : TRANSIENT_ERRORS.contains(errorCode) || statusCode >= 500,
                 operatorMessage: describeError(errorCode),
                 body           : parsed,
         ]
-    }
-
-    /** Whether a failure needs a human rather than a retry. */
-    static boolean isActionable(Object errorCode) {
-        return ACTIONABLE_ERRORS.contains(((errorCode)?.toString()?.trim()))
     }
 
     /**
@@ -323,8 +285,7 @@ class SlackApiClient {
      * no error, no empty result, just a list that looked complete. Encoding is therefore uniform
      * here rather than per-method — the next method added must not have to rediscover this.</p>
      *
-     * <p>A future {@code blocks} payload is the one thing that would need care: form encoding
-     * requires it as a JSON-encoded STRING value, not a nested structure.</p>
+     * <p>{@code blocks} goes in as a JSON-encoded STRING value, never a nested structure (postMessage).</p>
      */
     static String formEncode(Map<String, Object> params) {
         return (params ?: [:]).findAll { entry -> entry.value != null }

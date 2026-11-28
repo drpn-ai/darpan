@@ -217,7 +217,6 @@ class RetentionSupport {
                         { find -> find.condition("createdDate", EntityCondition.LESS_THAN, cutoff)
                                 .condition("statusEnumId", EntityCondition.NOT_IN, UNFINISHED_RUN_STATUSES) },
                         [[entity: "darpan.reconciliation.ReconciliationRunStep", fk: "reconciliationRunResultId"],
-                         [entity: "darpan.reconciliation.SlackPostedMessage", fk: "reconciliationRunResultId"],
                          [entity: "darpan.reconciliation.ReconciliationRunNotifySubscription", fk: "reconciliationRunResultId"]],
                         // An automation execution keeps its own counts and history; it only forgets which run result it made.
                         [[entity: "darpan.reconciliation.ReconciliationAutomationExecution", fk: "reconciliationRunResultId"]])

@@ -437,26 +437,6 @@
         </relationship>
     </entity>
 
-    <entity entity-name="SlackPostedMessage" package="darpan.reconciliation" use="transactional" cache="never">
-        <description>The Slack message a run posted to one destination, keyed by its `ts`.
-
-            chat.postMessage returns a ts; an incoming webhook returns the bare string "ok" and no
-            handle at all. Keeping the ts is what makes a later chat.update possible — a run message
-            that evolves as steps complete rather than one terminal alert. Rows are written by the
-            bot delivery path only.</description>
-        <field name="reconciliationRunResultId" type="id" is-pk="true"/>
-        <field name="chatSpaceId" type="id" is-pk="true"/>
-        <field name="slackChannelId" type="text-medium"/>
-        <field name="messageTs" type="text-medium"/>
-        <field name="postedDate" type="date-time"/>
-        <relationship type="one" related="darpan.reconciliation.ReconciliationRunResult" fk-name="SLKMSG_RESULT">
-            <key-map field-name="reconciliationRunResultId"/>
-        </relationship>
-        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" fk-name="SLKMSG_SPACE">
-            <key-map field-name="chatSpaceId"/>
-        </relationship>
-    </entity>
-
     <entity entity-name="ReconciliationRunNotifySubscription" package="darpan.reconciliation" use="transactional" cache="never">
         <description>One user's notify-me subscription on one running reconciliation. chatSpaceId is a
             snapshot of the user's default chat space at click time; unsubscribe deletes the row.</description>

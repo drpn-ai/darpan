@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 /**
  * The Slack Web API reports failure with HTTP 200 and {@code {"ok": false, "error": "..."}}, so the
  * status code alone can never decide whether a notification was delivered. These tests pin that
- * contract, the actionable/transient split that decides what an operator is told, and the ts
- * handle that a later chat.update depends on.
+ * contract, the sentence an operator is told (a retry for a busy Slack, a fix for a misconfigured channel), and
+ * the ts a delivered message comes back with.
  */
 class SlackApiClientTests {
 
@@ -50,7 +50,6 @@ class SlackApiClientTests {
         Map<String, Object> outcome = SlackApiClient.interpretResponse(200, '{"ok":true,"channel":"C1","ts":"1712.45"}')
         assertTrue(outcome.ok as boolean)
         assertNull(outcome.errorCode)
-        assertFalse(outcome.transient as boolean)
     }
 
     @Test
@@ -60,8 +59,7 @@ class SlackApiClientTests {
             Map<String, Object> outcome = SlackApiClient.interpretResponse(200, """{"ok":false,"error":"${code}"}""")
             assertFalse(outcome.ok as boolean, "HTTP 200 + ${code} must not read as delivered")
             assertEquals(code, outcome.errorCode)
-            assertTrue(SlackApiClient.isActionable(code), "${code} needs a human, not a retry")
-            assertFalse(outcome.transient as boolean, "${code} must not be classified transient")
+            assertFalse(outcome.operatorMessage.toString().contains("try again"), "${code} needs a human, not a retry")
         }
     }
 
@@ -70,11 +68,11 @@ class SlackApiClientTests {
         // A rate-limited run and a deleted channel both fail, but only one is the operator's problem.
         // Conflating them is how a blip gets debugged as a permissions bug.
         Map<String, Object> limited = SlackApiClient.interpretResponse(200, '{"ok":false,"error":"rate_limited"}')
-        assertTrue(limited.transient as boolean)
-        assertFalse(SlackApiClient.isActionable("rate_limited"))
-
+        assertTrue(limited.operatorMessage.toString().contains("try again"), limited.operatorMessage as String)
         Map<String, Object> serverSide = SlackApiClient.interpretResponse(503, '{"ok":false,"error":"service_unavailable"}')
-        assertTrue(serverSide.transient as boolean)
+        assertTrue(serverSide.operatorMessage.toString().contains("try again"), serverSide.operatorMessage as String)
+        Map<String, Object> deleted = SlackApiClient.interpretResponse(200, '{"ok":false,"error":"channel_not_found"}')
+        assertFalse(deleted.operatorMessage.toString().contains("try again"), deleted.operatorMessage as String)
     }
 
     @Test
@@ -84,7 +82,6 @@ class SlackApiClientTests {
         Map<String, Object> outcome = SlackApiClient.interpretResponse(429, "")
         assertFalse(outcome.ok as boolean)
         assertEquals("rate_limited", outcome.errorCode)
-        assertTrue(outcome.transient as boolean)
     }
 
     @Test
@@ -96,7 +93,10 @@ class SlackApiClientTests {
 
     @Test
     void everyActionableErrorGetsAnOperatorSentenceNotARawCode() {
-        SlackApiClient.ACTIONABLE_ERRORS.each { String code ->
+        // The codes that need a human (a deleted channel, a missing invite, a removed app): each is told in words.
+        ["channel_not_found", "not_in_channel", "is_archived", "channel_is_archived", "invalid_auth", "token_revoked",
+         "token_expired", "account_inactive", "missing_scope", "not_allowed_token_type", "restricted_action",
+         "restricted_action_read_only_channel", "no_permission"].each { String code ->
             String message = SlackApiClient.describeError(code)
             assertFalse(message.contains(code),
                     "${code} still leaks the raw code to the operator: ${message}")

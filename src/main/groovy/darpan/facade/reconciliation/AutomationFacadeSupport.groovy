@@ -57,6 +57,8 @@ class AutomationFacadeSupport {
     static final String SHOPIFY_WINDOW_END_PARAMETER = "windowEnd"
     static final List<String> FILE_SIDES = [FILE_SIDE_1, FILE_SIDE_2].asImmutable()
     static final List<String> SUPPORTED_INPUT_MODES = [INPUT_MODE_API_RANGE, INPUT_MODE_SFTP_FILES].asImmutable()
+    /** DAR-BE-052: no connector reads a population by status, and the runner refuses such a row (S06 F-A4). */
+    static final String STATE_WINDOW_RETIRED = "State-based windows are retired; choose a date window."
 
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
@@ -71,8 +73,8 @@ class AutomationFacadeSupport {
         if (!ec.message.hasError()) {
             validateSources(ec, inputModeEnumId, sourceEntries, savedRunResolution.savedRun as Map)
         }
-        if (!ec.message.hasError()) {
-            validateStateModeSources(ec, input, sourceEntries).each { String error -> ec.message.addError(error) }
+        if (!ec.message.hasError() && AutomationExecutionSupport.isStateWindowMode(input)) {
+            ec.message.addError(STATE_WINDOW_RETIRED)
         }
 
         String chatSpaceId = normalize(input.chatSpaceId) ?: null
@@ -796,29 +798,6 @@ class AutomationFacadeSupport {
         }
     }
 
-    /**
-     * A state-based automation defines its population by status on BOTH sides. If one side still
-     * receives a date window while the other does not, the two extracts describe different populations
-     * and every non-overlapping record reads as a genuine discrepancy. Caught on save, because at run
-     * time the result looks like a real finding rather than a configuration error.
-     */
-    static List<String> validateStateModeSources(def ec, def automation, Collection sources) {
-        if (!AutomationExecutionSupport.isStateWindowMode(automation)) return []
-
-        List<String> errors = []
-        (sources ?: []).each { Object source ->
-            String systemEnumId = normalize(readField(source, "systemEnumId"))
-            String fileSide = normalize(readField(source, "fileSide"))
-            Map<String, Object> connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId)
-            if (!connector?.supportsStateExtract) {
-                errors.add(("Source ${fileSide} (${systemEnumId}) cannot run without a date window. " +
-                        "Choose a date-based schedule window, or a source system that supports " +
-                        "status-defined extraction.").toString())
-            }
-        }
-        return errors
-    }
-
     protected static void validateChatSpace(def ec, String chatSpaceId) {
         // DAR-BE-077: chatSpaceId is the whole PK, and one() keeps only the PK when it has one, so a
         // tenant condition beside it was silently dropped and another tenant's space passed. The
@@ -1408,32 +1387,28 @@ class AutomationFacadeSupport {
         List<Map<String, Object>> connectors = connectorRowsForConfigEntity(ec, type.entityName)
         if (!connectors) return []
 
-        try {
-            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
-            // listAccessibleConfigRows applies no status filter, so isActive is preserved here — the
-            // source picker must not offer an inactive config. canReadOrders is deliberately NOT
-            // checked anymore: per-endpoint enablement (isEndpointEnabled below) replaces it.
-            List rows = SharedConfigAccessSupport.listAccessibleConfigRows(ec, configTypeEnumId)
-                    .findAll { normalize(readString(it, "isActive")) != "N" }
-            List<Map<String, Object>> pairs = []
-            rows.each { item ->
-                String configId = readString(item, type.pkField)
-                String configLabel = readString(item, "description") ?: configId
-                connectors.each { Map<String, Object> connector ->
-                    String systemEnumId = connector.systemEnumId as String
-                    // Absent SourceConfigEndpointAccess row means enabled — never expressed as a
-                    // finder condition; isEndpointEnabled already applies that contract.
-                    if (SourceEndpointAccessSupport.isEndpointEnabled(ec, configTypeEnumId, configId, systemEnumId)) {
-                        pairs << ([configId: configId, pkField: type.pkField, configLabel: configLabel,
-                                   connector: connector] as Map<String, Object>)
-                    }
+        // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
+        // listAccessibleConfigRows applies no status filter, so isActive is preserved here — the
+        // source picker must not offer an inactive config. canReadOrders is deliberately NOT
+        // checked anymore: per-endpoint enablement (isEndpointEnabled below) replaces it.
+        // No catch: a failed read must fail the options call, not show "No API configs are available".
+        List rows = SharedConfigAccessSupport.listAccessibleConfigRows(ec, configTypeEnumId)
+                .findAll { normalize(readString(it, "isActive")) != "N" }
+        List<Map<String, Object>> pairs = []
+        rows.each { item ->
+            String configId = readString(item, type.pkField)
+            String configLabel = readString(item, "description") ?: configId
+            connectors.each { Map<String, Object> connector ->
+                String systemEnumId = connector.systemEnumId as String
+                // Absent SourceConfigEndpointAccess row means enabled — never expressed as a
+                // finder condition; isEndpointEnabled already applies that contract.
+                if (SourceEndpointAccessSupport.isEndpointEnabled(ec, configTypeEnumId, configId, systemEnumId)) {
+                    pairs << ([configId: configId, pkField: type.pkField, configLabel: configLabel,
+                               connector: connector] as Map<String, Object>)
                 }
             }
-            return pairs
-        } catch (Exception e) {
-            logger.warn("Failed to load source config options for ${configTypeEnumId}", e)
-            return []
         }
+        return pairs
     }
 
     /** Enabled SourceSystemConnector rows for one config entity, projected to just the fields these builders need. */
@@ -1595,15 +1570,10 @@ class AutomationFacadeSupport {
      * Registry-driven on purpose: a connector opting in later needs no UI change.
      */
     protected static boolean supportsExcludeFiltersForSystem(def ec, String systemEnumId) {
-        try {
-            Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(systemEnumId))
-            // Explicit truthiness, NOT `as boolean`: String.asType(Boolean) routes through
-            // Boolean.valueOf, which would turn "sourceFilters" into false.
-            return normalize(connector?.get("filterParameterName")) ? true : false
-        } catch (Exception e) {
-            logger.warn("Could not resolve exclusion-filter support for system ${systemEnumId}", e)
-            return false
-        }
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(systemEnumId))
+        // Explicit truthiness, NOT `as boolean`: String.asType(Boolean) routes through
+        // Boolean.valueOf, which would turn "sourceFilters" into false.
+        return normalize(connector?.get("filterParameterName")) ? true : false
     }
 
     protected static String sftpServerLabel(def ec, String sftpServerId) {

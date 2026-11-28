@@ -869,91 +869,20 @@ class AutomationFacadeSmokeTests {
         return probe.call()
     }
 
-    // ─── state-mode source-capability validation (RQ-15) ──────────────────────────
-    // A state-based automation defines its population by status on BOTH sides; a side that still
-    // needs a date window (i.e. its connector does not declare supportsStateExtract) makes the diff
-    // compare two different populations. These exercise validateStateModeSources directly against the
-    // SourceSystemConnector registry. No seeded connector declares supportsStateExtract since the HotWax REST
-    // transfer-order connector was deleted (DAR-BE-052), so a test-only row stands in for one.
-
-    private static final String STATE_CAPABLE = "STATE_CAPABLE_TEST"
-
-    private void seedStateCapableConnector() {
-        upsertEntity(darpan.reconciliation.automation.SourceSystemConnectorSupport.ENTITY_NAME, [systemEnumId: STATE_CAPABLE], [
-                systemEnumId        : STATE_CAPABLE,
-                extractServiceName  : "reconciliation.StateTestExtractionServices.extract#StateTestRecords",
-                supportsStateExtract: "Y",
-                statusParameterName : "statusIds",
-                enabled             : "Y",
-        ])
-    }
+    // ─── retired state-based window (DAR-BE-052, S06 F-A4) ──────────────────────────
+    // No connector reads a population by status any more and the runner refuses such a row, so a save
+    // is refused up front, in words, rather than left to fail on every scheduled run.
 
     @Test
-    void stateModeAutomationRejectsASideThatCannotDoStateExtraction() {
-        seedStateCapableConnector()
-        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
-                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
-                 [fileSide: "FILE_2", systemEnumId: "SHOPIFY"]])
-
-        assertEquals(1, errors.size())
-        assertTrue(errors[0].contains("FILE_2"))
-        assertTrue(errors[0].contains("SHOPIFY"))
-    }
-
-    @Test
-    void stateModeAutomationAcceptsTwoStateCapableSides() {
-        seedStateCapableConnector()
-        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
-                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
-                 [fileSide: "FILE_2", systemEnumId: STATE_CAPABLE]])
-
-        assertEquals([], errors)
-    }
-
-    @Test
-    void windowModeAutomationIsNeverCheckedForStateCapability() {
-        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
-                [automationId: "AUT_SO", relativeWindowTypeEnumId: "AUT_WIN_LAST_DAYS"],
-                [[fileSide: "FILE_1", systemEnumId: "OMS"],
-                 [fileSide: "FILE_2", systemEnumId: "SHOPIFY"]])
-
-        assertEquals([], errors)
-    }
-
-    @Test
-    void stateModeAutomationTreatsAnUnresolvableConnectorAsIncapableRatherThanThrowing() {
-        // A systemEnumId with no SourceSystemConnector row (typo, retired system, or a disabled row)
-        // must fail the same actionable way as a real-but-window-only connector, never throw.
-        seedStateCapableConnector()
-        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
-                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
-                 [fileSide: "FILE_2", systemEnumId: "NOT_A_REAL_SYSTEM"]])
-
-        assertEquals(1, errors.size())
-        assertTrue(errors[0].contains("FILE_2"))
-        assertTrue(errors[0].contains("NOT_A_REAL_SYSTEM"))
-    }
-
-    @Test
-    void saveAutomationRejectsStateModeAutomationWhenSourcesCannotDoStateExtraction() {
-        // Wiring proof: prepareAutomationSave (via save#Automation) must actually call
-        // validateStateModeSources and surface its errors through ec.message like every other
-        // save-time validation, not just have the pure function pass its own unit tests.
-        // saveSftpAutomation's default sources are OMS (FILE_1) / SHOPIFY (FILE_2) — neither
-        // connector declares supportsStateExtract, so AUT_WIN_STATE must reject both sides.
-        Map<String, Object> saveResult = saveSftpAutomation("State Mode Mismatch SFTP", [
-                relativeWindowTypeEnumId: "AUT_WIN_STATE",
+    void saveAutomationRefusesTheRetiredStateWindow() {
+        Map<String, Object> saveResult = saveSftpAutomation("State Window SFTP", [
+                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_STATE,
         ])
 
         assertFalse((Boolean) saveResult.ok)
-        String joinedErrors = (saveResult.errors ?: []).join(" | ")
-        assertTrue(joinedErrors.contains("FILE_1") && joinedErrors.contains("OMS"),
-                "Unexpected errors: ${joinedErrors}")
-        assertTrue(joinedErrors.contains("FILE_2") && joinedErrors.contains("SHOPIFY"),
-                "Unexpected errors: ${joinedErrors}")
+        assertEquals([AutomationFacadeSupport.STATE_WINDOW_RETIRED], saveResult.errors,
+                "one refusal, naming the window, not one per source")
+        ec.message.clearErrors()
     }
 
     private Map<String, Object> saveSftpAutomation(String automationName, Map<String, Object> extraParams = [:]) {

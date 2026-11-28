@@ -1,10 +1,14 @@
 package darpan.facade.reconciliation
 
+import darpan.common.DarpanEntityConstants
+import darpan.facade.common.SharedConfigAccessSupport
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -118,6 +122,23 @@ class AutomationFacadeSupportSharedConfigTests {
                 "with zero grants a foreign tenant must still be rejected exactly as before")
     }
 
+    // --- listEnabledConfigEndpoints: a failed read is loud (S19 F7) --------
+
+    @Test
+    void aFailedConfigReadFailsTheSourcePickerInsteadOfOfferingNothing() {
+        // It used to catch everything and return [], so a broken read showed "No API configs are
+        // available" and the operator had no way to tell it from a tenant with no config.
+        Expando ec = executionContext("KREWE", DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, [], [])
+        Map<String, FinderStub> finders = ((EntityFacadeStub) ec.entity).finders
+        finders.put(SourceSystemConnectorSupport.ENTITY_NAME, new FinderStub(listResult: [[systemEnumId: "OMS_GQL",
+                configEntityName: DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, enabled: "Y"]]))
+        finders.put(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, new FailingFinderStub())
+
+        assertThrows(IllegalStateException) {
+            AutomationFacadeSupport.listEnabledConfigEndpoints(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
+        }
+    }
+
     // --- fixtures ------------------------------------------------------
 
     private static Map grant(String type, String configId, String tenant, Timestamp thruDate = null) {
@@ -213,5 +234,10 @@ class AutomationFacadeSupportSharedConfigTests {
                 conditions.every { k, v -> row[k] == v }
             }
         }
+    }
+
+    static class FailingFinderStub extends FinderStub {
+        @Override List list() { throw new IllegalStateException("config read failed") }
+        @Override Object one() { throw new IllegalStateException("config read failed") }
     }
 }

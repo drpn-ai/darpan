@@ -1,5 +1,6 @@
 package darpan.ops
 
+import darpan.common.MessageScope
 import darpan.common.SecretRedactor
 import darpan.config.DarpanSettings
 import darpan.reconciliation.notification.StreakMilestoneVoice
@@ -96,25 +97,15 @@ class ErrorChatSupport {
      */
     private static Map claimSlot(def ec, Map params, String webhookUrl) {
         if (claimHook != null) return (Map) claimHook.call(params)
-        List infos = new ArrayList(ec.message.messageInfos)
-        List publics = new ArrayList(ec.message.publicMessageInfos)
-        ec.message.pushErrors()
-        Map claim = null
-        try {
-            claim = ec.service.sync().name("ops.OpsServices.record#RunErrorNotice").requireNewTransaction(true).parameters(params).call()
-            if (ec.message.hasError()) claim = null
-        } catch (Throwable t) {
-            logger.warn("Error card claim failed: {}", failureNote(t, webhookUrl))
-        } finally {
-            ec.message.clearAll()
-            // addPublic puts one MessageInfo in both lists, so the snapshot of the general list already holds the public ones
-            infos.each { mi ->
-                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
-                else ec.message.addMessage(mi.message, mi.type)
+        return MessageScope.isolated(ec) {
+            try {
+                Map claim = ec.service.sync().name("ops.OpsServices.record#RunErrorNotice").requireNewTransaction(true).parameters(params).call()
+                return ec.message.hasError() ? null : claim
+            } catch (Throwable t) {
+                logger.warn("Error card claim failed: {}", failureNote(t, webhookUrl))
+                return null
             }
-            ec.message.popErrors()
-        }
-        return claim
+        } as Map
     }
 
     /** The exception class and the webhook's host: never the exception message (it can carry the URL's key and token) nor the URL. */

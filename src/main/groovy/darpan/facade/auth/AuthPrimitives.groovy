@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.common.MessageScope
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import org.apache.commons.validator.routines.InetAddressValidator
@@ -68,29 +69,19 @@ class AuthPrimitives {
      *
      * A failed service call does not throw in Moqui: it rolls back and adds the exception text to ec.message's errors. So
      * the call is isolated: its errors (database text) never reach the caller's reply or fail the caller's transaction,
-     * and the caller's own messages come back as they were (ErrorLogCapture.flush's way; clearErrors would turn the
-     * counter's errors into danger messages).
+     * and the caller's own messages come back as they were (MessageScope; clearErrors would turn the counter's errors into danger messages).
      */
     @CompileDynamic
     static boolean countFailedLogin(def ec, String userId) {
         if (!userId) return false
-        List infos = new ArrayList(ec.message.messageInfos)
-        List publics = new ArrayList(ec.message.publicMessageInfos)
-        String failure = null
-        ec.message.pushErrors()
-        try {
-            ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")
-                    .parameters([userId: userId]).requireNewTransaction(true).call()
-            if (ec.message.hasError()) failure = ec.message.errors.join("; ")
-        } catch (Exception e) {
-            failure = e.message
-        } finally {
-            ec.message.clearAll()
-            infos.each { mi ->
-                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
-                else ec.message.addMessage(mi.message, mi.type)
+        String failure = MessageScope.isolated(ec) {
+            try {
+                ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")
+                        .parameters([userId: userId]).requireNewTransaction(true).call()
+                return ec.message.hasError() ? (ec.message.errors.join("; ") as String) : null
+            } catch (Exception e) {
+                return e.message
             }
-            ec.message.popErrors()
         }
         if (failure == null) return true
         logger.error("A failed login for userId {} was not counted toward its lockout: {}", userId, failure)

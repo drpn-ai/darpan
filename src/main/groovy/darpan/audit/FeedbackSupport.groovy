@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.common.MessageScope
 import darpan.config.DarpanSettings
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.conclusion.ConclusionTreeSupport
@@ -292,19 +293,14 @@ class FeedbackSupport {
      * the recipient's address.
      */
     private static Object isolated(def ec, String what, Map facts, Closure work) {
-        List infos = new ArrayList(ec.message.messageInfos)
-        List publics = new ArrayList(ec.message.publicMessageInfos)
+        Map before = MessageScope.snapshot(ec)
         ec.message.pushErrors()
         try {
             Object result = work.call()
             if (ec.message.hasError()) {
                 logger.error("Feedback {} for {} {} to user {} reported {} error(s)", what, facts?.tenantId, facts?.findingId,
                         (facts?.user as Map)?.id, ec.message.errors.size())
-                ec.message.clearAll()
-                infos.each { mi ->
-                    if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
-                    else ec.message.addMessage(mi.message, mi.type)
-                }
+                MessageScope.restore(ec, before)
                 return null
             }
             return result

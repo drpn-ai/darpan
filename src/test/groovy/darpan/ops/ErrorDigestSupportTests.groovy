@@ -97,6 +97,27 @@ class ErrorDigestSupportTests {
         assertTrue(claims.isEmpty() && loads.isEmpty() && mails.isEmpty() && posts.isEmpty())
     }
 
+    /** DAR-OPS-029 S99-021: a claim that fails twice is a failure (the day's email is not silently skipped as sent). */
+    @Test
+    void aClaimThatKeepsFailingIsNotReadAsAlreadySent() {
+        int calls = 0
+        ErrorDigestSupport.claim = { def ec, LocalDate day, Timestamp now -> calls++; return null }
+        Map out = ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        assertEquals([sent: false, reason: "CLAIM_FAILED"], out.subMap(["sent", "reason"]))
+        assertEquals(2, calls, "one retry, so a lost race reads the winner's row")
+        assertTrue(loads.isEmpty() && mails.isEmpty() && posts.isEmpty())
+    }
+
+    /** S99-021: a lost race (the other node's create won the key) retries, sees the row and reads ALREADY_SENT. */
+    @Test
+    void aLostClaimRaceReadsAlreadySent() {
+        int calls = 0
+        ErrorDigestSupport.claim = { def ec, LocalDate day, Timestamp now -> calls++; return calls == 1 ? null : [isNew: false] }
+        Map out = ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        assertEquals([sent: false, reason: "ALREADY_SENT"], out.subMap(["sent", "reason"]))
+        assertTrue(mails.isEmpty())
+    }
+
     @Test
     void theHourSendsOnceAndClaims() {
         input.executions = [failedRun()]

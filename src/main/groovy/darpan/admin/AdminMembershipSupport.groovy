@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.common.MessageScope
 import darpan.facade.auth.PasswordResetSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileDynamic
@@ -65,16 +66,17 @@ class AdminMembershipSupport {
             // Null when there is none to send: the email then has no password lines.
             tempPassword: tempPassword,
         ]
-        boolean sent = false
-        ec.message.pushErrors()
-        try {
-            sent = sendWelcomeEmail(ec, ((String) account.emailAddress).trim(), params, tempPassword == null)
-        } catch (Throwable t) {
-            logger.warn("Welcome email for {} to user {} failed: {}", params.tenantLabel, account.userId, t.toString())
-        } finally {
+        // DAR-OPS-029 S99-024: the send's errors are logged and dropped, never left in the admin's reply (clearErrors turned
+        // them into danger messages there).
+        boolean sent = MessageScope.isolated(ec) {
+            boolean ok = false
+            try {
+                ok = sendWelcomeEmail(ec, ((String) account.emailAddress).trim(), params, tempPassword == null)
+            } catch (Throwable t) {
+                logger.warn("Welcome email for {} to user {} failed: {}", params.tenantLabel, account.userId, t.toString())
+            }
             if (ec.message.hasError()) logger.warn("Welcome email for user {} not sent: {}", account.userId, ec.message.errorsString)
-            ec.message.clearErrors()
-            ec.message.popErrors()
+            return ok
         }
         return [sent: sent, withPassword: sent && tempPassword != null]
     }

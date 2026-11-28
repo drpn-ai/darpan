@@ -1,5 +1,6 @@
 package darpan.ops
 
+import darpan.common.MessageScope
 import darpan.common.SecretRedactor
 import darpan.config.DarpanSettings
 import darpan.email.EmailCopyReader
@@ -41,7 +42,7 @@ class ErrorDigestSupport {
     private static final String WHY = "DAR-BE-015 daily Darpan error email: read-only scan across every tenant for Darpan's own staff"
 
     static final String NOT_THE_HOUR = "NOT_THE_HOUR", ALREADY_SENT = "ALREADY_SENT", NO_DESTINATION = "NO_DESTINATION",
-                        DELIVERY_FAILED = "DELIVERY_FAILED"
+                        DELIVERY_FAILED = "DELIVERY_FAILED", CLAIM_FAILED = "CLAIM_FAILED"
 
     private static final Closure DEFAULT_CLAIM = { def ec, LocalDate day, Timestamp now -> claimDay(ec, day, now) }
     private static final Closure DEFAULT_FINISH = { def ec, LocalDate day, Map fields -> finishDay(ec, day, fields) }
@@ -78,7 +79,7 @@ class ErrorDigestSupport {
 
     /**
      * Sends the day's email when now is in the hour errors.digest.hourUtc (UTC) and the day is not claimed yet.
-     * Returns [sent, reason]: reason null when the email went out, else NOT_THE_HOUR, ALREADY_SENT, NO_DESTINATION (no
+     * Returns [sent, reason]: reason null when the email went out, else NOT_THE_HOUR, ALREADY_SENT, CLAIM_FAILED (the claim failed twice), NO_DESTINATION (no
      * address set; the chat summary still goes when the webhook is set) or DELIVERY_FAILED; plus subject and warnings when
      * it ran. Never throws past the claim: a failure after it is a warning and DELIVERY_FAILED.
      */
@@ -94,8 +95,14 @@ class ErrorDigestSupport {
         }
 
         LocalDate day = utc.toLocalDate()
-        Map claimed = claim.call(ec, day, now) as Map
-        if (claimed?.isNew != true) return [sent: false, reason: ALREADY_SENT]
+        // A failed claim is null: another node's create won the key, or the store failed. One retry tells them apart: after a
+        // lost race the day's row exists, so the retry answers isNew false. A second failure is a real one, never "already sent".
+        Map claimed = (claim.call(ec, day, now) ?: claim.call(ec, day, now)) as Map
+        if (claimed == null) {
+            logger.error("Daily error email for {} not sent: the day could not be claimed (see the warning above)", day)
+            return [sent: false, reason: CLAIM_FAILED]
+        }
+        if (claimed.isNew != true) return [sent: false, reason: ALREADY_SENT]
 
         boolean emailed = false
         Map counts = [checks: 0, logErrors: 0]
@@ -185,7 +192,7 @@ class ErrorDigestSupport {
 
     /** The call in its own transaction; a failure (another node's claim on the key) is null and leaves no error or message behind. */
     private static Map isolated(def ec, String service, Map params) {
-        return withOwnMessages(ec) {
+        return MessageScope.isolated(ec) {
             try {
                 Map out = ec.service.sync().name(service).requireNewTransaction(true).parameters(params).call() as Map
                 return ec.message.hasError() ? null : out
@@ -203,7 +210,7 @@ class ErrorDigestSupport {
      * not (a String, also logged). The caller's messages, public messages and errors come back exactly as they were.
      */
     static Object sendThroughTemplate(def ec, String to, Map bodyParameters) {
-        String why = withOwnMessages(ec) {
+        String why = MessageScope.isolated(ec) {
             int before = ec.message.messageInfos.size()
             try {
                 Map out = AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
@@ -233,24 +240,6 @@ class ErrorDigestSupport {
             return server != null && !server.smtpHost
         } catch (Throwable ignored) {
             return false
-        }
-    }
-
-    /** Runs body behind a fresh message scope; afterwards the caller's messages, public messages and errors are exactly as before. */
-    private static <T> T withOwnMessages(def ec, Closure<T> body) {
-        List infos = new ArrayList(ec.message.messageInfos)
-        List publics = new ArrayList(ec.message.publicMessageInfos)
-        ec.message.pushErrors()
-        try {
-            return body.call()
-        } finally {
-            ec.message.clearAll()
-            // addPublic puts one MessageInfo in both lists, so the snapshot of the general list already holds the public ones
-            infos.each { mi ->
-                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
-                else ec.message.addMessage(mi.message, mi.type)
-            }
-            ec.message.popErrors()
         }
     }
 

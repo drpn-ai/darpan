@@ -1,5 +1,6 @@
 package darpan.ops
 
+import darpan.common.MessageScope
 import darpan.common.SecretRedactor
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
@@ -174,25 +175,19 @@ class ErrorLogCapture implements LogEventSubscriber {
         String failure = null
         String priorFlag = ThreadContext.get(FLUSH_MDC_KEY)
         ThreadContext.put(FLUSH_MDC_KEY, "true")
-        // the caller's messages and errors come back exactly as they were; the store's own are discarded (clearErrors would turn
-        // them into danger messages). addPublic puts one MessageInfo in both lists, so the general snapshot holds the public ones.
-        List infos = new ArrayList(ec.message.messageInfos)
-        List publics = new ArrayList(ec.message.publicMessageInfos)
-        ec.message.pushErrors()
         try {
-            if (storeHook != null) storeHook.call(ec, rows)
-            else ec.service.sync().name(FLUSH_SERVICE).requireNewTransaction(true).parameters([entries: rows]).call()
-            stored = !ec.message.hasError()
-            if (!stored) failure = "${ec.message.getErrors().size()} store error(s)"
-        } catch (Throwable t) {
-            failure = t.getClass().name
-        } finally {
-            ec.message.clearAll()
-            infos.each { mi ->
-                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
-                else ec.message.addMessage(mi.message, mi.type)
+            // the caller's messages and errors come back exactly as they were; the store's own are discarded (MessageScope)
+            MessageScope.isolated(ec) {
+                try {
+                    if (storeHook != null) storeHook.call(ec, rows)
+                    else ec.service.sync().name(FLUSH_SERVICE).requireNewTransaction(true).parameters([entries: rows]).call()
+                    stored = !ec.message.hasError()
+                    if (!stored) failure = "${ec.message.getErrors().size()} store error(s)"
+                } catch (Throwable t) {
+                    failure = t.getClass().name
+                }
             }
-            ec.message.popErrors()
+        } finally {
             if (priorFlag != null) ThreadContext.put(FLUSH_MDC_KEY, priorFlag) else ThreadContext.remove(FLUSH_MDC_KEY)
             if (!stored) INSTANCE.restore(entries)
         }

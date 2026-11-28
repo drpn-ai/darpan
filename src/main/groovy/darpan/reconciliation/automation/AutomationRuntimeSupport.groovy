@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.common.SecretRedactor
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
@@ -9,26 +10,11 @@ import darpan.reconciliation.streak.AutomationStreakSupport
 import groovy.json.JsonOutput
 
 import java.sql.Timestamp
-import java.util.regex.Pattern
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
 
 class AutomationRuntimeSupport {
-    /**
-     * A secret's key, bare, quoted or backslash-quoted (JSON inside a string), with any prefix (access_token, client_secret,
-     * x-api-key, refreshToken), then =, : or => on the same line, then its value: a quoted value up to its closing quote on
-     * the same line (escapes allowed, at most 512 characters), a quote that does not close on its line up to the line's end,
-     * a bare value up to a space, comma or ")". Never past a line end, so a stack trace's other lines stay readable. A key
-     * that only ends in a secret word (nextPageToken) is masked too: over-masking is the safe side. The key, separator and
-     * quotes stay: "apiToken":"x" reads "apiToken":"***".
-     */
-    private static final Pattern SECRET_VALUE =
-            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|[^,\s)]+)/
-    /** A PEM block (a private key or certificate spans lines), masked whole before the line-bound rule above runs. */
-    private static final Pattern PEM_BLOCK = ~/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/
-    private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
-
     static def loadAutomation(def ec, String automationId) {
         // [P0#4 step 3] DUAL-CONTEXT: called by user-initiated run#AutomationNow (which gates via
         // TenantAccessSupport.canAccessTenantRecord in ReconciliationFacadeServices.xml before this is reached)
@@ -229,14 +215,9 @@ class AutomationRuntimeSupport {
         return sanitizeText(detail.toString())
     }
 
+    /** DAR-BE-408: the one secret mask (SecretRedactor), so a run error masks exactly what the migration ledger and digest do. */
     static String sanitizeText(String value) {
-        if (value == null) return null
-        String unkeyed = value.replaceAll(PEM_BLOCK, '-----BEGIN $1-----***-----END $1-----')
-        String keyed = unkeyed.replaceAll(SECRET_VALUE) { String all, String quote, String prefix, String key, String separator, String secret ->
-            String valueQuote = secret.startsWith('"') || secret.startsWith("'") ? secret.substring(0, 1) : ""
-            "${quote}${prefix}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
-        }
-        return keyed.replaceAll(BEARER_VALUE, '$1 ***')
+        return SecretRedactor.redact(value)
     }
 
     static String truncate(String value, int maxLength) {

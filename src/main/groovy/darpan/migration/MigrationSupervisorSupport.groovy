@@ -1,5 +1,6 @@
 package darpan.migration
 
+import darpan.common.SecretRedactor
 import darpan.facade.common.TenantScopedFinder
 
 import java.sql.Timestamp
@@ -290,10 +291,10 @@ class MigrationSupervisorSupport {
 
     /**
      * Migration output is written to a persisted ledger an admin screen renders, so anything
-     * secret-shaped is removed here rather than trusted not to appear.
+     * secret-shaped is removed here rather than trusted not to appear (DAR-BE-408: the one mask, SecretRedactor).
      */
     private static String sanitize(String raw) {
         if (!raw) return null
-        return raw.replaceAll(/(?i)(password|token|secret|apikey|api_key|webhook)\s*[=:]\s*\S+/, '$1=[redacted]')
+        return SecretRedactor.redact(raw)
     }
 }

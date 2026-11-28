@@ -13,6 +13,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -40,6 +41,18 @@ class ErrorLogCaptureTests {
                 .setContextData(context)
                 .setTimeMillis((over.time ?: System.currentTimeMillis()) as long)
                 .build()
+    }
+
+    /** DAR-BE-408: a secret an ERROR line or its exception carries never reaches the digest's sample, stack or key. */
+    @Test
+    void aSecretInAnErrorLineOrItsStackIsMasked() {
+        Throwable thrown = new IllegalStateException('chat post failed for https://chat.googleapis.com/v1/spaces/A/messages?key=AIzaK1&token=T0k3n',
+                new RuntimeException('{"client_secret":"cs_live_9"}'))
+        capture.process(event(message: "NetSuite 401 for apiToken=sk_live_secret", thrown: thrown))
+        Map aggregate = capture.drain()[0]
+        String stored = [aggregate.fingerprint, aggregate.sampleMessage, aggregate.sampleStack].join(" | ")
+        ["sk_live_secret", "AIzaK1", "T0k3n", "cs_live_9"].each { assertFalse(stored.contains(it), "${it} reached the digest: ${stored}") }
+        assertTrue((aggregate.sampleMessage as String).contains("apiToken=***"), aggregate.sampleMessage as String)
     }
 
     @Test

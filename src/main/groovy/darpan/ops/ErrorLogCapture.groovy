@@ -1,5 +1,6 @@
 package darpan.ops
 
+import darpan.common.SecretRedactor
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import org.apache.logging.log4j.Level
@@ -90,7 +91,9 @@ class ErrorLogCapture implements LogEventSubscriber {
             ReadOnlyStringMap context = event.getContextData()
             if (context != null && context.getValue(FLUSH_MDC_KEY) != null) return
             String loggerName = event.getLoggerName() ?: ""
-            String message = event.getMessage()?.getFormattedMessage() ?: ""
+            String raw = event.getMessage()?.getFormattedMessage() ?: ""
+            // DAR-BE-408: a secret in an ERROR line never reaches the digest; only the head the fingerprint reads is masked
+            String message = SecretRedactor.redact(raw.length() > MASK_MAX_CHARS ? raw.substring(0, MASK_MAX_CHARS) : raw)
             Throwable thrown = event.getThrown()
             String tenantId = tenantOf(context)
 
@@ -225,7 +228,7 @@ class ErrorLogCapture implements LogEventSubscriber {
     /** Frames kept per throwable, so the causes (often the useful part) still fit. */
     private static final int FRAMES_PER_THROWABLE = 12
 
-    /** The throwable and its causes, up to FRAMES_PER_THROWABLE frames each, stopped at STACK_MAX_CHARS. */
+    /** The throwable and its causes, up to FRAMES_PER_THROWABLE frames each, stopped at STACK_MAX_CHARS, secrets masked. */
     static String stackText(Throwable thrown) {
         StringBuilder sb = new StringBuilder()
         Throwable t = thrown
@@ -242,6 +245,8 @@ class ErrorLogCapture implements LogEventSubscriber {
             if (frames.length > shown) sb.append("\t... ").append(frames.length - shown).append(" more\n")
             t = t.getCause()
         }
-        return sb.length() > STACK_MAX_CHARS ? sb.substring(0, STACK_MAX_CHARS) : sb.toString()
+        // DAR-BE-408: masked, then capped again (a mask can be longer than what it hides)
+        String masked = SecretRedactor.redact(sb.length() > STACK_MAX_CHARS ? sb.substring(0, STACK_MAX_CHARS) : sb.toString())
+        return masked.length() > STACK_MAX_CHARS ? masked.substring(0, STACK_MAX_CHARS) : masked
     }
 }

@@ -1,5 +1,6 @@
-package darpan.reconciliation.automation
+package darpan.common
 
+import darpan.reconciliation.automation.AutomationRuntimeSupport
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -7,13 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 
 /**
- * DAR-OPS-029 S07a. sanitizeText guards every run error Darpan stores (execution errorMessage/errorDetail, the audit ledger's
- * read reason) and so every card and daily email built from it. A secret in a system's JSON error body used to pass through:
- * the mask read key=value only. No Moqui.
+ * DAR-BE-408 (DAR-OPS-029 S07a). The one secret mask: run errors, cards and the daily email (AutomationRuntimeSupport.sanitizeText),
+ * the migration ledger and the error digest all go through it, so a case here holds on every one of those paths. No Moqui.
  */
-class AutomationRuntimeSupportTests {
+class SecretRedactorTests {
 
-    private static String masked(String text) { return AutomationRuntimeSupport.sanitizeText(text) }
+    private static String masked(String text) { return SecretRedactor.redact(text) }
 
     @Test
     void aKeyValueSecretKeepsItsShape() {
@@ -46,7 +46,6 @@ class AutomationRuntimeSupportTests {
         assertEquals('{"error":"unauthorized","apiToken":"***","secret": "***","apiKey":"***","clientSecret":"***"}', out)
     }
 
-    /** DAR-OPS-029 S07a QA: shapes the second pattern still let through. */
     @Test
     void secretsUnderOtherNamesAndShapesAreMasked() {
         assertEquals('{"access_token":"***","refresh_token":"***","client_secret":"***"}',
@@ -60,11 +59,21 @@ class AutomationRuntimeSupportTests {
 
     /** A private key spans lines, so the line-bound rule alone would mask only its first line. */
     @Test
-    void aPemBlockIsMaskedWhole() {
+    void aPemBlockIsMaskedWholeEvenWhenItWasCutBeforeItsEnd() {
         String detail = 'privateKey="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1\nq2w3e4r5\n-----END RSA PRIVATE KEY-----"\n    at darpan.X'
-        String out = masked(detail)
-        assertFalse(out.contains("MIIEow") || out.contains("q2w3e4r5"), out)
-        assertEquals('privateKey="***"\n    at darpan.X', out)
+        assertEquals('privateKey="***"\n    at darpan.X', masked(detail))
+        String cut = masked("key: -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg\nkqhkiG9w0BAQEF")
+        assertFalse(cut.contains("MIIEvQ") || cut.contains("kqhkiG9"), "a block a cap cut before END is masked to the end: ${cut}")
+    }
+
+    /** What the migration ledger and the error digest masked before, and the webhook URLs a failed chat post logs. */
+    @Test
+    void urlsAndWebhooksAreMasked() {
+        assertEquals("POST https://chat.googleapis.com/v1/spaces/AAA/messages?key=***&token=*** failed",
+                masked("POST https://chat.googleapis.com/v1/spaces/AAA/messages?key=AIzaK1&token=T0k3n failed"))
+        assertEquals("jdbc:mysql://darpan:***@db:3306/darpan", masked("jdbc:mysql://darpan:s3cret@db:3306/darpan"))
+        assertEquals("googleChatWebhookUrl=*** rejected", masked("googleChatWebhookUrl=https://chat.googleapis.com/v1/spaces/A/messages rejected"))
+        assertEquals("migration failed: webhook=*** (400)", masked("migration failed: webhook=https://hooks.slack.com/services/T/B/x (400)"))
     }
 
     @Test
@@ -74,8 +83,15 @@ class AutomationRuntimeSupportTests {
 
     @Test
     void nothingButASecretIsMasked() {
-        String plain = 'orderId=123, "status":"OPEN", tokenCount=5, secretary=Ann, "keyField":"orderName"'
+        String plain = 'orderId=123, "status":"OPEN", tokenCount=5, secretary=Ann, "keyField":"orderName", primaryKey=ID'
         assertEquals(plain, masked(plain))
         assertNull(masked(null))
+        assertEquals("", masked(""))
+    }
+
+    @Test
+    void runErrorsGoThroughTheRedactor() {
+        String text = '{"client_secret":"cs"} password=x'
+        assertEquals(masked(text), AutomationRuntimeSupport.sanitizeText(text))
     }
 }

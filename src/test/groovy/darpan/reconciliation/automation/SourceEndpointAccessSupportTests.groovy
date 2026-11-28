@@ -345,6 +345,31 @@ class SourceEndpointAccessSupportTests {
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID), "a refused write leaves every row as it was")
     }
 
+    // OC206 (Coordinator C5): a connection's writes need run access everywhere (save#SftpServer, the OMS REST save, the app's
+    // canManageConnections), so a User of the owning tenant, who may save the connection, may switch its endpoints too.
+    @Test
+    void storeServiceLetsAUserWhoMaySaveTheConnectionSwitchItsEndpoints() {
+        ec.entity.makeValue("moqui.security.UserGroup")
+                .setAll([userGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID, description: "User",
+                         groupTypeEnumId: TenantAccessSupport.DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID]).createOrUpdate()
+        setKrewePermissions([TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID])
+        Map<String, Object> result
+        try {
+            ec.message.clearErrors()
+            result = ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
+                    .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                                 configId            : CONFIG_ID,
+                                 enabledSystemEnumIds: ["OMS_GQL"]])
+                    .disableAuthz().call() as Map<String, Object>
+        } finally {
+            ec.message.clearErrors()
+            setKrewePermissions([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID])
+            // The switch wrote disable rows for the config's other endpoints; leave the config as every other test expects it.
+            ec.entity.find("darpan.reconciliation.SourceConfigEndpointAccess").condition("configId", CONFIG_ID).disableAuthz().deleteAll()
+        }
+        assertTrue((result.ok as boolean), "a User manages connections, so it may switch their endpoints: ${result.errors}")
+    }
+
     /** The KREWE owner's permission groups on KREWE, exactly these. */
     private void setKrewePermissions(List<String> permissionGroupIds) {
         ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", KREWE)

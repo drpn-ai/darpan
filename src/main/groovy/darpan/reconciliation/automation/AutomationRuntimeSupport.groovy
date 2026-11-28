@@ -16,12 +16,15 @@ import static darpan.common.ValueSupport.readField
 
 class AutomationRuntimeSupport {
     /**
-     * A secret's key, bare or quoted, then = or :, then its value: a quoted value up to its closing quote (escapes allowed,
-     * so spaces, commas and quotes inside it stay masked), a bare one up to a space, comma or ")". The key, separator and
-     * quotes stay, so a JSON error body stays readable: "apiToken":"x" reads "apiToken":"***", apiToken=x reads apiToken=***.
+     * A secret's key, bare, quoted or backslash-quoted (JSON inside a string), with any prefix (access_token, client_secret,
+     * x-api-key, refreshToken), then =, : or => on the same line, then its value: a quoted value up to its closing quote on
+     * the same line (escapes allowed, at most 512 characters), a quote that does not close on its line up to the line's end,
+     * a bare value up to a space, comma or ")". Never past a line end, so a stack trace's other lines stay readable. A key
+     * that only ends in a secret word (nextPageToken) is masked too: over-masking is the safe side. The key, separator and
+     * quotes stay: "apiToken":"x" reads "apiToken":"***".
      */
     private static final Pattern SECRET_VALUE =
-            ~/(?i)(["']?)(password|privateKey|apiToken|apiKey|api_key|clientSecret|secret|token)\1(\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s)]+)/
+            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|[^,\s)]+)/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     static def loadAutomation(def ec, String automationId) {
@@ -112,7 +115,8 @@ class AutomationRuntimeSupport {
     }
 
     /**
-     * Runs {@code work} in its OWN new transaction (Moqui's {@code runRequireNew}). Unlike
+     * Runs {@code work} in its OWN new transaction (Moqui's {@code runRequireNew}). Moqui waits at most 300 s for it (ten
+     * times the 30 s timeout), then logs and returns null while the work goes on: keep each unit short. Unlike
      * {@link #runInTransaction}, which JOINS an ambient transaction if one is already open,
      * {@code work} here is guaranteed to commit or roll back independently of whatever transaction
      * the caller happens to be running inside.
@@ -225,9 +229,9 @@ class AutomationRuntimeSupport {
 
     static String sanitizeText(String value) {
         if (value == null) return null
-        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String key, String separator, String secret ->
+        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String prefix, String key, String separator, String secret ->
             String valueQuote = secret.startsWith('"') || secret.startsWith("'") ? secret.substring(0, 1) : ""
-            "${quote}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
+            "${quote}${prefix}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
         }
         return keyed.replaceAll(BEARER_VALUE, '$1 ***')
     }

@@ -141,14 +141,21 @@ class AdminServicesSmokeTests {
          "moqui.security.UserGroupMember", TempPasswordKeeper.ENTITY].each { String entityName ->
             ec.entity.find(entityName).disableAuthz().deleteAll()
         }
+        // Only this class's CLI rows: other @SharedMoqui classes keep theirs.
+        ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", org.moqui.entity.EntityCondition.LIKE, "admsvc-%")
+                .disableAuthz().deleteAll()
+        ec.entity.find("darpan.auth.CliDeviceCode").condition("deviceCodeHash", org.moqui.entity.EntityCondition.LIKE, "admsvc-%")
+                .disableAuthz().deleteAll()
         AuditLogTestSupport.wipe(ec)
 
         upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME,
                 userFullName: "Admin Super", emailAddress: "admsvc.super@example.com", disabled: "N", requirePasswordChange: "N"])
         upsert("moqui.security.UserAccount", [userId: PLAIN_ID, username: PLAIN_USERNAME,
-                userFullName: "Plain Tenant Admin", emailAddress: "admsvc.plain@example.com", disabled: "N", requirePasswordChange: "N"])
+                userFullName: "Plain Tenant Admin", emailAddress: "admsvc.plain@example.com", disabled: "N", requirePasswordChange: "N",
+                sessionsEndedDate: null])
         upsert("moqui.security.UserAccount", [userId: TARGET_ID, username: TARGET_USERNAME,
-                userFullName: "Target User", emailAddress: "admsvc.target@example.com", disabled: "N", requirePasswordChange: "N"])
+                userFullName: "Target User", emailAddress: "admsvc.target@example.com", disabled: "N", requirePasswordChange: "N",
+                sessionsEndedDate: null])
         upsert("moqui.security.UserAccount", [userId: DORMANT_ID, username: "admsvc.dormant",
                 userFullName: "Dormant User", emailAddress: "admsvc.dormant@example.com", disabled: "Y", requirePasswordChange: "Y"])
 
@@ -542,6 +549,8 @@ class AdminServicesSmokeTests {
         loginKey("admsvc-key-1", TARGET_ID)
         loginKey("admsvc-key-2", TARGET_ID)
         loginKey("admsvc-key-other", PLAIN_ID)
+        cliSignIns(TARGET_ID)
+        cliSignIns(PLAIN_ID)
 
         Map off = callAs(SUPER_USERNAME, "admin.UserAdminServices.disable#UserAccount", [userId: TARGET_ID])
         assertNoErrors(off)
@@ -549,6 +558,8 @@ class AdminServicesSmokeTests {
         assertEquals("Y", find("moqui.security.UserAccount", [userId: TARGET_ID]).disabled)
         assertEquals(0, loginKeyCount(TARGET_ID), "live sessions must be revoked on disable")
         assertEquals(1, loginKeyCount(PLAIN_ID), "only the target's keys go")
+        assertEverySignInEnded(TARGET_ID)
+        assertSignInsUntouched(PLAIN_ID)
         assertAudit("admin.UserAdminServices.disable#UserAccount", "User", TARGET_ID, "Disabled user ${TARGET_ID}.")
 
         AuditLogTestSupport.wipe(ec)
@@ -568,6 +579,8 @@ class AdminServicesSmokeTests {
     @Test
     void resetPasswordForcesAChangeAndRevokesLoginKeys() {
         loginKey("admsvc-key-3", TARGET_ID)
+        cliSignIns(TARGET_ID)
+        cliSignIns(PLAIN_ID)
         String before = find("moqui.security.UserAccount", [userId: TARGET_ID]).currentPassword
 
         Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.reset#Password",
@@ -581,6 +594,10 @@ class AdminServicesSmokeTests {
         assertNotEquals(before, account.currentPassword)
         assertNotEquals(STRONG_PASSWORD, account.currentPassword)
         assertEquals(0, loginKeyCount(TARGET_ID), "live sessions must be revoked on password reset")
+        // OC-A: the admin answer to a compromised account ends the attacker's browser session (the stamp) and the CLI
+        // sign-in they approved but had not collected (poll#CliLogin would otherwise mint a fresh key after the reset).
+        assertEverySignInEnded(TARGET_ID)
+        assertSignInsUntouched(PLAIN_ID)
         assertAudit("admin.UserAdminServices.reset#Password", "User", TARGET_ID,
                 "Reset password for user ${TARGET_ID}; change forced at next login.")
     }
@@ -588,6 +605,7 @@ class AdminServicesSmokeTests {
     @Test
     void resetPasswordStopsWhenTheFrameworkRefusesThePassword() {
         loginKey("admsvc-key-4", TARGET_ID)
+        cliSignIns(TARGET_ID)
 
         Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.reset#Password",
                 [userId: TARGET_ID, tempPassword: "weak"])
@@ -595,6 +613,7 @@ class AdminServicesSmokeTests {
         assertTrue(out.hasError)
         assertNotEquals(true, out.result?.ok)
         assertEquals(1, loginKeyCount(TARGET_ID), "no login-key revocation when the framework password update failed")
+        assertSignInsUntouched(TARGET_ID)
         assertEquals("N", find("moqui.security.UserAccount", [userId: TARGET_ID]).requirePasswordChange)
         assertNoAudit()
     }
@@ -1305,6 +1324,29 @@ class AdminServicesSmokeTests {
 
     private void preference(String userId, String tenantId) {
         upsert("moqui.security.UserPreference", [userId: userId, preferenceKey: PREF_KEY, preferenceValue: tenantId])
+    }
+
+    /** A live CLI session and a CLI sign-in the person approved that their CLI has not collected yet. */
+    private void cliSignIns(String userId) {
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        create("darpan.auth.CliSession", [loginKeyHash: "admsvc-cli-${userId}".toString(), userId: userId, createdDate: T0])
+        create("darpan.auth.CliDeviceCode", [deviceCodeHash: "admsvc-dev-${userId}".toString(), userCode: "ADM-${userId}".toString(),
+                statusId: "APPROVED", approvedByUserId: userId, createdDate: now, expiresDate: new Timestamp(now.time + 600_000L)])
+    }
+
+    /** TwoFactorSupport.endSessions' three marks: the stamp that ends a key-less web session, the CLI session revoked,
+     *  the approved device row denied (so poll#CliLogin answers DENIED, never a fresh key). */
+    private void assertEverySignInEnded(String userId) {
+        assertNotNull(find("moqui.security.UserAccount", [userId: userId]).sessionsEndedDate, "the person's web sessions end")
+        assertNotNull(find("darpan.auth.CliSession", [loginKeyHash: "admsvc-cli-${userId}".toString()]).revokedDate, "CLI session revoked")
+        assertEquals("DENIED", find("darpan.auth.CliDeviceCode", [deviceCodeHash: "admsvc-dev-${userId}".toString()]).statusId,
+                "an approved, uncollected CLI sign-in is denied")
+    }
+
+    private void assertSignInsUntouched(String userId) {
+        assertNull(find("moqui.security.UserAccount", [userId: userId]).sessionsEndedDate)
+        assertNull(find("darpan.auth.CliSession", [loginKeyHash: "admsvc-cli-${userId}".toString()]).revokedDate)
+        assertEquals("APPROVED", find("darpan.auth.CliDeviceCode", [deviceCodeHash: "admsvc-dev-${userId}".toString()]).statusId)
     }
 
     private void loginKey(String key, String userId) {

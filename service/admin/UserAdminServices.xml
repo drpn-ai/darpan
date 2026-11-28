@@ -71,7 +71,8 @@
     </service>
 
     <service verb="disable" noun="UserAccount" allow-remote="true">
-        <description>Disable a user and revoke their live login keys. Self-disable is refused.</description>
+        <description>Disable a user and end every sign-in they have: browser sessions, login keys, CLI sessions and a CLI
+            sign-in they approved that their CLI has not collected yet. Self-disable is refused.</description>
         <in-parameters><parameter name="userId" required="true"><description>User to disable.</description></parameter></in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when disabled.</description></parameter></out-parameters>
         <actions>
@@ -85,13 +86,9 @@
             <!-- ok turns true once the framework call succeeds, as it always has: a later write that
                  fails surfaces through ec.message (and rolls the call back), not through ok. -->
             <set field="ok" from="true"/>
-            <!-- UserLoginKey's PK is loginKey alone (not composite with userId), so the implicit delete
-                 CrUD service needs each row's key individually: find live keys for the user, delete each. -->
-            <entity-find entity-name="moqui.security.UserLoginKey" list="loginKeyList">
-                <econdition field-name="userId"/></entity-find>
-            <iterate list="loginKeyList" entry="loginKeyRow">
-                <service-call name="delete#moqui.security.UserLoginKey" in-map="[loginKey: loginKeyRow.loginKey]"/>
-            </iterate>
+            <!-- OC84: the one step that ends every sign-in (stamp, keys, CLI sessions, approved CLI sign-ins), in this
+                 transaction and catching nothing, so a failure rolls the disable back. -->
+            <script>darpan.facade.auth.TwoFactorSupport.endSessions(ec, userId)</script>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.UserAdminServices.disable#UserAccount', targetType: 'User', targetId: userId,
                     detailText: 'Disabled user ' + userId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
@@ -117,9 +114,10 @@
     </service>
 
     <service verb="reset" noun="Password" allow-remote="true">
-        <description>Set a temporary password for a user (change forced at next login) and revoke
-            their live login keys. The temporary password is kept encrypted for their tenant welcome emails
-            (DAR-BE-325), replacing an earlier one.</description>
+        <description>Set a temporary password for a user (change forced at next login) and end every sign-in they have
+            (browser sessions, login keys, CLI sessions, a CLI sign-in approved but not yet collected), as a password
+            change does. The temporary password is kept encrypted for their tenant welcome emails (DAR-BE-325), replacing
+            an earlier one.</description>
         <in-parameters>
             <parameter name="userId" required="true"><description>User whose password resets.</description></parameter>
             <parameter name="tempPassword" required="true"><description>Temporary password.</description></parameter>
@@ -140,13 +138,10 @@
             <!-- ok turns true once the framework call succeeds, as it always has: a later write that
                  fails surfaces through ec.message (and rolls the call back), not through ok. -->
             <set field="ok" from="true"/>
-            <!-- UserLoginKey's PK is loginKey alone (not composite with userId), so the implicit delete
-                 CrUD service needs each row's key individually: find live keys for the user, delete each. -->
-            <entity-find entity-name="moqui.security.UserLoginKey" list="loginKeyList">
-                <econdition field-name="userId"/></entity-find>
-            <iterate list="loginKeyList" entry="loginKeyRow">
-                <service-call name="delete#moqui.security.UserLoginKey" in-map="[loginKey: loginKeyRow.loginKey]"/>
-            </iterate>
+            <!-- OC84: the admin answer to a compromised account. Deleting keys alone left the attacker's browser session
+                 live (only the sessionsEndedDate stamp ends a session holding no key) and a CLI sign-in they approved
+                 collectable as a fresh key. One step, this transaction, catching nothing: a failure rolls the reset back. -->
+            <script>darpan.facade.auth.TwoFactorSupport.endSessions(ec, userId)</script>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.UserAdminServices.reset#Password', targetType: 'User', targetId: userId,
                     detailText: 'Reset password for user ' + userId + '; change forced at next login.', auditTimestamp: ec.user.nowTimestamp]"/>

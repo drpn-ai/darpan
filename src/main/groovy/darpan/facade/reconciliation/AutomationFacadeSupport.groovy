@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.audit.AuditSettingsSupport
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.SharedConfigAccessSupport
@@ -126,7 +127,7 @@ class AutomationFacadeSupport {
         String isActive = readString(automation, "isActive") ?: "Y"
         Map<String, Object> chatSpaceSummary = resolveChatSpaceSummary(ec, automation)
         // DAR-BE-199: an audit's automation runs on the audit's schedule, never paused or resumed by itself.
-        Map audit = darpan.audit.AuditSettingsSupport.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
+        Map audit = AuditSettingsSupport.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
         Map<String, Object> peak = AutomationExecutionSupport.peakNextRun(ec,
                 peakTick ?: AutomationExecutionSupport.newPeakTick(ec.user.nowTimestamp), automation)
         Map<String, Object> row = [
@@ -885,7 +886,7 @@ class AutomationFacadeSupport {
             } else {
                 Map metadata = parseJsonMap(source.safeMetadataJson)
                 Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-                if (!normalize(parameters[configParam])) {
+                if (!normalize(parameters.get(configParam))) {
                     ec.message.addError("${source.fileSide} ${connector.endpointLabel ?: source.systemEnumId} source requires its ${configParam}.")
                 }
             }
@@ -896,7 +897,7 @@ class AutomationFacadeSupport {
                     .condition("systemMessageRemoteId", source.systemMessageRemoteId)
                     .useCache(false)
                     .one()
-            if (!remote && isVirtualApiOrdersRemote(source)) {
+            if (!remote && isVirtualShopifyOrdersRemote(source)) {
                 remote = ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(
                         ec, source.systemEnumId, source.systemMessageRemoteId, source.sourceConfigType)
             }
@@ -960,14 +961,14 @@ class AutomationFacadeSupport {
             Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(enriched.systemEnumId))
             String configParam = connector ? normalize(connector.configParameterName) : null
             if (configParam) {
-                String configId = normalize(parameters[configParam]) ?:
-                        normalize(enriched[configParam]) ?:
+                String configId = normalize(parameters.get(configParam)) ?:
+                        normalize(enriched.get(configParam)) ?:
                         normalize(enriched.sourceConfigId) ?:
                         normalize(enriched.optionKey) ?:
                         AutomationExecutionSupport.findSingleActiveConfigId(ec,
                                 TenantAccessSupport.currentActiveTenantUserGroupId(ec),
                                 normalize(connector.configEntityName), configParam, normalize(connector.systemEnumId))
-                if (configId) parameters[configParam] = configId
+                if (configId) parameters.put(configParam, configId)
 
                 String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
                 if (!metadata.extractServiceName && configId) {
@@ -1059,17 +1060,11 @@ class AutomationFacadeSupport {
     protected static Timestamp resolveNextFireTime(Map input, Timestamp now) {
         String scheduleExpr = normalize(input.scheduleExpr)
         if (!scheduleExpr) return null
-        // Audit H15.3 — previously defaulted to 'UTC' when input.windowTimeZone was unset, so a UI
-        // preview of an automation persisted with windowTimeZone='America/Los_Angeles' (but called
-        // here without explicitly passing it through) would show next-fire times in UTC, diverging
-        // from what the scanner actually fires (the scanner reads the entity's windowTimeZone).
-        // Pull from input.windowTimeZone first; if absent, look at the embedded automation map; only
-        // then fall back to UTC.
-        String zone = normalize(input.windowTimeZone)
-        if (!zone && input.automation instanceof Map) zone = normalize(((Map) input.automation).windowTimeZone)
+        // Audit H15.3: the next fire is computed in the zone being saved, the same one the scanner reads
+        // off the row; save#Automation always passes it.
         Map automationMap = [
                 scheduleExpr          : scheduleExpr,
-                windowTimeZone        : zone ?: "UTC",
+                windowTimeZone        : normalize(input.windowTimeZone) ?: "UTC",
                 lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
         ]
         return AutomationExecutionSupport.resolveNextScheduledFireTime(automationMap, automationMap.lastScheduledFireTime as Timestamp, now)
@@ -1194,26 +1189,32 @@ class AutomationFacadeSupport {
 
     protected static List<Map<String, Object>> sourceConfigOptionsForType(def ec, String configTypeEnumId) {
         return listEnabledConfigEndpoints(ec, configTypeEnumId).collect { Map<String, Object> pair ->
-            Map<String, Object> connector = pair.connector as Map<String, Object>
-            String configId = pair.configId as String
-            String pkField = pair.pkField as String
             String label = pair.configLabel as String
-            String systemEnumId = connector.systemEnumId as String
-            ([
-                    sourceConfigId  : configId,
-                    sourceConfigType: connector.expectedSourceConfigType,
-                    (pkField)       : configId,
-                    description     : label,
-                    systemEnumId    : systemEnumId,
-                    systemLabel     : enumLabel(ec, systemEnumId),
-                    dateFromParameterName: connector.dateFromParameterName,
-                    dateToParameterName  : connector.dateToParameterName,
-                    safeMetadataJson: safeMetadataJsonForConnector(connector, pkField, configId),
-                    label           : label,
+            (endpointOptionFields(ec, pair) + [
+                    description   : label,
+                    label         : label,
                     // DAR-UI-064: the extract options a run side over this endpoint may set; absent when it takes none.
-                    extractOptions  : SourceExtractOptionsSupport.declaredOptions(connector) ?: null,
-            ] as Map<String, Object>).findAll { it.value != null } as Map<String, Object>
+                    extractOptions: SourceExtractOptionsSupport.declaredOptions(pair.connector as Map<String, Object>) ?: null,
+            ]).findAll { it.value != null } as Map<String, Object>
         } as List<Map<String, Object>>
+    }
+
+    /** The fields every (config x endpoint) option row carries, in both the sourceConfigs and systemRemotes lists. */
+    private static Map<String, Object> endpointOptionFields(def ec, Map<String, Object> pair) {
+        Map<String, Object> connector = pair.connector as Map<String, Object>
+        String configId = pair.configId as String
+        String pkField = pair.pkField as String
+        String systemEnumId = connector.systemEnumId as String
+        return [
+                sourceConfigId       : configId,
+                sourceConfigType     : connector.expectedSourceConfigType,
+                (pkField)            : configId,
+                systemEnumId         : systemEnumId,
+                systemLabel          : enumLabel(ec, systemEnumId),
+                dateFromParameterName: connector.dateFromParameterName,
+                dateToParameterName  : connector.dateToParameterName,
+                safeMetadataJson     : safeMetadataJsonForConnector(connector, pkField, configId),
+        ] as Map<String, Object>
     }
 
     protected static List<Map<String, Object>> listNsAuthConfigOptions(def ec) {
@@ -1312,7 +1313,7 @@ class AutomationFacadeSupport {
                 "projection of a tenant-scoped NsSuiteQlSourceQuery")
                 .condition("nsSuiteQlSourceQueryId", queryId).orderBy("sequenceNum").useCache(false).list()
                 .collect { readString(it, "recordFieldName") }
-        names.addAll((SUITEQL_TEMPLATE_FIELDS[normalize(queryTemplate)] ?: []).findAll { !names.contains(it) })
+        names.addAll((SUITEQL_TEMPLATE_FIELDS.get(normalize(queryTemplate)) ?: []).findAll { !names.contains(it) })
         String origin = normalize(originFieldName)
         if (origin && !names.contains(origin)) names.add(origin)
         return names.collect { String name ->
@@ -1373,29 +1374,18 @@ class AutomationFacadeSupport {
     protected static List<Map<String, Object>> remoteOptionsForType(def ec, String configTypeEnumId) {
         return listEnabledConfigEndpoints(ec, configTypeEnumId).collect { Map<String, Object> pair ->
             Map<String, Object> connector = pair.connector as Map<String, Object>
-            String configId = pair.configId as String
-            String pkField = pair.pkField as String
-            String configLabel = pair.configLabel as String
             String systemEnumId = connector.systemEnumId as String
             String endpointLabel = normalize(connector.endpointLabel as String) ?: systemEnumId
-            ([
-                    systemMessageRemoteId: connector.remoteId,
-                    optionKey            : configId,
-                    sourceConfigId       : configId,
-                    sourceConfigType     : connector.expectedSourceConfigType,
-                    (pkField)            : configId,
-                    sourceConfigLabel    : configLabel,
-                    description          : endpointLabel,
-                    systemEnumId         : systemEnumId,
-                    systemLabel          : enumLabel(ec, systemEnumId),
-                    dateFromParameterName: connector.dateFromParameterName,
-                    dateToParameterName  : connector.dateToParameterName,
-                    primaryIdOptions     : primaryIdOptionsForSystem(ec, systemEnumId),
-                    fieldOptions         : fieldOptionsForSystem(ec, systemEnumId),
+            (endpointOptionFields(ec, pair) + [
+                    systemMessageRemoteId : connector.remoteId,
+                    optionKey             : pair.configId,
+                    sourceConfigLabel     : pair.configLabel,
+                    description           : endpointLabel,
+                    primaryIdOptions      : primaryIdOptionsForSystem(ec, systemEnumId),
+                    fieldOptions          : fieldOptionsForSystem(ec, systemEnumId),
                     supportsExcludeFilters: supportsExcludeFiltersForSystem(ec, systemEnumId),
-                    safeMetadataJson     : safeMetadataJsonForConnector(connector, pkField, configId),
-                    label                : endpointLabel,
-            ] as Map<String, Object>).findAll { it.value != null } as Map<String, Object>
+                    label                 : endpointLabel,
+            ]).findAll { it.value != null } as Map<String, Object>
         } as List<Map<String, Object>>
     }
 
@@ -1518,10 +1508,6 @@ class AutomationFacadeSupport {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }
         return normalize(fallbackLabel) ?: normalize(remoteId)
-    }
-
-    protected static boolean isVirtualApiOrdersRemote(Map<String, Object> source) {
-        return isVirtualShopifyOrdersRemote(source)
     }
 
     protected static boolean isVirtualShopifyOrdersRemote(Map<String, Object> source) {

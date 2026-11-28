@@ -1055,7 +1055,7 @@ class AutomationFacadeSmokeTests {
     }
 
     private void seedOmsRestSourceConfig(String tenantId, String configId) {
-        upsertEntityValue("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: configId], [
+        upsertEntity("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: configId], [
                 omsRestSourceConfigId : configId,
                 description           : "Krewe OMS Orders",
                 companyUserGroupId    : tenantId,
@@ -1073,7 +1073,7 @@ class AutomationFacadeSmokeTests {
     }
 
     private void seedShopifyAuthConfig(String tenantId, String configId) {
-        upsertEntityValue("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: configId], [
+        upsertEntity("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: configId], [
                 shopifyAuthConfigId: configId,
                 description        : "Krewe Shopify",
                 companyUserGroupId : tenantId,
@@ -1087,14 +1087,14 @@ class AutomationFacadeSmokeTests {
     }
 
     private void seedLegacySystemSourceAliases() {
-        upsertEntityValue("moqui.basic.Enumeration", [enumId: "DarSysOms"], [
+        upsertEntity("moqui.basic.Enumeration", [enumId: "DarSysOms"], [
                 enumId     : "DarSysOms",
                 enumTypeId : "DarpanSystemSource",
                 enumCode   : "OMS",
                 description: "OMS",
                 sequenceNum: 1L,
         ])
-        upsertEntityValue("moqui.basic.Enumeration", [enumId: "DarSysShopify"], [
+        upsertEntity("moqui.basic.Enumeration", [enumId: "DarSysShopify"], [
                 enumId     : "DarSysShopify",
                 enumTypeId : "DarpanSystemSource",
                 enumCode   : "SHOPIFY",
@@ -1104,7 +1104,7 @@ class AutomationFacadeSmokeTests {
     }
 
     private void seedLegacyPollInputMode() {
-        upsertEntityValue("moqui.basic.Enumeration", [enumId: "AUT_IN_SFTP_POLL"], [
+        upsertEntity("moqui.basic.Enumeration", [enumId: "AUT_IN_SFTP_POLL"], [
                 enumId     : "AUT_IN_SFTP_POLL",
                 enumTypeId : "AutomationInputMode",
                 enumCode   : "SFTP_POLL",
@@ -1119,7 +1119,7 @@ class AutomationFacadeSmokeTests {
                 description    : label,
                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
         ])
-        upsertEntityValue("moqui.security.UserGroupMember", [
+        upsertEntity("moqui.security.UserGroupMember", [
                 userGroupId: tenantId,
                 userId     : TEST_USER_ID,
                 fromDate   : TEST_FROM_DATE,
@@ -1152,7 +1152,7 @@ class AutomationFacadeSmokeTests {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
         }
-        upsertEntityValue(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+        upsertEntity(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
                 tenantUserGroupId    : tenantId,
                 userId               : TEST_USER_ID,
                 permissionUserGroupId: permissionGroupId,
@@ -1174,17 +1174,6 @@ class AutomationFacadeSmokeTests {
     }
 
     private void upsertEntity(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
-        def existing = ec.entity.find(entityName)
-                .condition(pkFields)
-                .disableAuthz()
-                .useCache(false)
-                .one()
-        if (existing != null) return
-
-        ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
-    }
-
-    private void upsertEntityValue(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
         def existing = ec.entity.find(entityName)
                 .condition(pkFields)
                 .disableAuthz()

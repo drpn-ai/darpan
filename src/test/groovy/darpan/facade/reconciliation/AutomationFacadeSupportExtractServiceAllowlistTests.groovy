@@ -16,8 +16,8 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
 
     private static final String OMS_GQL_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
 
-    private static MessageStub callValidate(String extractServiceName, Map<String, Object> parameters = [:]) {
-        MessageStub message = new MessageStub()
+    private static AutomationFacadeSupportTests.MessageStub callValidate(String extractServiceName, Map<String, Object> parameters = [:]) {
+        AutomationFacadeSupportTests.MessageStub message = new AutomationFacadeSupportTests.MessageStub()
         def ec = new Expando(message: message, entity: connectorEntityStub())
         Map<String, Object> metadata = [extractServiceName: extractServiceName]
         if (parameters) metadata.parameters = parameters
@@ -40,7 +40,7 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
 
     @Test
     void rejectsArbitraryServiceName() {
-        MessageStub message = callValidate("darpan.reconciliation.SomeInternalService")
+        AutomationFacadeSupportTests.MessageStub message = callValidate("darpan.reconciliation.SomeInternalService")
         assertTrue(message.hasError())
         assertTrue(message.errors.any { it.contains("is not in the allowed service list") },
                 "Unexpected errors: ${message.errors}")
@@ -48,7 +48,7 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
 
     @Test
     void rejectsMissingServiceName() {
-        MessageStub message = callValidate(null)
+        AutomationFacadeSupportTests.MessageStub message = callValidate(null)
         assertTrue(message.hasError())
     }
 
@@ -72,11 +72,5 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
         Expando entity = new Expando()
         entity.find = { String ignored -> finder }
         return entity
-    }
-
-    static class MessageStub {
-        List<String> errors = []
-        void addError(Object error) { errors.add(error?.toString()) }
-        boolean hasError() { return !errors.isEmpty() }
     }
 }

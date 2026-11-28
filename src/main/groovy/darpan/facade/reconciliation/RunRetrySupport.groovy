@@ -81,7 +81,7 @@ class RunRetrySupport {
     }
 
     /** True when the rule set or anything under its compare scope was written after `started`. */
-    static boolean editedSince(def ec, String tenantId, String ruleSetId, String compareScopeId, Timestamp started) {
+    private static boolean editedSince(def ec, String tenantId, String ruleSetId, String compareScopeId, Timestamp started) {
         if (TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RULE_SET, WHY)
                 .condition("companyUserGroupId", tenantId).condition("ruleSetId", ruleSetId)
                 .condition("lastUpdatedStamp", "greater", started).useCache(false).count() > 0) return true

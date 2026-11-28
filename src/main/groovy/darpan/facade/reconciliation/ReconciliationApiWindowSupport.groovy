@@ -19,10 +19,6 @@ class ReconciliationApiWindowSupport {
     private static final Logger logger = LoggerFactory.getLogger(ReconciliationApiWindowSupport.class)
     private static final long DAY_MILLIS = Duration.ofDays(1).toMillis()
 
-    static Map<String, Object> normalizeSavedRunApiWindow(def ec, Timestamp windowStartDate, Timestamp windowEndDate) {
-        return normalizeCalendarWindow(windowStartDate, windowEndDate, TenantAccessSupport.resolveActiveTenantTimeZone(ec))
-    }
-
     static Map<String, Object> normalizeSavedRunApiWindow(def ec, Timestamp windowStartDate, Timestamp windowEndDate,
             Object rawStartLocalDate, Object rawEndLocalDate) {
         return normalizeCalendarWindow(windowStartDate, windowEndDate, TenantAccessSupport.resolveActiveTenantTimeZone(ec),
@@ -102,7 +98,7 @@ class ReconciliationApiWindowSupport {
         }
     }
 
-    private static LocalDate parseLocalDate(Object rawDate, ZoneId zone = ZoneOffset.UTC) {
+    private static LocalDate parseLocalDate(Object rawDate, ZoneId zone) {
         if (rawDate == null) return null
         if (rawDate instanceof LocalDate) return (LocalDate) rawDate
         if (rawDate instanceof Timestamp) return ((Timestamp) rawDate).toInstant().atZone(zone).toLocalDate()

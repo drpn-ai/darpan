@@ -85,18 +85,28 @@ class ExtractReplaySupport {
     /**
      * DAR-BE-163. The sides a failed interactive run finished reading: side -> [dataManagerPath, fileName, recordCount].
      * Unlike replayResults, a side that was not read in full, or whose file is gone, is simply left out: the retry reads
-     * that side again. The stamped path is data-manager relative and resolved under its root only, so a run row can never
-     * point a retry at a file outside it.
+     * that side again. So is an uploaded side (sidesReadInFull). The stamped path is data-manager relative and resolved
+     * under its root only, so a run row can never point a retry at a file outside it.
      */
     static Map<String, Map<String, Object>> landedSides(def ec, String tenantId, String runResultId, def runRow) {
         Map<String, Integer> counts = readCounts(ec, tenantId, runResultId)
+        Set<String> readInFull = sidesReadInFull(counts)
         Map<String, Map<String, Object>> landed = [:]
         [(SIDE_1): "file1", (SIDE_2): "file2"].each { String side, String field ->
-            if (!counts.containsKey(side)) return
+            if (!readInFull.contains(side)) return
             Map<String, Object> file = landedFile(ec, runRow, "${field}DataManagerPath", "${field}Name")
             if (file != null) landed[side] = [dataManagerPath: file.dataManagerPath, fileName: file.fileName, recordCount: counts[side]] as Map<String, Object>
         }
         return landed
+    }
+
+    /**
+     * Pure (DAR-OPS-029 OC106): the sides whose read finished WITH its count. An upload finishes its step with no count
+     * (RunExtractSupport.stageTextInput) and a retry never reuses it (only extractApiSource replays a side), so it is not a
+     * landed read: a run whose one finished side was an upload has nothing to retry from. Zero records is still a read.
+     */
+    static Set<String> sidesReadInFull(Map<String, Integer> countsBySide) {
+        return ((countsBySide ?: [:]).findAll { String side, Integer count -> count != null }.keySet()) as Set<String>
     }
 
     static final String RESULT = "RESULT"

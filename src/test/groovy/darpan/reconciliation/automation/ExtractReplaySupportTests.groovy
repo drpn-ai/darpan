@@ -123,4 +123,19 @@ class ExtractReplaySupportTests {
                 [reconciliationRunStepId: "99999", stageCode: "EXTRACT_FILE1", startedDate: early, recordCount: 3]]))
         assertEquals([:], ExtractReplaySupport.countsBySide([]))
     }
+
+    @Test
+    void anUploadedSideIsNotALandedReadSoARetryNeverResumesFromIt() {
+        // DAR-OPS-029 OC106: an upload records a finished step with no count (RunExtractSupport.stageTextInput) and a retry
+        // never reuses it (only extractApiSource replays a side), so a run whose one finished side was an upload has nothing
+        // to retry from. Only a read with its count is landed; zero records is still a read.
+        Timestamp at = Timestamp.valueOf("2026-10-27 15:00:00")
+        Map<String, Integer> counts = ExtractReplaySupport.countsBySide([
+                [reconciliationRunStepId: "1", stageCode: "EXTRACT_FILE1", startedDate: at, recordCount: null],
+                [reconciliationRunStepId: "2", stageCode: "EXTRACT_FILE2", startedDate: at, recordCount: 0]])
+        assertEquals([ExtractReplaySupport.SIDE_2] as Set, ExtractReplaySupport.sidesReadInFull(counts) as Set)
+        assertEquals([] as Set, ExtractReplaySupport.sidesReadInFull([FILE_1: null]) as Set, "an upload alone: nothing landed")
+        assertEquals([] as Set, ExtractReplaySupport.sidesReadInFull([:]) as Set)
+    }
+
 }

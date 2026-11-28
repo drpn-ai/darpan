@@ -17,10 +17,10 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeTreatsAdminGroupMemberWithoutTenantMembershipAsTenantScopedWithoutActiveTenant() {
-        TableRows adminFinder = new TableRows(rows: [[userGroupId: "ADMIN", userId: "EX_ADMIN"]])
+        List<Map> adminRows = [[userGroupId: "ADMIN", userId: "EX_ADMIN"]]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN"),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupMember": adminFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupMember": adminRows])
         )
 
         Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
@@ -38,18 +38,18 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeUsesConfiguredTenantsForAdminWithoutMemberships() {
-        TableRows adminFinder = new TableRows(rows: [[userGroupId: "ADMIN", userId: "EX_ADMIN"]])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        List<Map> adminRows = [[userGroupId: "ADMIN", userId: "EX_ADMIN"]]
+        List<Map> companyGroupRows = [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
 
@@ -72,20 +72,20 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeTreatsDarpanSuperAdminGroupAsSuperAdmin() {
-        TableRows adminFinder = new TableRows(rows: [[
+        List<Map> adminRows = [[
                 userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
                 userId     : "EX_ADMIN",
-        ]])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        ]]
+        List<Map> companyGroupRows = [
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
 
@@ -100,19 +100,19 @@ class TenantAccessSupportTests {
     }
 
     private static def darpanAdminOnlyEc(Map extra = [:]) {
-        TableRows adminFinder = new TableRows(rows: [[
+        List<Map> adminRows = [[
                 userGroupId: TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
                 userId     : "EX_DARPAN_ADMIN",
-        ] + extra])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        ] + extra]
+        List<Map> companyGroupRows = [
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         return executionContext(
                 user: new UserStub(userId: "EX_DARPAN_ADMIN"),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
     }
@@ -146,13 +146,13 @@ class TenantAccessSupportTests {
     @Test
     void aDarpanAdminIsNotASuperAdmin() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows adminFinder = new TableRows(rows: [[
+        List<Map> adminRows = [[
                 userGroupId: TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
                 userId     : "EX_DARPAN_ADMIN",
-        ]])
+        ]]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_DARPAN_ADMIN"),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupMember": adminFinder]),
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupMember": adminRows]),
                 message: message
         )
 
@@ -163,13 +163,13 @@ class TenantAccessSupportTests {
     @Test
     void requireDarpanAdminPassesASuperAdmin() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows adminFinder = new TableRows(rows: [[
+        List<Map> adminRows = [[
                 userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
                 userId     : "EX_ADMIN",
-        ]])
+        ]]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN"),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupMember": adminFinder]),
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupMember": adminRows]),
                 message: message
         )
 
@@ -179,18 +179,18 @@ class TenantAccessSupportTests {
 
     @Test
     void canAccessTenantRecordRequiresActiveTenantMatchForSuperAdmin() {
-        TableRows adminFinder = new TableRows(rows: [[userGroupId: "ADMIN", userId: "EX_ADMIN"]])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        List<Map> adminRows = [[userGroupId: "ADMIN", userId: "EX_ADMIN"]]
+        List<Map> companyGroupRows = [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
 
@@ -203,15 +203,15 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeUsesPreferredTenantWhenMembershipIsValid() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
 
         Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
@@ -229,15 +229,15 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeFallsBackToFirstAvailableTenantWhenPreferenceIsInvalid() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "MISSING",
                 ]),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
 
         Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
@@ -249,21 +249,21 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeUsesPermissionAssignmentsForTheSelectedTenant() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "GORJANA", userId: "EX_USER", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "GORJANA", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ])
         )
 
@@ -277,19 +277,19 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeAllowsTenantUserToRunButNotEditActiveTenantData() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ])
         )
 
@@ -305,19 +305,19 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeAllowsTenantAdminToRunAndEditActiveTenantData() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ])
         )
 
@@ -331,14 +331,14 @@ class TenantAccessSupportTests {
 
     @Test
     void resolveGenericOutputLocationUsesCustomerScopedFolderForNonAdmin() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "test.customer", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "test.customer", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
 
         String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
@@ -348,17 +348,17 @@ class TenantAccessSupportTests {
 
     @Test
     void resolveGenericOutputLocationUsesTenantScopedFolderForAdminWithActiveTenant() {
-        TableRows adminFinder = new TableRows(rows: [[userGroupId: "ADMIN", userId: "EX_ADMIN"]])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        List<Map> adminRows = [[userGroupId: "ADMIN", userId: "EX_ADMIN"]]
+        List<Map> companyGroupRows = [
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
 
@@ -370,14 +370,14 @@ class TenantAccessSupportTests {
     @Test
     void requireTenantRecordAccessRejectsCrossTenantRecord() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "CUSTOMER_A", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "CUSTOMER_A", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder]),
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows]),
                 message: message
         )
 
@@ -390,15 +390,15 @@ class TenantAccessSupportTests {
 
     @Test
     void assignTenantOwnershipOnCreateUsesActiveTenantAndCreator() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         UserStub user = new UserStub(userId: "EX_USER", preferences: [
                 (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
         Map<String, Object> newValue = [:]
 
@@ -410,13 +410,13 @@ class TenantAccessSupportTests {
 
     @Test
     void saveActiveTenantPersistsRequestedTenantWhenMembershipIsValid() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         UserStub user = new UserStub(userId: "EX_USER")
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
 
         boolean saved = TenantAccessSupport.saveActiveTenant(ec, "KREWE")
@@ -427,20 +427,20 @@ class TenantAccessSupportTests {
 
     @Test
     void buildAccessScopeSyncsActiveTenantIntoUserContext() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
-        ])
+        ]
         UserStub user = new UserStub(userId: "EX_USER", preferences: [
                 (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ])
         )
 
@@ -460,14 +460,14 @@ class TenantAccessSupportTests {
 
     @Test
     void canEditActiveTenantDataRequiresExplicitEditorAssignment() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows])
         )
 
         assertFalse(TenantAccessSupport.canEditActiveTenantData(ec))
@@ -477,19 +477,19 @@ class TenantAccessSupportTests {
     @Test
     void requireActiveTenantRunAccessAllowsTenantUserRole() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ]),
                 message: message
         )
@@ -502,16 +502,16 @@ class TenantAccessSupportTests {
 
     @Test
     void saveActiveTenantAllowsAdminWhenTenantIsConfigured() {
-        TableRows adminFinder = new TableRows(rows: [[userGroupId: "ADMIN", userId: "EX_ADMIN"]])
-        TableRows companyGroupFinder = new TableRows(rows: [
+        List<Map> adminRows = [[userGroupId: "ADMIN", userId: "EX_ADMIN"]]
+        List<Map> companyGroupRows = [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         UserStub user = new UserStub(userId: "EX_ADMIN")
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": adminFinder,
-                        "moqui.security.UserGroup"      : companyGroupFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": adminRows,
+                        "moqui.security.UserGroup"      : companyGroupRows,
                 ])
         )
 
@@ -523,20 +523,20 @@ class TenantAccessSupportTests {
 
     @Test
     void sessionInfoUsesActiveTenantTimezoneBeforeUserAccountTimezone() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows tenantSettingsFinder = new TableRows(rows: [[
+        ]
+        List<Map> tenantSettingsRows = [[
                 companyUserGroupId: "KREWE",
                 timeZone          : "Europe/London",
-        ]])
+        ]]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", username: "test.user", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"       : companyFinder,
-                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingsFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"       : companyRows,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingsRows,
                 ])
         )
 
@@ -552,17 +552,17 @@ class TenantAccessSupportTests {
      */
     @Test
     void aTenantWithNoZoneComputesWindowsInUtcButShowsTimesInTheUsersZone() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 l10n: new Expando(timeZone: "Europe/Paris"),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"             : companyFinder,
-                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): new TableRows(),
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"             : companyRows,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): [],
                 ])
         )
 
@@ -580,17 +580,17 @@ class TenantAccessSupportTests {
 
     @Test
     void buildSessionInfoExposesRawUserAndTenantTimeZones() {
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "GORJANA", userId: "EX_USER", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows tenantSettingFinder = new TableRows(rows: [[companyUserGroupId: "GORJANA", timeZone: "America/New_York"]])
+        ]
+        List<Map> tenantSettingRows = [[companyUserGroupId: "GORJANA", timeZone: "America/New_York"]]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "GORJANA",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"             : companyFinder,
-                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"             : companyRows,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingRows,
                 ])
         )
 
@@ -603,20 +603,20 @@ class TenantAccessSupportTests {
     @Test
     void saveActiveTenantSettingsStoresTimezoneForActiveTenant() {
         Timestamp now = Timestamp.valueOf("2026-05-02 10:00:00")
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
-        ])
+        ]
         ServiceFacadeStub service = new ServiceFacadeStub()
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", nowTimestamp: now, preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ]),
                 service: service
         )
@@ -636,20 +636,20 @@ class TenantAccessSupportTests {
     @Test
     void saveActiveTenantSettingsRejectsInvalidTimezone() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
-        ])
+        ]
         ServiceFacadeStub service = new ServiceFacadeStub()
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ]),
                 message: message,
                 service: service
@@ -764,13 +764,13 @@ class TenantAccessSupportTests {
     @Test
     void saveActiveTenantRejectsRequestedTenantOutsideUserMembership() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
+        ]
         UserStub user = new UserStub(userId: "EX_USER")
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(tables: ["moqui.security.UserGroupAndMember": companyFinder]),
+                entity: new FakeEntityFacade(tables: ["moqui.security.UserGroupAndMember": companyRows]),
                 message: message
         )
 
@@ -784,19 +784,19 @@ class TenantAccessSupportTests {
     @Test
     void requireActiveTenantWriteAccessRejectsReadOnlyTenantRole() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ]),
                 message: message
         )
@@ -810,19 +810,19 @@ class TenantAccessSupportTests {
     @Test
     void requireActiveTenantWriteAccessRejectsTenantUserRole() {
         MessageFacadeStub message = new MessageFacadeStub()
-        TableRows companyFinder = new TableRows(rows: [
+        List<Map> companyRows = [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
-        ])
-        TableRows permissionFinder = new TableRows(rows: [
+        ]
+        List<Map> permissionRows = [
                 [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
-        ])
+        ]
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
                         (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember"                     : companyFinder,
-                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember"                     : companyRows,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionRows,
                 ]),
                 message: message
         )
@@ -837,16 +837,16 @@ class TenantAccessSupportTests {
     void listAvailableTenantsExcludesDeactivatedTenantForMember() {
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER"),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember": new TableRows(rows: [
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember": [
                                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe",
                                  groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
                                 [userGroupId: "ACME", userId: "EX_USER", description: "Acme",
                                  groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
-                        ]),
-                        "darpan.auth.TenantSetting": new TableRows(rows: [
+                        ],
+                        "darpan.auth.TenantSetting": [
                                 [companyUserGroupId: "ACME", disabled: "Y"],
-                        ]),
+                        ],
                 ]))
 
         List tenants = TenantAccessSupport.listAvailableTenants(ec)
@@ -860,9 +860,9 @@ class TenantAccessSupportTests {
      */
     @Test
     void aNonTenantGroupNeverLendsItsDescriptionAsATenantLabel() {
-        def ec = executionContext(entity: new EntityFacadeStub(tables: [
-                "moqui.security.UserGroup": new TableRows(rows: [[
-                        userGroupId: "ADMIN", description: "Administrators", groupTypeEnumId: "UgtMoqui"]]),
+        def ec = executionContext(entity: new FakeEntityFacade(tables: [
+                "moqui.security.UserGroup": [[
+                        userGroupId: "ADMIN", description: "Administrators", groupTypeEnumId: "UgtMoqui"]],
         ]))
 
         assertEquals("ADMIN", TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, "ADMIN"))
@@ -871,10 +871,10 @@ class TenantAccessSupportTests {
 
     @Test
     void aTenantGroupLendsItsDescription() {
-        def ec = executionContext(entity: new EntityFacadeStub(tables: [
-                "moqui.security.UserGroup": new TableRows(rows: [[
+        def ec = executionContext(entity: new FakeEntityFacade(tables: [
+                "moqui.security.UserGroup": [[
                         userGroupId: "KREWE", description: "Krewe",
-                        groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]]),
+                        groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]],
         ]))
 
         assertEquals("Krewe", TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, "KREWE"))
@@ -885,11 +885,11 @@ class TenantAccessSupportTests {
     void lastRunIsNeverReadOutsideTheActiveTenant() {
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER"),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupAndMember": new TableRows(rows: []),
-                        (darpan.common.DarpanEntityConstants.RECONCILIATION_RUN_RESULT): new TableRows(rows: [[
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupAndMember": [],
+                        (darpan.common.DarpanEntityConstants.RECONCILIATION_RUN_RESULT): [[
                                 reconciliationRunResultId: "RR_1", createdByUserId: "EX_USER",
-                                companyUserGroupId: "TENANT_LEFT_BEHIND", savedRunId: "RS_1"]]),
+                                companyUserGroupId: "TENANT_LEFT_BEHIND", savedRunId: "RS_1"]],
                 ]))
 
         assertNull(TenantAccessSupport.resolveLastRun(ec))
@@ -899,20 +899,20 @@ class TenantAccessSupportTests {
     void listAvailableTenantsExcludesDeactivatedTenantForSuperAdmin() {
         def ec = executionContext(
                 user: new UserStub(userId: "SA_USER"),
-                entity: new EntityFacadeStub(tables: [
-                        "moqui.security.UserGroupMember": new TableRows(rows: [[
+                entity: new FakeEntityFacade(tables: [
+                        "moqui.security.UserGroupMember": [[
                                 userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
                                 userId     : "SA_USER",
-                        ]]),
-                        "moqui.security.UserGroup": new TableRows(rows: [
+                        ]],
+                        "moqui.security.UserGroup": [
                                 [userGroupId: "KREWE", description: "Krewe",
                                  groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
                                 [userGroupId: "ACME", description: "Acme",
                                  groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
-                        ]),
-                        "darpan.auth.TenantSetting": new TableRows(rows: [
+                        ],
+                        "darpan.auth.TenantSetting": [
                                 [companyUserGroupId: "ACME", disabled: "Y"],
-                        ]),
+                        ],
                 ]))
 
         List tenants = TenantAccessSupport.listAvailableTenants(ec)
@@ -929,16 +929,16 @@ class TenantAccessSupportTests {
     // so a future refactor that drops it fails CI instead of only failing a live-server proof.
     @Test
     void listAvailableTenantsDisablesAuthzOnTenantSettingFinderForDisabledTenantLookup() {
-        EntityFacadeStub entityFacadeStub = new EntityFacadeStub(tables: [
-                "moqui.security.UserGroupMember": new TableRows(rows: [[
+        FakeEntityFacade entityFacadeStub = new FakeEntityFacade(tables: [
+                "moqui.security.UserGroupMember": [[
                         userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
                         userId     : "SA_USER",
-                ]]),
-                "moqui.security.UserGroup": new TableRows(rows: [
+                ]],
+                "moqui.security.UserGroup": [
                         [userGroupId: "KREWE", description: "Krewe",
                          groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
-                ]),
-                "darpan.auth.TenantSetting": new TableRows(rows: []),
+                ],
+                "darpan.auth.TenantSetting": [],
         ])
         def ec = executionContext(user: new UserStub(userId: "SA_USER"), entity: entityFacadeStub)
 
@@ -959,12 +959,12 @@ class TenantAccessSupportTests {
     void isTenantAdminIsTrueWhenUserHoldsTenantAdminInThatSpecificTenant() {
         def ec = executionContext(
                 user: new UserStub(userId: "aditi"),
-                entity: new EntityFacadeStub(tables: [
-                        "darpan.auth.TenantUserPermissionGroupMember": new TableRows(rows: [
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.TenantUserPermissionGroupMember": [
                                 [userId: "aditi", tenantUserGroupId: "STEVE_MADDEN",
                                  permissionUserGroupId: "DARPAN_TENANT_ADMIN", thruDate: null],
-                        ]),
-                        "moqui.security.UserGroupMember": new TableRows(rows: []),
+                        ],
+                        "moqui.security.UserGroupMember": [],
                 ])
         )
 
@@ -976,12 +976,12 @@ class TenantAccessSupportTests {
     void isTenantAdminIsFalseForATenantTheUserOnlyEditsOrDoesNotAdminister() {
         def ec = executionContext(
                 user: new UserStub(userId: "aditi"),
-                entity: new EntityFacadeStub(tables: [
-                        "darpan.auth.TenantUserPermissionGroupMember": new TableRows(rows: [
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.TenantUserPermissionGroupMember": [
                                 [userId: "aditi", tenantUserGroupId: "BETSEY_JOHNSON",
                                  permissionUserGroupId: "DARPAN_COMPANY_EDITOR", thruDate: null],
-                        ]),
-                        "moqui.security.UserGroupMember": new TableRows(rows: []),
+                        ],
+                        "moqui.security.UserGroupMember": [],
                 ])
         )
 
@@ -1006,11 +1006,11 @@ class TenantAccessSupportTests {
     void isTenantAdminIsTrueForSuperAdminOnAnyTenant() {
         def ec = executionContext(
                 user: new UserStub(userId: "root"),
-                entity: new EntityFacadeStub(tables: [
-                        "darpan.auth.TenantUserPermissionGroupMember": new TableRows(rows: []),
-                        "moqui.security.UserGroupMember": new TableRows(rows: [[
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.TenantUserPermissionGroupMember": [],
+                        "moqui.security.UserGroupMember": [[
                                 userId: "root", userGroupId: "DARPAN_SUPER_ADMIN", thruDate: null
-                        ]]),
+                        ]],
                 ])
         )
 
@@ -1025,9 +1025,9 @@ class TenantAccessSupportTests {
         def ec = executionContext(
                 user: new UserStub(userId: "aditi"),
                 message: message,
-                entity: new EntityFacadeStub(tables: [
-                        "darpan.auth.TenantUserPermissionGroupMember": new TableRows(rows: []),
-                        "moqui.security.UserGroupMember": new TableRows(rows: []),
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.TenantUserPermissionGroupMember": [],
+                        "moqui.security.UserGroupMember": [],
                 ])
         )
 
@@ -1039,7 +1039,7 @@ class TenantAccessSupportTests {
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),
-                entity: overrides.entity ?: new EntityFacadeStub(),
+                entity: overrides.entity ?: new FakeEntityFacade(),
                 message: overrides.message ?: new MessageFacadeStub(),
                 service: overrides.service ?: new ServiceFacadeStub(),
                 l10n: overrides.l10n ?: new Expando(timeZone: "UTC"),
@@ -1065,21 +1065,6 @@ class TenantAccessSupportTests {
 
         void refresh() {
             timeZone = backingRow.timeZone
-        }
-    }
-
-    /** One table's rows for {@link EntityFacadeStub}: the shared FakeEntityFind applies the conditions, as Moqui would. */
-    static class TableRows {
-        List<Map> rows = []
-    }
-
-    /**
-     * ec.entity over the shared {@link FakeEntityFacade}: keys from the entity XML, a fresh finder per find(), and one() by a
-     * full primary key drops any other equality condition. Tables the test does not give are empty.
-     */
-    static class EntityFacadeStub extends FakeEntityFacade {
-        void setTables(Map<String, TableRows> tables) {
-            tables.each { String name, TableRows t -> table(name, t.rows) }
         }
     }
 

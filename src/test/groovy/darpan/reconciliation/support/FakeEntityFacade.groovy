@@ -12,6 +12,7 @@ package darpan.reconciliation.support
 class FakeEntityFacade {
     private final Map<String, List<String>> pkByEntity = [:]
     private final Map<String, List<Map>> rowsByEntity = [:]
+    private final Map<String, RuntimeException> failures = [:]
     final Map<String, List<FakeEntityFind>> issued = [:]
 
     /** Declares a table, its key read from the entity XML; returns this for chaining. The row list is shared, not copied. */
@@ -33,12 +34,24 @@ class FakeEntityFacade {
         return this
     }
 
+    /** {@code new FakeEntityFacade(tables: [entityName: rows, ...])}: declares each table, its key from the entity XML. */
+    void setTables(Map<String, List<Map>> tables) {
+        tables.each { String name, List<Map> rows -> table(name, rows) }
+    }
+
+    /** Every later finder on {@code entityName} throws {@code failure} from one(), list() and count(): a failed read. */
+    FakeEntityFacade failOn(String entityName, RuntimeException failure) {
+        failures.put(entityName, failure)
+        return this
+    }
+
     /** The live row list of a declared table (what updateAll/deleteAll changed), or null when not declared. */
     List<Map> rows(String entityName) { rowsByEntity.get(entityName) }
 
     FakeEntityFind find(String entityName) {
         if (!pkByEntity.containsKey(entityName)) table(entityName, knownPk(entityName), new ArrayList<Map>())
         FakeEntityFind f = new FakeEntityFind(pkByEntity.get(entityName), rowsByEntity.get(entityName))
+        f.failure = failures.get(entityName)
         issued.computeIfAbsent(entityName) { [] as List<FakeEntityFind> }.add(f)
         return f
     }

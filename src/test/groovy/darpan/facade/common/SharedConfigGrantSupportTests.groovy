@@ -1,5 +1,6 @@
 package darpan.facade.common
 
+import darpan.reconciliation.support.FakeEntityFacade
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -343,31 +344,27 @@ class SharedConfigGrantSupportTests {
         // not from the preference alone. Defaults to the config's owning tenant.
         String activeTenant = spec.activeTenant ?: spec.config?.companyUserGroupId
 
-        def entity = new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
+        def entity = new FakeEntityFacade(tables: [
                 "darpan.auth.TenantUserPermissionGroupMember":
-                        new SharedConfigAccessSupportTests.FinderStub(listResult: permissionRows),
-                // isSuperAdmin reads this via .one(); leaving oneResult null keeps the acting user a
+                        permissionRows,
+                // isSuperAdmin reads this via .one(); leaving it empty keeps the acting user a
                 // plain tenant admin. A super-admin would short-circuit every check under test —
                 // spec.superAdmin opts a single test into that short-circuit deliberately, to prove
                 // isDarpanTenant (not the admin checks) is what still stops it.
                 "moqui.security.UserGroupMember":
-                        new SharedConfigAccessSupportTests.FinderStub(listResult: [],
-                                oneResult: spec.superAdmin ? [userId: "aditi", userGroupId: "ADMIN"] : null),
+                        spec.superAdmin ? [[userId: "aditi", userGroupId: "ADMIN"]] : [],
                 "moqui.security.UserGroupAndMember":
-                        new SharedConfigAccessSupportTests.FinderStub(listResult:
-                                activeTenant ? [[userId         : "aditi",
+                        activeTenant ? [[userId         : "aditi",
                                                  userGroupId    : activeTenant,
-                                                 groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                 groupTypeEnumId: "UgtDarpanCompany"]] : [],
                 "darpan.auth.ConfigTenantAccess":
-                        new SharedConfigAccessSupportTests.FinderStub(listResult: (spec.grants ?: []) as List),
+                        (spec.grants ?: []) as List,
                 "darpan.hotwax.HotWaxOmsRestSourceConfig":
-                        new SharedConfigAccessSupportTests.FinderStub(oneResult: spec.config),
+                        spec.config ? [spec.config] : [],
         ])
-        // FinderStub.one() matches on the conditions applied, so a single stub cannot serve
-        // per-tenant UserGroup lookups. TenantGroupFinderStub answers any userGroupId in
-        // knownTenants as a UgtDarpanCompany group, and null for anything else — so a grant naming
+        // Every tenant in knownTenants is a UgtDarpanCompany group; any other userGroupId finds nothing, so a grant naming
         // an unknown tenant is still correctly rejected.
-        entity.finders["moqui.security.UserGroup"] = new TenantGroupFinderStub(known: knownTenants)
+        entity.table("moqui.security.UserGroup", knownTenants.collect { [userGroupId: it, groupTypeEnumId: "UgtDarpanCompany"] as Map })
 
         def message = new SharedConfigAccessSupportTests.MessageFacadeStub()
         def ec = new Expando(
@@ -381,33 +378,6 @@ class SharedConfigGrantSupportTests {
                 resource: new Expando(properties: [:])
         )
         return [ec: ec, message: message, created: created, updated: updated, deleted: deleted, audited: audited]
-    }
-
-    /**
-     * Answers UserGroup point-lookups per userGroupId, which a single-row FinderStub cannot do
-     * (its {@code one()} matches a single fixed {@code oneResult} against the applied conditions).
-     *
-     * <p>MUST extend {@code SharedConfigAccessSupportTests.FinderStub}. {@code EntityFacadeStub.find}
-     * assigns into a {@code FinderStub}-typed local, and Groovy enforces declared types on
-     * assignment — a sibling class that merely duck-types the same methods throws
-     * {@code GroovyCastException} at runtime, not a compile error, so the failure would surface as
-     * an unrelated-looking test error.</p>
-     */
-    static class TenantGroupFinderStub extends SharedConfigAccessSupportTests.FinderStub {
-        List<String> known = []
-
-        @Override
-        Object one() {
-            String requested = conditions["userGroupId"]?.toString()
-            if (!requested || !(requested in known)) return null
-            return [userGroupId: requested, groupTypeEnumId: "UgtDarpanCompany"]
-        }
-
-        @Override
-        List list() {
-            def row = one()
-            return row ? [row] : []
-        }
     }
 
     /** Records service calls by verb so the tests can assert create-vs-update-vs-delete-vs-audit. */

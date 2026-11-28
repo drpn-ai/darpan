@@ -130,6 +130,11 @@ class FakeEntityFindTests {
         assertEquals("KREWE", entity.find("moqui.security.UserGroup").condition("userGroupId", "KREWE").condition("x", "y").one()?.userGroupId)
         assertEquals([], entity.find("darpan.auth.TenantSetting").list(), "an undeclared real entity is an empty table")
         assertThrows(IllegalStateException) { entity.find("darpan.no.SuchEntity") }
+        assertEquals([[userGroupId: "KREWE"]], new FakeEntityFacade(tables: ["moqui.security.UserGroup": [[userGroupId: "KREWE"]]])
+                .find("moqui.security.UserGroup").list())
+        FakeEntityFacade failing = new FakeEntityFacade().failOn("moqui.security.UserGroup", new IllegalStateException("db down"))
+        assertThrows(IllegalStateException) { failing.find("moqui.security.UserGroup").list() }
+        assertThrows(IllegalStateException) { failing.find("moqui.security.UserGroup").condition("userGroupId", "X").one() }
         assertThrows(IllegalArgumentException) { new FakeEntityFacade().table("darpan.auth.TenantSetting", ["tenantId"], []) }
     }
 

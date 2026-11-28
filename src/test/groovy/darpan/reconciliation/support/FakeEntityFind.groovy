@@ -37,6 +37,8 @@ class FakeEntityFind {
     Integer limitCount
     boolean authzDisabled = false
     Boolean cacheUsed
+    /** When set, one(), list(), count(), updateAll() and deleteAll() throw it: a read or write that failed. */
+    RuntimeException failure
 
     FakeEntityFind(List<String> pkFields, List<Map> rows = []) {
         if (!pkFields) throw new IllegalArgumentException("an entity has at least one primary key field")
@@ -100,6 +102,7 @@ class FakeEntityFind {
     }
 
     Map one() {
+        if (failure != null) throw failure
         if (pkFields.any { conditions.containsKey(it) && isEmpty(conditions.get(it)) }) return null
         if (conditions.isEmpty() && whereConditions.isEmpty()) return null
         List<Map> found = sorted(matching(oneConditions()))
@@ -128,6 +131,7 @@ class FakeEntityFind {
     }
 
     private List<Map> matching(Map<String, Object> applied) {
+        if (failure != null) throw failure
         return rows.findAll { Map row ->
             applied.every { String k, Object v -> row.get(k) == v } && whereConditions.every { it.call(row) }
         }

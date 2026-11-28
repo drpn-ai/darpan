@@ -3,6 +3,8 @@ package darpan.facade.reconciliation
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.support.FakeEntityFacade
+import darpan.reconciliation.support.FakeTenantEc
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -84,10 +86,10 @@ class AutomationFacadeSupportSharedConfigTests {
         // It used to catch everything and return [], so a broken read showed "No API configs are
         // available" and the operator had no way to tell it from a tenant with no config.
         Expando ec = executionContext("KREWE", DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, [], [])
-        Map<String, FinderStub> finders = ((EntityFacadeStub) ec.entity).finders
-        finders.put(SourceSystemConnectorSupport.ENTITY_NAME, new FinderStub(listResult: [[systemEnumId: "OMS_GQL",
-                configEntityName: DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, enabled: "Y"]]))
-        finders.put(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, new FailingFinderStub())
+        FakeEntityFacade entity = (FakeEntityFacade) ec.entity
+        entity.table(SourceSystemConnectorSupport.ENTITY_NAME, [[systemEnumId: "OMS_GQL",
+                configEntityName: DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, enabled: "Y"]])
+        entity.failOn(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, new IllegalStateException("config read failed"))
 
         assertThrows(IllegalStateException) {
             AutomationSourceOptionsSupport.listEnabledConfigEndpoints(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
@@ -112,83 +114,21 @@ class AutomationFacadeSupportSharedConfigTests {
                 user: new UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": activeTenant],
                         context: [activeTenantUserGroupId: activeTenant]),
-                entity: new EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new FinderStub(listResult: grants),
-                        (entityName)                    : new FinderStub(listResult: configRows),
-                        "moqui.security.UserGroupAndMember": new FinderStub(listResult:
-                                activeTenant ? [[userId         : "aditi",
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": grants,
+                        (entityName)                    : configRows,
+                        "moqui.security.UserGroupAndMember": activeTenant ? [[userId         : "aditi",
                                                  userGroupId    : activeTenant,
-                                                 groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                 groupTypeEnumId: "UgtDarpanCompany"]] : [],
                 ]),
-                message: new MessageFacadeStub(),
+                message: new FakeTenantEc.MessageFacadeStub(),
                 l10n: new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:])
         )
     }
 
-    static class UserStub {
-        String userId
-        String username
-        Timestamp nowTimestamp = NOW
-        Map<String, Object> preferences = [:]
-        Map<String, Object> context = [:]
-        Object userAccount = new Expando(timeZone: "UTC")
-
-        Object getPreference(String key) { preferences[key] }
-        void setPreference(String key, Object value) { preferences[key] = value }
-    }
-
-    static class MessageFacadeStub {
-        List<String> errors = []
-        void addError(String msg) { errors << msg }
-        boolean hasError() { !errors.isEmpty() }
-    }
-
-    static class EntityFacadeStub {
-        Map<String, FinderStub> finders = [:]
-
-        FinderStub find(String entityName) {
-            FinderStub f = finders[entityName]
-            if (f == null) { f = new FinderStub(); finders[entityName] = f }
-            // Real Moqui hands back a brand-new EntityFind with an empty condition set on every
-            // find() call — reset here so a second find() on the same entity (owned-rows list, then
-            // shared-rows point lookups) within one production method starts clean. Matches
-            // SharedConfigAccessSupportTests.EntityFacadeStub's own rationale.
-            f.conditions = [:]
-            return f
-        }
-    }
-
-    static class FinderStub {
-        Map<String, Object> conditions = [:]
-        Object oneResult
-        List listResult = []
-
-        FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        FinderStub conditionDate(String f, String t, Object m) { this }
-        FinderStub useCache(boolean v) { this }
-        FinderStub disableAuthz() { this }
-        FinderStub orderBy(String s) { this }
-
-        Object one() {
-            if (oneResult != null) {
-                if (oneResult instanceof Map && !conditions.every { k, v -> oneResult[k] == v }) return null
-                return oneResult
-            }
-            List matches = list()
-            return matches.isEmpty() ? null : matches[0]
-        }
-
-        List list() {
-            listResult.findAll { row ->
-                if (!(row instanceof Map)) return true
-                conditions.every { k, v -> row[k] == v }
-            }
-        }
-    }
-
-    static class FailingFinderStub extends FinderStub {
-        @Override List list() { throw new IllegalStateException("config read failed") }
-        @Override Object one() { throw new IllegalStateException("config read failed") }
+    /** The shared stub user, its clock fixed at {@link #NOW} so grant dates compare against a known moment. */
+    static class UserStub extends FakeTenantEc.UserStub {
+        UserStub() { nowTimestamp = NOW }
     }
 }

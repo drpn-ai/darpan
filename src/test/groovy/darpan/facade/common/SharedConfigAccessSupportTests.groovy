@@ -1,5 +1,7 @@
 package darpan.facade.common
 
+import darpan.reconciliation.support.FakeEntityFacade
+import darpan.reconciliation.support.FakeTenantEc
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -86,12 +88,12 @@ class SharedConfigAccessSupportTests {
 
     @Test
     void listMemberTenantIdsIsEmptyForAnUnknownConfigTypeWithoutTouchingTheDatabase() {
-        def finder = new FinderStub(listResult: [grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "STEVE_MADDEN")])
-        def ec = executionContext(entity: new EntityFacadeStub(
-                finders: ["darpan.auth.ConfigTenantAccess": finder]))
+        FakeEntityFacade entity = new FakeEntityFacade(tables: [
+                "darpan.auth.ConfigTenantAccess": [grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "STEVE_MADDEN")]])
+        def ec = executionContext(entity: entity)
 
         assertTrue(SharedConfigAccessSupport.listMemberTenantIds(ec, "SCFG_MADE_UP", "OMS_HW_1").isEmpty())
-        assertTrue(finder.conditions.isEmpty(),
+        assertTrue(entity.issuedFor("darpan.auth.ConfigTenantAccess").isEmpty(),
                 "an unknown config type must short-circuit before any query is built")
     }
 
@@ -102,8 +104,7 @@ class SharedConfigAccessSupportTests {
      */
     @Test
     void aGrantReadThatFailsIsNotReportedAsNotShared() {
-        def ec = executionContext(entity: new EntityFacadeStub(finders: [
-                "darpan.auth.ConfigTenantAccess": new FinderStub(listFailure: new IllegalStateException("db down"))]))
+        def ec = executionContext(entity: new FakeEntityFacade().failOn("darpan.auth.ConfigTenantAccess", new IllegalStateException("db down")))
 
         assertThrows(IllegalStateException) {
             SharedConfigGrantSupport.hasActiveGrants(ec, "SCFG_HOTWAX_OMS", "OMS_HW_1")
@@ -306,19 +307,18 @@ class SharedConfigAccessSupportTests {
                 user: new UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": spec.activeTenant],
                         context: [activeTenantUserGroupId: spec.activeTenant]),
-                entity: new EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new FinderStub(listResult: (spec.grants ?: []) as List),
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": (spec.grants ?: []) as List,
                         "darpan.hotwax.HotWaxOmsRestSourceConfig":
-                                new FinderStub(listResult: (spec.configRows ?: []) as List),
+                                (spec.configRows ?: []) as List,
                         // REQUIRED, same reason as ecWithGrants above: listAccessibleConfigRows calls
                         // currentActiveTenantUserGroupId, which resolves through listAvailableTenants →
                         // this view, NOT from the preference. Omit it and the active tenant is null, so
                         // the method returns [] — `listAccessibleConfigRowsIsEmptyWithNoActiveTenant`
                         // would pass for the wrong reason while the other two tests fail.
-                        "moqui.security.UserGroupAndMember": new FinderStub(listResult:
-                                spec.activeTenant ? [[userId         : "aditi",
+                        "moqui.security.UserGroupAndMember": spec.activeTenant ? [[userId         : "aditi",
                                                       userGroupId    : spec.activeTenant,
-                                                      groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                      groupTypeEnumId: "UgtDarpanCompany"]] : [],
                 ])
         )
     }
@@ -333,17 +333,16 @@ class SharedConfigAccessSupportTests {
                 user: new UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": activeTenantUserGroupId],
                         context: [activeTenantUserGroupId: activeTenantUserGroupId]),
-                entity: new EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new FinderStub(listResult: grants),
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": grants,
                         // REQUIRED: currentActiveTenantUserGroupId resolves through listAvailableTenants,
                         // which reads this view. Without a matching row the active tenant is null and
                         // every owner-or-shared assertion below silently tests the wrong thing.
-                        // Both fields must be present — FinderStub.list() filters on the conditions
+                        // Both fields must be present — the fake finder's list() filters on the conditions
                         // listTenantMembershipRecords applies.
-                        "moqui.security.UserGroupAndMember": new FinderStub(listResult:
-                                activeTenantUserGroupId ? [[userId          : "aditi",
+                        "moqui.security.UserGroupAndMember": activeTenantUserGroupId ? [[userId          : "aditi",
                                                             userGroupId     : activeTenantUserGroupId,
-                                                            groupTypeEnumId : "UgtDarpanCompany"]] : []),
+                                                            groupTypeEnumId : "UgtDarpanCompany"]] : [],
                 ])
         )
     }
@@ -351,81 +350,17 @@ class SharedConfigAccessSupportTests {
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user   : overrides.user    ?: new UserStub(),
-                entity : overrides.entity  ?: new EntityFacadeStub(),
+                entity : overrides.entity  ?: new FakeEntityFacade(),
                 message: overrides.message ?: new MessageFacadeStub(),
                 l10n   : new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:])
         )
     }
 
-    static class UserStub {
-        String userId
-        String username
-        Timestamp nowTimestamp = NOW
-        Map<String, Object> preferences = [:]
-        Map<String, Object> context = [:]
-        Object userAccount = new Expando(timeZone: "UTC")
-
-        Object getPreference(String key) { preferences[key] }
-        void setPreference(String key, Object value) { preferences[key] = value }
+    /** The shared stub user, its clock fixed at {@link #NOW} so grant dates compare against a known moment. */
+    static class UserStub extends FakeTenantEc.UserStub {
+        UserStub() { nowTimestamp = NOW }
     }
 
-    static class MessageFacadeStub {
-        List<String> errors = []
-        void addError(String msg) { errors << msg }
-        boolean hasError() { !errors.isEmpty() }
-    }
-
-    static class EntityFacadeStub {
-        Map<String, FinderStub> finders = [:]
-
-        FinderStub find(String entityName) {
-            FinderStub f = finders[entityName]
-            if (f == null) { f = new FinderStub(); finders[entityName] = f }
-            // Real Moqui's ec.entity.find(entityName) always hands back a brand-new EntityFind with
-            // an empty condition set — it never remembers conditions from an earlier, unrelated query
-            // against the same entity. Reset here so a second find() on the same entity within one
-            // production method (e.g. TenantScopedFinder.findGlobalUnscoped's point lookup, called
-            // after findTenantScoped already queried and condition()'d this same cached stub) starts
-            // clean instead of silently inheriting a stale condition (like the prior tenant-scoping
-            // companyUserGroupId) that would never match the target row.
-            f.conditions = [:]
-            return f
-        }
-    }
-
-    static class FinderStub {
-        Map<String, Object> conditions = [:]
-        Object oneResult
-        List listResult = []
-        RuntimeException listFailure
-
-        FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        FinderStub conditionDate(String f, String t, Object m) { this }
-        FinderStub useCache(boolean v) { this }
-        FinderStub disableAuthz() { this }
-        FinderStub orderBy(String s) { this }
-
-        Object one() {
-            // Explicit oneResult (a single canned row) wins, matching the original point-lookup
-            // shape used by SharedConfigGrantSupportTests. When no oneResult is configured, fall back
-            // to filtering listResult exactly like list() does and take the first match — this is what
-            // lets a single FinderStub double as BOTH a list()-based query (owned rows) and a
-            // condition-per-PK one() point lookup (shared rows), which listAccessibleConfigRows needs.
-            if (oneResult != null) {
-                if (oneResult instanceof Map && !conditions.every { k, v -> oneResult[k] == v }) return null
-                return oneResult
-            }
-            List matches = list()
-            return matches.isEmpty() ? null : matches[0]
-        }
-
-        List list() {
-            if (listFailure != null) throw listFailure
-            listResult.findAll { row ->
-                if (!(row instanceof Map)) return true
-                conditions.every { k, v -> row[k] == v }
-            }
-        }
-    }
+    static class MessageFacadeStub extends FakeTenantEc.MessageFacadeStub {}
 }

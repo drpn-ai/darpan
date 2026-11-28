@@ -2,6 +2,7 @@ package darpan.facade.common
 
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.support.FakeEntityFacade
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -233,7 +234,7 @@ class SharedConfigPropagationTests {
                 "config explicitly")
     }
 
-    /** Builds an EC for the automation auto-detect path. All config rows share one FinderStub, since
+    /** Builds an EC for the automation auto-detect path. All config rows share one table, since
      *  findSingleActiveConfigId queries the same entity twice: once by companyUserGroupId (owned),
      *  once by explicit PK (shared point lookup). Also seeds a single "OMS" SourceSystemConnector row
      *  so SourceEndpointAccessSupport.isEndpointEnabled has a non-empty catalog to read — with an empty
@@ -245,20 +246,16 @@ class SharedConfigPropagationTests {
                 user: new SharedConfigAccessSupportTests.UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": activeTenant],
                         context: [activeTenantUserGroupId: activeTenant]),
-                entity: new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: grants),
-                        "darpan.hotwax.HotWaxOmsRestSourceConfig": new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: configRows),
-                        "darpan.reconciliation.SourceSystemConnector": new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: [[systemEnumId      : "OMS",
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": grants,
+                        "darpan.hotwax.HotWaxOmsRestSourceConfig": configRows,
+                        "darpan.reconciliation.SourceSystemConnector": [[systemEnumId      : "OMS",
                                               configEntityName  : "darpan.hotwax.HotWaxOmsRestSourceConfig",
-                                              enabled           : "Y"]]),
+                                              enabled           : "Y"]],
                         "moqui.security.UserGroupAndMember":
-                                new SharedConfigAccessSupportTests.FinderStub(listResult:
-                                        activeTenant ? [[userId         : "aditi",
+                                activeTenant ? [[userId         : "aditi",
                                                          userGroupId    : activeTenant,
-                                                         groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                         groupTypeEnumId: "UgtDarpanCompany"]] : [],
                 ]),
                 message: new SharedConfigAccessSupportTests.MessageFacadeStub(),
                 l10n: new Expando(timeZone: "UTC"),
@@ -277,19 +274,16 @@ class SharedConfigPropagationTests {
                 user: new SharedConfigAccessSupportTests.UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": activeTenant],
                         context: [activeTenantUserGroupId: activeTenant]),
-                entity: new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: [[configTypeEnumId: configTypeEnumId, configId: configRow[pkField],
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": [[configTypeEnumId: configTypeEnumId, configId: configRow[pkField],
                                               tenantUserGroupId: "BETSEY_JOHNSON",
                                               fromDate: Timestamp.valueOf("2026-01-01 00:00:00"),
-                                              thruDate: null, grantedByUserId: "aditi"]]),
-                        (entityName): new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: [configRow], oneResult: configRow),
+                                              thruDate: null, grantedByUserId: "aditi"]],
+                        (entityName): [configRow],
                         "moqui.security.UserGroupAndMember":
-                                new SharedConfigAccessSupportTests.FinderStub(listResult:
-                                        activeTenant ? [[userId         : "aditi",
+                                activeTenant ? [[userId         : "aditi",
                                                          userGroupId    : activeTenant,
-                                                         groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                         groupTypeEnumId: "UgtDarpanCompany"]] : [],
                 ]),
                 message: new SharedConfigAccessSupportTests.MessageFacadeStub(),
                 l10n: new Expando(timeZone: "UTC"),
@@ -303,24 +297,21 @@ class SharedConfigPropagationTests {
                 user: new SharedConfigAccessSupportTests.UserStub(userId: "aditi", nowTimestamp: NOW,
                         preferences: ["darpan.auth.activeTenantUserGroupId": activeTenant],
                         context: [activeTenantUserGroupId: activeTenant]),
-                entity: new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
-                        "darpan.auth.ConfigTenantAccess": new SharedConfigAccessSupportTests.FinderStub(
-                                listResult: [[configTypeEnumId: "SCFG_HOTWAX_OMS", configId: "OMS_SM",
+                entity: new FakeEntityFacade(tables: [
+                        "darpan.auth.ConfigTenantAccess": [[configTypeEnumId: "SCFG_HOTWAX_OMS", configId: "OMS_SM",
                                               tenantUserGroupId: "BETSEY_JOHNSON",
                                               fromDate: Timestamp.valueOf("2026-01-01 00:00:00"),
-                                              thruDate: null, grantedByUserId: "aditi"]]),
+                                              thruDate: null, grantedByUserId: "aditi"]],
                         "darpan.hotwax.HotWaxOmsRestSourceConfig":
-                                new SharedConfigAccessSupportTests.FinderStub(
-                                        listResult: [sharedRow], oneResult: sharedRow),
+                                [sharedRow],
                         // REQUIRED — see the Global Constraint on active-tenant stubs. Without this
                         // view row the active tenant is null, canActiveTenantUseConfig returns false
                         // for BOTH tenants, and `aTenantOutsideTheGroupStillCannotResolveTheConfig`
                         // passes while the two tests that prove the feature works fail.
                         "moqui.security.UserGroupAndMember":
-                                new SharedConfigAccessSupportTests.FinderStub(listResult:
-                                        activeTenant ? [[userId         : "aditi",
+                                activeTenant ? [[userId         : "aditi",
                                                          userGroupId    : activeTenant,
-                                                         groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                                                         groupTypeEnumId: "UgtDarpanCompany"]] : [],
                         // Task 8: validateHotWaxOmsConfig now ends in
                         // requireEndpointEnabledForSide -> SourceEndpointAccessSupport.isEndpointEnabled,
                         // which builds its catalog from SourceSystemConnector rows. Without this row the
@@ -329,10 +320,9 @@ class SharedConfigPropagationTests {
                         // validateHotWaxOmsConfigAllowsAMemberTenantToReferenceTheSharedConfig even though
                         // canReadOrders: "Y" above says the config itself is fine. Mirrors ecForAutomation.
                         "darpan.reconciliation.SourceSystemConnector":
-                                new SharedConfigAccessSupportTests.FinderStub(listResult:
-                                        [[systemEnumId    : "OMS",
+                                [[systemEnumId    : "OMS",
                                           configEntityName: "darpan.hotwax.HotWaxOmsRestSourceConfig",
-                                          enabled         : "Y"]]),
+                                          enabled         : "Y"]],
                 ]),
                 message: new SharedConfigAccessSupportTests.MessageFacadeStub(),
                 l10n: new Expando(timeZone: "UTC"),

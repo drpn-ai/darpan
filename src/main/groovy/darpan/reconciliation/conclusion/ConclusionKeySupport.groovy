@@ -62,8 +62,10 @@ class ConclusionKeySupport {
             return raw.toString() // NaN or Infinity: no decimal to write
         }
         // Bounded: past 2^53 (16 digits) Spark writes scientific notation anyway, and plain text of an exponent such as
-        // 1E999999999 would expand to a billion digits. Such a key keeps its own text.
-        if (value.precision() - value.scale() > 16 || value.scale() > 16) return raw.toString()
+        // 1E999999999 would expand to a billion digits. Such a key keeps its own text. In long arithmetic: precision minus a
+        // scale near Integer.MIN_VALUE overflows an int and would pass the check.
+        long integerDigits = (long) value.precision() - (long) value.scale()
+        if (integerDigits > 16L || value.scale() > 16 || value.scale() < -16) return raw.toString()
         return value.toPlainString()
     }
 

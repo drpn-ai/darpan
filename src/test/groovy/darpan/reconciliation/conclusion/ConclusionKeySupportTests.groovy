@@ -54,6 +54,8 @@ class ConclusionKeySupportTests {
         // Security review: an exponent is never expanded into digits; past 16 digits a key keeps its own text.
         assertEquals("1E+999999999", ConclusionKeySupport.compareKey([id: new BigDecimal("1E999999999")], ["id"], null))
         assertEquals("1E-999999999", ConclusionKeySupport.compareKey([id: new BigDecimal("1E-999999999")], ["id"], null))
+        // ... including where precision minus scale overflows an int (scale -2147483647).
+        assertEquals("1E+2147483647", ConclusionKeySupport.compareKey([id: new BigDecimal("1E2147483647")], ["id"], null))
     }
 
     @Test

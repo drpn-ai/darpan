@@ -91,6 +91,37 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.rejection("/rest/s1/graphql/sdl", [:]))
     }
 
+    /**
+     * DAR-OPS-029 OC213 (GAP-11): Moqui's tools REST (/rest/s1/moqui: users/{id}/password/update and reset, PATCH a user
+     * disabled) and the System app's UserAccountDetail set or disable passwords without ending the account's sign-ins, so
+     * they are closed for everyone, as are the Tools and System apps under every app root. Darpan's clients use /rpc/json
+     * and /rest/s1/graphql only.
+     */
+    @Test
+    void closesMoquiToolsRestAndTheSystemAndToolsAppsUnderEveryRoot() {
+        ["/rest/s1/moqui/users/U1/password/update", "/rest/s1/moqui/users/U1/password/reset", "/rest/s1/moqui/users/U1",
+         "/rest/s1/moqui", "/rest/s1.json/moqui/users", "/rest/s1/moqui.json/users", "//rest//s1//moqui",
+         "/apps/system/Security/UserAccount/UserAccountDetail", "/apps/system", "/apps.html/system", "/apps;x/system",
+         "/vapps/system/Security", "/qapps/system/Security", "/apps/tools/Entity/DataEdit", "/vapps/tools", "/qapps/tools"].each { String path ->
+            assertNotNull(RpcMethodFence.rejection(path, [:]), "not fenced: ${path}")
+        }
+        ["/rest/s1/graphql", "/rest/s1/graphql/sdl", "/apps/darpan/Settings", "/rest/s1/moquix", "/apps/systems",
+         "/apps/darpan/system"].each { String path ->
+            assertNull(RpcMethodFence.rejection(path, [:]), "fenced by mistake: ${path}")
+        }
+        // Moqui routes on its cleaned path: an inline ~ segment the container keeps still reaches the System app.
+        assertNotNull(RpcMethodFence.rejection(["apps", "system"], ["apps", "~x", "system"], [:]))
+    }
+
+    /** DAR-OPS-029 OC214 (GAP-12): /notws and /groovysh sign in from the HTTP session with no ended-sign-in check, so both are off. */
+    @Test
+    void theFrameworkWebSocketEndpointsAreOff() {
+        def conf = new groovy.xml.XmlSlurper().parse(new File(System.getProperty("user.dir"), "MoquiConf.xml"))
+        Map<String, String> enabledByPath = conf.'webapp-list'.webapp.findAll { it.@name == "webroot" }.endpoint
+                .collectEntries { [(it.@path.toString()): it.@enabled.toString()] }
+        assertEquals(["/notws": "false", "/groovysh": "false"], enabledByPath)
+    }
+
     /** Security review 2026-10-21: Moqui strips a render-mode extension before matching a screen or transition
      *  name (ScreenUrlInfo: "is there an extension beyond a transition name?"), so a fenced transition must be
      *  matched on the name before the first dot. */

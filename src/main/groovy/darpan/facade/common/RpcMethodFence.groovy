@@ -21,6 +21,12 @@ import org.moqui.util.StringUtilities
  * <p>Also closes the framework's /rest/login transition, which no Darpan client uses and which
  * returns the realm's raw "no account" vs "password incorrect" text.
  *
+ * <p>DAR-OPS-029 OC213 (GAP-11): and Moqui's tools REST (/rest/s1/moqui: users/{id}/password/update and reset, a PATCH
+ * that disables a user) and the Tools and System apps under every app root (apps, vapps, qapps), whose
+ * UserAccountDetail sets or disables a password. They change an account without ending its sign-ins
+ * (AuthSessionSupport's endEverySignIn), and no Darpan client uses them: darpan-ui, the admin app and the CLIs reach
+ * Darpan through /rpc/json (facade.*, admin.*) and /rest/s1/graphql.
+ *
  * <p>The framework's /Login/resetPassword (DAR-BE-028: it reveals whether an account exists and emails a password that
  * never expires) needs no rule here: /Login is its only mount, and darpan.facade.auth.PasswordOnlyRouteFence, which runs
  * first in the same hook, answers 404 for /Login and everything under it (DAR-BE-264).
@@ -49,6 +55,10 @@ class RpcMethodFence {
     static final List<String> ALLOWED_METHOD_PREFIXES = ["facade.", "admin.", "gql."].asImmutable()
 
     static final String CLI_PATH_REFUSAL = "This address is not available to the Darpan CLI."
+    static final String MOQUI_TOOLS_REFUSAL = "This address is not available."
+    /** The app roots Moqui's webroot renders the apps under (DAR-OPS-029 OC213). */
+    static final List<String> APP_ROOTS = ["apps", "vapps", "qapps"].asImmutable()
+    static final List<String> CLOSED_APPS = ["system", "tools"].asImmutable()
     static final String AMBIGUOUS_PATH_REFUSAL = "This address reads differently to the server and to the router, so it is not available."
 
     static void enforce(ExecutionContext ec) {
@@ -155,7 +165,7 @@ class RpcMethodFence {
 
     /** What each fence decision turns on, for one view of the path. */
     private static List<Boolean> fenceVerdicts(List<String> segments) {
-        return [isJsonRpc(segments), hasPair(segments, "rest", "login")]
+        return [isJsonRpc(segments), hasPair(segments, "rest", "login"), isMoquiTools(segments)]
     }
 
     private static boolean isDotSegment(String segment) {
@@ -165,6 +175,7 @@ class RpcMethodFence {
     private static String rejectionOf(List<String> segments, Map params) {
         // A transition takes trailing path segments, so match the pair, not the exact path.
         if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
+        if (isMoquiTools(segments)) return MOQUI_TOOLS_REFUSAL
         if (!isJsonRpc(segments)) return null
 
         for (String method in requestedMethods(params)) {
@@ -192,6 +203,16 @@ class RpcMethodFence {
 
     static boolean isAllowedMethod(String method) {
         return method != null && ALLOWED_METHOD_PREFIXES.any { String prefix -> method.startsWith(prefix) }
+    }
+
+    /**
+     * DAR-OPS-029 OC213: /rest/s1/moqui/** (the tools REST API) or /{apps|vapps|qapps}/{system|tools}/**, matched from the
+     * webroot on each segment's name before its first dot, as the other fenced paths are.
+     */
+    static boolean isMoquiTools(List<String> segments) {
+        List<String> names = (segments ?: []).collect { nameBeforeDot(it) }
+        if (names.size() >= 3 && names[0] == "rest" && names[1] == "s1" && names[2] == "moqui") return true
+        return names.size() >= 2 && names[0] in APP_ROOTS && names[1] in CLOSED_APPS
     }
 
     /** True for any path holding the rpc/json transition, including extra trailing segments. */

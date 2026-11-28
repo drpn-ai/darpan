@@ -68,6 +68,11 @@
             <!-- DAR-BE-261: pinned here so a framework default change cannot lengthen it; matches
                  AuthSessionSupport.IDLE_TIMEOUT_MINUTES. -->
             <session-config timeout="60"/>
+            <!-- DAR-OPS-029 OC214 (GAP-12): the framework's WebSocket endpoints sign in from the HTTP session with no
+                 ended-sign-in (sessionsEndedDate / hasLoggedOut) check, and run no before-request hook. No Darpan client
+                 uses them (notifications go to chat rooms and email), so both are off. Keyed on path (MNode merge). -->
+            <endpoint path="/notws" class="org.moqui.impl.webapp.NotificationEndpoint" enabled="false"/>
+            <endpoint path="/groovysh" class="org.moqui.impl.webapp.GroovyShellEndpoint" enabled="false"/>
             <!-- DAR-UI-141: browsers may send X-Darpan-Tenant (TenantAccessSupport.REQUESTED_TENANT_HEADER, DAR-CLI-003): each
                  web tab names its own tenant. Same type and name as the framework's entry, so this REPLACES its value
                  (MNode.mergeChildrenByKeys): the framework list is restated in full, then the tenant header. A header

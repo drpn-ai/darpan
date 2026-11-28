@@ -403,6 +403,56 @@ class AuditReportAssemblerSmokeTests {
         assertEquals(2, s8.size())
     }
 
+    // DAR-OPS-029 S99-210 (S10 E3). The same stored rows and the same generatedStamp give the same report, twice over.
+    @Test
+    void theSameRowsAndStampGiveTheSameReport() {
+        ["2026-10-07", "2026-10-08", "2026-10-09"].each { String day ->
+            assertEquals(report(GORJANA, day), report(GORJANA, day), "${day}: a second assembly differs from the first")
+        }
+    }
+
+    // DAR-OPS-029 S99-210 (S10 C). A statement lists its first FINDINGS_CAP (50) orders. The 51st is still counted
+    // (findingsOmitted), and a later step's finding waiting on it is still visible as that statement's waiting count:
+    // not listed (its holder isn't), never counted open.
+    @Test
+    void aHolderPastTheListCapStillCountsAndItsWaitingFindingStillShows() {
+        audit(TRUN, "TREP_T_CAP", "cap", "Cap", "AUDP_MONTH")
+        statement(TRUN, "TREP_T_CAP", "TREP_CAP4", "CAP4", "AUDC_ORDERS", "AUDSW_FIRM", 40, "Every open order line is at a facility that can fulfil it.")
+        statement(TRUN, "TREP_T_CAP", "TREP_CAP8", "CAP8", "AUDC_ORDERS", "AUDSW_FIRM", 80, "Every completed line is invoiced.")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_CC4", companyUserGroupId: TRUN, checkCode: "cap-open-lines", label: "open lines"])
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_CC8", companyUserGroupId: TRUN, checkCode: "cap-completed", label: "completed"])
+        link(TRUN, "TREP_CC4", "TREP_CAP4", 1)
+        link(TRUN, "TREP_CC8", "TREP_CAP8", 1)
+        Closure record = { String checkId, List findings ->
+            ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: TRUN, checkId: checkId,
+                    reportDate: Date.valueOf("2026-10-22"), checkStamp: at("2026-10-22", "07:30:00"), findings: findings]).call()
+            noErrors()
+        }
+        // 51 orders at step 4, SO1000..SO1050: same day and id length, so SO1050 sorts last, past the cap.
+        record("TREP_CC4", (1000..1050).collect { int n ->
+            [statementCode: "CAP4", recordKey: "SO${n}/01".toString(), headline: "Line M${n}/01 is open and not at a facility".toString(),
+             records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO${n}".toString(), internalId: "8${n}".toString()],
+                       [systemEnumId: "OMS_RETURNS_GQL", recordType: "order", recordId: "EXC-${n}".toString(), internalId: "M${n}".toString()]]]
+        })
+        // Step 8: M1050's other line, held by the last order.
+        record("TREP_CC8", [[statementCode: "CAP8", recordKey: "M1050/02", headline: "Item M1050/02 is completed and not invoiced",
+                records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: "M1050/02",
+                           recordData: JsonOutput.toJson([omsOrderName: "EXC-1050"])],
+                          [systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO1050", internalId: "81050"]]]])
+
+        Map doc = report(TRUN, "TREP_T_CAP", "2026-10-22")
+        Map statements = (Map) doc.categories.orders.statements
+        Map cap4 = (Map) statements.CAP4, cap8 = (Map) statements.CAP8
+        assertEquals(51, cap4.counts.open, "every broken order counts")
+        assertEquals([50, 1], [(cap4.findings as List).size(), cap4.findingsOmitted], "50 listed, the 51st omitted, not lost")
+        assertFalse((cap4.findings as List<Map>)*.id.contains("SO1050"), "the holder is the order past the cap")
+        assertEquals(0, cap8.counts.open, "the waiting finding counts nowhere")
+        assertEquals([], cap8.findings)
+        assertEquals(1, cap8.waiting, "and is still visible, as step 8's waiting count")
+        assertEquals(51, doc.summary.open)
+        assertEquals(doc, report(TRUN, "TREP_T_CAP", "2026-10-22"), "the cut is the same every time")
+    }
+
     // DAR-OPS-029 S10, OC80 (findings are never hidden): a statement whose categoryEnumId is not an AuditCategory enum (the
     // foreign key takes any Enumeration; only the facade checks the type, so an import can bring one) vanished from the
     // report: categories and summary iterate the AuditCategory enums. It is listed under "uncategorised" instead.

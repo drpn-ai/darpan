@@ -1,9 +1,11 @@
 package darpan.admin.transfer
 
 import darpan.admin.AdminAuditSupport
+import darpan.audit.AuditSchedule
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import groovy.json.JsonException
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileDynamic
@@ -319,7 +321,8 @@ class ConfigTransferExporter {
         Map<String, Object> out = [:]
         if (spec.kind && spec.pkField) out.ref = namer(spec.kind as String, row.get(spec.pkField as String))
         Map<String, Object> fields = [:]
-        valueFields(ec, spec).each { String f ->
+        List<String> auditOwned = auditScheduleFieldsOf(ec, spec, row)
+        valueFields(ec, spec).findAll { !(it in auditOwned) }.each { String f ->
             Object value = row.get(f)
             if (f in JSON_REF_FIELDS) {
                 fields[f] = rewriteLookups(value) { Map item -> namer(lookupKind(ec, item.systemEnumId) ?: "UNKNOWN", item.sourceConfigId) }
@@ -359,6 +362,17 @@ class ConfigTransferExporter {
             out.children = children
         }
         return out
+    }
+
+    /**
+     * OC81. The spec's auditScheduleFields when an audit's checks run through this row (it runs on that audit's schedule,
+     * DAR-BE-199), else none. Both sides of a diff ask, so a target automation that follows its audit reads UNCHANGED.
+     */
+    static List<String> auditScheduleFieldsOf(def ec, Map spec, def row) {
+        List<String> fields = (spec.auditScheduleFields ?: []) as List<String>
+        if (!fields) return []
+        Map audit = AuditSchedule.auditOfAutomation(ec, text(row.get("companyUserGroupId")), text(row.get(spec.pkField as String)))
+        return audit ? fields : []
     }
 
     /**
@@ -403,57 +417,58 @@ class ConfigTransferExporter {
                 }
     }
 
-    /** The kind of a compare source's sourceConfigId: its type when that is a kind, else its connector's config entity. */
     /** The kind a polymorphic ref column names: an automation's saved run is a lifecycle or a run; a compare source's, its connector's. */
-    static String polymorphicKind(def ec, Map spec, def row) {
+    private static String polymorphicKind(def ec, Map spec, def row) {
         if (spec.kind == AUTOMATION) return text(row.get("savedRunType")) == "reconciliation" ? LIFECYCLE : RUN
         return sourceKind(ec, row)
     }
 
-    static String sourceKind(def ec, def source) {
+    private static String sourceKind(def ec, def source) {
         String type = text(source.get("sourceConfigType"))
         if (type in [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_SUITEQL]) return type
         return lookupKind(ec, source.get("systemEnumId")) ?: (type ?: "UNKNOWN")
     }
 
-    static String lookupKind(def ec, Object systemEnumId) {
+    private static String lookupKind(def ec, Object systemEnumId) {
         String entityName = text(systemEnumId) ? SourceSystemConnectorSupport.resolve(ec, text(systemEnumId))?.configEntityName : null
         return entityName ? specForEntity(entityName as String)?.kind : null
     }
 
-    /** A JSON list of lookups with each sourceConfigId mapped; text that is no such list is kept as it is. */
-    static String rewriteLookups(Object raw, Closure<String> mapId) {
+    /** The JSON a text column holds; null when it is blank or no JSON at all (the caller then keeps the text as it is). */
+    static Object parseJson(Object raw) {
         String json = text(raw)
-        if (!json?.trim()) return json
-        Object parsed
+        if (!json?.trim()) return null
         try {
-            parsed = new JsonSlurper().parseText(json)
-        } catch (Exception ignored) {
-            return json
+            return new JsonSlurper().parseText(json)
+        } catch (JsonException ignored) {
+            return null
         }
-        if (!(parsed instanceof List)) return json
+    }
+
+    /** A JSON list whose map items have key passed through mapItem(item); text that is no such list is kept as it is. */
+    private static String rewriteListItems(Object raw, String key, Closure<Object> mapItem) {
+        Object parsed = parseJson(raw)
+        if (!(parsed instanceof List)) return text(raw)
         return JsonOutput.toJson(((List) parsed).collect { Object item ->
-            if (!(item instanceof Map) || !text(((Map) item).sourceConfigId)) return item
+            if (!(item instanceof Map) || !text(((Map) item).get(key))) return item
             Map copy = new LinkedHashMap((Map) item)
-            copy.sourceConfigId = mapId(copy)
+            copy.put(key, mapItem(copy))
             return copy
         })
+    }
+
+    /** A JSON list of lookups with each sourceConfigId mapped (mapId gets the lookup); other text is kept. */
+    static String rewriteLookups(Object raw, Closure<String> mapId) {
+        return rewriteListItems(raw, "sourceConfigId", mapId)
     }
 
     /**
      * DAR-BE-160. A JSON map whose "parameters" map passes each value through mapValue(key, value); text that is no such
      * map is kept as it is.
      */
-    static String rewriteParams(Object raw, Closure<Object> mapValue) {
-        String json = text(raw)
-        if (!json?.trim()) return json
-        Object parsed
-        try {
-            parsed = new JsonSlurper().parseText(json)
-        } catch (Exception ignored) {
-            return json
-        }
-        if (!(parsed instanceof Map) || !(((Map) parsed).parameters instanceof Map)) return json
+    private static String rewriteParams(Object raw, Closure<Object> mapValue) {
+        Object parsed = parseJson(raw)
+        if (!(parsed instanceof Map) || !(((Map) parsed).parameters instanceof Map)) return text(raw)
         Map copy = new LinkedHashMap((Map) parsed)
         copy.parameters = ((Map) copy.parameters).collectEntries { k, v -> [(k): mapValue(k as String, v)] }
         return JsonOutput.toJson(copy)
@@ -461,37 +476,16 @@ class ConfigTransferExporter {
 
     /** DAR-BE-160. A JSON list whose items name a conclusion code by conclusionEnumId, each mapped; other text is kept. */
     static String rewriteConclusionRules(Object raw, Closure<Object> mapId) {
-        String json = text(raw)
-        if (!json?.trim()) return json
-        Object parsed
-        try {
-            parsed = new JsonSlurper().parseText(json)
-        } catch (Exception ignored) {
-            return json
-        }
-        if (!(parsed instanceof List)) return json
-        return JsonOutput.toJson(((List) parsed).collect { Object item ->
-            if (!(item instanceof Map) || !text(((Map) item).conclusionEnumId)) return item
-            Map copy = new LinkedHashMap((Map) item)
-            copy.conclusionEnumId = mapId(copy.conclusionEnumId)
-            return copy
-        })
+        return rewriteListItems(raw, "conclusionEnumId") { Map item -> mapId(item.conclusionEnumId) }
     }
 
     /**
      * DAR-BE-334. A JSON document with each value under one of keyKinds' keys (at any depth) passed through
      * mapValue(kind, value); text that is not JSON is kept as it is.
      */
-    static String rewriteKeyed(Object raw, Map<String, String> keyKinds, Closure<Object> mapValue) {
-        String json = text(raw)
-        if (!json?.trim()) return json
-        Object parsed
-        try {
-            parsed = new JsonSlurper().parseText(json)
-        } catch (Exception ignored) {
-            return json
-        }
-        if (!(parsed instanceof Map) && !(parsed instanceof List)) return json
+    private static String rewriteKeyed(Object raw, Map<String, String> keyKinds, Closure<Object> mapValue) {
+        Object parsed = parseJson(raw)
+        if (!(parsed instanceof Map) && !(parsed instanceof List)) return text(raw)
         Closure walk
         walk = { Object node ->
             if (node instanceof Map) {
@@ -515,7 +509,7 @@ class ConfigTransferExporter {
     }
 
     /** Every value under key, at any depth, of a JSON document (none when it is not JSON). */
-    static List<String> keyedValues(Object raw, String key) {
+    private static List<String> keyedValues(Object raw, String key) {
         List<String> out = []
         rewriteKeyed(raw, [(key): "_"]) { String kind, Object v -> out << (v as String); v }
         return out
@@ -529,11 +523,11 @@ class ConfigTransferExporter {
         }
     }
 
-    static List<String> splitList(Object raw) {
+    private static List<String> splitList(Object raw) {
         return (text(raw) ?: "").split(",").collect { it.trim() }.findAll { it } as List<String>
     }
 
-    static boolean isConclusionEnum(def ec, String enumId) {
+    private static boolean isConclusionEnum(def ec, String enumId) {
         def e = enumId ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", enumId).useCache(true).one() : null
         return e != null && e.enumTypeId == CONCLUSION_ENUM_TYPE
     }

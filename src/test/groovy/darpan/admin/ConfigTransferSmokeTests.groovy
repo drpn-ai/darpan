@@ -739,6 +739,22 @@ class ConfigTransferSmokeTests {
         assertTrue(refused.any { (it.message as String).contains("XYZ") })
     }
 
+    /** OC82 (S29, from S13): an enum column names an enum of its own type, as add#AuditStatement requires. */
+    @Test
+    void anEnumOfAnotherTypeBlocks() {
+        Map bundle = copy(exportSource())
+        (bundle.audits as List<Map>)[0].fields.periodEnumId = "AUDP_KNOWN"
+        Map statement = (bundle.statements as List<Map>).find { it.ref == "STATEMENT:XFER_AUDIT_R4" }
+        statement.fields.categoryEnumId = "AUDP_MONTH"
+        ((statement.children.AuditReasonPriority as List<Map>)[0].fields as Map).priorityEnumId = "AUDC_RETURNS"
+        List<Map> refused = (importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan.blocking as List<Map>)
+                .findAll { it.code == "MISSING_REFERENCE_DATA" }
+        assertEquals(["AUDIT:XFER_AUDIT", "STATEMENT:XFER_AUDIT_R4", "STATEMENT:XFER_AUDIT_R4"], refused*.ref.sort(), "${refused}")
+        ["AuditPeriod", "AuditCategory", "AuditPriority"].each { String type ->
+            assertTrue(refused.any { (it.message as String).contains(type) }, "${type} named: ${refused*.message}")
+        }
+    }
+
     @Test
     void aReasonPriorityTravelsWithItsStatement() {
         Map bundle = exportSource()
@@ -1480,6 +1496,68 @@ class ConfigTransferSmokeTests {
                     assertEquals(["savedRunId"], (check.refs as Map).keySet() as List, "a version's checks are what they were")
                     assertFalse((check.fields as Map).containsKey("automationId"))
                 }
+            } finally {
+                linkChecks(null)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- OC81 (S29, from S11): audit automations follow the audit schedule
+
+    @Test
+    void anAuditRunAutomationTakesTheTargetAuditsScheduleWhenItIsOn() {
+        withAutomation {
+            linkChecks("XFER_AUTO")
+            create("darpan.audit.Audit", [auditId: "XFER_DST_AUDIT", companyUserGroupId: DST, auditCode: "month-close",
+                    auditName: "Month close", periodEnumId: "AUDP_MONTH", scheduleTime: "02:15", scheduleTimeZone: "Europe/London",
+                    scheduleActive: "Y"])
+            try {
+                Map bundle = exportWhole()
+                Map carried = (bundle.automations as List<Map>).find { it.ref == AUTO_REF }
+                ["scheduleExpr", "windowTimeZone"].each {
+                    assertFalse((carried.fields as Map).containsKey(it), "an audit-run automation's ${it} is its audit's, never carried")
+                }
+                Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
+                assertEquals("0 0 6 * * ?", (pack.automations as List<Map>).find { it.ref == AUTO_REF }.fields.scheduleExpr,
+                        "a version keeps it, so its pack is what it was")
+
+                Map applied = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+                assertNoErrors(applied)
+                def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", applied.result.idMap[AUTO_REF])
+                        .disableAuthz().useCache(false).one()
+                assertEquals(["Y", "0 15 2 * * ?", "Europe/London"], [automation.isActive, automation.scheduleExpr, automation.windowTimeZone],
+                        "the target audit is on at 02:15 London, so its automation is")
+                assertNotNull(automation.nextScheduledFireTime)
+
+                Map plan = importInto(DST, exportWhole(), [(AUTH_REF): applied.result.idMap[AUTH_REF]]).result.plan as Map
+                assertEquals([], plan.blocking)
+                (plan.lines as List<Map>).each {
+                    assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+                }
+            } finally {
+                linkChecks(null)
+            }
+        }
+    }
+
+    @Test
+    void aRunningAutomationAnImportLinksIsPausedWhenTheTargetAuditsScheduleIsOff() {
+        withAutomation {
+            linkChecks("XFER_AUTO")
+            create("darpan.audit.Audit", [auditId: "XFER_DST_AUDIT", companyUserGroupId: DST, auditCode: "month-close",
+                    auditName: "Month close", periodEnumId: "AUDP_MONTH", scheduleTime: "01:30", scheduleTimeZone: "America/Los_Angeles",
+                    scheduleActive: "N"])
+            create("darpan.reconciliation.ReconciliationAutomation", [automationId: "XFER_DST_AUTO", automationName: "Returns every morning",
+                    companyUserGroupId: DST, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "XFER_DST_ANY", savedRunType: "ruleset",
+                    scheduleExpr: "0 0 5 * * ?", windowTimeZone: "UTC", isActive: "Y"])
+            try {
+                Map applied = applyPlan(DST, exportWhole(), [(AUTH_REF): "CREATE"])
+                assertNoErrors(applied)
+                assertEquals("XFER_DST_AUTO", applied.result.idMap[AUTO_REF], "matched by name")
+                def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "XFER_DST_AUTO")
+                        .disableAuthz().useCache(false).one()
+                assertEquals(["N", "0 30 1 * * ?", "America/Los_Angeles"], [automation.isActive, automation.scheduleExpr, automation.windowTimeZone],
+                        "the audit's schedule is off, so no check of it runs")
             } finally {
                 linkChecks(null)
             }

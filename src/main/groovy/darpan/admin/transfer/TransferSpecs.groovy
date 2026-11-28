@@ -192,10 +192,13 @@ class TransferSpecs {
             // its run, compare scope and chat space travel as refs; the legacy question and mapping ids stay behind (a
             // mapping's automation is never carried). A version keeps all of these as the plain ids they are
             // (versionPlainFields): it restores into its own tenant, and its pack, so its hash, is what it was before.
+            // OC81 (DAR-OPS-029 S29): an automation an audit's checks run through runs on that audit's schedule (DAR-BE-199),
+            // so in a transfer its time and zone are the TARGET audit's (auditScheduleFields, dropped per row); a version keeps them.
             [kind: AUTOMATION, entityName: "darpan.reconciliation.ReconciliationAutomation", pkField: "automationId",
              naturalKey: "automationName", polymorphicRef: "savedRunId",
              refFields: [ruleSetId: RUN, chatSpaceId: CHAT_SPACE], positionRefs: [compareScopeId: SCOPE],
              dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime", "reconciliationRunId", "reconciliationMappingId"],
+             auditScheduleFields: ["scheduleExpr", "windowTimeZone"],
              versionPlainFields: ["ruleSetId", "chatSpaceId", "compareScopeId", "reconciliationRunId", "reconciliationMappingId"], children: [
                     [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
                      orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
@@ -247,6 +250,7 @@ class TransferSpecs {
         // DAR-BE-334: a JSON column whose ids stay plain in a version (JSON_KEYED_REF_FIELDS are refs only in a transfer)
         out.plainJsonFields = plain.findAll { JSON_KEYED_REF_FIELDS.containsKey(it) }
         out.remove("versionPlainFields")
+        out.remove("auditScheduleFields")   // OC81: a version restores its own tenant's automations as they were
         return out.asImmutable()
     }
 
@@ -314,6 +318,18 @@ class TransferSpecs {
     static final Map<String, Map<String, List<String>>> UNDECLARED_REFERENCES = [
             "darpan.audit.AuditCheck": [amountCurrencyUomId: ["moqui.basic.Uom", "uomId"]]].asImmutable()
 
+    /**
+     * OC82 (DAR-OPS-029 S29, from S13). Value columns naming an Enumeration of one type: entity -> field -> enumTypeId. An
+     * id of another type blocks as missing reference data, as add#AuditStatement refuses a category that is no AuditCategory.
+     */
+    static final Map<String, Map<String, String>> ENUM_TYPES = [
+            "darpan.audit.Audit"                   : [periodEnumId: "AuditPeriod"],
+            "darpan.audit.AuditStatement"          : [categoryEnumId: "AuditCategory", weightEnumId: "AuditStatementWeight",
+                                                      priorityEnumId: "AuditPriority"],
+            "darpan.audit.AuditReasonPriority"     : [priorityEnumId: "AuditPriority"],
+            "darpan.audit.AuditCheck"              : [fixWhereEnumId: "DarpanSystemSource"],
+            "darpan.reconciliation.TenantChatSpace": [chatProviderEnumId: "DarpanChatProvider"]].asImmutable() as Map<String, Map<String, String>>
+
     /** Reference data a source points at that the target must already have; an instance-local remote is gated apart. */
     static final Set<String> REFERENCE_SKIP_ENTITIES = (["moqui.service.message.SystemMessageRemote"] as Set<String>).asImmutable()
 
@@ -359,7 +375,7 @@ class TransferSpecs {
      * An encrypted column, or one a kind names in extraSecretFields: headersJson is plain text but may carry an auth
      * header (OmsRestSourceSupport only ever shows safeHeaderNames), so it is never read, sent, diffed or written.
      */
-    static boolean isSecret(def ed, String fieldName) {
+    private static boolean isSecret(def ed, String fieldName) {
         if (ed.getFieldInfo(fieldName).encrypt) return true
         return fieldName in ((specForEntity(ed.getFullEntityName() as String)?.extraSecretFields ?: []) as List<String>)
     }

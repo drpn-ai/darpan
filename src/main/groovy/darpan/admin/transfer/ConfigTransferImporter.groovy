@@ -1,6 +1,7 @@
 package darpan.admin.transfer
 
 import darpan.admin.AdminAuditSupport
+import darpan.audit.AuditSchedule
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -147,6 +148,7 @@ class ConfigTransferImporter {
         records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
         // DAR-BE-188: a check's automation is written after the check, so the check is linked to it now.
         records(ctx, "checks").each { Map c -> linkHeldRefs(ctx, spec(CHECK), c) }
+        followAuditSchedules(ctx)
         records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
         // DAR-BE-236: after the chat spaces and runs its deployments name.
         records(ctx, "scripts").each { Map t -> writeScript(ctx, t) }
@@ -390,12 +392,11 @@ class ConfigTransferImporter {
         if (bundleRun != null && ((((Map) bundleRun.children)?.RuleSetCompareScope ?: []) as List).size() == 1) {
             runRef = bundleRunRef
             index = 0
-        } else if (scopeRef?.startsWith("${SCOPE}:")) {
-            String body = scopeRef.substring(SCOPE.length() + 1)
-            int hash = body.lastIndexOf('#')
-            if (hash > 0 && body.substring(hash + 1).isInteger()) {
-                runRef = ref(RUN, body.substring(0, hash))
-                index = body.substring(hash + 1) as Integer
+        } else if (parseRef(scopeRef)?.get(0) == SCOPE) {
+            List scope = parseScopeId(parseRef(scopeRef)[1])
+            if (scope) {
+                runRef = ref(RUN, scope[0] as String)
+                index = scope[1] as Integer
             }
         } else {
             // a config version names its scope by id, in its own tenant: find the scope's run and its place in the run's order
@@ -495,9 +496,15 @@ class ConfigTransferImporter {
         }
         referenceColumns(ec, spec).each { List<String> column ->
             String value = text(rec.fields?.get(column[0]))
-            if (value && !referenceExists(ctx, column[1], column[2], value)) {
+            if (!value) return
+            String enumType = ENUM_TYPES[entityName]?.get(column[0])
+            if (!referenceExists(ctx, column[1], column[2], value)) {
                 block(ctx, "MISSING_REFERENCE_DATA", ownerRef, "${shortName(entityName)}.${column[0]} is ${value}, which this " +
                         "instance has no ${shortName(column[1])} for. Load it here first.")
+            } else if (enumType && ec.entity.find("moqui.basic.Enumeration").condition("enumId", value).useCache(true).one()?.enumTypeId != enumType) {
+                // OC82: an enum of another type is no reference at all (add#AuditStatement refuses it the same way).
+                block(ctx, "MISSING_REFERENCE_DATA", ownerRef, "${shortName(entityName)}.${column[0]} is ${value}, which is no " +
+                        "${enumType} on this instance. Fix it at the source.")
             }
         }
         JSON_REF_FIELDS.findAll { text(rec.fields?.get(it))?.trim() }.each { String field ->
@@ -874,6 +881,12 @@ class ConfigTransferImporter {
         if (heldRefsOf(rec).size() != held.size()) {
             sourceRec = new LinkedHashMap(rec)
             sourceRec.refs = ((rec.refs ?: [:]) as Map).findAll { k, v -> !(k in heldSpec.keySet()) || k in held.keySet() }
+        }
+        // OC81: a target automation that follows its audit takes that audit's time and zone, whatever a bundle carries.
+        List<String> auditOwned = ConfigTransferExporter.auditScheduleFieldsOf(ec, spec, row)
+        if (auditOwned && ((sourceRec.fields ?: [:]) as Map).keySet().any { it in auditOwned }) {
+            sourceRec = new LinkedHashMap(sourceRec)
+            sourceRec.fields = ((rec.fields ?: [:]) as Map).findAll { k, v -> !(k in auditOwned) }
         }
         Map source = canonical(ec, spec, sourceRec, sourceIdOf(ctx))
         Map existing = canonical(ec, spec, target, targetIdOf(ctx))
@@ -1402,6 +1415,36 @@ class ConfigTransferImporter {
         }
     }
 
+    /**
+     * OC81 (DAR-OPS-029 S29, from S11). An automation an audit's checks run through runs on that audit's schedule (DAR-BE-199:
+     * "audits run everything on the audit schedule"), so each automation this transfer wrote or matched takes the TARGET
+     * audit's time, zone and on/off, never the source audit's: a check never runs while its audit's schedule is off. Written
+     * only where an automation is off that schedule, so an unchanged re-apply writes nothing. A version restore puts its own
+     * tenant's rows back as they were and is left alone.
+     */
+    private static void followAuditSchedules(Map ctx) {
+        if (ctx.sameTenant) return
+        def ec = ctx.ec
+        String tenantId = ctx.tenantId as String
+        Map<String, List<String>> automationsByAudit = [:]
+        records(ctx, "automations").each { Map a ->
+            String id = ctx.idMap[a.ref] as String
+            Map audit = id ? AuditSchedule.auditOfAutomation(ec, tenantId, id) : null
+            if (audit) automationsByAudit.computeIfAbsent(audit.auditCode as String) { [] } << id
+        }
+        automationsByAudit.each { String auditCode, List<String> automationIds ->
+            def row = scoped(ctx, "darpan.audit.Audit").condition("auditCode", auditCode).list().find()
+            if (row == null) return
+            Map audit = new LinkedHashMap(row.getMap())
+            // An audit never scheduled here runs in ITS tenant's zone, never the importing admin's active tenant's.
+            if (!text(audit.scheduleTimeZone)) audit.scheduleTimeZone = TenantAccessSupport.tenantTimeZoneFor(ec, tenantId).id
+            Map schedule = AuditSchedule.scheduleOf(ec, audit)
+            boolean off = scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationId", "in", automationIds).list()
+                    .any { AuditSchedule.offSchedule(it.getMap(), schedule) }
+            if (off) AuditSchedule.applySchedule(ec, tenantId, audit, ctx.now as Timestamp)
+        }
+    }
+
     /** DAR-BE-188. The held refs a record carries: column -> ref. */
     private static Map<String, String> heldRefsOf(Map rec) {
         Map kindSpec = TransferSpecs.spec(parseRef(rec.ref)?.get(0))
@@ -1500,12 +1543,7 @@ class ConfigTransferImporter {
 
     /** A lookups column as its list of lookups, each sourceConfigId a ref; null when it is anything else. */
     private static List<Map> lookupsOf(Object raw) {
-        Object parsed
-        try {
-            parsed = new groovy.json.JsonSlurper().parseText(text(raw))
-        } catch (Exception ignored) {
-            return null
-        }
+        Object parsed = ConfigTransferExporter.parseJson(raw)
         if (!(parsed instanceof List) || ((List) parsed).any { !(it instanceof Map) }) return null
         List<Map> items = (List<Map>) parsed
         return items.every { !text(it.sourceConfigId) || parseRef(it.sourceConfigId) != null } ? items : null

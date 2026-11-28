@@ -167,6 +167,87 @@ class AgentQuerySupport {
         return runCore(meta, tenantId, work) { Map row -> writeLog(ec, tenantId, userId, row) }
     }
 
+    // ---- a GraphQL system's fresh query and schema read (DAR-OPS-029 S99-073: HotWax OMS and Shopify each kept a copy) ----
+
+    static final String SCHEMA_CACHE_NAME = "darpan.agent.schema"
+    static final long SCHEMA_TTL_MILLIS = 24L * 60 * 60 * 1000
+    static final String TOO_LARGE = "The answer is larger than 5 MB; ask for fewer fields or a smaller 'first'."
+
+    /**
+     * One fresh GraphQL query through a stored connection. {@code gate} is the system's own: {@code (meta) ->} [send:
+     * {@code (document, variables) -> data}, stamp], [refused: the logged REFUSED answer], or null with an error on ec; it
+     * sets meta.secrets before anything that can fail. The document check comes after it, so a refusal is logged with the
+     * secrets already set. {@code send} makes one call (no retry: the 60 s wall clock bounds it); the answer is capped here.
+     * The caller holds its run-access gate first. Returns {@link #run}'s answer with data/schema and rowCount, or null.
+     */
+    static Map graphqlQuery(def ec, Map meta, String document, Map variables, Closure<Map> gate) {
+        Map g = gate.call(meta)
+        if (g == null) return null
+        if (g.refused) return (Map) g.refused
+        String problem = checkGraphqlQuery(document)
+        if (problem) return refuse(ec, meta, problem)
+        final Closure send = (Closure) g.send
+        Map answer = run(ec, meta, {
+            return [rows: [capAnswer((Map) send.call(document, variables))], hasMore: false, offset: 0] as Map
+        } as Closure<Map>)
+        return unwrapGraphql(answer)
+    }
+
+    /**
+     * The system's GraphQL schema, trimmed (GraphqlSchemaTrim), from a 24 h cache, else one introspection. The gate runs
+     * first, so a cache hit is never served to a caller who failed it; the key carries the config's last-updated stamp
+     * (an edited connection does not serve the old schema) and the cache keeps its own copy (a caller changing what it was
+     * given cannot change what the next one reads). Introspection is allowed only here.
+     */
+    static Map graphqlSchema(def ec, Map meta, String cachePrefix, Closure<Map> gate) {
+        Map g = gate.call(meta)
+        if (g == null) return null
+        if (g.refused) return (Map) g.refused
+        def cache = ec.cache.getCache(SCHEMA_CACHE_NAME)
+        String key = "${cachePrefix}:${meta.connectionId}:${g.stamp ?: ''}".toString()
+        Map cached = (Map) cache.get(key)
+        if (cached != null && System.currentTimeMillis() - (cached.at as long) < SCHEMA_TTL_MILLIS) {
+            return unwrapGraphql([rows: [copyOf((Map) cached.schema)], rowCount: 1, hasMore: false, truncated: false, durationMs: 0L])
+        }
+        List errors = (List) GraphQlDocumentCheck.check(GraphqlSchemaTrim.INTROSPECTION_QUERY, true).errors
+        if (errors) return refuse(ec, meta, errors.join(" "))
+        final Closure send = (Closure) g.send
+        Map answer = run(ec, meta, {
+            return [rows: [GraphqlSchemaTrim.trimWithinCap((Map) send.call(GraphqlSchemaTrim.INTROSPECTION_QUERY, null))], hasMore: false, offset: 0] as Map
+        } as Closure<Map>)
+        Map out = unwrapGraphql(answer)
+        if (out.rows) cache.put(key, [at: System.currentTimeMillis(), schema: copyOf((Map) ((List) out.rows)[0])])
+        return out
+    }
+
+    /** A single 5 MB cap on one GraphQL answer: a JSON document cannot be cut partway, so an over-size one is refused with advice. */
+    static Map capAnswer(Map data) {
+        Map answer = data ?: [:]
+        if (JsonOutput.toJson(answer).getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES - 64) throw new AgentQueryRefused(TOO_LARGE)
+        return answer
+    }
+
+    /** rows:[payload] becomes data and schema; rowCount is the edge count of the one top-level connection, else null. */
+    static Map unwrapGraphql(Map answer) {
+        if (answer.error) return answer
+        if (!(answer.rows instanceof List) || ((List) answer.rows).isEmpty()) return [error: "The system returned no usable answer.", code: "ERROR"]
+        Map payload = ((List) answer.rows)[0] as Map
+        Map out = new LinkedHashMap(answer)
+        out.schema = payload
+        out.data = payload
+        out.rowCount = edgeCount(payload)
+        return out
+    }
+
+    static Integer edgeCount(Map data) {
+        if (data == null || data.size() != 1) return null
+        Object only = data.values().first()
+        if (only instanceof Map && ((Map) only).edges instanceof List) return ((List) ((Map) only).edges).size()
+        return null
+    }
+
+    private static Map copyOf(Map m) { (Map) new groovy.json.JsonSlurper().parseText(JsonOutput.toJson(m)) }
+
     /**
      * Final review R25: fresh queries and schema reads run only on a connection the ACTIVE tenant owns. A connection
      * another tenant granted (ConfigTenantAccess) keeps working for saved runs, never for an agent's own queries, so

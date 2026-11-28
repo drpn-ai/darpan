@@ -274,4 +274,21 @@ class AgentQuerySupportTests {
         AgentQuerySupport.runCore([queryText: "q"], "T1", { throw new IllegalStateException("x") }, { })
         assertTrue(eventually { AgentQueryLane.inFlight("T1") == 0 })
     }
+
+    /** S99-073: the GraphQL answer shaping HotWax OMS and Shopify shared: one connection's edge count, unwrap, and the 5 MB cap. */
+    @Test
+    void aGraphqlAnswerIsUnwrappedCountedAndCapped() {
+        assertEquals(2, AgentQuerySupport.edgeCount([orders: [edges: [[node: [:]], [node: [:]]]]]))
+        assertNull(AgentQuerySupport.edgeCount([a: 1, b: 2]), "two top-level fields: no one connection to count")
+        assertNull(AgentQuerySupport.edgeCount([shop: [name: "x"]]), "not a connection")
+        Map out = AgentQuerySupport.unwrapGraphql([rows: [[orders: [edges: [[node: [:]]]]]], hasMore: false])
+        assertEquals(out.data, out.schema)
+        assertEquals(1, out.rowCount)
+        assertEquals("ERROR", AgentQuerySupport.unwrapGraphql([rows: []]).code)
+        Map refused = [error: "no", code: "REFUSED"]
+        assertTrue(AgentQuerySupport.unwrapGraphql(refused).is(refused), "an error answer passes through")
+        assertEquals([:], AgentQuerySupport.capAnswer(null))
+        def e = assertThrows(AgentQuerySupport.AgentQueryRefused) { AgentQuerySupport.capAnswer([big: "x" * (int) AgentQuerySupport.MAX_BODY_BYTES]) }
+        assertEquals(AgentQuerySupport.TOO_LARGE, e.message)
+    }
 }

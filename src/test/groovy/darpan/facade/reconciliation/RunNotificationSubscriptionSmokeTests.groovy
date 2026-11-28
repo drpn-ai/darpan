@@ -447,6 +447,60 @@ class RunNotificationSubscriptionSmokeTests {
     }
 
     /**
+     * OC49: a run is told once. Two claimers of the same run-result row, each in its own transaction, can win only once
+     * between them. The claim used updateAll, which read the row without a lock and updated it by primary key, so the
+     * second claimer read notifiedDate as still empty past the first one's uncommitted stamp, waited on the row, then
+     * stamped it again, and both delivered.
+     */
+    @Test
+    void twoClaimersOfOneRunDeliverOnlyOnce() {
+        String runId = seedRun("AUT_STAT_SUCCESS")
+        java.util.concurrent.CountDownLatch firstClaimed = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch releaseFirst = new java.util.concurrent.CountDownLatch(1)
+        List<Boolean> wins = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Closure claimer = { boolean holdOpen ->
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                boolean began = tec.transaction.begin(60)
+                try {
+                    wins << (TenantNotificationSupport.claimNotification(tec, runId) as boolean)
+                    if (holdOpen) {
+                        firstClaimed.countDown()
+                        // Held open so the second claimer meets this claim uncommitted, as two runs finishing together do.
+                        releaseFirst.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                } finally {
+                    tec.transaction.commit(began)
+                }
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        Thread first = Thread.start { claimer.call(true) }
+        assertTrue(firstClaimed.await(30, java.util.concurrent.TimeUnit.SECONDS), "the first claim must land")
+        Thread second = Thread.start { claimer.call(false) }
+        // Give the second claimer time to reach the row while the first is still uncommitted; the outcome must not depend on it.
+        second.join(500L)
+        releaseFirst.countDown()
+        first.join(30_000L)
+        second.join(30_000L)
+
+        assertTrue(failures.isEmpty(), "no claim may throw: ${failures*.toString()}")
+        assertEquals(2, wins.size(), "both claimers answered: ${wins}")
+        assertEquals(1, wins.count { it }, "exactly one claimer wins the run's notification: ${wins}")
+        assertNotNull(findRun(runId).notifiedDate, "the winner stamped the run")
+    }
+
+    private def findRun(String runId) {
+        return ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunResultId", runId)
+                .disableAuthz().useCache(false).one()
+    }
+
+    /**
      * OC48: a run's warnings are counted in its client message and never quoted there; their words go to Darpan's alerts
      * room, once per run (the notification claim), so a warning still reaches someone who can act on it. A run with no
      * warnings sends the alerts room nothing.

@@ -1194,6 +1194,9 @@ class SftpAutomationSupportTests {
 
         FakeFind useCache(boolean ignored) { return this }
 
+        // DAR-OPS-029 S09a OC49: the notification claim reads its run-result row FOR UPDATE; one fake thread needs no lock.
+        FakeFind forUpdate(boolean ignored) { return this }
+
         FakeValue one() {
             return list().find()
         }

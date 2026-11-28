@@ -4,6 +4,7 @@ import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.junit.jupiter.api.Test
 import org.moqui.context.ExecutionContext
+import org.moqui.context.TransactionFacade
 import org.moqui.entity.EntityFacade
 import org.moqui.entity.EntityFind
 import org.moqui.entity.EntityList
@@ -318,6 +319,8 @@ class StuckRunReaperNotifyTests {
                     return selfHolder[0]
                 },
                 useCache   : { Object ignored -> selfHolder[0] },
+                // DAR-OPS-029 S09a OC49: the notification claim reads its run-result row FOR UPDATE; one fake thread needs no lock.
+                forUpdate  : { Object ignored -> selfHolder[0] },
                 disableAuthz: { -> selfHolder[0] },
                 one        : { ->
                     Map<String, Object> match = matchRows(store, entityName, eqConditions, opConditions)?.find()
@@ -369,6 +372,8 @@ class StuckRunReaperNotifyTests {
                 getEntity : { -> newEntityFacade(store) },
                 getUser   : { -> newUserFacade(store) },
                 getService: { -> newServiceFacade(store) },
+                // DAR-OPS-029 S09a OC49: the claim runs in the caller's transaction, else its own; the fake runs it inline.
+                getTransaction: { -> ([runUseOrBegin: { Integer timeout, String message, Closure work -> work.call() }] as TransactionFacade) },
         ]
         return handlers as ExecutionContext
     }

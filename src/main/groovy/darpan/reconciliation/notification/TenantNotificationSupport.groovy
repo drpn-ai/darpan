@@ -578,15 +578,27 @@ class TenantNotificationSupport {
         }
     }
 
+    /**
+     * Claims the run's one notification: true for exactly one caller. The row is read FOR UPDATE inside a transaction (the
+     * caller's, else its own), so a second claimer waits on the first's lock and then reads notifiedDate as set (OC49).
+     * Moqui's updateAll read the row without a lock and updated it by primary key, so two claimers finishing together both
+     * read it empty and both won. A claim that fails reports false and is logged.
+     */
     private static boolean claimNotification(def ec, String resultId) {
         try {
-            long updated = TenantScopedFinder.findGlobalUnscoped(ec,
-                            DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
-                            "atomic notify claim — conditional update keyed by run-result id where notifiedDate is null")
-                    ?.condition("reconciliationRunResultId", resultId)
-                    ?.condition("notifiedDate", null)
-                    ?.updateAll([notifiedDate: ec.user.nowTimestamp]) ?: 0
-            return updated > 0
+            return (boolean) ec.transaction.runUseOrBegin(60, "notification claim for run result ${resultId}".toString(), {
+                def resultRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                                DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                                "notify claim — the run-result row read for update by its id; its notifiedDate decides the one winner")
+                        ?.condition("reconciliationRunResultId", resultId)
+                        ?.useCache(false)
+                        ?.forUpdate(true)
+                        ?.one()
+                if (resultRow == null || resultRow.notifiedDate != null) return false
+                resultRow.set("notifiedDate", ec.user.nowTimestamp)
+                resultRow.update()
+                return true
+            })
         } catch (Throwable t) {
             logger.warn("Failed to claim notification for run result {}: {}", resultId, t.message)
             return false

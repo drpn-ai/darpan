@@ -125,10 +125,34 @@ class KeepArtifactsTests {
         KeepArtifacts.writeRows(file, [[0, "A:1"], [1, "A:1"], [9, "A:1"]].iterator())
         assertThrows(IllegalStateException) { KeepArtifacts.forEachKeptRecord(file) { Map r -> throw new IllegalStateException("boom") } }
         assertThrows(IllegalStateException) { KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> throw new IllegalStateException("boom") } }
-        KeepArtifacts.forEachKeptRecord(file) { Map r -> }
-        KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> }
+        assertThrows(IllegalStateException) { KeepArtifacts.forEachKeptRecord(file) { Map r -> } }
+        assertThrows(IllegalStateException) { KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> } }
 
         assertEquals(before, KeepArtifacts.OPEN_ROW_READERS.get(), "a rows reader was left open")
+    }
+
+    /**
+     * DAR-OPS-029 S05 (conservation): a rows file naming a row the extract does not have was written for another extract (a
+     * stale artifact beside a file read again under the same name). Which records it sets aside here is a guess, so both readers
+     * refuse it, naming the row and the record count, rather than skip whatever records the numbers happen to land on.
+     */
+    @Test
+    void setAsideRowsPastTheLastRecordAreRefused() {
+        File file = extract((0..2).collect { [n: it] })
+        KeepArtifacts.writeRows(file, [[1, "A:1"], [3, "A:1"]].iterator())
+
+        List kept = []
+        IllegalStateException keptRead = assertThrows(IllegalStateException) { KeepArtifacts.forEachKeptRecord(file) { Map r -> kept.add(r.n) } }
+        assertTrue(keptRead.message.contains("row 3") && keptRead.message.contains("3 records"), keptRead.message)
+        assertEquals([0, 2], kept, "every record was visited before the mismatch was found")
+
+        IllegalStateException asideRead = assertThrows(IllegalStateException) { KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> } }
+        assertTrue(asideRead.message.contains("row 3") && asideRead.message.contains("3 records"), asideRead.message)
+
+        KeepArtifacts.writeRows(file, [[0, "A:1"], [2, "A:1"]].iterator())
+        List seen = []
+        KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> seen.add(r.n) }
+        assertEquals([0, 2], seen, "the last record can still be set aside")
     }
 
     @Test
@@ -170,6 +194,10 @@ class KeepArtifactsTests {
         File nestedFlag = new File(dir, "nested-flag.json")
         nestedFlag.text = '{"records":[{"id":"K1","lines":[{"isTest":"N","x":{"y":[1,{"z":2}]}}],"after":{"a":1}},{"id":"K2"}],"metadata":{}}'
         assertFalse(KeepArtifacts.filteredAtRead(nestedFlag, ["isTest"]))
+        // DAR-OPS-029 S05: Keep reads a record's keys trimmed (JsonRecordLines), so a padded flag key is the flag
+        File paddedFlag = new File(dir, "padded-flag.json")
+        paddedFlag.text = '{"records":[{"id":"K1"},{"id":"K2"," isTest ":"Y"}],"metadata":{}}'
+        assertFalse(KeepArtifacts.filteredAtRead(paddedFlag, ["isTest"]))
 
         File ruled = new File(dir, "ruled.json")
         ruled.text = JsonOutput.toJson([records: [[id: "K1", isTest: "N"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,

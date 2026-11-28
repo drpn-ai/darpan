@@ -114,7 +114,8 @@ class KeepArtifacts {
             if (token == null) throw new IOException("The extract ends inside a structure.")
             if (token.isStructStart()) depth++
             else if (token.isStructEnd()) depth--
-            else if (token == JsonToken.FIELD_NAME && fields.contains(parser.currentName())) {
+            // trimmed, as JsonRecordLines reads a record's keys for Keep
+            else if (token == JsonToken.FIELD_NAME && fields.contains(parser.currentName().trim())) {
                 found = true
                 break
             }
@@ -167,14 +168,17 @@ class KeepArtifacts {
         }
     }
 
-    /** Calls visit(record) for every record the Keep did not set aside; returns the extract's other top-level fields. */
+    /**
+     * Calls visit(record) for every record the Keep did not set aside; returns the extract's other top-level fields. A set-aside
+     * row past the extract's last record throws once every record has been read (pastLastRecord).
+     */
     static Map forEachKeptRecord(File extract, Closure visit) {
         RowReader aside = rowIds(extract)
         try {
             long nextAside = -1
             if (aside.hasNext()) nextAside = Long.parseLong(aside.next().split("\t", 2)[0])
             long row = 0
-            return JsonRecordStream.forEachRecord(extract, "records") { Map record ->
+            Map others = JsonRecordStream.forEachRecord(extract, "records") { Map record ->
                 if (row == nextAside) {
                     nextAside = aside.hasNext() ? Long.parseLong(aside.next().split("\t", 2)[0]) : -1
                 } else {
@@ -182,12 +186,14 @@ class KeepArtifacts {
                 }
                 row++
             }
+            if (nextAside >= 0) throw pastLastRecord(extract, nextAside, row)
+            return others
         } finally {
             aside.close()
         }
     }
 
-    /** Calls visit(record, ruleId) for every set-aside record, in row order. */
+    /** Calls visit(record, ruleId) for every set-aside record, in row order; a row past the last record throws (pastLastRecord). */
     static void forEachSetAsideRecord(File extract, Closure visit) {
         RowReader aside = rowIds(extract)
         try {
@@ -201,9 +207,20 @@ class KeepArtifacts {
                 }
                 row++
             }
+            if (next != null) throw pastLastRecord(extract, Long.parseLong(next[0]), row)
         } finally {
             aside.close()
         }
+    }
+
+    /**
+     * DAR-OPS-029 S05 (OC10). Rows are written from this extract's own records, so one past its last record means the rows file
+     * was written for another extract (one read again under the same name, beside a stale artifact). Which records it sets aside
+     * here would be a guess, so the read fails loudly instead of skipping whatever records the numbers land on.
+     */
+    private static IllegalStateException pastLastRecord(File extract, long row, long records) {
+        return new IllegalStateException(("Keep's set-aside rows for ${extract.name} name row ${row}, but the extract has ${records} " +
+                "records: the rows were written for another extract.").toString())
     }
 
     /** The rows file's lines, lazily; empty when there is none. Callers close it in a finally. */
@@ -262,6 +279,6 @@ class KeepArtifacts {
 
     private static String baseName(File extract) {
         String name = extract.getName()
-        return name.toLowerCase().endsWith(".json") ? name.substring(0, name.length() - ".json".length()) : name
+        return name.toLowerCase(Locale.ROOT).endsWith(".json") ? name.substring(0, name.length() - ".json".length()) : name
     }
 }

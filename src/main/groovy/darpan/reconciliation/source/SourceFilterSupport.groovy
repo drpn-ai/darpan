@@ -15,7 +15,7 @@ import static darpan.common.ValueSupport.normalize
  * per-page parsing would both repeat the work on every thread and turn one malformed rule into N
  * identical mid-flight failures instead of a single clean pre-flight error.
  *
- * Matching semantics deliberately copy the hardcoded OMS filters (OmsRestSourceSupport.isSalesOrder
+ * Matching semantics deliberately copy the hardcoded OMS filters (darpan-hotwax OmsExtractSupport.isSalesOrder
  * and containsExchangeOrderAssociation) so configured and built-in exclusions behave identically:
  * field names are trimmed and case-SENSITIVE, values are trimmed and case-INSENSITIVE, and a record
  * that lacks the field is kept — "exclude these values" cannot match an absent value.
@@ -74,6 +74,8 @@ class SourceFilterSupport {
         // purpose. The board cannot produce this state (one filter per field), so this guards
         // direct API callers and rows written before the guard existed.
         Map<String, String> operatorByField = new LinkedHashMap<>()
+        // Every path tallies a rule's records by its sequence number, so a repeat would give each rule the other's records.
+        Set<Integer> sequenceNums = new HashSet<>()
         int position = 0
         for (Object raw : rawList) {
             position++
@@ -82,6 +84,10 @@ class SourceFilterSupport {
             }
             Map row = (Map) raw
             Integer sequenceNum = parseSequenceNum(row.get("sequenceNum"), position)
+            if (!sequenceNums.add(sequenceNum)) {
+                throw new IllegalArgumentException(
+                        "Source filter ${sequenceNum} repeats a sequence number; each filter's counts are kept by its number.".toString())
+            }
             String fieldExpression = normalize(row.get("fieldExpression"))
             if (!fieldExpression) {
                 throw new IllegalArgumentException("Source filter ${sequenceNum} has no field to test.".toString())
@@ -147,15 +153,25 @@ class SourceFilterSupport {
         }
         List<Map<String, Object>> configuredExclusions = parsedRules.collect { Map<String, Object> rule ->
             String key = String.valueOf(rule.get("sequenceNum"))
-            return [sequenceNum     : rule.get("sequenceNum"),
-                    fieldExpression : rule.get("fieldExpression"),
-                    operator        : rule.get("operator"),
-                    values          : new ArrayList<String>((List) rule.get("values")),
-                    excludedCount   : exclusionCounts.get(key) ?: 0,
-                    fieldAbsentCount: fieldAbsentCounts.get(key) ?: 0] as Map<String, Object>
+            return exclusionEntry(rule.get("sequenceNum"), rule.get("fieldExpression"), rule.get("operator"), (List) rule.get("values"),
+                    exclusionCounts.get(key) ?: 0, fieldAbsentCounts.get(key) ?: 0)
         }
         ExcludedRecordsSidecar.flush(excludedCollector)
         return [records: kept, configuredExclusions: configuredExclusions, excludedCollector: excludedCollector]
+    }
+
+    /**
+     * One rule's configuredExclusions entry, the shape the conclude pass reads (a read's metadata and a Spark Keep's summary
+     * alike). Counts are written as given, so each caller keeps its own number type.
+     */
+    static Map<String, Object> exclusionEntry(Object sequenceNum, Object fieldExpression, Object operator, List values,
+                                              Number excludedCount, Number fieldAbsentCount) {
+        return [sequenceNum     : sequenceNum,
+                fieldExpression : fieldExpression,
+                operator        : operator,
+                values          : new ArrayList(values ?: []),
+                excludedCount   : excludedCount,
+                fieldAbsentCount: fieldAbsentCount] as Map<String, Object>
     }
 
     /**
@@ -176,7 +192,7 @@ class SourceFilterSupport {
         Map row = (Map) record
         for (Map<String, Object> rule : rules) {
             String fieldExpression = (String) rule.get("fieldExpression")
-            // Same top-level, trimmed, case-sensitive key scan as OmsRestSourceSupport.isSalesOrder.
+            // Same top-level, trimmed, case-sensitive key scan as darpan-hotwax OmsExtractSupport.isSalesOrder.
             Object rawValue = row.find { key, ignored -> normalize(key) == fieldExpression }?.value
             String candidate = normalize(rawValue)
             boolean prefixMode = OPERATOR_INCLUDE_PREFIX == rule.get("operator")

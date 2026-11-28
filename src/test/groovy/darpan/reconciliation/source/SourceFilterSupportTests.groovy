@@ -63,7 +63,7 @@ class SourceFilterSupportTests {
     void fieldNameIsCaseSensitiveLikeTheBuiltInFilters() {
         List<Map<String, Object>> rules = channelRule("POS_SALES_CHANNEL")
 
-        // Mirrors OmsRestSourceSupport.isSalesOrder: normalize(key) == fieldName (trim, no case fold).
+        // Mirrors darpan-hotwax OmsExtractSupport.isSalesOrder: normalize(key) == fieldName (trim, no case fold).
         assertNull(SourceFilterSupport.evaluate([SALESCHANNELENUMID: "POS_SALES_CHANNEL"], rules))
         assertNotNull(SourceFilterSupport.evaluate([" salesChannelEnumId ": "POS_SALES_CHANNEL"], rules))
     }
@@ -194,6 +194,23 @@ class SourceFilterSupportTests {
 
         assertEquals(1, rules[0].sequenceNum)
         assertEquals(2, rules[1].sequenceNum)
+    }
+
+    /**
+     * DAR-OPS-029 S05 (conservation): every path tallies a rule's excluded records by its sequence number, so two rules sharing
+     * one would each report both rules' records. A repeat is refused, whether written or taken from the rule's position.
+     */
+    @Test
+    void aRepeatedSequenceNumberIsRefused() {
+        IllegalArgumentException written = assertThrows(IllegalArgumentException) {
+            SourceFilterSupport.parseRules([[sequenceNum: 3, fieldExpression: "statusId", filterValues: "ORDER_CANCELLED"],
+                                            [sequenceNum: "3", fieldExpression: "salesChannelEnumId", filterValues: "POS_SALES_CHANNEL"]])
+        }
+        assertTrue(written.message.contains("3"), written.message)
+        assertThrows(IllegalArgumentException) {
+            SourceFilterSupport.parseRules([[sequenceNum: 2, fieldExpression: "statusId", filterValues: "ORDER_CANCELLED"],
+                                            [fieldExpression: "salesChannelEnumId", filterValues: "POS_SALES_CHANNEL"]])
+        }
     }
 
     @Test

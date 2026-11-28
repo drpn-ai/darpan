@@ -87,6 +87,8 @@ class ReconciliationServicesUnifiedFilesTests {
 
         assertEquals(["A", "A"], idsOfType(document, "DUPLICATE_IN_FILE_1"), "both copies of A are findings")
         assertEquals(["A"], idsOfType(document, "DUPLICATE_IN_FILE_2_PAIRED"), "Shopify's A is its partner row (S01b OC14)")
+        assertTrue(((List<Map>) document.differences).find { it.type == "DUPLICATE_IN_FILE_2_PAIRED" }.note.toString().contains("HotWax"),
+                "the partner row names the system whose key repeated, not FILE_1")
         assertEquals(["B"], idsOfType(document, "missing_in_Shopify"))
         assertEquals(["C"], idsOfType(document, "missing_in_HotWax"))
         assertEquals(1L, result.onlyInFile1Count)

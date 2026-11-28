@@ -171,11 +171,11 @@ class ReconciliationServices {
             }
             // DAR-BE-165, as on the RuleSet path: a key on more than one record of a side is a finding for each of those
             // records and leaves the compare on both sides. The anti-join below used to match it and read clean.
-            Map<String, Object> split = RuleSetCompareScopeAdapter.splitDuplicateKeys(ingestBySide)
-            persisted.addAll((List<Dataset>) split.persistedFrames)
             Map<String, String> labelBySide = [FILE_1: label1, FILE_2: label2]
+            Map<String, Object> split = RuleSetCompareScopeAdapter.splitDuplicateKeys(ingestBySide, labelBySide)
+            persisted.addAll((List<Dataset>) split.persistedFrames)
             ((Map<String, Long>) split.duplicateKeyCountBySide).each { String side, Long keys ->
-                processingWarnings.add("${side} (${labelBySide[side]}) has ${keys} key(s) on more than one record; ${RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL}".toString())
+                processingWarnings.add(RuleSetCompareScopeAdapter.duplicateKeyWarning("${side} (${labelBySide[side]})", keys))
             }
             Map side1 = (Map) ((Map) split.ingestBySide).FILE_1
             Map side2 = (Map) ((Map) split.ingestBySide).FILE_2

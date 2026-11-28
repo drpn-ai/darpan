@@ -712,11 +712,11 @@ class AuditReportAssembler {
     }
 
     /**
-     * Statements in story order: sequenceNum (none last), then code, then id. The one order the report, the by-order
+     * Statements in story order: sequenceNum (none last; 0 is a step), then code, then id. The one order the report, the by-order
      * list and the findings page share (DAR-OPS-029 S10: the report sorted in the database, where NULL comes first).
      */
     static final Comparator<Map> STATEMENT_ORDER = { Map a, Map b ->
-        ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
+        ((a.sequenceNum != null ? a.sequenceNum : Long.MAX_VALUE) as Long) <=> ((b.sequenceNum != null ? b.sequenceNum : Long.MAX_VALUE) as Long) ?:
                 (a.statementCode as String) <=> (b.statementCode as String) ?: (a.statementId as String) <=> (b.statementId as String)
     } as Comparator<Map>
 

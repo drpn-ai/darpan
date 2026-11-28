@@ -106,4 +106,55 @@ class StepUnitsTests {
                     "no other open M1 unit is counted, for ${order*.statementId}")
         }
     }
+
+    /** The whole split as plain data: per statement, its counted and waiting units and what hangs under each holder. */
+    private static Map shape(Map<String, Map> split) {
+        Closure ids = { Map u -> (u.entries as List<Map>)*.row*.findingId }
+        return split.collectEntries { String st, Map s ->
+            [(st): [counted: (s.counted as List<Map>).collect { [it.order, it.state, ids(it),
+                        ((it.waitingUnits ?: []) as List<Map>).collect { w -> [w.statementId, ids(w)] }] },
+                    waiting: (s.waiting as List<Map>).collect { [it.order, ids(it)] }]]
+        }
+    }
+
+    // DAR-OPS-029 S10 (QA 14:38): OrderWorlds waits only on a strictly earlier step, so two statements at one step, or
+    // both with none, each counted the same order open. Ties go to story order (STATEMENT_ORDER: code, then id).
+    @Test
+    void statementsAtOneStepCountAnOrderOnceAtTheFirstInStoryOrder() {
+        [5L, null].each { Long seq ->
+            List<Map> statements = [statement("SB", seq), statement("SA", seq)]
+            Map<String, List<Map>> entries = [SA: [entry("F-A", "SA", OPEN)], SB: [entry("F-B", "SB", OPEN)]]
+            Map<String, Map> records = ["F-A": item("M2/01"), "F-B": item("M2/02")]
+            Map<String, Map> split = AuditOrderUnits.stepUnits(statements, entries, records)
+            List<String> openAt = split.findAll { k, v -> (v.counted as List<Map>).any { it.state == OPEN } }*.key
+            assertEquals(["SA"], openAt, "M2 counted open once, at SA (step ${seq})")
+            assertEquals([["M2", ["F-B"]]], (split.SB.waiting as List<Map>).collect { [it.order, (it.entries as List<Map>)*.row*.findingId] })
+        }
+    }
+
+    // sequenceNum 0 read as "no step" (Groovy: 0 is false), so the earliest step lost to the next one.
+    @Test
+    void stepZeroIsTheEarliestStep() {
+        List<Map> statements = [statement("S1", 1L), statement("S0", 0L)]
+        Map<String, Map> split = AuditOrderUnits.stepUnits(statements,
+                [S0: [entry("F-0", "S0", OPEN)], S1: [entry("F-1", "S1", OPEN)]], ["F-0": item("M1/01"), "F-1": item("M1/02")])
+        assertEquals([["M1", OPEN, ["F-0"]]], (split.S0.counted as List<Map>).collect { [it.order, it.state, (it.entries as List<Map>)*.row*.findingId] })
+        assertEquals([], split.S1.counted)
+        assertEquals(["S0", "S1"], [[statementId: "S1", statementCode: "S1", sequenceNum: 1L], [statementId: "S0", statementCode: "S0", sequenceNum: 0L]]
+                .sort(false, AuditReportAssembler.STATEMENT_ORDER)*.statementId)
+    }
+
+    // QA: the input-order test checked only M1's holder; the whole split must be the same in every order.
+    @Test
+    void theWholeSplitIsTheSameInEveryInputOrder() {
+        Map s = scenario()
+        List<Map> statements = [statement("S0", null), statement("S2", 8L)] + (s.statements as List<Map>)
+        Map entries = (s.entries as Map) + [S0: [entry("F-0", "S0", OPEN)], S2: [entry("F-20", "S2", OPEN)]]
+        Map records = (s.records as Map) + ["F-0": item("M1/04"), "F-20": item("M9/02")]
+        Map expected = shape(AuditOrderUnits.stepUnits(statements, entries, records))
+        [statements.reverse(), [statements[2], statements[0], statements[3], statements[1]]].each { List<Map> order ->
+            assertEquals(expected, shape(AuditOrderUnits.stepUnits(order, entries, records)), "for ${order*.statementId}")
+        }
+    }
 }
+

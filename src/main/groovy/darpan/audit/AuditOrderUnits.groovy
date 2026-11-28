@@ -53,15 +53,19 @@ class AuditOrderUnits {
      * wait together (they share its world and its step); its fixed lines never wait, so when its open lines wait, they
      * are a waiting unit and its fixed lines stay counted as fixed at their own step (DAR-OPS-029 S10: before, such an
      * order was counted open at both steps). Each waiting unit is hung, with its statement, on the first open unit of its
-     * order world that a statement counts, which is at the step it waits on. Returns statementId -> [counted, waiting].
+     * order world that a statement counts, which is at the step it waits on. Statements at one step (or with none) go in
+     * story order: the first holds the order (DAR-OPS-029 S10). Returns statementId -> [counted, waiting].
      */
     static Map<String, Map> stepUnits(List<Map> statements, Map<String, List<Map>> entriesByStatement, Map<String, Map> recordsByFinding) {
-        Map<String, Long> step = statements.collectEntries { [(it.statementId as String): it.sequenceNum == null ? null : (it.sequenceNum as Long)] }
-        List<Map> all = statements.collectMany { (entriesByStatement.get(it.statementId as String) ?: []) as List<Map> } as List<Map>
+        // Each statement's 1-based place in story order (STATEMENT_ORDER), never its raw sequenceNum: OrderWorlds waits only on a
+        // strictly earlier step, so a tie (or two with none) counted one order at both; and it reads 0 as no step.
+        List<Map> story = statements.sort(false, AuditReportAssembler.STATEMENT_ORDER)
+        Map<String, Long> step = (0..<story.size()).collectEntries { int i -> [(story[i].statementId as String): (i + 1) as Long] }
+        List<Map> all = story.collectMany { (entriesByStatement.get(it.statementId as String) ?: []) as List<Map> } as List<Map>
         Map<String, Map> worlds = OrderWorlds.rank(all, recordsByFinding, step)
         Map<String, Map> out = new LinkedHashMap<>()
         Map<String, Map> holderByWorld = [:]
-        statements.each { Map st ->
+        story.each { Map st ->
             List<Map> counted = [], waiting = []
             orderUnits((entriesByStatement.get(st.statementId as String) ?: []) as List<Map>, recordsByFinding).each { Map unit ->
                 List<Map> lines = unit.entries as List<Map>

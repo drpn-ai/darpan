@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-OPS-029 S99-057: what darpan core asks of every connector component's services, declared once here and implemented
+     by each connector (HotWax OMS, NetSuite, Shopify, database) instead of mirrored per connector. A connector's own
+     parameter of the same name overlays the interface's (a description, a narrower meaning); its extras follow. Interfaces
+     only: never called. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="define" noun="SourceExtractOutputs" type="interface">
+        <description>Out-parameters every connector extract returns: the automation edge and the run pipeline read them by
+            name off every side's extract (SourceSystemConnector.extractServiceName). A script service returns only declared
+            out-parameters, so a missing one reads as "no data" rather than as a wiring error.</description>
+        <out-parameters>
+            <parameter name="dataAvailable" type="Boolean"/>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="requestMetadata" type="Map"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="define" noun="SourceConnectionProbe" type="interface">
+        <description>A staged connection probe (SourceSystemConnector.healthCheckServiceName), dispatched only by
+            facade.SettingsFacadeServices.test#SourceConnection, which owns the permission gate, resolves the config and
+            passes it under the row's configParameterName (so the config id is each probe's own in-parameter). Read-only;
+            never writes to ec.message: a refused credential is a check row, not a service error.</description>
+        <in-parameters>
+            <parameter name="stage">
+                <description>Run just this stage and report the next one, so the caller can show progress as each
+                    completes. Blank runs every stage in a single call; "@first" (SourceConnectionDiagnosticsSupport.STAGE_FIRST)
+                    is whichever stage the probe runs first.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List">
+                <parameter name="check" type="Map">
+                    <parameter name="key"/>
+                    <parameter name="label"/>
+                    <parameter name="status"><description>PASS, FAIL or SKIP.</description></parameter>
+                    <parameter name="detail"/>
+                    <parameter name="durationMillis" type="Long"/>
+                </parameter>
+            </parameter>
+            <parameter name="nextStage">
+                <description>Stage to run next, or blank when the probe is finished: either it completed or a failure made
+                    the remaining stages meaningless.</description>
+            </parameter>
+        </out-parameters>
+    </service>
+
+</services>

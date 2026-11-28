@@ -18,7 +18,7 @@ class AuditOrderUnits {
      * sales order line's order; null when the finding is not about an order line. A finding that only mentions an order
      * (a credit memo naming its Shopify order) is not one, so returns and memos stay findings of their own.
      */
-    static String orderKeyOf(Map records) {
+    private static String orderKeyOf(Map records) {
         Closure<String> first = { String system, String type -> ((((records ?: [:])[system] ?: [:]) as Map)[type] as List)?.find()?.id as String }
         return first("OMS", "orderItem")?.with { it.contains("/") ? it.substring(0, it.indexOf("/")) : it } ?:
                 first("NetSuite", "salesOrderLine")
@@ -29,7 +29,7 @@ class AuditOrderUnits {
      * oldest-first and newToday hold; its worst state: open, else fixed), one line or many; a finding that
      * is not an order line a unit of its own. Units keep the order of their earliest line.
      */
-    static List<Map> orderUnits(List<Map> entries, Map<String, Map> recordsByFinding) {
+    private static List<Map> orderUnits(List<Map> entries, Map<String, Map> recordsByFinding) {
         Map<String, List<Map>> byOrder = new LinkedHashMap<>()
         List<Object> keys = []
         entries.each { Map e ->
@@ -186,7 +186,7 @@ class AuditOrderUnits {
     }
 
     /** DAR-UI-099: "2" for item M1132010/02 of order M1132010; the item id when it has no number after the order. */
-    static String itemNumber(String order, String item) {
+    private static String itemNumber(String order, String item) {
         if (!item?.startsWith(order) || item.length() <= order.length()) return item
         String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
         return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix

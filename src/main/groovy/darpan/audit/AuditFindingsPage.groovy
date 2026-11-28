@@ -68,8 +68,8 @@ class AuditFindingsPage {
                     priorities = values as List<String>; break
                 case "firstFound":
                     Date day
-                    try { day = Date.valueOf(LocalDate.parse(values[0])) }
-                    catch (Exception ignored) { return [publicError: "firstFound must be YYYY-MM-DD, got ${values[0]}".toString()] }
+                    try { day = Date.valueOf(LocalDate.parse((values ? values[0] : null) ?: "")) }
+                    catch (java.time.format.DateTimeParseException ignored) { return [publicError: "firstFound must be YYYY-MM-DD, got ${values[0]}".toString()] }
                     conditions << cf.makeCondition("firstFoundDate", COMPARATORS.get(t.comparator as String), day); break
             }
         }
@@ -172,8 +172,8 @@ class AuditFindingsPage {
             if (!(parts instanceof List) || ((List) parts).size() != 5 || !(((List) parts)[1] instanceof Boolean)) return null
             LocalDate.parse(((List) parts)[3] as String)
             return (List) parts
-        } catch (Exception ignored) {
-            return null
+        } catch (IllegalArgumentException | groovy.json.JsonException | java.time.DateTimeException ignored) {
+            return null   // not base64, not JSON, or no date in it: not one of ours
         }
     }
 }

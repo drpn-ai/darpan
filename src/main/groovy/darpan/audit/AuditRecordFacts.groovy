@@ -62,7 +62,7 @@ class AuditRecordFacts {
         try {
             Object parsed = new groovy.json.JsonSlurper().parseText(text)
             return parsed instanceof Map ? (Map) parsed : null
-        } catch (Exception ignored) {
+        } catch (groovy.json.JsonException ignored) {
             return null
         }
     }
@@ -180,7 +180,7 @@ class AuditRecordFacts {
      * DAR-UI-080. A record's date as the tenant's calendar day (2026-10-21): epoch millis (an OMS return's returnDate), an
      * ISO instant (GraphQL orderDate, Shopify createdAt), a date already written as one, or NetSuite's M/d/yyyy (DAR-BE-372). Anything else is no date.
      */
-    static String dayOf(String text, ZoneId zone) {
+    private static String dayOf(String text, ZoneId zone) {
         if (!text) return null
         try {
             if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate().toString()

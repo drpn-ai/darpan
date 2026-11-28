@@ -96,7 +96,7 @@ class SourceExtractOptionsSupportTests {
     }
 
     /**
-     * DAR-BE-192: SourceSystemConnector.extractOptionsJson is text-medium (255). A longer seeded value fails its row and Moqui
+     * DAR-BE-192: SourceSystemConnector.extractOptionsJson is text-medium (255), and each option's type is one the code reads. A longer seeded value fails its row and Moqui
      * skips the rest of the file, so every later connector silently keeps its old row (found live: 6 of 10 loaded).
      */
     @Test
@@ -112,7 +112,11 @@ class SourceExtractOptionsSupportTests {
         rows.each { def row ->
             String json = row.@extractOptionsJson.text()
             assertTrue(json.length() <= 255, "${row.@systemEnumId} extractOptionsJson is ${json.length()} characters")
-            new groovy.json.JsonSlurper().parseText(json)
+            // No type is boolean; an unknown one is read as boolean too, so a seed typo would silently turn a text option into a switch
+            ((List<Map>) new groovy.json.JsonSlurper().parseText(json)).each { Map option ->
+                assertTrue(option.type == null || option.type in SourceExtractOptionsSupport.OPTION_TYPES,
+                        "${row.@systemEnumId} option ${option.name} has type ${option.type}")
+            }
         }
     }
 }

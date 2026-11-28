@@ -61,9 +61,10 @@ class SourceExtractOptionsSupport {
             String name = normalize(k)
             Map<String, Object> option = declared[name]
             if (option == null) {
+                // Only the connector's own: the core's options are not offered in the run builder either.
+                List<String> takes = connectorNames(connector)
                 throw new IllegalArgumentException("${sideLabel} has no option '${name}'" +
-                        // Only the connector's own: the core's options are not offered in the run builder either.
-                        (connectorNames(connector) ? "; it takes ${connectorNames(connector).join(', ')}." : "; its source takes no options."))
+                        (takes ? "; it takes ${takes.join(', ')}." : "; its source takes no options."))
             }
             if (option.type == "boolean") {
                 if (!(v instanceof Boolean) && !(v?.toString() in ["true", "false"])) {

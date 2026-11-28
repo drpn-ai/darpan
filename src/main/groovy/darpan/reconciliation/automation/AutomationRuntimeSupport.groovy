@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.common.DataManagerSupport
+import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.source.SourceFilterSupport
@@ -8,11 +9,20 @@ import darpan.reconciliation.streak.AutomationStreakSupport
 import groovy.json.JsonOutput
 
 import java.sql.Timestamp
+import java.util.regex.Pattern
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
 
 class AutomationRuntimeSupport {
+    /**
+     * A secret's key, bare or quoted, then = or :, then its value (bare or quoted). The key, separator and quotes stay, so a
+     * JSON error body stays readable: "apiToken":"x" reads "apiToken":"***", apiToken=x reads apiToken=***.
+     */
+    private static final Pattern SECRET_VALUE =
+            ~/(?i)(["']?)(password|privateKey|apiToken|apiKey|api_key|clientSecret|secret|token)\1(\s*[:=]\s*)(["']?)[^"'\s,&)}]+\4/
+    private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
+
     static def loadAutomation(def ec, String automationId) {
         // [P0#4 step 3] DUAL-CONTEXT: called by user-initiated run#AutomationNow (which gates via
         // TenantAccessSupport.canAccessTenantRecord in ReconciliationFacadeServices.xml before this is reached)
@@ -157,7 +167,7 @@ class AutomationRuntimeSupport {
         return truncate(JsonOutput.toJson(safeJsonValue(metadata)), 3900)
     }
 
-    static Object safeJsonValue(Object value) {
+    private static Object safeJsonValue(Object value) {
         if (value == null || value instanceof CharSequence || value instanceof Number || value instanceof Boolean) return value
         if (value instanceof Collection) return value.collect { safeJsonValue(it) }
         if (value instanceof Map) {
@@ -189,7 +199,7 @@ class AutomationRuntimeSupport {
     static String sanitizeErrorMessage(Throwable t) {
         // DAR-BE-031: a Java service's failure arrives wrapped as "Java method for service [..] threw an exception"; the
         // person reads the cause's own message.
-        String plain = darpan.facade.common.FacadeSupport.withoutServicePrefix(t?.message) ?: t?.cause?.message
+        String plain = FacadeSupport.withoutServicePrefix(t?.message) ?: t?.cause?.message
         return sanitizeText(plain ?: t?.class?.name ?: "Automation execution failed")
     }
 
@@ -213,7 +223,11 @@ class AutomationRuntimeSupport {
     }
 
     static String sanitizeText(String value) {
-        return value?.replaceAll(/(?i)(password|privateKey|apiToken|token)\s*[:=]\s*[^,\s)]+/, "\$1=***")
+        if (value == null) return null
+        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String key, String separator, String valueQuote ->
+            "${quote}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
+        }
+        return keyed.replaceAll(BEARER_VALUE, '$1 ***')
     }
 
     static String truncate(String value, int maxLength) {

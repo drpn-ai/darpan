@@ -186,7 +186,8 @@ class DisableAuthzRatchetTest {
     static final Map<String, Integer> COMPONENT_BASELINES = [
             // 66 again since DAR-BE-338: save#Automation and delete#Automation clear the automation's own filter rows again.
             // 65 since DAR-OPS-029 S22: save#Automation's saved-run guard reuses the automation row it already read.
-            "darpan service+screen XML .disableAuthz("            : 65, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
+            // 64 since DAR-OPS-029 S99-079: save#RuleSet deleted (its anyRuleSet existence read went with it).
+            "darpan service+screen XML .disableAuthz("            : 64, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             // 35 again since DAR-BE-338: save#Automation creates the automation's own filter rows again.
             // 36 since DAR-BE-374 (re-baselined in 3.5.3): IdIndexFacadeServices save#TenantIdIndexField stores the tenant's own
             // field after requireActiveTenantWriteAccess, companyUserGroupId set to the active tenant.

@@ -20,6 +20,7 @@ class DarpanSettingsTests {
     static final String SILENT = 'darpan.reconciliation.runHealth.silentAnyStageMinutes'
 
     static final String PARALLEL = 'darpan.reconciliation.automation.parallelSourceExtracts'
+    static final String RUN_RESULT_DAYS = 'darpan.retention.runResult.days'
 
     long now = 1_000_000L
     int loads = 0
@@ -149,6 +150,42 @@ class DarpanSettingsTests {
         assertEquals(2, call)
         DarpanSettings.expire()
         assertEquals(6, DarpanSettings.intValue(MAX))
+    }
+
+    /**
+     * DAR-OPS-029 S32, OC188: a caller that deletes by a setting (a sweep's horizon) must never read the catalog default
+     * because the table could not be read. After a restart during a database blip the first load fails and every read
+     * gets defaults: a 13-month default would delete rows a 36-month row keeps. The strict read refuses until a load
+     * has succeeded; the plain read keeps its fallback.
+     */
+    @Test void aStrictReadRefusesWhileNoLoadHasSucceeded() {
+        boolean down = true
+        DarpanSettings.rowLoader = { -> loads++; if (down) throw new IllegalStateException('db down'); [(MAX): [settingValue: '6']] as Map<String, Map> }
+        assertEquals(8, DarpanSettings.intValue(MAX), "the plain read still falls back to the default")
+        IllegalStateException e = assertThrows(IllegalStateException) { DarpanSettings.intValueStrict(MAX) }
+        assertTrue(e.message.contains(MAX), e.message)
+        assertThrows(IllegalStateException) { DarpanSettings.optionalIntValueStrict(RUN_RESULT_DAYS) }
+        down = false
+        now += 31_000
+        assertEquals(6, DarpanSettings.intValueStrict(MAX), "a load that succeeds lifts the refusal")
+        assertNull(DarpanSettings.optionalIntValueStrict(RUN_RESULT_DAYS), "unset is still unset (keep forever)")
+    }
+
+    @Test void aStrictReadAfterAFailedReloadUsesTheLastLoadedRows() {
+        int call = 0
+        DarpanSettings.rowLoader = { -> if (call++ == 0) return [(MAX): [settingValue: '6']] as Map<String, Map>; throw new IllegalStateException('db down') }
+        assertEquals(6, DarpanSettings.intValueStrict(MAX))
+        now += 31_000
+        assertEquals(6, DarpanSettings.intValueStrict(MAX))
+        DarpanSettings.expire()
+        assertEquals(6, DarpanSettings.intValueStrict(MAX), "an expire keeps what was loaded")
+        assertEquals(3, call)
+    }
+
+    @Test void aStrictReadKeepsTheTypeAndOptionalRules() {
+        assertThrows(IllegalArgumentException) { DarpanSettings.intValueStrict(RUN_RESULT_DAYS) }
+        assertThrows(IllegalArgumentException) { DarpanSettings.optionalIntValueStrict(MAX) }
+        assertThrows(IllegalArgumentException) { DarpanSettings.intValueStrict(DAYS) }
     }
 
     @Test void theSnapshotReloadsAfterThirtySeconds() {

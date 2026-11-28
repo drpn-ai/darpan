@@ -152,7 +152,7 @@
                 <set field="ignoreSuperAdminCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may purge reconciliation outputs.')"/>
             </if>
 
-            <set field="resolvedRetentionDays" from="retentionDays == null ? darpan.config.DarpanSettings.intValue('darpan.purge.generatedOutput.days') : ((Number) retentionDays).intValue()"/>
+            <set field="resolvedRetentionDays" from="retentionDays == null ? darpan.config.DarpanSettings.intValueStrict('darpan.purge.generatedOutput.days') : ((Number) retentionDays).intValue()"/>
             <if condition="!ec.message.hasError() &amp;&amp; resolvedRetentionDays &lt; 0">
                 <return error="true" message="retentionDays must be 0 or greater"/>
             </if>
@@ -215,7 +215,7 @@
             <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
                 <if condition="!darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may purge reconciliation extracts.')"><return/></if>
             </if>
-            <set field="resolvedRetentionDays" from="retentionDays == null ? darpan.config.DarpanSettings.intValue('darpan.purge.extract.days') : ((Number) retentionDays).intValue()"/>
+            <set field="resolvedRetentionDays" from="retentionDays == null ? darpan.config.DarpanSettings.intValueStrict('darpan.purge.extract.days') : ((Number) retentionDays).intValue()"/>
             <if condition="resolvedRetentionDays &lt; 1">
                 <return error="true" message="retentionDays must be 1 or greater: an extract being written must never be purged."/>
             </if>

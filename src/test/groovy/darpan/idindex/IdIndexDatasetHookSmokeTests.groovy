@@ -184,6 +184,25 @@ class IdIndexDatasetHookSmokeTests {
         assertEquals(["TEN_DAYS"], rows("c-months")*.idNorm, "one month configured: a row last seen 40 days ago goes, one seen 10 days ago stays")
     }
 
+    /** OC188: after a restart during a database blip no settings load has succeeded; the sweep must fail, not delete by the
+     *  13-month default (a 36-month row would have kept this one). */
+    @Test
+    void "OC188: a sweep with no successful settings load fails and deletes nothing"() {
+        ec.entity.makeValue("darpan.idindex.RecordIdIndex").setAll([rowKey: "kBLIP", companyUserGroupId: A, idNorm: "BLIP", systemCode: "SHOPIFY",
+                systemEnumId: "KC_ISO", connectionId: "c-blip", recordKind: "ORDER", recordKey: "BLIP", fieldPath: "id", role: "OWN",
+                lastSeenAt: Timestamp.from(NOW.minus(400, ChronoUnit.DAYS))]).create()
+        darpan.config.DarpanSettings.resetForTests()
+        darpan.config.DarpanSettings.rowLoader = { -> throw new IllegalStateException("db blip") }
+        Map out
+        try {
+            out = asJob { ec.service.sync().name("idindex.IdIndexServices.maintain#IdIndex").call() }
+        } finally {
+            darpan.config.DarpanSettings.resetForTests()
+        }
+        assertTrue(out.errors.any { it.contains(IdIndexMaintain.MONTHS_SETTING) }, "the job fails naming the setting: ${out.errors}")
+        assertEquals(["BLIP"], rows("c-blip")*.idNorm, "nothing is deleted on the default")
+    }
+
     /** QA E-e: a row an index pass sees again between the sweep's select and its delete is kept: the delete re-applies the age. */
     @Test
     void "the sweep keeps a row seen again between its select and its delete"() {

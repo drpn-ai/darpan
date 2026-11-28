@@ -110,7 +110,9 @@ class RetentionSupport {
                     days = p.days as Integer
                     whatIf = true
                 } else {
-                    days = DarpanSettings.optionalIntValue(setting)
+                    // OC188: strict, so a table that has not loaded since the restart never answers a catalog default (30 days of
+                    // sync pulse samples where 90 are set) to the sweep
+                    days = DarpanSettings.optionalIntValueStrict(setting)
                 }
             }
             out[table] = [table: table, property: setting, periodDays: days, status: days == null ? KEEP_FOREVER : null,

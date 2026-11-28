@@ -61,7 +61,8 @@ class TempPasswordKeeper {
     }
 
     private static Timestamp cutoff(Timestamp now) {
-        return new Timestamp(now.time - DarpanSettings.intValue(KEEP_DAYS_SETTING) * DAY_MILLIS)
+        // OC188: strict, as every horizon a delete runs on
+        return new Timestamp(now.time - DarpanSettings.intValueStrict(KEEP_DAYS_SETTING) * DAY_MILLIS)
     }
 
     private static def rows(def ec, String reason) {

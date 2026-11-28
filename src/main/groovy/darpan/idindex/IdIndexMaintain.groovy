@@ -64,13 +64,13 @@ class IdIndexMaintain {
     /**
      * Deletes rows not seen for darpan.idindex.months (the catalog's default 13, 1 to 36), 10,000 at a time; returns how many.
      * OC100: read with intValue. The setting is required, so optionalIntValue always threw and a catch kept 13 whatever was
-     * set. A settings failure now stops the sweep before anything is deleted: Darpan's alerts room hears why (never a client
-     * room) and the job fails.
+     * set. OC188: read strictly, so a settings table that has not loaded since the restart stops the sweep before anything
+     * is deleted instead of answering 13: Darpan's alerts room hears why (never a client room) and the job fails.
      */
     static int sweep(def ec) {
         int months
         try {
-            months = DarpanSettings.intValue(MONTHS_SETTING)
+            months = DarpanSettings.intValueStrict(MONTHS_SETTING)
         } catch (Throwable t) {
             ErrorChatSupport.postAlertText(ec, "ID index sweep stopped before deleting anything: the setting ${MONTHS_SETTING} could not be read (${t.message ?: t.class.simpleName}).".toString())
             throw t

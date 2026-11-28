@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicLong
  * run. A reader never throws for a known key; an unknown key or the wrong typed getter is a programming error.
  *
  * The table is tiny, so it is held as one in-memory snapshot, reloaded when older than REFRESH_MILLIS and expired
- * after the commit of every edit. A failed reload keeps the last snapshot.
+ * after the commit of every edit. A failed reload keeps the last snapshot; a caller that deletes by a value reads it
+ * strictly (intValueStrict), which refuses while no load has succeeded.
  */
 class DarpanSettings {
     private static final Logger logger = LoggerFactory.getLogger(DarpanSettings)
@@ -43,8 +44,10 @@ class DarpanSettings {
         final Map<String, Map> rows
         final long loadedAt
         final boolean expired
-        Snapshot(Map<String, Map> rows, long loadedAt, boolean expired) {
-            this.rows = rows; this.loadedAt = loadedAt; this.expired = expired
+        /** True once these rows came from a load that succeeded (now or earlier); false for the empty stand-in. */
+        final boolean loaded
+        Snapshot(Map<String, Map> rows, long loadedAt, boolean expired, boolean loaded) {
+            this.rows = rows; this.loadedAt = loadedAt; this.expired = expired; this.loaded = loaded
         }
     }
 
@@ -67,6 +70,24 @@ class DarpanSettings {
         if (!definition(key).optional) throw new IllegalArgumentException("Setting ${key} always has a value; read it with intValue".toString())
         return (Integer) read(key, 'INT')
     }
+    /**
+     * DAR-OPS-029 S32, OC188. intValue for a caller that deletes by the value (a sweep's or purge's horizon): it throws
+     * while no load of the settings table has succeeded in this JVM, instead of answering with the catalog default. After
+     * a restart during a database blip a 13-month default would delete rows a 36-month row keeps. A failed reload after a
+     * good one still serves the rows last loaded. The refusal is logged at ERROR, so the daily digest and its alerts-room
+     * line carry it.
+     */
+    static int intValueStrict(String key) {
+        if (definition(key).optional) throw new IllegalArgumentException("Setting ${key} may be unset; read it with optionalIntValueStrict".toString())
+        return (int) strictRead(key, 'INT')
+    }
+
+    /** optionalIntValue with intValueStrict's refusal: null (unset, keep forever) only from a table that was read. */
+    static Integer optionalIntValueStrict(String key) {
+        if (!definition(key).optional) throw new IllegalArgumentException("Setting ${key} always has a value; read it with intValueStrict".toString())
+        return (Integer) strictRead(key, 'INT')
+    }
+
     /** A STRING setting: trimmed; null when unset or blank. */
     static String stringValue(String key) { return (String) read(key, 'STRING') }
     /** The value as the admin app shows it: a secret key keeps only an ellipsis and its last 6 characters. */
@@ -91,6 +112,23 @@ class DarpanSettings {
             logger.warn("Setting {} read failed, using the catalog default: {}", key, t.toString())
             return parse(sd, sd.defaultValue)
         }
+    }
+
+    private static Object strictRead(String key, String type) {
+        SettingDefinition sd = definition(key)
+        if (sd.type != type) throw new IllegalArgumentException("Setting ${key} is ${sd.type}, not ${type}".toString())
+        rows()
+        if (!snapshot.loaded) {
+            synchronized (DarpanSettings) {
+                if (!snapshot.loaded) reload(clock.call(), snapshot)
+            }
+        }
+        if (!snapshot.loaded) {
+            String why = "Setting ${key} is not read: the settings table has not loaded since this server started, and a delete never runs on the catalog default".toString()
+            logger.error(why)
+            throw new IllegalStateException(why)
+        }
+        return resolve(sd).value
     }
 
     // ------------------------------------------------------------------ catalog
@@ -302,11 +340,11 @@ class DarpanSettings {
             Map<String, Map> loaded = rowLoader.call()
             Map<String, Map> copy = new HashMap<>()
             loaded?.each { String k, Object v -> copy.put(k, v instanceof Map ? (Map) v : [settingValue: v]) }
-            snapshot = new Snapshot(Collections.unmodifiableMap(copy), now, expireCount.get() != seen)
+            snapshot = new Snapshot(Collections.unmodifiableMap(copy), now, expireCount.get() != seen, true)
         } catch (Throwable t) {
             logger.warn("Settings reload failed, keeping the last snapshot: {}", t.toString())
             Map<String, Map> keep = previous != null ? previous.rows : Collections.<String, Map> emptyMap()
-            snapshot = new Snapshot(keep, now, false)
+            snapshot = new Snapshot(keep, now, false, previous != null && previous.loaded)
         }
     }
 
@@ -314,7 +352,7 @@ class DarpanSettings {
     static void expire() {
         expireCount.incrementAndGet()
         Snapshot snap = snapshot
-        if (snap != null) snapshot = new Snapshot(snap.rows, snap.loadedAt, true)
+        if (snap != null) snapshot = new Snapshot(snap.rows, snap.loadedAt, true, snap.loaded)
     }
 
     /** Expires the snapshot once the surrounding transaction has completed (now when there is none). */

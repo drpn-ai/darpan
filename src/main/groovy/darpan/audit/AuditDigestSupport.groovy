@@ -52,8 +52,8 @@ class AuditDigestSupport {
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.
      * fullList lists every open finding the report carries, as far as one message holds.
      * DAR-BE-303: the fixed words are DARPAN_AUDIT_DIGEST copy blocks read through copy; the counts, finding rows and the
-     * report link stay here. Chat and email get the same text, so both read the same blocks, except the not-run notice:
-     * withNotice false (the chat room's copy) leaves it out, since a client room never gets a warning (DAR-BE-378).
+     * report link stay here. Chat and email get the same text, so both read the same blocks, except the rules not checked:
+     * withNotice false (the chat room's copy) leaves them out, since a client room never gets a warning (DAR-BE-378).
      */
     static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy, EmailCopyReader runCopy,
                          boolean withNotice = true) {
@@ -66,10 +66,10 @@ class AuditDigestSupport {
         String day = dayLabel(head.date as String)
         lines.add([head.audit instanceof Map ? (head.audit as Map).name : null, head.period,
                    weekly ? copy.text("week", [day: day]) : day].findAll { it }.join(" · "))
-        // DAR-BE-363: a morning with a check that did not run carries the run update's neutral notice (DARPAN_AUDIT_RUN
-        // blocks, read through runCopy), built from the same rule facts; never health.summary, which names systems and causes.
-        String notice = withNotice ? AuditRunMessage.notRunNotice(AuditRunFacts.build(report, [], null), runCopy) : null
-        if (notice) lines.add(notice)
+        // DAR-BE-363, OC55 (Aditi D8): a morning with a check not run names each such rule neutrally (DARPAN_AUDIT_RUN
+        // blocks, read through runCopy), from the same rule facts as the run email; never health.summary (it names systems
+        // and causes) and never "Darpan has been alerted": that goes to Darpan's alerts room, and these go to the tenant.
+        if (withNotice) lines.addAll(notCheckedLines(report, runCopy))
         lines.add("")
 
         if (weekly) {
@@ -120,8 +120,20 @@ class AuditDigestSupport {
         return lines.join("\n")
     }
 
+    /** "R2 · Not checked this morning.", or "R2 · 1 of 2 checks not checked this morning.": one line per rule a check missed. */
+    private static List<String> notCheckedLines(Map report, EmailCopyReader runCopy) {
+        List<Map> rules = (AuditRunFacts.build(report, [], null)?.rules ?: []) as List<Map>
+        return rules.findAll { it.checksNotRun }.collect { Map rule ->
+            int notRun = ((rule.checksNotRun ?: []) as List).size()
+            int total = (rule.checksTotal ?: 0) as int
+            // No total counts every check as not run, as the run email reads it.
+            String status = notRun >= total ? runCopy.text("rule.notrun") : runCopy.text("rule.partly", [notRun: notRun, total: total])
+            "${rule.id} · ${status}".toString()
+        }
+    }
+
     /** "F-100000 · R2 · 6 days · Invoice INV8412671 has no Etail id". */
-    static String findingLine(Map finding, EmailCopyReader copy) {
+    private static String findingLine(Map finding, EmailCopyReader copy) {
         int age = count(finding.ageDays)
         return [finding.id, finding.statement, age == 1 ? copy.text("age.one") : copy.text("age.many", [days: age]), finding.headline]
                 .findAll { it != null && it != "" }.join(" · ")
@@ -143,7 +155,7 @@ class AuditDigestSupport {
     }
 
     /** Findings a statement holds beyond the 50 the report lists. */
-    static int omittedCount(Map report) {
+    private static int omittedCount(Map report) {
         int omitted = 0
         ((report?.categories ?: [:]) as Map).values().each { Object category ->
             (((category as Map).statements ?: [:]) as Map).values().each { Object statement ->
@@ -174,7 +186,8 @@ class AuditDigestSupport {
             try {
                 outcomes.add([auditDigestId: digest.auditDigestId] + sendIfDue(ec, digest, now))
             } catch (Throwable t) {
-                logger.warn("Audit digest {} for tenant {} failed: {}", digest.auditDigestId, digest.companyUserGroupId, t.message)
+                // ERROR: the DAR-BE-015 capture keeps ERROR and above, so a digest that crashed reaches Darpan's alerts room.
+                logger.error("Audit digest {} for tenant {} failed: {}", digest.auditDigestId, digest.companyUserGroupId, t.message)
                 outcomes.add([auditDigestId: digest.auditDigestId, sent: false, reason: "FAILED"])
             }
         }

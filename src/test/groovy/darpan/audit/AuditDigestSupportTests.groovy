@@ -42,8 +42,10 @@ class AuditDigestSupportTests {
         doc.categories.orders.statements.R2.text = "Invoice has an Etail id"
         doc.categories.orders.statements.R2.checks = [[id: "invoices-without-etail-id", status: "notRun"]]
         String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null, COPY, RUN_COPY)
-        assertEquals("R2 did not run this morning. Darpan has been alerted and is working on a fix.", text.readLines()[1],
-                "said under the title, before any count")
+        // OC55 (Aditi D8): the email goes to the tenant's people, so it names the rule neutrally and never says Darpan was
+        // alerted (that goes to Darpan's alerts room); a rule not checked never reads clean.
+        assertEquals("R2 · Not checked this morning.", text.readLines()[1], "said under the title, before any count")
+        assertFalse(text.contains("alerted"), text)
         assertFalse(text.contains("read failed"), text)
         assertFalse(text.contains(reason) || text.contains("Not complete") || text.contains("invoices-without-etail-id"), text)
         assertFalse(text.contains("Report:"), "no app address, no link line")

@@ -229,7 +229,9 @@ class EmailTemplatesRenderTests {
         String chat = AuditDigestSupport.render(v[0] as Map, v[1] as String, v[2] as boolean, v[3] as Map, v[4] as String,
                 new EmailCopyReader(ec, "DARPAN_AUDIT_DIGEST"), runCopy, false)
         assertFalse(chat.contains("did not run"), chat)
-        assertTrue(digest(v).contains("R2 did not run this morning."), "the email copy keeps it")
+        // OC55 (Aditi D8): the email keeps a neutral line per rule not checked, never the alerted sentence.
+        assertTrue(digest(v).contains("R2 · Not checked this morning."), "the email copy keeps a neutral line")
+        assertFalse(digest(v).contains("alerted"), digest(v))
     }
 
     @Test
@@ -255,7 +257,10 @@ class EmailTemplatesRenderTests {
             String html = render("AuditRun", full, "html"), text = render("AuditRun", full, "text")
             assertTrue(html.contains("DO THESE FIRST") && text.contains("\nDo these first\n"), "heading in both parts")
             assertTrue(text.contains("  Every one of the 1 is in gorjana-month-close-2026-11-R10.csv · ${AuditEmailSamples.BASE}/audits/month-close"), text)
-            assertTrue(html.contains("Skipped today: R9.") && text.contains("Skipped today: R9."))
+            // F-E6 (Aditi 2026-11-28): the not-run notice is the alerts room's (alertText), never the client's email
+            assertFalse(html.contains("Skipped today") || text.contains("Skipped today"), "no notice in the email")
+            assertTrue(AuditRunMessage.alertText(full.runFacts as Map, AuditEmailSamples.BASE, new EmailCopyReader(ec, "DARPAN_AUDIT_RUN"))
+                    .contains("Skipped today: R9."), "the edited notrun block reaches the alerts room")
             assertFalse(html.contains("ACT ON FIRST") || html.contains("did not run on this morning"))
 
             // an address, an unknown variable, empty text: the default goes, and the report link stays the code-built one

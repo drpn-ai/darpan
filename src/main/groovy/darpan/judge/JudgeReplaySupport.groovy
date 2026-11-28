@@ -465,7 +465,7 @@ class JudgeReplaySupport {
                       missingObjectDifferenceCount: compared.missingObjectDifferenceCount,
                       ruleDifferenceCount         : compared.ruleDifferenceCount, duplicateDifferenceCount: compared.duplicateDifferenceCount,
                       processingWarnings          : (List) (compared.processingWarnings ?: [])]
-        RunConclusionSupport.applyHidden(counts, (Map) concluded.hiddenByBucket)
+        RunConclusionSupport.applyHidden(counts, (Map) concluded.hiddenByBucket, "differenceCount", (Collection) concluded.repeatSidesCleared)
         Map result = [checkId                : check.checkId, savedRunId: check.savedRunId, ruleSetId: args.ruleSetId,
                       compareScopeId         : args.compareScopeId, compareScopeDescription: compared.compareScopeDescription,
                       replayOfRunFolder      : replayOf, file1Name: file1.fileName, file2Name: file2.fileName,

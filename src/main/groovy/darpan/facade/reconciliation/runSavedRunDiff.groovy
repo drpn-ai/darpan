@@ -803,7 +803,7 @@ try {
                                             diffFile: resolveOutputFile(serviceResult), file1Source: file1Source, file2Source: null,
                                             file1Result: file1Result, file2Result: null, runResultId: obsRunId, stepCtx: obsCtx])
                                     // DAR-BE-157: rows a HIDE rule dropped are not differences this run reports.
-                                    darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(serviceResult, (Map) concluded?.hiddenByBucket)
+                                    darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(serviceResult, (Map) concluded?.hiddenByBucket, "differenceCount", (Collection) concluded?.repeatSidesCleared)
                                     obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     String resultDataManagerPath = serviceResult.diffLocation ?
@@ -1004,7 +1004,7 @@ try {
                                             diffFile: resolveOutputFile(serviceResult), file1Source: file1Source, file2Source: file2Source,
                                             file1Result: file1Result, file2Result: file2Result, runResultId: obsRunId, stepCtx: obsCtx])
                                     // DAR-BE-157: rows a HIDE rule dropped are not differences this run reports.
-                                    darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(serviceResult, (Map) concluded?.hiddenByBucket)
+                                    darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(serviceResult, (Map) concluded?.hiddenByBucket, "differenceCount", (Collection) concluded?.repeatSidesCleared)
                                     obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     String resultDataManagerPath = serviceResult.diffLocation ?

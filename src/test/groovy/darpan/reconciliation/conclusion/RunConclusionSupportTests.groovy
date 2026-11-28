@@ -756,6 +756,28 @@ class RunConclusionSupportTests {
         assertEquals([[code: "CONC_SPLIT_RMA", label: "One RMA per resolution", count: 3]], d.summary.conclusions.hidden)
     }
 
+    /**
+     * DAR-OPS-029 S99-015 (S01b F-H1): each side's repeated-key warning goes with that side's repeats. With repeats on both
+     * sides and a rule that explains only FILE_2's, FILE_2's warning goes and FILE_1's stays (both stayed before).
+     */
+    @Test
+    void eachSidesRepeatedKeyWarningGoesWithThatSidesRepeats() {
+        String file1Repeats = "Compare scope 'Returns' FILE_1 (HotWax) has 1 key(s) on more than one record; " +
+                darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+        List<Map> rows = repeatedOnFile2("K", "split") +
+                [repeatRow("DUPLICATE_IN_FILE_2_PAIRED", "J", FILE2, [orderId: "J"]),
+                 repeatRow("DUPLICATE_IN_FILE_1", "J", FILE1, [omsOrderId: "J", seq: "1"]),
+                 repeatRow("DUPLICATE_IN_FILE_1", "J", FILE1, [omsOrderId: "J", seq: "2"])]
+        File doc = writeDiffDocument(rows, [totalDifferences: 6], [file1Repeats, REPEATS_WARNING, OTHER_WARNING])
+        Map out = RunConclusionSupport.concludeRun(args(doc, SPLIT_RMA_HIDE))
+        assertEquals(["FILE_2"], out.repeatSidesCleared)
+        assertEquals([file1Repeats, OTHER_WARNING], parse(doc).processingWarnings, "the document keeps FILE_1's warning only")
+
+        Map runCounts = [differenceCount: 6, duplicateDifferenceCount: 6, processingWarnings: [file1Repeats, REPEATS_WARNING, OTHER_WARNING]]
+        RunConclusionSupport.applyHidden(runCounts, (Map) out.hiddenByBucket, "differenceCount", (Collection) out.repeatSidesCleared)
+        assertEquals([file1Repeats, OTHER_WARNING], runCounts.processingWarnings, "the run counts agree with the document")
+    }
+
     @Test
     void aKeyWhoseRepeatsAreNotHiddenKeepsItsPartnerRow() {
         File doc = writeDiffDocument(repeatedOnFile2("K", "split") + repeatedOnFile2("J", "other"), [totalDifferences: 6], [REPEATS_WARNING])

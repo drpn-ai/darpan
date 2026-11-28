@@ -85,7 +85,7 @@ class RunConclusionSupport {
      * total and off its own bucket's count, so the total stays the sum of the buckets. A single-sided run's FINDING rows
      * have no bucket count (only the total). Only the keys present are changed; no hidden rows, no change.
      */
-    static void applyHidden(Map counts, Map hiddenByBucket, String totalKey = "differenceCount") {
+    static void applyHidden(Map counts, Map hiddenByBucket, String totalKey = "differenceCount", Collection<String> clearedSides = null) {
         if (!counts || !hiddenByBucket) return
         int onlyIn1 = (hiddenByBucket.get("MISSING_FROM_FILE_2") ?: 0) as int
         int onlyIn2 = (hiddenByBucket.get("MISSING_FROM_FILE_1") ?: 0) as int
@@ -103,15 +103,26 @@ class RunConclusionSupport {
         // explains keeps it, and the run still says it did not finish cleanly.
         int duplicates = (hiddenByBucket.findAll { k, v -> k?.toString()?.startsWith("DUPLICATE_IN_FILE_") }.values().sum(0) ?: 0) as int
         minus("duplicateDifferenceCount", duplicates)
-        if (duplicates && counts.get("duplicateDifferenceCount") == 0 && counts.get("processingWarnings") instanceof List) {
+        if (!(counts.get("processingWarnings") instanceof List)) return
+        if (clearedSides != null) {
+            // DAR-OPS-029 S99-015: per side. The conclude pass names the sides whose every repeat a rule hid (repeatSidesCleared).
+            if (clearedSides) counts.put("processingWarnings", withoutRepeatedKeyWarning((List) counts.get("processingWarnings"), clearedSides))
+        } else if (duplicates && counts.get("duplicateDifferenceCount") == 0) {
             counts.put("processingWarnings", withoutRepeatedKeyWarning((List) counts.get("processingWarnings")))
         }
     }
 
-    /** The warnings without the compare's repeated-key one (it ends in RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL). */
-    static List withoutRepeatedKeyWarning(List warnings) {
+    /**
+     * The warnings without the compare's repeated-key one (it ends in RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL);
+     * with sides, only the ones naming those sides ("... FILE_1 (HotWax) has N key(s) ...").
+     */
+    static List withoutRepeatedKeyWarning(List warnings, Collection<String> sides = null) {
         return (warnings ?: []).findAll {
-            !it?.toString()?.endsWith(darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL)
+            String text = it?.toString()
+            if (!text?.endsWith(darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL)) return true
+            if (sides == null) return false
+            def named = text =~ /\b(FILE_[12]) \(/
+            return !(named.find() && sides.contains(named.group(1)))
         }
     }
 
@@ -289,7 +300,7 @@ class RunConclusionSupport {
             return [f: f, sides: sides, lookedUp: lookedUp, conclusion: conclusion]
         }
         Map<String, Map<String, String>> hiddenRepeats = hiddenCodes ? hiddenRepeatedKeys(diffFile, finding, concludeRow, hiddenCodes) : [:]
-        int repeatsShown = 0
+        Set<String> repeatsShownBySide = new HashSet<>()
 
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
             Map one = concludeRow(row)
@@ -305,7 +316,7 @@ class RunConclusionSupport {
                 hiddenByBucket.put((String) f.bucket, (hiddenByBucket.get((String) f.bucket) ?: 0) + 1)
                 return null
             }
-            if (((String) f.bucket)?.startsWith("DUPLICATE_IN_FILE_")) repeatsShown++
+            if ((String) f.bucket in ["DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2"]) repeatsShownBySide.add(((String) f.bucket).substring("DUPLICATE_IN_".length()))
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
                 labels.put(code, conclusion.label?.toString() ?: code)
@@ -342,13 +353,13 @@ class RunConclusionSupport {
                                                 [code: code, label: labels.get(code), count: count]
                                             }] : [:])]
         }, { List warnings ->
-            // OC71: the document's own warnings say what the run counts say (applyHidden): once every repeated-key row is
-            // hidden the compare's repeated-key warning goes with them; a repeat still shown keeps it.
-            int repeatsHidden = (hiddenByBucket.findAll { k, v -> k?.startsWith("DUPLICATE_IN_FILE_") }.values().sum(0) ?: 0) as int
-            return repeatsHidden && !repeatsShown ? withoutRepeatedKeyWarning(warnings) : warnings
+            // OC71 + S99-015: the document's own warnings say what the run counts say (applyHidden): once every repeat of a
+            // side is hidden, that side's repeated-key warning goes; a side with a repeat still shown keeps its warning.
+            return withoutRepeatedKeyWarning(warnings, repeatSidesCleared(hiddenByBucket, repeatsShownBySide))
         })
         return [ran: true, counts: counts.findAll { !hiddenCodes.contains(it.key) }, unknownSides: unknownSides,
-                hidden: hidden, hiddenByBucket: hiddenByBucket] +
+                hidden: hidden, hiddenByBucket: hiddenByBucket,
+                repeatSidesCleared: repeatSidesCleared(hiddenByBucket, repeatsShownBySide)] +
                 (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, answeredFromFacts: brain.answeredFromFacts,
                                  questions: brain.questions, warnings: brain.warnings]] : [:])
     }
@@ -396,6 +407,13 @@ class RunConclusionSupport {
     private static void readRows(File diffFile, Closure visit) {
         DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(diffFile, visit)
         if (!scan.complete) throw new IllegalStateException("Not concluded: ${scan.problem()}".toString())
+    }
+
+    /** S99-015: the sides (FILE_1 / FILE_2) with a repeated-key row hidden and none shown. */
+    private static List<String> repeatSidesCleared(Map<String, Integer> hiddenByBucket, Set<String> shownSides) {
+        return ["FILE_1", "FILE_2"].findAll { String side ->
+            (hiddenByBucket.get("DUPLICATE_IN_".concat(side)) ?: 0) > 0 && !shownSides.contains(side)
+        }
     }
 
     /** DAR-BE-151: what BrainFactAdapter reads of a finding, and nothing else. */

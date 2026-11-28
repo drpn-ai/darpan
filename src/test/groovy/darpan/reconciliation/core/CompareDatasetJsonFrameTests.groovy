@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 
+import static org.apache.spark.sql.functions.col
+import static org.apache.spark.sql.functions.to_json
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -146,6 +148,46 @@ class CompareDatasetJsonFrameTests {
         assertEquals(["007", "7"], csvKeys, "leading zeros are not stripped: 007 and 7 are different keys")
         assertEquals(["ab"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":"Ab"}'), paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])))
         assertEquals(["ab"], ids(CompareDatasetSupport.buildCsvIdDf(csv("id", "aB "), [[idExpr: "id", idNormalizer: "CASE_FOLD"]], "File 2")))
+    }
+
+    // DAR-BE-185 (moved from SparkReadSchemaSupportTests with the saved read schema, S01b F-E2). Spark 4 turns ANSI mode on,
+    // where a bad cast throws instead of yielding null. Ingest reads JSON with inference only, which never coerces: a
+    // non-number in a number-looking column keeps its text, and the only cast on the compare path is to string (total).
+
+    @Test
+    void numbersAndBooleansCompareAsTheirText() {
+        Row inferred = json('{"compare_id":"A","amount":1.50,"qty":3,"paid":true}').select(
+                CompareDatasetSupport.applyIdNormalizer(col("amount"), null),
+                CompareDatasetSupport.applyIdNormalizer(col("qty"), null),
+                CompareDatasetSupport.applyIdNormalizer(col("paid"), null)).collectAsList().get(0)
+        // Pinned from Spark 3.5.1: the text a value compares as. Money read as a double: DAR-BE-416.
+        assertEquals(["1.5", "3", "true"], (0..2).collect { inferred.get(it) })
+    }
+
+    @Test
+    void aCompareOverMessyRowsStillFinishesAndKeepsTheBadValuesAsText() {
+        Dataset raw1 = json('{"id":" A ","qty":"abc","amount":""}', '{"id":"B","qty":"1","amount":"x"}')
+        Dataset raw2 = json('{"id":"a","qty":3,"amount":1.50}', '{"id":7,"qty":-1,"amount":0}')
+        Dataset id1 = CompareDatasetSupport.buildJsonIdDf(raw1, paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])
+        Dataset id2 = CompareDatasetSupport.buildJsonIdDf(raw2, paths('$.id'), "File 2", ["CASE_FOLD"], ['$.id'])
+        Dataset data1 = CompareDatasetSupport.buildJsonDataDf(raw1, paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])
+        Dataset data2 = CompareDatasetSupport.buildJsonDataDf(raw2, paths('$.id'), "File 2", ["CASE_FOLD"], ['$.id'])
+
+        Dataset onlyIn1 = id1.join(id2, id1.col("compare_id").equalTo(id2.col("compare_id")), "left_anti").distinct()
+        Dataset onlyIn2 = id2.join(id1, id1.col("compare_id").equalTo(id2.col("compare_id")), "left_anti").distinct()
+        Dataset missing = CompareDatasetSupport.unionDatasets(
+                CompareDatasetSupport.buildMissingDiffRows(data1, onlyIn1, "MISSING", "File 1", "File 2", "n"),
+                CompareDatasetSupport.buildMissingDiffRows(data2, onlyIn2, "MISSING", "File 2", "File 1", "n"))
+        Dataset matched = CompareDatasetSupport.buildMatchedIdDataset(id1, id2)
+        Dataset pairs = CompareDatasetSupport.buildMatchedPairDataset(data1, data2, matched, "S1", "order")
+                .select(col("primaryId"), to_json(col("file1")), to_json(col("file2")))
+
+        // Pinned from Spark 3.5.1, row for row: "abc" and "" stay text, nothing became a null that could compare equal.
+        assertEquals(['[MISSING,7,File 2,File 1,{"amount":0.0,"id":"7","qty":-1},n]',
+                      '[MISSING,b,File 1,File 2,{"amount":"x","id":"B","qty":"1"},n]'],
+                missing.collectAsList().collect { Row r -> r.toString() }.sort())
+        assertEquals(['[a,{"amount":"","id":" A ","qty":"abc"},{"amount":1.5,"id":"a","qty":3}]'],
+                pairs.collectAsList().collect { Row r -> r.toString() }.sort())
     }
 
     @Test

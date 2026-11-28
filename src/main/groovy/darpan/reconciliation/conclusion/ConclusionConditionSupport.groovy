@@ -11,11 +11,15 @@ package darpan.reconciliation.conclusion
  *
  * UNKNOWN presence satisfies no presence condition: "Not found" is a claim, and an unknown is not
  * evidence for it.
+ *
+ * WITHIN_HOURS is measured back from asOfMillis, the one instant the conclude pass pins (DAR-OPS-029 S03a, lens E3), so a
+ * replay concludes as the run did and every row of a pass reads the same "now". Only a caller with no pass (a unit check)
+ * falls back to the clock.
  */
 class ConclusionConditionSupport {
 
     /** @return [passed: boolean, value: String] — value is what the condition read. */
-    static Map check(Map condition, Map side) {
+    static Map check(Map condition, Map side, Long asOfMillis = null) {
         boolean firstField = "FIRST_FIELD" == text(condition.get("keyScope"))
         String presence = text(firstField ? side?.get("firstFieldPresence") : side?.get("presence"))
         Map record = (Map) (firstField ? side?.get("firstFieldRecord") : side?.get("record"))
@@ -35,8 +39,9 @@ class ConclusionConditionSupport {
         List<String> wanted = ((List) (condition.get("conditionValues") ?: [])).collect { it?.toString()?.trim()?.toUpperCase(Locale.ROOT) }
         List<String> values = records.collectMany { Map r -> valuesAt(r, field) }
         boolean any = "ANY" == text(condition.get("quantifier"))
-        boolean passed = any ? values.any { String v -> holds(operator, v, wanted) }
-                             : values.every { String v -> holds(operator, v, wanted) }
+        long asOf = asOfMillis != null ? asOfMillis : System.currentTimeMillis()
+        boolean passed = any ? values.any { String v -> holds(operator, v, wanted, asOf) }
+                             : values.every { String v -> holds(operator, v, wanted, asOf) }
         List<String> seen = values.findAll { it != null }.unique(false)
         return [passed: passed, value: seen ? seen.join(", ") : null]
     }
@@ -63,7 +68,7 @@ class ConclusionConditionSupport {
         return values ? values : [null]
     }
 
-    private static boolean holds(String operator, String value, List<String> wanted) {
+    private static boolean holds(String operator, String value, List<String> wanted, long asOf) {
         switch (operator) {
             case "IN": return value != null && wanted.contains(value.toUpperCase(Locale.ROOT))
             case "NOT_IN": return value == null || !wanted.contains(value.toUpperCase(Locale.ROOT))
@@ -76,7 +81,7 @@ class ConclusionConditionSupport {
             // DAR-BE-327 (Aditi 2026-11-20): less than the one number, e.g. a return date (epoch millis) before go-live.
             case "LT": return isBelow(value, wanted ? wanted[0] : null)
             // Aditi 2026-10-24: a time within the last N hours (a fulfilled item NetSuite bills within 24 hours).
-            case "WITHIN_HOURS": return isWithinHours(value, wanted ? wanted[0] : null)
+            case "WITHIN_HOURS": return isWithinHours(value, wanted ? wanted[0] : null, asOf)
             case "BLANK": return !value
             case "NOT_BLANK": return value as boolean
             default: throw new IllegalArgumentException("Unsupported conclusion operator '${operator}'")
@@ -107,12 +112,12 @@ class ConclusionConditionSupport {
         }
     }
 
-    /** An ISO instant or epoch millis no more than `hours` before now (and not after it). */
-    private static boolean isWithinHours(String value, String hours) {
+    /** An ISO instant or epoch millis no more than `hours` before asOf (and not more than a minute after it). */
+    private static boolean isWithinHours(String value, String hours, long asOf) {
         if (!value || !hours) return false
         try {
             long at = value ==~ /-?\d{10,}/ ? Long.parseLong(value) : java.time.Instant.parse(value).toEpochMilli()
-            long age = System.currentTimeMillis() - at
+            long age = asOf - at
             return age >= -60_000L && age <= (long) (new BigDecimal(hours) * 3_600_000L)
         } catch (Exception ignored) {
             return false

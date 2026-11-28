@@ -78,6 +78,18 @@ class ConclusionConditionSupportTests {
         }
     }
 
+    // DAR-OPS-029 S03a (lens E3, handoff from S04): WITHIN_HOURS measures back from the instant it is given, not the clock,
+    // so a replay of 2026-11-01's run concludes as that run did.
+    @Test
+    void withinHoursMeasuresBackFromTheInstantItIsGiven() {
+        long runAt = java.time.Instant.parse("2026-11-01T00:00:00Z").toEpochMilli()
+        Map c = cond(fieldExpression: "completedAt", operator: "WITHIN_HOURS", conditionValues: ["24"])
+        Map side = [presence: "KEPT", record: [completedAt: "2026-10-31T12:00:00Z"]]
+        assertTrue(ConclusionConditionSupport.check(c, side, runAt).passed, "12 hours before the run")
+        assertFalse(ConclusionConditionSupport.check(c, side, runAt + 2 * 86_400_000L).passed, "60 hours before a later run")
+        assertFalse(ConclusionConditionSupport.check(c, side).passed, "the clock today: weeks later, so not within 24 hours")
+    }
+
     @Test
     void anyHoldsWhenOneRecordDoes() {
         Map side = [presence: "KEPT", record: [q: "0"], records: [[q: "0"], [q: "2"]]]

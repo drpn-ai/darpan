@@ -62,8 +62,9 @@ class ConclusionTreeEngine implements Closeable {
         }
     }
 
-    List<Map> conclude(List<Map> findings) {
-        List<Map> facts = (findings ?: []).collect { Map f -> ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides) }
+    /** asOfMillis: the pass's one instant for WITHIN_HOURS (ConclusionConditionSupport); null reads the clock. */
+    List<Map> conclude(List<Map> findings, Long asOfMillis = null) {
+        List<Map> facts = (findings ?: []).collect { Map f -> ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides, asOfMillis) }
         if (facts.isEmpty()) return []
         KieSession session = container.newKieSession()
         try {

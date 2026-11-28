@@ -93,7 +93,7 @@ class ConclusionLookupSupport {
      * Could the answer change a finding concluded at `reachedNodeId` (null: unexplained)? Only if it tried a rule reading
      * lookup `name` whose other conditions already hold on its `sides`.
      */
-    static boolean reaches(Map plan, String name, String reachedNodeId, String bucket, Map sides) {
+    static boolean reaches(Map plan, String name, String reachedNodeId, String bucket, Map sides, Long asOfMillis = null) {
         Map<String, Map> nodes = (Map<String, Map>) plan.nodes
         List<Map> path = []
         for (Map n = reachedNodeId ? nodes.get(reachedNodeId) : null; n != null; n = n.parentNodeId ? nodes.get(n.parentNodeId) : null) path.add(n)
@@ -103,7 +103,7 @@ class ConclusionLookupSupport {
             if (reader.parentNodeId && !onPath.contains(reader.parentNodeId)) return false
             Map matchedSibling = path.find { it.parentNodeId == reader.parentNodeId }
             if (matchedSibling != null && (matchedSibling.sequenceNum as int) < (reader.sequenceNum as int)) return false
-            return ConclusionTreeSupport.matches(ConclusionTreeSupport.newFact(bucket, sides),
+            return ConclusionTreeSupport.matches(ConclusionTreeSupport.newFact(bucket, sides, asOfMillis),
                     reader + [conditions: ((List<Map>) (reader.conditions ?: [])).findAll { !reads(it, name) }])
         }
     }

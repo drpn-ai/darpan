@@ -47,6 +47,18 @@ class RunConclusionSupport {
     static void resetForTests() {
         maxBrainFindings = DEFAULT_MAX_BRAIN_FINDINGS
     }
+    /**
+     * DAR-OPS-029 S03a (lens E3): the one instant a conclude pass measures WITHIN_HOURS back from: args.asOf (a Timestamp,
+     * Date or epoch millis: the run's own time, so a replay concludes as the run did), else the clock, read once per pass.
+     */
+    static long asOfOf(Map args) {
+        Object asOf = args?.get("asOf")
+        if (asOf instanceof Date) return ((Date) asOf).getTime()
+        if (asOf instanceof Number) return ((Number) asOf).longValue()
+        if (asOf != null) throw new IllegalArgumentException("asOf is a Timestamp, Date or epoch millis, got: ${asOf}")
+        return System.currentTimeMillis()
+    }
+
     /** DAR-BE-118: ids per lookup call. */
     static final int LOOKUP_BATCH = 500
     static Map concludeRun(Map args) {
@@ -106,13 +118,14 @@ class RunConclusionSupport {
     static void concludeEach(Map args, Closure visit) {
         List<Map> rules = (List<Map>) (args.rules ?: [])
         ConclusionTreeEngine engine = rules ? ConclusionTreeEngine.compile(rules) : null
+        long asOf = asOfOf(args)
         try {
             Map prepared = evidenceOf(args)
             Closure<Map> finding = (Closure<Map>) prepared.finding
             DiffDocumentStreamSupport.forEachRow((File) args.diffFile) { Map row ->
                 Map f = finding(row)
-                visit.call(row, engine ? engine.conclude([f])[0] :
-                        ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides)))
+                visit.call(row, engine ? engine.conclude([f], asOf)[0] :
+                        ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides, asOf)))
             }
         } finally {
             engine?.close()
@@ -197,6 +210,7 @@ class RunConclusionSupport {
         Map prepared = evidenceOf(args)
         // DAR-BE-198 (b): the run's Unexplained rows are expected (RuleSetCompareScope.unexplainedOutcome EXPECTED).
         boolean unexplainedExpected = args.unexplainedExpected == true
+        long asOf = asOfOf(args)
         Map sideSpecs = (Map) prepared.sideSpecs
         Map<String, String> otherSideKeyFields = (Map<String, String>) prepared.otherSideKeyFields
         Map<String, Map> index = (Map<String, Map>) prepared.index
@@ -224,7 +238,7 @@ class RunConclusionSupport {
         Map<String, Integer> hidden = new LinkedHashMap<>()
         Map<String, Integer> hiddenByBucket = new LinkedHashMap<>()
 
-        Map<String, Map<String, Map>> answers = engine ? lookUp(engine, rules, args, diffFile, finding) : [:]
+        Map<String, Map<String, Map>> answers = engine ? lookUp(engine, rules, args, diffFile, finding, asOf) : [:]
         // DAR-BE-151: a scope in the brain is concluded by it first; the tree concludes what the brain leaves unexplained.
         Map brain = null
         if (args.brain instanceof Map) {
@@ -258,7 +272,7 @@ class RunConclusionSupport {
                 }
             }
             Map conclusion = (Map) ((Map) (brain?.byKey ?: [:])).get(row.get("primaryId")?.toString()) ?:
-                    (engine ? engine.conclude([f])[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides)))
+                    (engine ? engine.conclude([f], asOf)[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides, asOf)))
             return [f: f, sides: sides, lookedUp: lookedUp, conclusion: conclusion]
         }
         Map<String, Map<String, String>> hiddenRepeats = hiddenCodes ? hiddenRepeatedKeys(diffFile, finding, concludeRow, hiddenCodes) : [:]
@@ -362,7 +376,7 @@ class RunConclusionSupport {
      * LOOKUP_BATCH, for only the ids named by findings that reached a rule reading it: name -> (id -> record).
      */
     private static Map<String, Map<String, Map>> lookUp(ConclusionTreeEngine engine, List<Map> rules, Map args, File diffFile,
-                                                        Closure<Map> finding) {
+                                                        Closure<Map> finding, long asOf) {
         List<Map> lookups = (List<Map>) (args.lookups ?: [])
         Closure fetch = (Closure) args.fetchLookup
         if (!lookups || fetch == null) return [:]
@@ -370,9 +384,9 @@ class RunConclusionSupport {
         Map<String, Set<String>> wanted = lookups.collectEntries { [(it.name): new LinkedHashSet<String>()] }
         DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
             Map f = finding(row)
-            String reached = engine.conclude([f])[0].nodeId
+            String reached = engine.conclude([f], asOf)[0].nodeId
             lookups.each { Map l ->
-                if (ConclusionLookupSupport.reaches(plan, (String) l.name, reached, (String) f.bucket, (Map) f.sides)) {
+                if (ConclusionLookupSupport.reaches(plan, (String) l.name, reached, (String) f.bucket, (Map) f.sides, asOf)) {
                     wanted.get(l.name).addAll(ConclusionLookupSupport.idsOf((Map) ((Map) f.sides).get(l.subject), l))
                 }
             }

@@ -15,13 +15,15 @@ class ConclusionTreeSupport {
     static final String UNEXPLAINED = "UNEXPLAINED"
     static final String UNEXPLAINED_LABEL = "Unexplained"
 
-    static Map newFact(String bucket, Map sides) {
+    /** asOfMillis: the conclude pass's one instant, which WITHIN_HOURS conditions measure back from (null: the clock). */
+    static Map newFact(String bucket, Map sides, Long asOfMillis = null) {
         Map fact = new HashMap()
         fact.put("_node", ROOT)
         fact.put("_bucket", bucket)
         fact.put("_sides", sides ?: [:])
         fact.put("_path", [])
         fact.put("_reached", null)
+        fact.put("_asOf", asOfMillis)
         return fact
     }
 
@@ -29,14 +31,14 @@ class ConclusionTreeSupport {
         String applies = text(node.get("appliesToBucket"))
         if (applies && applies != fact.get("_bucket")) return false
         for (Map condition : ((List<Map>) (node.get("conditions") ?: []))) {
-            if (!ConclusionConditionSupport.check(condition, sideFor(fact, condition)).passed) return false
+            if (!ConclusionConditionSupport.check(condition, sideFor(fact, condition), (Long) fact.get("_asOf")).passed) return false
         }
         return true
     }
 
     static void advance(Map fact, Map node) {
         List<Map> checks = ((List<Map>) (node.get("conditions") ?: [])).collect { Map condition ->
-            Map r = ConclusionConditionSupport.check(condition, sideFor(fact, condition))
+            Map r = ConclusionConditionSupport.check(condition, sideFor(fact, condition), (Long) fact.get("_asOf"))
             [label: condition.get("checkLabel"), value: r.value, passed: true]
         }
         ((List) fact.get("_path")).add([code: node.get("conclusionEnumId"), label: node.get("label"), checks: checks])

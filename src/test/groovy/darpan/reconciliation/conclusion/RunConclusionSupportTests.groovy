@@ -319,6 +319,27 @@ class RunConclusionSupportTests {
         assertFalse(original.text.contains("\"conclusion\""), "concludeEach leaves the document untouched")
     }
 
+    // DAR-OPS-029 S03a (lens E3): the conclude pass and the read-only pass both read WITHIN_HOURS from args.asOf, the run's own
+    // time, so a replay years later reaches the conclusion the run reached.
+    @Test
+    void withinHoursReadsTheRunsOwnTime() {
+        List rules = [[conclusionEnumId: "CONC_NOT_BILLED_YET", label: "Not billed yet", appliesToBucket: "MISSING_FROM_FILE_2",
+                       conditions: [cond(subject: "FILE_1", fieldExpression: "completedAt", operator: "WITHIN_HOURS",
+                                         conditionValues: ["24"], checkLabel: "Completed in the last day")]]]
+        Closure<File> doc = { -> writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2,
+                [omsOrderId: "M1", orderItemSeqId: "01", completedAt: "2020-01-01T10:00:00Z"])]) }
+        java.sql.Timestamp runAt = java.sql.Timestamp.from(java.time.Instant.parse("2020-01-01T12:00:00Z"))
+        File replay = doc()
+        RunConclusionSupport.concludeRun(args(replay, rules) + [asOf: runAt])
+        assertEquals("CONC_NOT_BILLED_YET", onlyConclusion(replay).code)
+        List<String> visited = []
+        RunConclusionSupport.concludeEach(args(doc(), rules) + [asOf: runAt.time]) { Map row, Map c -> visited << (c.code as String) }
+        assertEquals(["CONC_NOT_BILLED_YET"], visited, "the read-only pass reads the same instant")
+        File today = doc()
+        RunConclusionSupport.concludeRun(args(today, rules))
+        assertEquals("UNEXPLAINED", onlyConclusion(today).code, "no run time: the clock, years later")
+    }
+
     @Test
     void countsSumToTheRowsWritten() {
         File doc = writeDiffDocument([missingRow("A${SEP}1", FILE1, FILE2), missingRow("B${SEP}1", FILE1, FILE2),

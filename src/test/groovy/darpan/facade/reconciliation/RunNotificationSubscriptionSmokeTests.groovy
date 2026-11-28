@@ -1,5 +1,7 @@
 package darpan.facade.reconciliation
 
+import darpan.config.DarpanSettings
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -45,6 +47,8 @@ class RunNotificationSubscriptionSmokeTests {
     void cleanup() {
         AutomationExecutionSupport.resetForTests()
         TenantNotificationSupport.resetDeliveryHook()
+        ErrorChatSupport.resetForTests()
+        DarpanSettings.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -440,6 +444,47 @@ class RunNotificationSubscriptionSmokeTests {
         assertTrue(cardText.contains("OMS_GQL extract failed: HTTP 401 from oms.example.com (token expired)"), cardText)
         assertFalse(cardText.contains("Extractor.groovy"), "first line only: ${cardText}")
         assertTrue(cardText.contains("FAILED · manual"), cardText)
+    }
+
+    /**
+     * OC48: a run's warnings are counted in its client message and never quoted there; their words go to Darpan's alerts
+     * room, once per run (the notification claim), so a warning still reaches someone who can act on it. A run with no
+     * warnings sends the alerts room nothing.
+     */
+    @Test
+    void aRunsWarningsReachDarpansAlertsRoomOnceAndClientsOnlyAsACount() {
+        String chatSpaceId = seedDefaultChatSpace("Warned space")
+        String warnedRun = seedRun("AUT_STAT_SUCCESS")
+        String quietRun = seedRun("AUT_STAT_SUCCESS")
+        List<String> alerts = []
+        List<String> deliveries = []
+        DarpanSettings.rowLoader = { -> [(ErrorChatSupport.WEBHOOK_SETTING): [settingValue: WEBHOOK]] }
+        DarpanSettings.expire()
+        ErrorChatSupport.postHook = { String url, Map payload -> alerts << (payload.text as String); [ok: true] }
+        TenantNotificationSupport.setDeliveryHook { String url, Map payload -> deliveries << (payload.text as String); [ok: true, statusCode: 200] }
+        try {
+            Map<String, Object> warned = [reconciliationRunResultId: warnedRun, companyUserGroupId: TENANT_ID, chatSpaceId: chatSpaceId,
+                                          runName: "API Order Sync", savedRunId: "RS_WARNED", differenceCount: 0, onlyInFile1Count: 0,
+                                          onlyInFile2Count: 0,
+                                          processingWarnings: ["Shopify exchange sweep failed: java.net.SocketException: Connection reset"]]
+            TenantNotificationSupport.notifyRunCompleted(ec, warned)
+            assertEquals("ALREADY_NOTIFIED", TenantNotificationSupport.notifyRunCompleted(ec, warned).skippedReason)
+            TenantNotificationSupport.notifyRunCompleted(ec, [reconciliationRunResultId: quietRun, companyUserGroupId: TENANT_ID,
+                                                              chatSpaceId: chatSpaceId, runName: "Quiet Sync", differenceCount: 0,
+                                                              onlyInFile1Count: 0, onlyInFile2Count: 0, processingWarnings: []])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+            ErrorChatSupport.resetForTests()
+            DarpanSettings.resetForTests()
+        }
+
+        assertEquals(2, deliveries.size(), "each run told its space once: ${deliveries}")
+        String client = deliveries.first()
+        assertTrue(client.contains("Warnings (1): details on the run result."), client)
+        assertFalse(client.contains("SocketException"), client)
+        assertEquals(1, alerts.size(), "one alert, for the warned run only: ${alerts}")
+        assertTrue(alerts.first().contains("API Order Sync"), alerts.first())
+        assertTrue(alerts.first().contains("java.net.SocketException: Connection reset"), alerts.first())
     }
 
     private String seedRun(String statusEnumId) {

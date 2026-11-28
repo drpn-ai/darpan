@@ -24,15 +24,46 @@ class RunNotificationVoiceTests {
     }
 
     @Test
-    void failedStatusOutranksEveryShapeBucket() {
-        Map result = RunNotificationVoice.classify(counts(39, 0, 0, [runFailed: true]))
-        assertEquals(RunNotificationVoice.BUCKET_FAILED, result.bucket)
+    void warningsOutrankEveryShapeBucket() {
+        Map result = RunNotificationVoice.classify(counts(39, 0, 0, [hasWarnings: true]))
+        assertEquals(RunNotificationVoice.BUCKET_ISSUES, result.bucket)
+    }
+
+    /**
+     * OC54: repeated keys are a difference of their own and never read clean. differenceCount holds missing, duplicate
+     * and rule differences, so what it holds beyond the other two is the duplicate count when the caller does not give it.
+     */
+    @Test
+    void repeatedKeysAreCountedAndNeverClean() {
+        Map alone = RunNotificationVoice.classify(counts(0, 0, 0, [differenceCount: 6]))
+        assertEquals(RunNotificationVoice.BUCKET_DUPLICATES, alone.bucket)
+        assertEquals(6, alone.duplicateCount)
+        assertEquals(6, alone.totalCount)
+
+        Map given = RunNotificationVoice.classify(counts(0, 0, 0, [differenceCount: 0, duplicateDifferenceCount: 4]))
+        assertEquals(4, given.duplicateCount, "a count the caller gives wins")
+
+        Map beside = RunNotificationVoice.classify(counts(0, 3, 0, [differenceCount: 4]))
+        assertEquals(RunNotificationVoice.BUCKET_MIXED, beside.bucket)
+        assertEquals(1, beside.duplicateCount)
+        assertEquals(4, beside.totalCount)
+
+        Map legacy = RunNotificationVoice.classify(counts(0, 3, 2, [differenceCount: 3]))
+        assertEquals(0, legacy.duplicateCount, "a differenceCount of the missing records alone holds no repeats")
+        assertEquals(RunNotificationVoice.BUCKET_MIXED, legacy.bucket)
     }
 
     @Test
-    void warningsOutrankShapeButNotFailure() {
-        Map result = RunNotificationVoice.classify(counts(39, 0, 0, [hasWarnings: true]))
-        assertEquals(RunNotificationVoice.BUCKET_ISSUES, result.bucket)
+    void aRepeatedKeyRunNamesItsShapeAndListsTheRepeats() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        List<String> alone = RunNotificationVoice.renderLines(RunNotificationVoice.classify(counts(0, 0, 0, [differenceCount: 2])) +
+                [runName: "R", file1SystemLabel: "Shopify", file2SystemLabel: "HotWax", completedMoment: null])
+        assertEquals("R — 2 to look at, all duplicate keys.", alone.first())
+        assertTrue(alone.contains("Duplicate keys: 2"), alone.toString())
+
+        String beside = RunNotificationVoice.renderLines(RunNotificationVoice.classify(counts(2, 0, 1, [differenceCount: 5])) +
+                [runName: "R", file1SystemLabel: "Shopify", file2SystemLabel: "HotWax", completedMoment: null]).first()
+        assertEquals("R — 5 to look at, missing, mismatched and duplicate keys.", beside)
     }
 
     @Test
@@ -210,10 +241,10 @@ class RunNotificationVoiceTests {
     }
 
     @Test
-    void failedRunsCarryNoFlavourAtAll() {
+    void warnedRunsCarryNoFlavourAtAll() {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
         Map model = RunNotificationVoice.classify(
-                [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, runFailed: true]) +
+                [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, hasWarnings: true]) +
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
                  storedStreakDays: 9, completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
@@ -625,32 +656,18 @@ class RunNotificationVoiceTests {
                  completedMoment: null]
     }
 
-    /**
-     * Deliberate deviation from the written plan, which returned a bare headline for these buckets.
-     * A run that failed partway still produced a partial result, and TenantNotificationServiceSmokeTests
-     * had encoded that intent since the audit ("Differences are still reported so the partial result
-     * is visible"). Only the flavour is suppressed above ISSUES, never the numbers.
-     */
+    /** A warned run still reports its counts: only the flavour is off, never the numbers. */
     @Test
-    void failedAndIssueRunsStillReportTheirCounts() {
+    void issueRunsStillReportTheirCounts() {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
-        // A list of pairs, not a map literal: an unquoted Groovy map key is a String, so
-        // [true: ...] would hand the closure "true" rather than the boolean.
-        [[true, RunNotificationVoice.BUCKET_FAILED], [false, RunNotificationVoice.BUCKET_ISSUES]]
-                .each { List pair ->
-            boolean failed = (boolean) pair[0]
-            String expectedBucket = (String) pair[1]
-            Map model = RunNotificationVoice.classify([onlyInFile1Count: 1, onlyInFile2Count: 3,
-                                                       ruleDifferenceCount: 2,
-                                                       runFailed: failed, hasWarnings: !failed]) +
-                    [runName: "R", file1SystemLabel: "SHOPIFY", file2SystemLabel: "OMS",
-                     completedMoment: null]
-            assertEquals(expectedBucket, model.bucket)
-            String text = RunNotificationVoice.renderLines(model).join("\n")
-            assertTrue(text.contains("Missing from OMS: 1"), text)
-            assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
-            assertTrue(text.contains("Field mismatches: 2"), text)
-        }
+        Map model = RunNotificationVoice.classify([onlyInFile1Count: 1, onlyInFile2Count: 3, ruleDifferenceCount: 2,
+                                                   hasWarnings: true]) +
+                [runName: "R", file1SystemLabel: "SHOPIFY", file2SystemLabel: "OMS", completedMoment: null]
+        assertEquals(RunNotificationVoice.BUCKET_ISSUES, model.bucket)
+        String text = RunNotificationVoice.renderLines(model).join("\n")
+        assertTrue(text.contains("Missing from OMS: 1"), text)
+        assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
+        assertTrue(text.contains("Field mismatches: 2"), text)
     }
 
     // -------------------------------------------------------------------------------------

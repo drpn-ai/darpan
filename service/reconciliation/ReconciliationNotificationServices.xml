@@ -23,23 +23,19 @@
             <parameter name="differenceCount"/>
             <parameter name="onlyInFile1Count"/>
             <parameter name="onlyInFile2Count"/>
-            <!-- differenceCount is onlyInFile1Count + onlyInFile2Count and nothing more
-                 (ReconciliationServices.groovy:111 — both sides are left_anti presence checks).
-                 Records present on BOTH sides with differing values are counted only here. Without
-                 this parameter a run with zero missing records and N value mismatches reported
-                 "Differences: 0" and read as a clean sync. -->
+            <!-- Records present on BOTH sides with differing values. Without this parameter a run with zero missing
+                 records and N value mismatches reported "Differences: 0" and read as a clean sync. -->
             <parameter name="ruleDifferenceCount"/>
+            <!-- OC54: records under a key repeated on its side. Missing, duplicate and rule differences are three disjoint
+                 counts and differenceCount holds all three (ReconciliationCoreServices); left out, the voice reads it as
+                 what differenceCount holds beyond the other two, so a duplicates-only run is never told clean. -->
+            <parameter name="duplicateDifferenceCount"/>
             <!-- DAR-BE-155/210: rule differences per rule, labelled by its ruleName or field (RuleDiffSupport.fieldTally); the voice says what differs. -->
             <parameter name="ruleDifferenceFields" type="List"/>
-            <!-- Audit 2026-06-11 #5: surface rule failures / processing warnings so a silently broken
-                 ruleset does not produce a normal "completed" alert. -->
-            <parameter name="statusEnumId"/>
+            <!-- Audit 2026-06-11 #5: a run with processing warnings does not read as a normal "completed" alert. A run
+                 whose rules failed, or that produced no output, never comes here: every caller sends it down the error
+                 path (AutomationExecutionSupport.notifyRunError / notifySavedRunError, DAR-BE-015/362). -->
             <parameter name="processingWarnings" type="List"/>
-            <parameter name="terminationReason"/>
-            <!-- UAT 2026-07-31: a run that died before producing any result has no counts to report.
-                 The standard body ("run completed" + "Differences: 0") reads as a clean sync for those,
-                 which is worse than silence — this switches to a did-not-complete body instead. -->
-            <parameter name="noOutputProduced" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payload" type="Map"/>
@@ -66,40 +62,21 @@
                  reports as structured counts, and on a returns run that came to six sentences of
                  prose after the numbers. The stored artifact keeps every sentence verbatim for the
                  run-result page's audit trail. -->
-            <set field="runFailed" from="((statusEnumId)?.toString()?.trim()) == 'AUT_STAT_FAILED'"/>
-            <set field="noOutput" from="runFailed &amp;&amp; noOutputProduced == true"/>
-            <!-- A no-output failure keeps its original header verbatim: zeros there are not "no
-                 differences", they are "never computed", and the verdict renderer has no counts to
-                 read. Every other run is rendered by RunNotificationVoice, which leads with the
-                 verdict instead of a fixed prefix. -->
-            <if condition="noOutput">
-                <set field="lines" from="['Darpan run FAILED: ' + runNameValue]"/>
-            <else>
-                <set field="voiceCounts" from="[onlyInFile1Count: onlyInFile1Count, onlyInFile2Count: onlyInFile2Count,
-                        ruleDifferenceCount: ruleDifferenceCount, runFailed: runFailed, hasWarnings: (warningList ? true : false)]"/>
-                <!-- DAR-BE-107/108: the stored streak, and the badge or side quest this run's slot earned; DAR-BE-138: its astronomy fact. -->
-                <set field="streakFacts" from="darpan.reconciliation.streak.AutomationStreakSupport.notificationFacts(ec, companyUserGroupId, resultIdValue)"/>
-                <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
-                        runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
-                        storedStreakDays: streakFacts.streakDays, badgeLine: streakFacts.badgeLine, questLine: streakFacts.questLine,
-                        factLine: streakFacts.factLine, mismatchFields: ruleDifferenceFields,
-                        completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
-                <set field="lines" from="darpan.reconciliation.notification.RunNotificationVoice.renderLines(voiceModel)"/>
-                <!-- The GIF only ever rides on good news. -->
-                <if condition="voiceModel.bucket == darpan.reconciliation.notification.RunNotificationVoice.BUCKET_CLEAN">
-                    <set field="celebration" from="darpan.reconciliation.streak.AutomationStreakSupport.celebrationFor(ec, streakFacts)"/>
-                </if>
-            </else>
-            </if>
-            <if condition="noOutput">
-                <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the run did not finish and produced no results. Nothing was reconciled.')"/>
-            </if>
-            <if condition="runFailed &amp;&amp; !noOutput">
-                <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.')"/>
-            </if>
-            <set field="terminationReasonValue" from="((terminationReason)?.toString()?.trim())"/>
-            <if condition="terminationReasonValue">
-                <set field="ignoreLine" from="lines.add('⚠ ' + terminationReasonValue)"/>
+            <!-- RunNotificationVoice leads with the verdict. -->
+            <set field="voiceCounts" from="[onlyInFile1Count: onlyInFile1Count, onlyInFile2Count: onlyInFile2Count,
+                    ruleDifferenceCount: ruleDifferenceCount, differenceCount: differenceCount,
+                    duplicateDifferenceCount: duplicateDifferenceCount, hasWarnings: (warningList ? true : false)]"/>
+            <!-- DAR-BE-107/108: the stored streak, and the badge or side quest this run's slot earned; DAR-BE-138: its astronomy fact. -->
+            <set field="streakFacts" from="darpan.reconciliation.streak.AutomationStreakSupport.notificationFacts(ec, companyUserGroupId, resultIdValue)"/>
+            <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
+                    runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
+                    storedStreakDays: streakFacts.streakDays, badgeLine: streakFacts.badgeLine, questLine: streakFacts.questLine,
+                    factLine: streakFacts.factLine, mismatchFields: ruleDifferenceFields,
+                    completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
+            <set field="lines" from="darpan.reconciliation.notification.RunNotificationVoice.renderLines(voiceModel)"/>
+            <!-- The GIF only ever rides on good news. -->
+            <if condition="voiceModel.bucket == darpan.reconciliation.notification.RunNotificationVoice.BUCKET_CLEAN">
+                <set field="celebration" from="darpan.reconciliation.streak.AutomationStreakSupport.celebrationFor(ec, streakFacts)"/>
             </if>
             <if condition="tenantLabelValue">
                 <set field="ignoreLine" from="lines.add('Tenant: ' + tenantLabelValue)"/>
@@ -111,8 +88,11 @@
             <if condition="resultUrl">
                 <set field="ignoreLine" from="lines.add('Run result: &lt;' + resultUrl + '|Open run result&gt;')"/>
             </if>
+            <!-- OC48 (DAR-BE-362; errors and warnings go to Darpan's alerts room only): this message reaches client subscriber
+                 rooms, so a warning's own words (an exception, a host, a stack line) never ride in it. The count stays, so a
+                 warned run never reads clean, and the words stay on the run result. -->
             <if condition="warningList">
-                <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>
+                <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): details on the run result.')"/>
             </if>
             <set field="payload" from="[text: lines.join('\n')]"/>
             <if condition="celebration">

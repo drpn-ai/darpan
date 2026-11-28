@@ -102,38 +102,6 @@ class TenantNotificationServiceSmokeTests {
         assertFalse(text.contains("amount"), text)
     }
 
-    @Test
-    void buildRunCompletedPayloadSurfacesRuleFailureAndWarnings() {
-        // Audit 2026-06-11 #5: a silently broken ruleset must not produce a normal "completed" ping.
-        Map result = ec.service.sync()
-                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
-                .parameters([
-                        companyUserGroupId       : "TENANT_A",
-                        companyLabel             : "Tenant A",
-                        runName                  : "API Automation",
-                        savedRunId               : "RS_ORDER",
-                        reconciliationRunResultId: "RUN_RESULT_1",
-                        resultDataManagerPath    : "reconciliation-runs/AUTO_API/20260501/result.json",
-                        file1SystemLabel         : "SHOPIFY",
-                        file2SystemLabel         : "OMS",
-                        differenceCount          : 4,
-                        onlyInFile1Count         : 1,
-                        onlyInFile2Count         : 3,
-                        statusEnumId             : "AUT_STAT_FAILED",
-                        processingWarnings       : ["RuleSet RS_ORDER compare stage failed: Drools build errors"],
-                ])
-                .disableAuthz()
-                .call()
-
-        String text = result.payload.text as String
-        assertTrue(text.contains("API Automation did not finish."), text)
-        assertTrue(text.contains("Status: FAILED"), text)
-        assertTrue(text.contains("Warnings (1): RuleSet RS_ORDER compare stage failed"), text)
-        // Counts are still reported so the partial result is visible.
-        assertTrue(text.contains("Missing from OMS: 1"), text)
-        assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
-    }
-
     /**
      * Reported from prod 2026-08-05 (Gorjana, API Order Sync, result 100255): a run with 0
      * differences, 0 missing and 0 pending was headlined "WITH ISSUES" purely because the exchange
@@ -285,13 +253,89 @@ class TenantNotificationServiceSmokeTests {
 
         String text = result.payload.text as String
         assertTrue(text.contains("API Order Sync finished, but not cleanly."), text)
-        // Exactly the two real failures — the two audit sentences are excluded from the count.
-        assertTrue(text.contains("Warnings (2): Exchange presence check skipped: manifest unreadable (boom).; " +
-                "Shopify exchange sweep failed: connection reset"), text)
+        // Exactly the two real failures — the two audit sentences are excluded from the count. OC48: counted, not quoted.
+        assertTrue(text.contains("Warnings (2): details on the run result."), text)
+        assertFalse(text.contains("manifest unreadable"), text)
         // Audit sentences are classified out of the warning count (asserted above) and then not
         // rendered at all — the counts an operator acts on are in *Details*.
         assertFalse(text.contains("Notes:"), text)
         assertFalse(text.contains("Verification pass:"), text)
+    }
+
+    /**
+     * OC48 (DAR-BE-362; errors and warnings go to Darpan's alerts room only): this message goes to client subscriber
+     * rooms, so a warning's own words never ride in it: not an exception's class or text, not a host, not a stack line.
+     * It still says the run did not finish cleanly, and how many warnings it carries, so it never reads clean; the
+     * words stay on the run result.
+     */
+    @Test
+    void buildRunCompletedPayloadNeverPutsAWarningsOwnWordsInTheClientMessage() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        companyLabel             : "Gorjana",
+                        runName                  : "API Order Sync",
+                        savedRunId               : "RS_ORDER",
+                        reconciliationRunResultId: "100257",
+                        file1SystemLabel         : "Shopify",
+                        file2SystemLabel         : "HotWax",
+                        differenceCount          : 2,
+                        onlyInFile1Count         : 2,
+                        onlyInFile2Count         : 0,
+                        processingWarnings       : [
+                                "Shopify exchange sweep failed: java.net.SocketException: Connection reset by peer (acme.myshopify.com:443)",
+                                "Verification pass failed: NullPointerException at darpan.facade.reconciliation.MissingDiffVerificationSupport.verify(MissingDiffVerificationSupport.groovy:212)",
+                        ],
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = result.payload.text as String
+        assertTrue(text.contains("API Order Sync finished, but not cleanly."), text)
+        assertTrue(text.contains("Warnings (2): details on the run result."), text)
+        for (String raw in ["SocketException", "Connection reset", "myshopify", "NullPointerException", ".groovy",
+                            "exchange sweep failed", "Verification pass failed"]) {
+            assertFalse(text.contains(raw), "a warning's own words reached the client message (${raw}): ${text}".toString())
+        }
+    }
+
+    /**
+     * OC54: missing, duplicate and rule differences are three disjoint counts, and differenceCount holds all three
+     * (ReconciliationCoreServices). A run whose only differences are repeated keys was told CLEAN ("every record lined
+     * up", with the celebration) because the voice summed missing and rule alone. The count comes in as
+     * duplicateDifferenceCount, or is what differenceCount holds beyond the other two.
+     */
+    @Test
+    void buildRunCompletedPayloadNeverTellsADuplicatesOnlyRunClean() {
+        Closure<String> told = { Map counts ->
+            Map result = ec.service.sync()
+                    .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                    .parameters([companyUserGroupId: "TENANT_A", runName: "Daily Order Reconciliation", savedRunId: "RS_ORDER",
+                                 reconciliationRunResultId: "100258", file1SystemLabel: "Shopify", file2SystemLabel: "HotWax"] + counts)
+                    .disableAuthz()
+                    .call()
+            return result.payload.text as String
+        }
+        String clean = RunNotificationVoice.CLEAN_HEADLINES.first().replace("{run}", "Daily Order Reconciliation")
+
+        String derived = told([differenceCount: 6, onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0])
+        assertFalse(derived.contains(clean), derived)
+        assertTrue(derived.contains("Daily Order Reconciliation — 6 to look at, all duplicate keys."), derived)
+        assertTrue(derived.contains("Duplicate keys: 6"), derived)
+
+        String given = told([differenceCount: 4, onlyInFile1Count: 0, onlyInFile2Count: 0, duplicateDifferenceCount: 4])
+        assertTrue(given.contains("Duplicate keys: 4"), given)
+
+        // Beside missing records, the repeats are counted in the headline's total and listed under Details.
+        String mixed = told([differenceCount: 5, onlyInFile1Count: 2, onlyInFile2Count: 0, ruleDifferenceCount: 0])
+        assertTrue(mixed.contains("5 to look at"), mixed)
+        assertTrue(mixed.contains("Missing from HotWax: 2"), mixed)
+        assertTrue(mixed.contains("Duplicate keys: 3"), mixed)
+
+        // A legacy caller whose differenceCount holds only the missing records reads no repeats.
+        String legacy = told([differenceCount: 2, onlyInFile1Count: 2, onlyInFile2Count: 0, ruleDifferenceCount: 3])
+        assertFalse(legacy.contains("Duplicate keys"), legacy)
     }
 
     /** A run whose only processingWarnings are real still reports no Notes line at all. */
@@ -314,7 +358,7 @@ class TenantNotificationServiceSmokeTests {
 
         String text = result.payload.text as String
         assertTrue(text.contains("API Automation finished, but not cleanly."), text)
-        assertTrue(text.contains("Warnings (1): Shopify exchange sweep failed"), text)
+        assertTrue(text.contains("Warnings (1): details on the run result."), text)
         assertFalse(text.contains("Notes:"), text)
     }
 

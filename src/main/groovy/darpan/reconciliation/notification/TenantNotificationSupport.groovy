@@ -1,11 +1,13 @@
 package darpan.reconciliation.notification
 
 import darpan.common.DarpanEntityConstants
+import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ExchangePairVerificationSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.RebuiltReturnPairingSupport
 import darpan.facade.reconciliation.ReturnPresenceVerificationSupport
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.core.ReconciliationServices
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -96,19 +98,29 @@ class TenantNotificationSupport {
         return "Unknown chat provider '${provider}'.".toString()
     }
 
-    static String validateSlackWebhookUrl(Object rawWebhookUrl) {
-        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
-        if (!webhookUrl) return null
-
+    /**
+     * The URI of a webhook URL that must parse, use https and sit on its provider's one host, or the sentence that says
+     * which of those it fails ("<provider> webhook URL is invalid." / "… must use https." / "… must use <host>.").
+     */
+    private static Map<String, Object> pinnedHttpsUri(String webhookUrl, String provider, String host) {
         URI uri
         try {
             uri = URI.create(webhookUrl)
         } catch (Exception ignored) {
-            return "Slack webhook URL is invalid."
+            return [error: "${provider} webhook URL is invalid.".toString()]
         }
+        if (uri.scheme != "https") return [error: "${provider} webhook URL must use https.".toString()]
+        if (uri.host != host) return [error: "${provider} webhook URL must use ${host}.".toString()]
+        return [uri: uri]
+    }
 
-        if (uri.scheme != "https") return "Slack webhook URL must use https."
-        if (uri.host != SLACK_WEBHOOK_HOST) return "Slack webhook URL must use hooks.slack.com."
+    static String validateSlackWebhookUrl(Object rawWebhookUrl) {
+        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
+        if (!webhookUrl) return null
+
+        Map<String, Object> pinned = pinnedHttpsUri(webhookUrl, "Slack", SLACK_WEBHOOK_HOST)
+        if (pinned.error) return (String) pinned.error
+        URI uri = (URI) pinned.uri
         if (!uri.path?.startsWith("/services/")) {
             return "Slack webhook URL must target a Slack incoming webhook endpoint."
         }
@@ -125,15 +137,9 @@ class TenantNotificationSupport {
         String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
         if (!webhookUrl) return null
 
-        URI uri
-        try {
-            uri = URI.create(webhookUrl)
-        } catch (Exception ignored) {
-            return "Google Chat webhook URL is invalid."
-        }
-
-        if (uri.scheme != "https") return "Google Chat webhook URL must use https."
-        if (uri.host != GOOGLE_CHAT_HOST) return "Google Chat webhook URL must use chat.googleapis.com."
+        Map<String, Object> pinned = pinnedHttpsUri(webhookUrl, "Google Chat", GOOGLE_CHAT_HOST)
+        if (pinned.error) return (String) pinned.error
+        URI uri = (URI) pinned.uri
         if (!uri.path?.startsWith("/v1/spaces/") || !uri.path?.endsWith("/messages")) {
             return "Google Chat webhook URL must target a Google Chat space messages endpoint."
         }
@@ -171,7 +177,10 @@ class TenantNotificationSupport {
             // Terminal-state cleanup (review finding 1): the run is done either way once the claim is
             // won, so any subscription rows for it — even ones that resolved to nothing deliverable
             // (inactive/foreign space) — are stale and must not linger forever.
-            if (claimed) purgeRunSubscriptions(subscriptionRows, resultId)
+            if (claimed) {
+                purgeRunSubscriptions(subscriptionRows, resultId)
+                alertRunWarnings(ec, context, tenantId, resultId)
+            }
             return claimed ?
                     [ok: true, attempted: false, skippedReason: "NO_DESTINATIONS"] :
                     [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
@@ -224,7 +233,44 @@ class TenantNotificationSupport {
                         destinationProvider, tenantId, resultId, destination.spaceName, t.message)
             }
         }
+        // OC48: the client message counts the run's warnings and never quotes them. Their words go to Darpan's alerts room,
+        // once per run (this call won the claim), so a warning still reaches someone who can act on it.
+        alertRunWarnings(ec, context, tenantId, resultId)
         return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
+    }
+
+    /** The most warnings an alert quotes, and the most of each one (its first line) it carries. */
+    private static final int ALERT_MAX_WARNINGS = 10
+    private static final int ALERT_MAX_WARNING_CHARS = 300
+
+    /**
+     * OC48 (DAR-BE-378). A completed run's processing warnings, in their own words, to Darpan's alerts room
+     * (errors.chat.webhookUrl, ErrorChatSupport.postAlertText): the tenant and the run, each warning's first line, and the
+     * run's link. Never to a client room. The always-emitted audit notes are not warnings (partitionAuditNotes). The caller
+     * has won the run's notification claim, so a run alerts once. Best effort: a failed alert is logged and never touches
+     * the run's own notification.
+     */
+    private static void alertRunWarnings(def ec, Map<String, Object> context, String tenantId, String resultId) {
+        try {
+            List<String> warnings = partitionAuditNotes(context.processingWarnings).warnings
+            if (!warnings) return
+            String tenantLabel = ((context.companyLabel)?.toString()?.trim()) ?:
+                    TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId) ?: tenantId
+            String runName = ((context.runName)?.toString()?.trim()) ?: ((context.savedRunId)?.toString()?.trim()) ?: resultId
+            List<String> lines = ["${tenantLabel} · ${runName}".toString(), "Warnings (${warnings.size()})".toString()]
+            warnings.take(ALERT_MAX_WARNINGS).each { String warning ->
+                String first = warning.readLines().find { it.trim() }?.trim() ?: warning
+                lines << (first.length() > ALERT_MAX_WARNING_CHARS ? first.substring(0, ALERT_MAX_WARNING_CHARS) + "…" : first)
+            }
+            if (warnings.size() > ALERT_MAX_WARNINGS) {
+                lines << "+${warnings.size() - ALERT_MAX_WARNINGS} more on the run result".toString()
+            }
+            String url = buildRunResultUrl(ec, context)
+            if (url) lines << url
+            ErrorChatSupport.postAlertText(ec, lines.join("\n"))
+        } catch (Throwable t) {
+            logger.warn("Warnings alert for tenant {} result {} failed: {}", tenantId, resultId, t.getClass().name)
+        }
     }
 
     /**

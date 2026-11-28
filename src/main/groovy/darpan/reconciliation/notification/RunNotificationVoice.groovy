@@ -10,13 +10,14 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class RunNotificationVoice {
 
-    static final String BUCKET_FAILED = "FAILED"
     static final String BUCKET_ISSUES = "ISSUES"
     static final String BUCKET_CLEAN = "CLEAN"
     static final String BUCKET_EVEN_SPLIT = "EVEN_SPLIT"
     static final String BUCKET_ONE_SIDED = "ONE_SIDED"
     static final String BUCKET_VALUE_DRIFT = "VALUE_DRIFT"
     static final String BUCKET_MIXED = "MIXED"
+    /** OC54: the only differences are records under a key repeated on its side. */
+    static final String BUCKET_DUPLICATES = "DUPLICATES"
 
     /**
      * Fraction of the larger missing count that the smaller must reach to read as an even split.
@@ -24,7 +25,7 @@ class RunNotificationVoice {
      */
     static final double EVEN_SPLIT_FLOOR = 0.8d
 
-    static int toCount(Object rawValue) {
+    private static int toCount(Object rawValue) {
         if (rawValue instanceof Number) return ((Number) rawValue).intValue()
         String text = ((rawValue)?.toString()?.trim())
         if (!text || !text.isInteger()) return 0
@@ -40,25 +41,40 @@ class RunNotificationVoice {
         int missingFromFile2Count = toCount(safeCounts.get("onlyInFile1Count"))
         int missingFromFile1Count = toCount(safeCounts.get("onlyInFile2Count"))
         int mismatchCount = toCount(safeCounts.get("ruleDifferenceCount"))
-        int totalCount = missingFromFile1Count + missingFromFile2Count + mismatchCount
+        int duplicateCount = duplicateCountOf(safeCounts, missingFromFile1Count + missingFromFile2Count + mismatchCount)
+        int totalCount = missingFromFile1Count + missingFromFile2Count + mismatchCount + duplicateCount
 
-        String bucket = resolveBucket(safeCounts, missingFromFile1Count, missingFromFile2Count, mismatchCount)
+        String bucket = resolveBucket(safeCounts, missingFromFile1Count, missingFromFile2Count, mismatchCount, duplicateCount)
 
         return [
                 bucket               : bucket,
                 missingFromFile1Count: missingFromFile1Count,
                 missingFromFile2Count: missingFromFile2Count,
                 mismatchCount        : mismatchCount,
+                duplicateCount       : duplicateCount,
                 totalCount           : totalCount,
         ] as Map<String, Object>
     }
 
+    /**
+     * OC54. Missing, duplicate and rule differences are three disjoint counts, and differenceCount holds all three
+     * (ReconciliationCoreServices). The duplicate count is duplicateDifferenceCount when the caller gives it, else what
+     * differenceCount holds beyond the missing and rule counts; a legacy differenceCount of the missing records alone
+     * reads no duplicates.
+     */
+    private static int duplicateCountOf(Map<String, Object> counts, int missingAndRuleCount) {
+        if (((counts.get("duplicateDifferenceCount"))?.toString()?.trim())) return toCount(counts.get("duplicateDifferenceCount"))
+        return Math.max(0, toCount(counts.get("differenceCount")) - missingAndRuleCount)
+    }
+
     private static String resolveBucket(Map<String, Object> counts, int missingFromFile1Count,
-                                        int missingFromFile2Count, int mismatchCount) {
-        if (counts.get("runFailed") == true) return BUCKET_FAILED
+                                        int missingFromFile2Count, int mismatchCount, int duplicateCount) {
+        // A run whose rules failed never reaches the voice: every caller sends it down the error path (DAR-BE-015/362).
         if (counts.get("hasWarnings") == true) return BUCKET_ISSUES
 
         int missingTotal = missingFromFile1Count + missingFromFile2Count
+        // OC54: a run with repeated keys is never clean; alone they are their own shape, beside anything else they are mixed.
+        if (duplicateCount > 0) return missingTotal == 0 && mismatchCount == 0 ? BUCKET_DUPLICATES : BUCKET_MIXED
         if (missingTotal == 0 && mismatchCount == 0) return BUCKET_CLEAN
         if (missingTotal == 0) return BUCKET_VALUE_DRIFT
 
@@ -99,7 +115,7 @@ class RunNotificationVoice {
         resetLineHistory()
     }
 
-    static void resetLineHistory() {
+    private static void resetLineHistory() {
         synchronized (CYCLE_LOCK) {
             CYCLES.clear()
             LAST_DEALT.clear()
@@ -107,7 +123,10 @@ class RunNotificationVoice {
     }
 
     /** Test-harness reset: restores every mutable static (picker, cycles, last-dealt). Never called from src/main. */
-    static void resetForTests() { resetLinePicker(); resetLineHistory() }
+    static void resetForTests() {
+        linePicker = null
+        resetLineHistory()
+    }
 
     /**
      * Deals a line, pinned by tests through {@link #setLinePicker}.
@@ -819,35 +838,34 @@ class RunNotificationVoice {
         int missingFromFile1 = toCount(safeModel.get("missingFromFile1Count"))
         int missingFromFile2 = toCount(safeModel.get("missingFromFile2Count"))
         int mismatches = toCount(safeModel.get("mismatchCount"))
+        int duplicates = toCount(safeModel.get("duplicateCount"))
         int total = toCount(safeModel.get("totalCount"))
         List<Map> mismatchFields = mismatchTallies(safeModel.get("mismatchFields"), safeModel.get("file1SystemLabel"), safeModel.get("file2SystemLabel"))
 
         List<String> lines = []
 
-        if (bucket == BUCKET_FAILED || bucket == BUCKET_ISSUES) {
-            // Humour is off from here up, and so is variation: these two lines are the ones a Chat
-            // filter or an on-call runbook is most likely to key on, and a rotating corpus would
-            // make bad news harder to match than good news. The XML service adds the status and
-            // warning lines.
-            lines << (bucket == BUCKET_FAILED
-                    ? "${runName} did not finish.".toString()
-                    : "${runName} finished, but not cleanly.".toString())
-            // The FLAVOUR is switched off above ISSUES — the NUMBERS are not. A run that failed
-            // partway still produced a partial result, and those counts are the operator's only
-            // handle on what did get compared. Dropping them would trade one silent alert
-            // (the all-zeros clean-looking run this whole change exists to fix) for another.
-            // A failure that produced no output at all never reaches here: the service's
-            // noOutput branch renders it without counts, because zeros there mean "never computed".
-            lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields))
+        if (bucket == BUCKET_ISSUES) {
+            // Humour is off here, and so is variation: this line is the one a Chat filter or an on-call runbook is most
+            // likely to key on, and a rotating corpus would make bad news harder to match than good news. The XML service
+            // adds the warning count.
+            lines << "${runName} finished, but not cleanly.".toString()
+            // The FLAVOUR is switched off for ISSUES; the NUMBERS are not. They are the operator's handle on what was
+            // compared, and dropping them would trade one silent alert (an all-zeros, clean-looking run) for another.
+            lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, duplicates, file1Label, file2Label, mismatchFields))
             return lines
         }
 
         if (bucket == BUCKET_CLEAN) return renderClean(runName, safeModel)
 
-        lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields)
-        lines << ((bucket == BUCKET_VALUE_DRIFT && mismatchFields) ?
-                valueDriftFact(mismatchFields, file1Label, file2Label) : diagnosisFor(bucket, mismatches))
-        lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields))
+        lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields,
+                missingFromFile1 + missingFromFile2, duplicates)
+        // OC54: the diagnosis pools read missing records and mismatched values; with repeated keys in the run they would
+        // misread it, so the headline's shape and the Details stand alone.
+        if (duplicates == 0) {
+            lines << ((bucket == BUCKET_VALUE_DRIFT && mismatchFields) ?
+                    valueDriftFact(mismatchFields, file1Label, file2Label) : diagnosisFor(bucket, mismatches))
+        }
+        lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, duplicates, file1Label, file2Label, mismatchFields))
         return lines
     }
 
@@ -900,7 +918,7 @@ class RunNotificationVoice {
      * run that sent no per-rule tally pool into one "Field mismatches: N" line.
      */
     private static List<String> detailsBlock(int missingFromFile1, int missingFromFile2,
-                                             int mismatches, String file1Label, String file2Label,
+                                             int mismatches, int duplicates, String file1Label, String file2Label,
                                              List<Map> mismatchFields) {
         List<String> lines = [
                 "",
@@ -909,6 +927,8 @@ class RunNotificationVoice {
                 "Missing from ${file2Label}: ${missingFromFile2}".toString(),
                 "Missing from ${file1Label}: ${missingFromFile1}".toString(),
         ]
+        // OC54: printed only when there are any, like the mismatch lines; the run page calls these rows "Duplicate in <system>".
+        if (duplicates > 0) lines << "Duplicate keys: ${duplicates}".toString()
         if (mismatches > 0) lines.addAll(mismatchLines(mismatches, mismatchFields))
         return lines
     }
@@ -1002,9 +1022,17 @@ class RunNotificationVoice {
      * than describing the second and mis-describing the first.
      */
     private static String headlineFor(String bucket, String runName, int total, int missingFromFile2,
-                                      int mismatches, String file1Label, String file2Label, List<Map> mismatchRules = []) {
+                                      int mismatches, String file1Label, String file2Label, List<Map> mismatchRules = [],
+                                      int missing = 0, int duplicates = 0) {
         String shape
-        if (bucket == BUCKET_ONE_SIDED) {
+        if (bucket == BUCKET_DUPLICATES) {
+            shape = "all duplicate keys"
+        } else if (duplicates > 0) {
+            // OC54: beside repeated keys the shape names the kinds the run holds, never "on both sides" it cannot know.
+            List<String> kinds = ([missing > 0 ? "missing" : null, mismatches > 0 ? "mismatched" : null].findAll { it }
+                    + ["duplicate keys"]) as List<String>
+            shape = kinds.size() == 3 ? "${kinds[0]}, ${kinds[1]} and ${kinds[2]}".toString() : kinds.join(" and ")
+        } else if (bucket == BUCKET_ONE_SIDED) {
             // missingFromFile2 > 0 means file 1 held them, so file 2's system is the one short.
             shape = "all missing from ${missingFromFile2 > 0 ? file2Label : file1Label}".toString()
         } else if (bucket == BUCKET_EVEN_SPLIT) {

@@ -115,11 +115,9 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <!-- Slack is always usable now that a bot token can be pasted; oauthAvailable says
-                 whether the one-click install is ALSO offered on this deployment. Before the token
-                 path existed these were the same thing, and conflating them hid Slack entirely on
-                 any deployment without a client id. -->
-            <parameter name="slackConfigured" type="Boolean"/>
+            <!-- Slack is always usable (a bot token can be pasted); oauthAvailable says whether the one-click
+                 install is ALSO offered on this deployment. DAR-OPS-029 S99-080: the always-true
+                 slackConfigured flag is gone. -->
             <parameter name="oauthAvailable" type="Boolean"/>
             <parameter name="installs" type="List">
                 <parameter name="slackInstallId"/><parameter name="teamId"/><parameter name="teamName"/>
@@ -129,7 +127,6 @@
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="slackConfigured" from="true"/>
             <set field="oauthAvailable" from="!!darpan.reconciliation.notification.SlackOAuthSupport.resolveClientId(ec) &amp;&amp; !!darpan.reconciliation.notification.SlackOAuthSupport.resolveRedirectUri(ec)"/>
             <!-- .list() honours the tenant condition; only the primary-key .one() path drops it. -->
             <set field="installRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.SlackWorkspaceInstall').condition('companyUserGroupId', tenantId).condition('isActive', 'Y').orderBy('teamName').disableAuthz().useCache(false).list() ?: []) : []"/>
@@ -141,12 +138,11 @@
     </service>
 
     <service verb="list" noun="SlackChannels" authz-action="view" allow-remote="true" authenticate="true">
-        <description>One page of channels from a connected workspace, for the chat-space channel
-            picker. Paginated rather than exhaustive: conversations.list is rate-limit Tier 2 and a
-            large workspace has thousands of channels.</description>
+        <description>Every channel of a connected workspace, for the chat-space channel picker: all
+            pages are read (Slack filters after taking a page, so one page comes back short), and a workspace past
+            the read's cap is told so in a message, never shown a silent subset.</description>
         <in-parameters>
             <parameter name="slackInstallId" required="true"/>
-            <parameter name="cursor"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -156,7 +152,6 @@
                 <parameter name="id"/><parameter name="name"/>
                 <parameter name="isPrivate" type="Boolean"/><parameter name="isMember" type="Boolean"/>
             </parameter>
-            <parameter name="nextCursor"/>
             <parameter name="botUserId"/>
         </out-parameters>
         <actions>
@@ -175,7 +170,6 @@
                     <message error="true">${outcome.operatorMessage}</message>
                 <else>
                     <set field="channels" from="outcome.channels"/>
-                    <set field="nextCursor" from="outcome.nextCursor"/>
                     <!-- Never a silent cap: a workspace big enough to exceed the page limit is told,
                          rather than shown an arbitrary subset it cannot tell is incomplete. -->
                     <if condition="outcome.truncated == true">

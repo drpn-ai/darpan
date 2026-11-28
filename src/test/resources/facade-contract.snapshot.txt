@@ -2630,7 +2630,6 @@ SERVICE get GeneratedOutputDifferences
     search : String
   OUT:
     bucketCounts : Map
-    conclusionCounts : Map
     differences : List
     errors : List
     errors.error : String
@@ -4305,7 +4304,6 @@ SERVICE get SlackInstall
     messages.message : String
     oauthAvailable : Boolean
     ok : Boolean
-    slackConfigured : Boolean
 
 SERVICE list SlackChannels
   file        : SlackFacadeServices.xml
@@ -4313,7 +4311,6 @@ SERVICE list SlackChannels
   authenticate: true
   allow-remote: true
   IN:
-    cursor : String
     slackInstallId : String [required]
   OUT:
     botUserId : String
@@ -4326,7 +4323,6 @@ SERVICE list SlackChannels
     errors.error : String
     messages : List
     messages.message : String
-    nextCursor : String
     ok : Boolean
 
 SERVICE save SlackBotToken

@@ -273,7 +273,8 @@ class DiffDetailClassifierTests {
                 [primaryId: "3", missingIn: F2, presentIn: F1, conclusion: [code: "A"]]]]
         Map page = DiffDetailClassifier.buildDifferencesPage(document, F1, F2, null, "all", null, 0, 50, true, "A")
         assertEquals(["1", "3"], ((List<Map>) page.differences)*.recordId)
-        assertEquals([A: 2, B: 1], page.conclusionCounts)
+        // DAR-OPS-029 S99-081: the conclusion-count facet had no reader and is no longer served.
+        assertFalse(page.containsKey("conclusionCounts"))
         assertEquals("A", ((List<Map>) page.differences)[0].conclusionCode)
     }
 
@@ -281,7 +282,7 @@ class DiffDetailClassifierTests {
     void legacyRowsHaveNoConclusionAndAnEmptyFacet() {
         Map document = [differences: [[primaryId: "1", missingIn: F2, presentIn: F1]]]
         Map page = DiffDetailClassifier.buildDifferencesPage(document, F1, F2, null, "all", null, 0, 50, true, null)
-        assertEquals([:], page.conclusionCounts)
+        assertFalse(page.containsKey("conclusionCounts"))
         assertNull(((List<Map>) page.differences)[0].conclusionCode)
     }
 

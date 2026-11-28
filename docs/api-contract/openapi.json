@@ -29991,11 +29991,6 @@
                         "type": "object",
                         "additionalProperties": true
                     },
-                    "conclusionCounts": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "description": "DAR-UI-044: whole-document count per conclusion code, ignoring the conclusion filter. Empty for a run without conclusions."
-                    },
                     "ruleOptions": {
                         "type": "array",
                         "items": {
@@ -40449,9 +40444,6 @@
                             "type": "string"
                         }
                     },
-                    "slackConfigured": {
-                        "type": "boolean"
-                    },
                     "oauthAvailable": {
                         "type": "boolean"
                     },
@@ -40559,15 +40551,12 @@
                 "properties": {
                     "slackInstallId": {
                         "type": "string"
-                    },
-                    "cursor": {
-                        "type": "string"
                     }
                 },
                 "required": [
                     "slackInstallId"
                 ],
-                "description": "One page of channels from a connected workspace, for the chat-space channel\n            picker. Paginated rather than exhaustive: conversations.list is rate-limit Tier 2 and a\n            large workspace has thousands of channels."
+                "description": "Every channel of a connected workspace, for the chat-space channel picker: all\n            pages are read (Slack filters after taking a page, so one page comes back short), and a workspace past\n            the read's cap is told so in a message, never shown a silent subset."
             },
             "ListSlackChannelsResult": {
                 "type": "object",
@@ -40606,9 +40595,6 @@
                                 }
                             }
                         }
-                    },
-                    "nextCursor": {
-                        "type": "string"
                     },
                     "botUserId": {
                         "type": "string"

@@ -153,6 +153,8 @@ class SlackFacadeSmokeTests {
         assertEquals(2, channels.size())
         assertEquals(false, channels[1].isMember)
         assertEquals("U_BOT", result.botUserId)
+        // DAR-OPS-029 S99-080: every page is read, so there is no cursor to hand back.
+        assertFalse(result.containsKey("nextCursor"))
     }
 
     @Test
@@ -264,7 +266,8 @@ class SlackFacadeSmokeTests {
         Map<String, Object> without = call("facade.SlackFacadeServices.get#SlackInstall", [:])
         // Slack itself stays available — the token path needs no client id. Only the one-click
         // install is withheld. Conflating these once hid Slack entirely on this deployment.
-        assertEquals(true, without.slackConfigured)
+        // DAR-OPS-029 S99-080: slackConfigured was always true and is gone; oauthAvailable is the only flag.
+        assertFalse(without.containsKey("slackConfigured"))
         assertEquals(false, without.oauthAvailable)
 
         ec.message.clearErrors()

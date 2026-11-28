@@ -194,16 +194,6 @@ class DiffDetailClassifier {
         return counts
     }
 
-    /** Whole-document count per conclusion code (DAR-UI-044); empty on a run without conclusions. */
-    private static Map<String, Integer> buildConclusionCounts(List<Map> rows) {
-        Map<String, Integer> counts = new LinkedHashMap<>()
-        rows.each { Map row ->
-            String code = (String) row.conclusionCode
-            if (code) counts.put(code, (counts.get(code) ?: 0) + 1)
-        }
-        return counts
-    }
-
     /**
      * DAR-BE-299: {@code rules} are the run's Rule rows; a rule with a name (DAR-BE-210) is shown by that name alone
      * (label = name, detail = ''), an unnamed one as "Rule N" over its formula. A difference's ruleId is the DRL rule
@@ -365,7 +355,6 @@ class DiffDetailClassifier {
         if (includeFacets) {
             result.put('bucketCounts', buildBucketCounts(classified))
             result.put('ruleOptions', buildRuleOptions(classified, rules))
-            result.put('conclusionCounts', buildConclusionCounts(classified))
         }
         return result
     }

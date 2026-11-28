@@ -4182,9 +4182,6 @@
             <parameter name="metadata" type="Map"/>
             <parameter name="summary" type="Map"/>
             <parameter name="bucketCounts" type="Map"/>
-            <parameter name="conclusionCounts" type="Map">
-                <description>DAR-UI-044: whole-document count per conclusion code, ignoring the conclusion filter. Empty for a run without conclusions.</description>
-            </parameter>
             <parameter name="ruleOptions" type="List"/>
             <parameter name="differences" type="List"/>
             <parameter name="pageIndex" type="Integer"/>
@@ -4202,7 +4199,6 @@
             <set field="metadata" from="differencesResult.metadata"/>
             <set field="summary" from="differencesResult.summary"/>
             <set field="bucketCounts" from="differencesResult.bucketCounts"/>
-            <set field="conclusionCounts" from="differencesResult.conclusionCounts"/>
             <set field="ruleOptions" from="differencesResult.ruleOptions"/>
             <set field="differences" from="differencesResult.differences"/>
             <set field="pageIndex" from="differencesResult.pageIndex"/>

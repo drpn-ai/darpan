@@ -4,9 +4,8 @@
      OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS, OMS_TRANSFER_ORDERS, OMS_RETURNS) were deleted, and migration
      OMS_REST_RETIRED moves stored runs and automations to their GraphQL endpoints. OMS stays an enum: it is the
      HotWax parent the source picker groups endpoints under.
-     configIdResolverServiceName / validationServiceName are intentionally left blank: today these are
-     Groovy static methods, not Moqui services; converting + allow-listing them is a later phase.
-     NetSuite / SAPI are intentionally deferred to a later phase. -->
+     A row is an endpoint: adding one is one Enumeration row, one row here and its pills in
+     SourceSystemConnectorSeedDataFields.xml (no Groovy or Vue change). -->
 <entity-facade-xml type="darpan-seed">
 
     <!-- OMS_GQL (DAR-BE-064): the order-grain presence extract over GraphQL. -->
@@ -74,7 +73,6 @@
             systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
             preserveWindowInstants="Y"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
-            exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"
             exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep"
             healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
             filterParameterName="sourceFilters"

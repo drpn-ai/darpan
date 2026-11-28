@@ -48,11 +48,6 @@ class DatabaseConnectorRegistryTests {
                 'facade.DatabaseFacadeServices.validate#DatabaseConnection'))
     }
 
-    @Test void rowDoesNotPopulateTheConsumerlessValidationSlot() {
-        assertFalse(databaseRow().contains('validationServiceName'),
-                'validationServiceName has no consumer anywhere; populating it is decoration')
-    }
-
     @Test void rowOmitsHttpShapedFields() {
         String row = databaseRow()
         assertFalse(row.contains('sendUrlTemplate'), 'HTTP-shaped and does not route')

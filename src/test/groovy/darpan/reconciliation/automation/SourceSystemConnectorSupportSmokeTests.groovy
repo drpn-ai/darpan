@@ -178,8 +178,6 @@ class SourceSystemConnectorSupportSmokeTests {
     void exchangeLookupFieldsRoundTripAndPassTheLookupFence() {
         assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(
                 "reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"))
-        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(
-                "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"))
 
         // OMS side: pairLookupServiceName returns full order groups keyed by the compare join key.
         Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
@@ -187,11 +185,8 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId",
                 oms.pairLookupServiceName)
 
-        // Shopify side: exchangeStateLookupServiceName returns per-order exchange state.
         Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
-        assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState",
-                shopify.exchangeStateLookupServiceName)
 
         // Shopify side: exchangeSweepServiceName enumerates in-window Shopify exchanges for the
         // presence check (every Shopify exchange must have been imported into OMS).

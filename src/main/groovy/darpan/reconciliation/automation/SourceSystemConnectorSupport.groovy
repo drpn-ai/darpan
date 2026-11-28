@@ -9,11 +9,8 @@ import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.readString
 
 /**
- * Read-only resolver over the SourceSystemConnector registry (config over code).
- *
- * Phase 1 (DAR-292 / DAR-293): nothing in the dispatch paths calls this yet. It exists so the
- * per-system switches in AutomationExecutionSupport / ReconciliationSavedRunSupport can be replaced
- * with data-driven lookups in later phases.
+ * Read-only resolver over the SourceSystemConnector registry (config over code): every run path, the extract dispatch
+ * fences and the rules board read an endpoint's services and parameters through it.
  *
  * SourceSystemConnector is use="configuration" (platform config, NOT tenant-scoped), so its own read
  * is a plain cached find (the JsonSchemaUtil config-read convention). Any downstream config-id /
@@ -28,7 +25,7 @@ class SourceSystemConnectorSupport {
      * ReconciliationSavedRunSupport.canonicalSystemEnumId does: strip whitespace/underscore/hyphen and
      * upper-case. Used for alias matching so "DAR_SYS_OMS", "Hot-Wax" and "oms" all line up.
      */
-    static String normalizeSystemKey(Object raw) {
+    private static String normalizeSystemKey(Object raw) {
         String n = normalize(raw)
         if (!n) return null
         return n.replaceAll(/[\s_-]/, "").toUpperCase()
@@ -193,13 +190,10 @@ class SourceSystemConnectorSupport {
                 expectedSourceConfigType   : readString(record, "expectedSourceConfigType"),
                 configParameterName        : readString(record, "configParameterName"),
                 configEntityName           : readString(record, "configEntityName"),
-                configIdResolverServiceName: readString(record, "configIdResolverServiceName"),
-                validationServiceName      : readString(record, "validationServiceName"),
                 remoteId                   : readString(record, "remoteId"),
                 endpointLabel              : readString(record, "endpointLabel"),
                 sendUrlTemplate            : readString(record, "sendUrlTemplate"),
                 remoteSendServiceName      : readString(record, "remoteSendServiceName"),
-                systemAliases              : readString(record, "systemAliases"),
                 preserveWindowInstants     : normalizeBool(readField(record, "preserveWindowInstants"), false),
                 // Normalised to a real Boolean here, like its neighbour: "N" is a non-empty String and
                 // therefore truthy in Groovy, so a raw read would turn every connector into a
@@ -219,7 +213,6 @@ class SourceSystemConnectorSupport {
                 lookupMaxShare             : normalizeInt(readField(record, "lookupMaxShare"), null),
                 lookupIdField              : readString(record, "lookupIdField"),
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),
-                exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 exchangeSweepServiceName       : readString(record, "exchangeSweepServiceName"),
                 orderStateLookupServiceName    : readString(record, "orderStateLookupServiceName"),
                 returnLinesLookupServiceName   : readString(record, "returnLinesLookupServiceName"),

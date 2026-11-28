@@ -1272,8 +1272,6 @@
         <field name="expectedSourceConfigType" type="text-short"/>
         <field name="configParameterName" type="text-short"/>
         <field name="configEntityName" type="text-medium"/>
-        <field name="configIdResolverServiceName" type="text-medium"/>
-        <field name="validationServiceName" type="text-medium"/>
         <field name="remoteId" type="id"/>
         <field name="endpointLabel" type="text-medium"/>
         <field name="sendUrlTemplate" type="text-long"/>
@@ -1363,11 +1361,6 @@
                 key (e.g. Shopify externalId) — the OMS side of the exchange pair verify stage. Same
                 lookup fence as lookupServiceName. Blank disables exchange pair verification for runs
                 where this connector is a side.</description>
-        </field>
-        <field name="exchangeStateLookupServiceName" type="text-medium">
-            <description>Optional lookup#* service returning per-order exchange state (returns with
-                exchange line items, current totals) — the Shopify side of the exchange pair verify
-                stage. Same lookup fence as lookupServiceName. Blank disables exchange pair verification.</description>
         </field>
         <field name="exchangeSweepServiceName" type="text-medium">
             <description>Optional lookup#* service enumerating exchanges created in this source system

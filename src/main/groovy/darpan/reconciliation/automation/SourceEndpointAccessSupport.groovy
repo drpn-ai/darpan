@@ -61,9 +61,7 @@ class SourceEndpointAccessSupport {
 
         Map<String, String> decisions = decisionsFor(ec, configTypeEnumId, configId)
 
-        return connectors.findAll { row ->
-            (readString(row, "enabled") ?: "Y").equalsIgnoreCase("Y")
-        }.collect { row ->
+        return connectors.findAll { row -> SourceSystemConnectorSupport.isEnabled(row) }.collect { row ->
             String systemEnumId = readString(row, "systemEnumId")
             [
                     systemEnumId : systemEnumId,

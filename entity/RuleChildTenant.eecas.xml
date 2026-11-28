@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-OPS-029 S35 (S02 R2). A rule set's child rows carry a denormalized copy of the rule set's tenant (companyUserGroupId),
+  and the active-tenant entity filter hides a child whose copy is blank (DAR-BE-076). Every writer stamps it today; these
+  run before each create so a writer that forgets cannot leave a row its own tenant can no longer see, and the hourly
+  sweep#RuleChildTenantStamps is not needed to heal one.
+
+  Each EECA fills a BLANK companyUserGroupId from the parent the sweep uses (RuleTenantStampSupport): Rule and
+  RuleSetCompareScope from their RuleSet; RuleSetCompareSource, its Filter and KeyField rows from their compare scope (its
+  stamp, else its RuleSet's). An explicit stamp is never changed. The parent is read as the caller can see it, with no
+  authz bypass: a tenant's save sees its own rule set; a system write (migration, import, data load) runs with authz off,
+  which lifts the filter as well; and a parent the caller cannot see is never copied onto the row, which stays blank. A
+  parent that does not exist leaves the row blank, as the sweep would. Creates only: an update never changes a row's tenant.
+-->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="RuleChildTenant_Rule" entity="darpan.rule.Rule" on-create="true" run-before="true" run-on-error="true">
+        <condition><expression>!entityValue.companyUserGroupId &amp;&amp; entityValue.ruleSetId</expression></condition>
+        <actions>
+            <entity-find-one entity-name="darpan.rule.RuleSet" value-field="stampRuleSet" cache="false">
+                <field-map field-name="ruleSetId" from="entityValue.ruleSetId"/></entity-find-one>
+            <if condition="stampRuleSet?.companyUserGroupId">
+                <script>entityValue.set('companyUserGroupId', stampRuleSet.companyUserGroupId)</script></if>
+        </actions>
+    </eeca>
+    <eeca id="RuleChildTenant_RuleSetCompareScope" entity="darpan.rule.RuleSetCompareScope" on-create="true" run-before="true"
+            run-on-error="true">
+        <condition><expression>!entityValue.companyUserGroupId &amp;&amp; entityValue.ruleSetId</expression></condition>
+        <actions>
+            <entity-find-one entity-name="darpan.rule.RuleSet" value-field="stampRuleSet" cache="false">
+                <field-map field-name="ruleSetId" from="entityValue.ruleSetId"/></entity-find-one>
+            <if condition="stampRuleSet?.companyUserGroupId">
+                <script>entityValue.set('companyUserGroupId', stampRuleSet.companyUserGroupId)</script></if>
+        </actions>
+    </eeca>
+    <eeca id="RuleChildTenant_RuleSetCompareSource" entity="darpan.rule.RuleSetCompareSource" on-create="true" run-before="true" run-on-error="true">
+        <condition><expression>!entityValue.companyUserGroupId &amp;&amp; entityValue.compareScopeId</expression></condition>
+        <actions>
+            <entity-find-one entity-name="darpan.rule.RuleSetCompareScope" value-field="stampScope" cache="false">
+                <field-map field-name="compareScopeId" from="entityValue.compareScopeId"/></entity-find-one>
+            <set field="stampTenant" from="stampScope?.companyUserGroupId"/>
+            <if condition="!stampTenant &amp;&amp; stampScope?.ruleSetId">
+                <entity-find-one entity-name="darpan.rule.RuleSet" value-field="stampRuleSet" cache="false">
+                    <field-map field-name="ruleSetId" from="stampScope.ruleSetId"/></entity-find-one>
+                <set field="stampTenant" from="stampRuleSet?.companyUserGroupId"/>
+            </if>
+            <if condition="stampTenant"><script>entityValue.set('companyUserGroupId', stampTenant)</script></if>
+        </actions>
+    </eeca>
+    <eeca id="RuleChildTenant_RuleSetCompareSourceFilter" entity="darpan.rule.RuleSetCompareSourceFilter" on-create="true" run-before="true" run-on-error="true">
+        <condition><expression>!entityValue.companyUserGroupId &amp;&amp; entityValue.compareScopeId</expression></condition>
+        <actions>
+            <entity-find-one entity-name="darpan.rule.RuleSetCompareScope" value-field="stampScope" cache="false">
+                <field-map field-name="compareScopeId" from="entityValue.compareScopeId"/></entity-find-one>
+            <set field="stampTenant" from="stampScope?.companyUserGroupId"/>
+            <if condition="!stampTenant &amp;&amp; stampScope?.ruleSetId">
+                <entity-find-one entity-name="darpan.rule.RuleSet" value-field="stampRuleSet" cache="false">
+                    <field-map field-name="ruleSetId" from="stampScope.ruleSetId"/></entity-find-one>
+                <set field="stampTenant" from="stampRuleSet?.companyUserGroupId"/>
+            </if>
+            <if condition="stampTenant"><script>entityValue.set('companyUserGroupId', stampTenant)</script></if>
+        </actions>
+    </eeca>
+    <eeca id="RuleChildTenant_RuleSetCompareSourceKeyField" entity="darpan.rule.RuleSetCompareSourceKeyField" on-create="true" run-before="true" run-on-error="true">
+        <condition><expression>!entityValue.companyUserGroupId &amp;&amp; entityValue.compareScopeId</expression></condition>
+        <actions>
+            <entity-find-one entity-name="darpan.rule.RuleSetCompareScope" value-field="stampScope" cache="false">
+                <field-map field-name="compareScopeId" from="entityValue.compareScopeId"/></entity-find-one>
+            <set field="stampTenant" from="stampScope?.companyUserGroupId"/>
+            <if condition="!stampTenant &amp;&amp; stampScope?.ruleSetId">
+                <entity-find-one entity-name="darpan.rule.RuleSet" value-field="stampRuleSet" cache="false">
+                    <field-map field-name="ruleSetId" from="stampScope.ruleSetId"/></entity-find-one>
+                <set field="stampTenant" from="stampRuleSet?.companyUserGroupId"/>
+            </if>
+            <if condition="stampTenant"><script>entityValue.set('companyUserGroupId', stampTenant)</script></if>
+        </actions>
+    </eeca>
+</eecas>

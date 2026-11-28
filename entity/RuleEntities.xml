@@ -75,8 +75,8 @@
         <field name="severity" type="text-short"/>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
-                the parent RuleSet stays the authoritative tenant boundary). Stamped at save time and
-                backfilled by sweep#RuleChildTenantStamps for pre-existing rows.</description>
+                the parent RuleSet stays the authoritative tenant boundary). Writers stamp it; when one leaves it
+                blank, entity/RuleChildTenant.eecas.xml fills it from the parent before the create.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -130,8 +130,8 @@
         <field name="description" type="text-medium"/>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
-                the parent RuleSet stays the authoritative tenant boundary). Stamped at create time and
-                backfilled by sweep#RuleChildTenantStamps for pre-existing rows.</description>
+                the parent RuleSet stays the authoritative tenant boundary). Writers stamp it; when one leaves it
+                blank, entity/RuleChildTenant.eecas.xml fills it from the parent before the create.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -201,8 +201,8 @@
         </field>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
-                the parent RuleSet stays the authoritative tenant boundary). Stamped at create time and
-                backfilled by sweep#RuleChildTenantStamps for pre-existing rows.</description>
+                the parent RuleSet stays the authoritative tenant boundary). Writers stamp it; when one leaves it
+                blank, entity/RuleChildTenant.eecas.xml fills it from the parent before the create.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -259,7 +259,8 @@
         </field>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
-                the parent RuleSet stays the authoritative tenant boundary).</description>
+                the parent RuleSet stays the authoritative tenant boundary). Writers stamp it; when one leaves it
+                blank, entity/RuleChildTenant.eecas.xml fills it from the parent before the create.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -309,7 +310,8 @@
         </field>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
-                the parent RuleSet stays the authoritative tenant boundary).</description>
+                the parent RuleSet stays the authoritative tenant boundary). Writers stamp it; when one leaves it
+                blank, entity/RuleChildTenant.eecas.xml fills it from the parent before the create.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

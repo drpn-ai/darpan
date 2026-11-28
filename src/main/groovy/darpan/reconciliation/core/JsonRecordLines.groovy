@@ -12,6 +12,8 @@ import darpan.reconciliation.source.KeepRules
 import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.transform.CompileStatic
 import org.moqui.context.ExecutionContext
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -27,6 +29,7 @@ import java.nio.file.StandardCopyOption
 @CompileStatic
 class JsonRecordLines {
 
+    private static final Logger logger = LoggerFactory.getLogger(JsonRecordLines.class)
     private static final JsonFactory FACTORY = new JsonFactory()
     static final String SUFFIX = ".records.jsonl"
 
@@ -40,7 +43,9 @@ class JsonRecordLines {
         File dataManager = null
         try {
             dataManager = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveDataManagerLocation(ec), false)
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // Only where the lines file goes changes: with no data manager it goes to the temp directory.
+            logger.warn("No data manager folder for {} ({}); its record lines go to the temp directory.", path, e.toString())
         }
         return forRecordArray(path, pathInfos, dataManager, injections)
     }
@@ -113,6 +118,7 @@ class JsonRecordLines {
 
     private static int copyRecords(JsonParser parser, File target, Map<String, List<Map>> byField) {
         int count = 0
+        int skipped = 0
         target.withOutputStream { OutputStream out ->
             JsonGenerator generator = FACTORY.createGenerator(out, JsonEncoding.UTF8)
             // Root values are separated by a newline and records hold none of their own: Spark splits on it.
@@ -121,6 +127,7 @@ class JsonRecordLines {
                 while (parser.nextToken() != JsonToken.END_ARRAY) {
                     if (parser.currentToken() != JsonToken.START_OBJECT) {
                         parser.skipChildren()
+                        skipped++
                         continue
                     }
                     copyRecord(parser, generator, byField, count)
@@ -131,6 +138,8 @@ class JsonRecordLines {
                 generator.close()
             }
         }
+        // A records array holds objects; anything else is not a record and is left out, said here rather than silently.
+        if (skipped > 0) logger.warn("{} of the records array's elements in {} are not objects and were left out.", skipped, target.name)
         return count
     }
 

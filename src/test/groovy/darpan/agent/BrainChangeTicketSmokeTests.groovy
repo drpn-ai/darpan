@@ -153,6 +153,37 @@ class BrainChangeTicketSmokeTests {
         assertEquals([], filtered.tickets)
     }
 
+    /**
+     * DAR-OPS-029 S30b OC161 (Aditi 2026-11-28: "editors/admins only"). The app shows tickets to no one, and a ticket holds
+     * another person's words from their agent chat, so the list is for editors and admins, as audit change proposals are.
+     */
+    @Test
+    @DisplayName("a view-only member cannot list the tenant's tickets; an editor can")
+    void viewerCannotListTickets() {
+        String id = create(CONV, "DISPLAY", "Only editors read this.").ticketId
+        String viewer = "BCT_VIEWER"
+        asSystem {
+            upsert("moqui.security.UserAccount", [userId: viewer, username: "bct.viewer", userFullName: "BCT Viewer",
+                    emailAddress: "bct.viewer@example.com", disabled: "N", requirePasswordChange: "N"])
+            upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: viewer, fromDate: FROM])
+            upsert("moqui.security.UserGroupMember", [userGroupId: MINE, userId: viewer, fromDate: FROM])
+            upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: viewer,
+                    permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, fromDate: FROM])
+        }
+        try {
+            assertTrue(ec.user.internalLoginUser("bct.viewer"), "could not log in")
+            ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, MINE)
+            TenantAccessSupport.syncUserContext(ec)
+            ec.message.clearAll()
+            Map out = call(FACADE, "list#BrainChangeTickets", [:])
+            assertTrue(out.hadError as boolean, "a viewer was not refused")
+            assertFalse(((out.tickets ?: []) as List<Map>)*.ticketId.contains(id), "a viewer read the ticket")
+        } finally {
+            actAs(MINE)
+        }
+        assertEquals([id], listIds(), "the editor still lists it")
+    }
+
     @Test
     @DisplayName("an unknown category is refused and every listed one is accepted")
     void unknownCategoryRefused() {

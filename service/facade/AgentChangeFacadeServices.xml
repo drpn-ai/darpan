@@ -261,10 +261,12 @@
     </service>
 
     <service verb="list" noun="BrainChangeTickets" allow-remote="true" authenticate="true" authz-action="view">
-        <description>The active tenant's tickets, newest first.</description>
+        <description>The active tenant's tickets, newest first. Editors and admins only (OC161, Aditi 2026-11-28): a ticket
+            holds another person's words from their agent chat.</description>
         <in-parameters><parameter name="status"><description>Only tickets in this status.</description></parameter></in-parameters>
         <out-parameters><parameter name="tickets" type="List"/></out-parameters>
         <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Brain change tickets are for editors and admins.')"><return error="true"/></if>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><set field="tickets" from="[]"/><return/></if>
             <entity-find entity-name="darpan.agent.BrainChangeTicket" list="rows">

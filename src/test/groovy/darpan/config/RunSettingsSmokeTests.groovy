@@ -2,6 +2,7 @@ package darpan.config
 
 import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.AutomationRetryPolicy
 import darpan.reconciliation.automation.AutomationWindows
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -70,9 +71,9 @@ class RunSettingsSmokeTests {
     @Test
     void theBackoffCapRowIsHonoured() {
         // base 5 min, doubling: attempt 10 would be 2560 min, so it sits at the cap.
-        assertEquals(60L * 60_000L, AutomationExecutionSupport.retryBackoffMillis(10))
+        assertEquals(60L * 60_000L, AutomationRetryPolicy.retryBackoffMillis(10))
         saveRow(BACKOFF_CAP, "30")
-        assertEquals(30L * 60_000L, AutomationExecutionSupport.retryBackoffMillis(10))
+        assertEquals(30L * 60_000L, AutomationRetryPolicy.retryBackoffMillis(10))
     }
 
     @Test

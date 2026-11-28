@@ -16,26 +16,26 @@ class AutomationFailureClassificationTests {
     void aSparkAnalysisErrorIsPermanent() {
         Throwable t = new RuntimeException("Java method for service [reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope] threw an exception",
                 new RuntimeException("[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column or function parameter with name `tranId` cannot be resolved. Did you mean one of the following? [`records`, `metadata`].;"))
-        assertTrue(AutomationExecutionSupport.isPermanentFailure(t))
-        assertTrue(AutomationExecutionSupport.isPermanentFailure(new RuntimeException("[DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES] Cannot resolve ...")))
-        assertTrue(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("Reconcile compare stage reported errors: " +
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(t))
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(new RuntimeException("[DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES] Cannot resolve ...")))
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(new IllegalStateException("Reconcile compare stage reported errors: " +
                 "Compare scope 'Exchange orders' FILE_2 (NetSuite SuiteQL) produced duplicate primary ids")))
     }
 
     @Test
     void aShopifyAccessDeniedIsPermanent() {
         // DAR-BE-243: New Era RS_100357's four attempts (2026-11-12) all failed this way.
-        assertTrue(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("Shopify orders extract failed",
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(new IllegalStateException("Shopify orders extract failed",
                 new RuntimeException("Shopify GraphQL error: Access denied for bulkOperationRunQuery field. " +
                         "Required access: Only accessible by supported access tokens."))))
-        assertTrue(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException(
+        assertTrue(AutomationRetryPolicy.isPermanentFailure(new IllegalStateException(
                 "Shopify GraphQL error: Access denied for returns field. Required access: `read_returns` access scope.")))
     }
 
     @Test
     void aTimeoutOrAGatewayErrorIsStillRetried() {
-        assertFalse(AutomationExecutionSupport.isPermanentFailure(new java.net.SocketTimeoutException("Read timed out")))
-        assertFalse(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("OMS returns extract failed with HTTP 504")))
-        assertFalse(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("OMS GraphQL extract failed [THROTTLED]: throttled")))
+        assertFalse(AutomationRetryPolicy.isPermanentFailure(new java.net.SocketTimeoutException("Read timed out")))
+        assertFalse(AutomationRetryPolicy.isPermanentFailure(new IllegalStateException("OMS returns extract failed with HTTP 504")))
+        assertFalse(AutomationRetryPolicy.isPermanentFailure(new IllegalStateException("OMS GraphQL extract failed [THROTTLED]: throttled")))
     }
 }

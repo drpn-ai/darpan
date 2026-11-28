@@ -706,6 +706,26 @@ class TenantAccessSupport {
         if (!canAccessTenantRecord(ec, record, companyField)) ec?.message?.addError(missingMessage)
     }
 
+    /**
+     * DAR-OPS-029 S99-042 (S22 R2). The shared first half of the facade's lifecycle switches
+     * (archive/restore/disable/enable#SavedRun, archive/restore/pause/resume#Automation): the id given, the active tenant's
+     * write access, the row, the tenant gate, each refusal in the words those services always used and in that order. The
+     * row, or null with an error added; the caller sets its one flag. An XML internal service cannot share this, because a
+     * nested service-call either returns early on an error (skipping ok/errors) or, with ignore-error, clears it.
+     */
+    static def ownedRowForWrite(def ec, String entityName, String idField, String idParameter, Object rawId,
+                                String readOnlyMessage, String notFoundLabel) {
+        String id = ((rawId)?.toString()?.trim())
+        if (!id) {
+            ec.message.addError("${idParameter} is required".toString())
+            return null
+        }
+        if (!requireActiveTenantWriteAccess(ec, readOnlyMessage)) return null
+        def row = ec.entity.find(entityName).condition(idField, id).disableAuthz().useCache(false).one()
+        requireTenantRecordAccess(ec, row, "${notFoundLabel} '${id}' was not found.".toString())
+        return ec.message.hasError() ? null : row
+    }
+
     static void assignTenantOwnershipOnCreate(def value, def ec, String companyField = "companyUserGroupId",
             String createdByField = "createdByUserId") {
         if (value == null) return

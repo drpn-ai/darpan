@@ -189,7 +189,8 @@ class DisableAuthzRatchetTest {
             // 64 since DAR-OPS-029 S99-079: save#RuleSet deleted (its anyRuleSet existence read went with it).
             // 54 since DAR-OPS-029 S99-019/S99-040: the automation row's 10 source and execution reads (list, get, save, pause,
             // resume, run#Automation) moved to AutomationRowSupport, tenant-scoped through TenantScopedFinder.
-            "darpan service+screen XML .disableAuthz("            : 54, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
+            // 46 since DAR-OPS-029 S99-042: the eight lifecycle switches' row reads moved to TenantAccessSupport.ownedRowForWrite.
+            "darpan service+screen XML .disableAuthz("            : 46, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             // 35 again since DAR-BE-338: save#Automation creates the automation's own filter rows again.
             // 36 since DAR-BE-374 (re-baselined in 3.5.3): IdIndexFacadeServices save#TenantIdIndexField stores the tenant's own
             // field after requireActiveTenantWriteAccess, companyUserGroupId set to the active tenant.

@@ -1245,6 +1245,71 @@ class AutomationFacadeSmokeTests {
         }
     }
 
+    /**
+     * DAR-OPS-029 S99-042 pin. The eight lifecycle switches (archive/restore/disable/enable#SavedRun,
+     * archive/restore/pause/resume#Automation) refuse and answer in their own words, in this order: no id, a view-only
+     * tenant, no such row (or another tenant's); then the switch, its message and its flag. Written before their shared
+     * body moved into one helper; it must not move.
+     */
+    @Test
+    void theEightLifecycleSwitchesRefuseAndAnswerInTheirOwnWords() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Switch Pin")
+        String automationId = automation.automationId as String
+        String runId = automation.savedRunId as String
+        Closure<Map> call = { String service, Map params ->
+            ec.message.clearAll()
+            Map out = callFacade("facade.ReconciliationFacadeServices.${service}".toString(), params)
+            ec.message.clearAll()
+            return out
+        }
+        Closure<List> said = { Map out -> [out.ok, out.errors, out.messages] }
+        List<List> runSwitches = [["archive#SavedRun", "Archived run", "isArchived", true], ["restore#SavedRun", "Restored run", "isArchived", false],
+                                  ["disable#SavedRun", "Disabled run", "isActive", false], ["enable#SavedRun", "Enabled run", "isActive", true]]
+        List<List> automationSwitches = [["archive#Automation", "Archived automation", "isArchived", true],
+                                         ["restore#Automation", "Restored automation", "isArchived", false],
+                                         ["pause#Automation", "Paused automation", null, null], ["resume#Automation", "Resumed automation", null, null]]
+        try {
+            runSwitches.each { List s ->
+                assertEquals([false, ["savedRunId is required"], []], said(call(s[0] as String, [savedRunId: "  "])), "${s[0]} no id")
+                assertEquals([false, ["Saved run 'NO_SUCH_RUN' was not found."], []], said(call(s[0] as String, [savedRunId: "NO_SUCH_RUN"])),
+                        "${s[0]} not found")
+            }
+            automationSwitches.each { List s ->
+                assertEquals([false, ["automationId is required"], []], said(call(s[0] as String, [automationId: "  "])), "${s[0]} no id")
+                assertEquals([false, ["Automation 'NO_SUCH_AUTOMATION' was not found."], []],
+                        said(call(s[0] as String, [automationId: "NO_SUCH_AUTOMATION"])), "${s[0]} not found")
+            }
+            replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID)
+            runSwitches.each { List s ->
+                assertEquals([false, ["Your active tenant only has view access for run changes."], []],
+                        said(call(s[0] as String, [savedRunId: " ${runId} "])), "${s[0]} view only")
+            }
+            automationSwitches.each { List s ->
+                assertEquals([false, ["Your active tenant only has view access for automation changes."], []],
+                        said(call(s[0] as String, [automationId: automationId])), "${s[0]} view only")
+            }
+            replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
+            runSwitches.each { List s ->
+                Map out = call(s[0] as String, [savedRunId: " ${runId} "])
+                assertEquals([true, [], ["${s[1]} ${runId}.".toString()]], said(out), "${s[0]} switched")
+                assertEquals(s[3], out[s[2]], "${s[0]} answers its flag")
+            }
+            automationSwitches.each { List s ->
+                Map out = call(s[0] as String, [automationId: " ${automationId} "])
+                assertEquals([true, [], ["${s[1]} ${automationId}.".toString()]], said(out), "${s[0]} switched")
+                if (s[2]) assertEquals(s[3], out[s[2]], "${s[0]} answers its flag")
+                else assertEquals(automationId, (out.automation as Map)?.automationId, "${s[0]} answers the row")
+            }
+            assertEquals(["Y", "N"], [findOne("darpan.rule.RuleSet", [ruleSetId: runId]).isActive,
+                                      findOne("darpan.rule.RuleSet", [ruleSetId: runId]).isArchived])
+            assertEquals(["Y", "N"], [findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]).isActive,
+                                      findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]).isArchived])
+        } finally {
+            replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
     @Test
     void archivedAutomationLeavesTheListAndStopsBeingScheduled() {
         Map<String, Object> automation = createSyncFixtureAutomation("Archive Me")

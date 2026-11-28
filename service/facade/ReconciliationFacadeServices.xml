@@ -3056,25 +3056,14 @@
             <parameter name="isArchived" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
-            <if condition="!savedRunIdValue">
-                <message error="true">savedRunId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
-                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="ruleSetRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'savedRunId', savedRunId, 'Your active tenant only has view access for run changes.', 'Saved run')"/>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetRecord.isArchived" from="'Y'"/>
                 <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="ruleSetRecord"/>
                 <set field="isArchived" from="true"/>
-                <message>Archived run ${savedRunIdValue}.</message>
+                <message>Archived run ${ruleSetRecord.ruleSetId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3100,25 +3089,14 @@
             <parameter name="isArchived" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
-            <if condition="!savedRunIdValue">
-                <message error="true">savedRunId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
-                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="ruleSetRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'savedRunId', savedRunId, 'Your active tenant only has view access for run changes.', 'Saved run')"/>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetRecord.isArchived" from="'N'"/>
                 <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="ruleSetRecord"/>
                 <set field="isArchived" from="false"/>
-                <message>Restored run ${savedRunIdValue}.</message>
+                <message>Restored run ${ruleSetRecord.ruleSetId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3147,27 +3125,14 @@
             <parameter name="isActive" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
-            <if condition="!savedRunIdValue">
-                <message error="true">savedRunId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
-                    <!-- One message for "no such run" and "not yours", matching every sibling here:
-                         a more specific one is a cross-tenant existence oracle. -->
-                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="ruleSetRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'savedRunId', savedRunId, 'Your active tenant only has view access for run changes.', 'Saved run')"/>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetRecord.isActive" from="'N'"/>
                 <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="ruleSetRecord"/>
                 <set field="isActive" from="false"/>
-                <message>Disabled run ${savedRunIdValue}.</message>
+                <message>Disabled run ${ruleSetRecord.ruleSetId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3196,27 +3161,14 @@
             <parameter name="isActive" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
-            <if condition="!savedRunIdValue">
-                <message error="true">savedRunId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
-                    <!-- One message for "no such run" and "not yours", matching every sibling here:
-                         a more specific one is a cross-tenant existence oracle. -->
-                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="ruleSetRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'savedRunId', savedRunId, 'Your active tenant only has view access for run changes.', 'Saved run')"/>
             <if condition="!ec.message.hasError()">
                 <set field="ruleSetRecord.isActive" from="'Y'"/>
                 <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="ruleSetRecord"/>
                 <set field="isActive" from="true"/>
-                <message>Enabled run ${savedRunIdValue}.</message>
+                <message>Enabled run ${ruleSetRecord.ruleSetId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3244,25 +3196,14 @@
             <parameter name="isArchived" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
-            <if condition="!automationIdValue">
-                <message error="true">automationId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
-                    <message error="true">Automation '${automationIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="automationRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.reconciliation.ReconciliationAutomation', 'automationId', 'automationId', automationId, 'Your active tenant only has view access for automation changes.', 'Automation')"/>
             <if condition="!ec.message.hasError()">
                 <set field="automationRecord.isArchived" from="'Y'"/>
                 <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="automationRecord"/>
                 <set field="isArchived" from="true"/>
-                <message>Archived automation ${automationIdValue}.</message>
+                <message>Archived automation ${automationRecord.automationId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3290,25 +3231,14 @@
             <parameter name="isArchived" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
-            <if condition="!automationIdValue">
-                <message error="true">automationId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
-                    <message error="true">Automation '${automationIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="automationRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.reconciliation.ReconciliationAutomation', 'automationId', 'automationId', automationId, 'Your active tenant only has view access for automation changes.', 'Automation')"/>
             <if condition="!ec.message.hasError()">
                 <set field="automationRecord.isArchived" from="'N'"/>
                 <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="automationRecord"/>
                 <set field="isArchived" from="false"/>
-                <message>Restored automation ${automationIdValue}.</message>
+                <message>Restored automation ${automationRecord.automationId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3329,19 +3259,8 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
-            <if condition="!automationIdValue">
-                <message error="true">automationId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
-                    <message error="true">Automation '${automationIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="automationRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.reconciliation.ReconciliationAutomation', 'automationId', 'automationId', automationId, 'Your active tenant only has view access for automation changes.', 'Automation')"/>
             <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
             <if condition="!ec.message.hasError()">
                 <set field="ownScheduleRefusal" from="darpan.audit.AuditSchedule.ownScheduleRefusal(ec, automationRecord)"/>
@@ -3352,9 +3271,9 @@
                 <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="automationRecord"/>
                 <!-- DAR-BE-107: a pause carries the streak. -->
-                <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
+                <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationRecord.automationId)"/>
                 <set field="automation" from="darpan.facade.reconciliation.AutomationRowSupport.loadAutomationRow(ec, automationRecord)"/>
-                <message>Paused automation ${automationIdValue}.</message>
+                <message>Paused automation ${automationRecord.automationId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -3375,19 +3294,8 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
-            <if condition="!automationIdValue">
-                <message error="true">automationId is required</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
-                    <message error="true">Automation '${automationIdValue}' was not found.</message>
-                </if>
-            </if>
+            <!-- DAR-OPS-029 S99-042: the id, write access, the row and its tenant gate, one helper for the eight switches. -->
+            <set field="automationRecord" from="darpan.facade.common.TenantAccessSupport.ownedRowForWrite(ec, 'darpan.reconciliation.ReconciliationAutomation', 'automationId', 'automationId', automationId, 'Your active tenant only has view access for automation changes.', 'Automation')"/>
             <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
             <if condition="!ec.message.hasError()">
                 <set field="ownScheduleRefusal" from="darpan.audit.AuditSchedule.ownScheduleRefusal(ec, automationRecord)"/>
@@ -3398,7 +3306,7 @@
                 <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="automationRecord"/>
                 <set field="automation" from="darpan.facade.reconciliation.AutomationRowSupport.loadAutomationRow(ec, automationRecord)"/>
-                <message>Resumed automation ${automationIdValue}.</message>
+                <message>Resumed automation ${automationRecord.automationId}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

@@ -8,8 +8,8 @@
         require-authentication="false">
     <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · CHAT LINE')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · CHAT LINE'))</script>
         <set field="copyNotRun" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_ERROR_NOTICE&quot;, &quot;client.notrun&quot;, [name: name])"/>
         <set field="copyRunFailed" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_ERROR_NOTICE&quot;, &quot;client.runfailed&quot;, [name: name])"/>
         <set field="copyNothing" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_ERROR_NOTICE&quot;, &quot;client.nothing&quot;, [name: name, day: day, counts: counts])"/>

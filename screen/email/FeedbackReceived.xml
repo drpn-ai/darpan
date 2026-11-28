@@ -8,8 +8,8 @@
         require-authentication="false">
     <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · FEEDBACK')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose, guideLinks, guidesHtml, guidesText (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · FEEDBACK', 'DARPAN_FEEDBACK_RECEIVED'))</script>
         <set field="copyVars" from="[firstName: firstName, note: note, statementCode: statementCode, recordKey: recordKey,
                 headline: headline, shownDays: shownDays]"/>
         <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;greeting&quot;, copyVars)"/>
@@ -18,9 +18,6 @@
         <set field="copyAbout" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;about&quot;, copyVars)"/>
         <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;next&quot;, copyVars)"/>
         <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;note&quot;, copyVars)"/>
-        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
         <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyQuote, copyAbout, copyNext, copyNote, '— Darpan'])"/>
     </actions>
     <widgets>

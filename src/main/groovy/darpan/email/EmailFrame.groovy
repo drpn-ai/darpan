@@ -53,6 +53,22 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
 
     static String close() { return "</td></tr></table></td></tr></table></body></html>" }
 
+    /**
+     * DAR-OPS-029 S99-076. The fields every email screen opens with, set in one call (context.putAll) instead of five set
+     * lines per screen: frameOpen and frameClose (the frame around the email's content) and, when the template carries guide
+     * links (emailTemplateId given), guideLinks, guidesHtml and guidesText. The screens' templates read these names unchanged.
+     */
+    static Map<String, Object> preamble(def ec, String eyebrowText, String emailTemplateId = null) {
+        Map<String, Object> fields = [frameOpen: open(eyebrowText), frameClose: close()] as Map<String, Object>
+        if (emailTemplateId) {
+            List<List<String>> links = EmailCopy.guides(ec, emailTemplateId)
+            fields.put("guideLinks", links)
+            fields.put("guidesHtml", EmailCopy.guidesHtml(links))
+            fields.put("guidesText", EmailCopy.guidesText(links))
+        }
+        return fields
+    }
+
     /** The user guide every link goes to; a template names a page path only, so no email can link anywhere else. */
     static final String DOCS = "https://docs.drpn.ai"
     private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"

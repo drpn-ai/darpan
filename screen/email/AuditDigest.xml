@@ -8,11 +8,8 @@
              draft's words show: the text is built here, through the same blocks. -->
         <set field="digestText" from="ec.context.get('digestText') ?: darpan.audit.AuditDigestSupport.render(digestReport, digestKind ?: 'AUDDK_DAILY', digestFullList == true, ec.context.get('digestWeekAgo'), ec.context.get('digestReportUrl'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_DIGEST'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_RUN'))"/>
         <set field="digestHtml" from="darpan.email.EmailFrame.esc(digestText)"/>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_AUDIT_DIGEST&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose, guideLinks, guidesHtml, guidesText (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · AUDIT DIGEST', 'DARPAN_AUDIT_DIGEST'))</script>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>

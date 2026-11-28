@@ -4,8 +4,8 @@
         require-authentication="false">
     <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose, guideLinks, guidesHtml, guidesText (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · SECURITY', 'DARPAN_2FA_REMINDER'))</script>
         <set field="copyVars" from="[firstName: firstName, requiredDate: requiredDate, appUrl: appUrl]"/>
         <set field="copyGreetingBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.before&quot;, copyVars)"/>
         <set field="copyGreetingAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.after&quot;, copyVars)"/>
@@ -13,9 +13,6 @@
         <set field="copyNextBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.before&quot;, copyVars)"/>
         <set field="copyNextAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.after&quot;, copyVars)"/>
         <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;note&quot;, copyVars)"/>
-        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_2FA_REMINDER&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
         <set field="isPast" from="past == true || past == 'true'"/>
         <!-- DAR-BE-315: the plain-text part is these same copy blocks, one per paragraph, never cut or dropped; template/email/EmailText.ftl keeps the labels above out of it (stock text macros cut each at 132 columns and drop fail-widgets branches). -->
         <set field="emailText" from="darpan.email.EmailFrame.textOf([(!isPast ? copyGreetingBefore : copyGreetingAfter), copyBody, (!isPast ? copyNextBefore : copyNextAfter), copyNote, '— Darpan'])"/>

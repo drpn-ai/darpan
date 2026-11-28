@@ -6,8 +6,8 @@
         require-authentication="false">
     <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · QUERY')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · QUERY'))</script>
         <set field="fileList" from="(fileNames ?: []).join(', ')"/>
         <set field="copyVars" from="[scriptName: scriptName, fileList: fileList]"/>
         <set field="copyIntro" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_QUERY_RESULT&quot;, &quot;intro&quot;, copyVars)"/>

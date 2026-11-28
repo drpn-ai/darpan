@@ -9,8 +9,8 @@
         require-authentication="false">
     <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
-        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
-        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <!-- DAR-OPS-029 S99-076: frameOpen, frameClose, guideLinks, guidesHtml, guidesText (EmailFrame.preamble). -->
+        <script>context.putAll(darpan.email.EmailFrame.preamble(ec, 'DARPAN · WELCOME', 'DARPAN_TENANT_WELCOME'))</script>
         <set field="copyVars" from="[firstName: firstName, tenantLabel: tenantLabel, rolePhrase: rolePhrase, appBaseUrl: appBaseUrl, username: username]"/>
         <set field="hasPassword" from="tempPassword as boolean"/>
         <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;smile&quot;, copyVars), tenantUserGroupId)"/>
@@ -22,9 +22,6 @@
         <set field="copySigninWithout" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;signin.without&quot;, copyVars)"/>
         <set field="copyPassword" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;password&quot;, copyVars)"/>
         <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;note&quot;, copyVars)"/>
-        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_TENANT_WELCOME&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
         <!-- DAR-BE-315: the plain-text part is these same copy blocks, one per paragraph, never cut or dropped; template/email/EmailText.ftl keeps the labels above out of it (stock text macros cut each at 132 columns and drop fail-widgets branches). -->
         <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyNext, (appBaseUrl ? copySigninWith : copySigninWithout)] + (hasPassword ? [copyPassword, tempPassword] : []) + [copyNote, '— Darpan'])"/>
     </actions>

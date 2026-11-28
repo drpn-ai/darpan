@@ -145,6 +145,31 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
         ec.message.clearErrors()
     }
 
+    // DAR-OPS-029 S27: the probe is gated like editing the connection it tests, and editing a connection is run access
+    // (save#SftpServer, the app's canManageConnections): a User who may save the connection may test it; a viewer may not.
+    @Test
+    void whoMaySaveTheConnectionMayTestItAndAViewerMayNot() {
+        actAs("DARPAN_TENANT_USER")
+        Map<String, Object> asUser = call("DIAGSYS_OK", "DIAG_OWNED")
+        assertTrue(asUser.ok as boolean, "a User manages connections, so it may test one: ${asUser.errors}")
+        assertTrue(asUser.available as boolean)
+
+        actAs("DARPAN_COMPANY_VIEW_ONLY")
+        Map<String, Object> asViewer = call("DIAGSYS_OK", "DIAG_OWNED")
+        assertFalse(asViewer.ok as boolean)
+        assertTrue(((List) asViewer.errors).join(" ").toLowerCase().contains("read-only"))
+        ec.message.clearErrors()
+    }
+
+    /** The KREWE test user holds exactly this tenant role. */
+    private void actAs(String roleId) {
+        upsert("moqui.security.UserGroup", [userGroupId: roleId, groupTypeEnumId: "UgtDarpanPermission"])
+        makeActiveTenantReadOnly()
+        upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: TENANT_ID,
+                userId: TEST_USER_ID, permissionUserGroupId: roleId, fromDate: java.sql.Timestamp.valueOf("2026-04-21 00:00:00")])
+        ec.message.clearErrors()
+    }
+
     @Test
     void blankInputsAreRejected() {
         Map<String, Object> noSystem = callRaw([systemEnumId: " ", configId: "DIAG_OWNED"])

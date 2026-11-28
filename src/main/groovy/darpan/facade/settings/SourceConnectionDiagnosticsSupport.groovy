@@ -55,9 +55,10 @@ class SourceConnectionDiagnosticsSupport {
             return unavailable(startedAt)
         }
 
-        // Running a probe spends a real credential against a real remote system, so it is gated
-        // exactly like editing or deleting the config it tests — same helper, same wording.
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec)) {
+        // Running a probe spends a real credential against a real remote system, so it is gated like saving the config it
+        // tests: run access (save#SftpServer, save#NsAuthConfig, save#NsRestletConfig and the app's canManageConnections),
+        // so a User may test the connection they may edit and a viewer may not (OC192).
+        if (!TenantAccessSupport.requireActiveTenantRunAccess(ec)) {
             return unavailable(startedAt)
         }
 

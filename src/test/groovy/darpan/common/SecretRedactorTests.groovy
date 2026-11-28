@@ -141,6 +141,101 @@ class SecretRedactorTests {
         assertEquals("", masked(""))
     }
 
+    /**
+     * DAR-OPS-029 S99-230. Text from an external system (a 401 body, a long token) can hold a 20000-character run: the keyed
+     * and Authorization patterns read it in one pass, not one pass per character (seconds per redact, on every stored error).
+     */
+    @Test
+    void aLongRunIsRedactedQuickly() {
+        String run = "u7" * 10_000
+        ["": "", "token=abc": "token=***", "authorization: x": "authorization: ***", " cookie=c": " cookie=***"].each { String tail, String out ->
+            long t0 = System.nanoTime()
+            assertEquals(run + out, masked(run + tail))
+            long ms = (long) ((System.nanoTime() - t0) / 1_000_000)
+            org.junit.jupiter.api.Assertions.assertTrue(ms < 500, "'${tail}' after a 20000-character run took ${ms} ms")
+        }
+        long t1 = System.nanoTime()
+        // the guard skips only the word that starts right after "return ": a longer word is still a header key
+        assertEquals("return " + run + "authorization: ***", masked("return " + run + "authorization: x"))
+        org.junit.jupiter.api.Assertions.assertTrue((System.nanoTime() - t1) / 1_000_000 < 500, "the Return guard over a long run")
+    }
+
+    /**
+     * S99-230: the linear patterns mask exactly what the old ones did, over every input in this class, the edges of the
+     * "Return " guard and word starts, and 4000 seeded random texts built from the patterns' own pieces. OLD is the rule set
+     * as it was (b1a0c4 era), kept here as the oracle.
+     */
+    @Test
+    void theLinearPatternsMaskExactlyWhatTheOldOnesDid() {
+        List<String> inputs = [
+                "NetSuite 401 for apiToken=sk_live_secret, retry", "password=hunter2 token=abc.def", "access_token=abc&x=1",
+                "password=p&ss}w0rd (retry)", "password=ab,cd next", "secret=x)y", '{"secret":"a b, c&d}","next":1}',
+                '{"password":"x\\"y z"}', "token='a b' ok", 'IllegalStateException: password="ab cd ef\n    at darpan.X.read(X.groovy:12)\nCaused by: "y"',
+                '{"error":"unauthorized","apiToken":"sk_live_1","secret": "s3cr3t","apiKey":"AK-9","clientSecret":"cs"}',
+                '{"access_token":"shpat_x","refresh_token":"r1","client_secret":"cs"}', 'body: {\\"apiToken\\":\\"sk_live\\",\\"x\\":1}',
+                "password => hunter2", "x-api-key: k1", "token:\n    at darpan.X",
+                'privateKey="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1\n-----END RSA PRIVATE KEY-----"\n    at darpan.X',
+                "POST https://chat.googleapis.com/v1/spaces/AAA/messages?key=AIzaK1&token=T0k3n failed", "jdbc:mysql://darpan:s3cret@db:3306/darpan",
+                "googleChatWebhookUrl=https://chat.googleapis.com/v1/spaces/A/messages rejected", "login_key=lk-1 loginKey: lk-2",
+                "Cookie: JSESSIONID=abc123; moqui_visitor=xyz", "Set-Cookie: JSESSIONID=abc123; Path=/; HttpOnly",
+                "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG", "passphrase=open-sesame pwd=p1 credentials: c1",
+                'oauth_signature="a%2Bb", oauth_nonce="n1"', "Authorization: Bearer eyJhbGciOi.payload.sig", "Authorization: Basic dXNlcjpwYXNz",
+                'Proxy-Authorization: Digest username="svc", realm="ns", response="6629fae4"', '{"Authorization":"Basic dXNlcjpwYXNz","Accept":"application/json"}',
+                "headers [authorization:Token t0k3n-v4lue, accept:json]", "X-Authorization = NTLM TlRMTVNTUAAB\n    at darpan.X",
+                "authorization failed for svc", "RMA 7 is Return Authorization : Pending Refund, expected Closed",
+                'orderId=123, "status":"OPEN", tokenCount=5, secretary=Ann, "keyField":"orderName", primaryKey=ID',
+                // the guard's edges: a word right after "return ", one letter in, and a quote between
+                "return xauthorization: y", "Return Pre-Authorization: x", "return\tAuthorization: x", "return  authorization: x",
+                'return "authorization": "x"', "RETURN x-cookie: c", "return ab_authorization=x", "returnauthorization: x",
+                // word starts: a prefix that holds another key word, a key after a quoted value, keys back to back
+                "tokenpassword=x", 'password="a"token=b', "xtoken=1 ytoken=2", "a-b_c-password: v", '\\"secret\\": \\"v\\"',
+        ]
+        List<String> pieces = ["password", "token", "authorization", "Authorization", "cookie", "secret", "api_key", "webhook",
+                "Return ", "return\t", "return", "x", "Pre-", "_", "-", "=", ":", "=>", " ", "\t", "\"", "'", "\\\"", "\n", "Bearer ",
+                "abc", "u7u7", "@", "https://u:p", "?key=", "&", ",", "}", "Proxy-", "Set-"]
+        Random random = new Random(230L)
+        4000.times {
+            StringBuilder b = new StringBuilder()
+            (1 + random.nextInt(14)).times { b.append(pieces[random.nextInt(pieces.size())]) }
+            inputs << b.toString()
+        }
+        inputs.each { String input -> assertEquals(OldRedactor.redact(input), masked(input), "differs on: ${input}") }
+    }
+
+    /** The rule set as it was before S99-230, for the parity check: only the two patterns' starts differ. */
+    private static final class OldRedactor {
+        static final java.util.regex.Pattern PEM = ~/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END \1-----|\z)/
+        static final java.util.regex.Pattern USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]*:)[^@\s]+@/
+        static final java.util.regex.Pattern PARAM =
+                ~/(?i)([?&](?:key|token|sig|signature|access_token|code|x-amz-signature|x-amz-credential|x-amz-security-token|oauth_[a-z_]+)=)[^&\s"'#]+/
+        static final java.util.regex.Pattern SECRET =
+                ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|passphrase|pwd|credentials?|login[_-]?key|privateKey|apiToken|api[_-]?key|clientSecret|secret[_-]?access[_-]?key|secret|oauth_[a-z_]+|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
+        static final java.util.regex.Pattern AUTH =
+                ~/(?i)(?<!return[ \t])(\\?["']?)([A-Za-z0-9_-]*?)(authorization|cookie)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|[^\r\n]+)/
+        static final java.util.regex.Pattern BEARER = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
+
+        static String redact(String text) {
+            String out = PEM.matcher(text).replaceAll('-----BEGIN $1-----***-----END $1-----')
+            out = USERINFO.matcher(out).replaceAll('$1***@')
+            out = PARAM.matcher(out).replaceAll('$1***')
+            out = keyed(AUTH, out)
+            out = keyed(SECRET, out)
+            return BEARER.matcher(out).replaceAll('$1 ***')
+        }
+
+        static String keyed(java.util.regex.Pattern pattern, String text) {
+            java.util.regex.Matcher m = pattern.matcher(text)
+            StringBuffer b = new StringBuffer()
+            while (m.find()) {
+                String secret = m.group(5)
+                String q = secret.startsWith('"') || secret.startsWith("'") ? secret.substring(0, 1) : ""
+                m.appendReplacement(b, java.util.regex.Matcher.quoteReplacement(m.group(1) + m.group(2) + m.group(3) + m.group(1) + m.group(4) + q + "***" + q))
+            }
+            m.appendTail(b)
+            return b.toString()
+        }
+    }
+
     @Test
     void runErrorsGoThroughTheRedactor() {
         String text = '{"client_secret":"cs"} password=x'

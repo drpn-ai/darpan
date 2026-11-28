@@ -40,15 +40,23 @@ final class SecretRedactor {
     private static final Pattern URL_USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]*:)[^@\s]+@/
     private static final Pattern URL_SECRET_PARAM =
             ~/(?i)([?&](?:key|token|sig|signature|access_token|code|x-amz-signature|x-amz-credential|x-amz-security-token|oauth_[a-z_]+)=)[^&\s"'#]+/
+    /**
+     * DAR-OPS-029 S99-230: a key's prefix starts only where a word does, so a long run of letters costs one try, not one per
+     * letter (a 20000-character run took seconds). The matches are the same: a prefix starting inside a word could always
+     * start at the word's first letter instead, and a match is found from its leftmost start.
+     */
     private static final Pattern SECRET_VALUE =
-            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|passphrase|pwd|credentials?|login[_-]?key|privateKey|apiToken|api[_-]?key|clientSecret|secret[_-]?access[_-]?key|secret|oauth_[a-z_]+|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
+            ~/(?i)(\\?["']?)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]*?)(password|passphrase|pwd|credentials?|login[_-]?key|privateKey|apiToken|api[_-]?key|clientSecret|secret[_-]?access[_-]?key|secret|oauth_[a-z_]+|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
     /**
      * OC83 (DAR-OPS-029 S29). An Authorization header's value, any scheme: quoted up to its closing quote on the line, else to
      * the line's end (a Digest value holds spaces, commas and quotes, and a scheme cannot be told from a credential).
      * NetSuite's record type "Return Authorization" (a status reads "Return Authorization : Pending Refund") is no header.
+     * S99-230: the prefix starts where a word does (as in SECRET_VALUE), or one letter in when the word starts right after
+     * "return ", which is where the guard alone used to move the match: "Return Authorization" stays unmasked and
+     * "return xAuthorization: v" stays masked.
      */
     private static final Pattern AUTHORIZATION_VALUE =
-            ~/(?i)(?<!return[ \t])(\\?["']?)([A-Za-z0-9_-]*?)(authorization|cookie)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|[^\r\n]+)/
+            ~/(?i)(?<!return[ \t])(\\?["']?)(?:(?<![A-Za-z0-9_-])|(?<=return[ \t][A-Za-z0-9_-]))([A-Za-z0-9_-]*?)(authorization|cookie)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|[^\r\n]+)/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     private SecretRedactor() {}

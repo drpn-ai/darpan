@@ -106,117 +106,25 @@ class RuleSetCompareScopeAdapter {
 
         List<String> processingWarnings = ((List<String>) context.get("processingWarnings") ?: []) as List<String>
         List<String> validationErrors = ((List<String>) context.get("validationErrors") ?: []) as List<String>
-        Map<String, Object> sideInputBySide = FILE_SIDES.collectEntries { String fileSide ->
-            String prefix = SIDE_PREFIX_BY_SIDE[fileSide]
-            [(fileSide): [
-                    fileLocation  : ReconciliationServices.normalize(context.get("${prefix}Location")),
-                    fileName      : ReconciliationServices.normalize(context.get("${prefix}Name")),
-                    fileTypeEnumId: ReconciliationServices.normalize(context.get("${prefix}FileTypeEnumId")),
-                    schemaFileName: ReconciliationServices.normalize(context.get("${prefix}SchemaFileName")),
-                    fileLabel     : ReconciliationServices.normalize(context.get("${prefix}Label"))
-            ]]
-        }
+        Map<String, Object> sideInputBySide = sideInputsFrom(context)
 
         if (!ruleSetId) throw new IllegalArgumentException("ruleSetId is required")
         if (!compareScopeId) throw new IllegalArgumentException("compareScopeId is required")
         // FILE_1 is required in EVERY mode, so it is still checked here — before the scope is loaded,
         // which is the cheapest place to fail. FILE_2 cannot be checked yet: whether it is required at
         // all depends on the scope's scopeMode, which is not known until the scope row is read. That
-        // check moved to the per-active-side loop below (DAR-BE-049).
+        // check is planSides' per-active-side loop (DAR-BE-049).
         if (!sideInputBySide.FILE_1.fileLocation) throw new IllegalArgumentException("file1Location is required")
 
-        // RuleSetCompareScope has no companyUserGroupId — gate via parent RuleSet (directly-owned).
-        // findTenantScopedChildren gates the RuleSet and returns a pre-scoped finder for its compare scopes.
-        def compareScopeBaseFinder = TenantScopedFinder.findTenantScopedChildren(
-                ec, DarpanEntityConstants.RULE_SET_COMPARE_SCOPE,
-                "darpan.rule.RuleSet", "ruleSetId", ruleSetId, "ruleSetId")
-        if (compareScopeBaseFinder == null) {
-            throw new IllegalArgumentException("RuleSet ${ruleSetId} was not found or is not accessible in your active tenant")
-        }
-        def compareScope = compareScopeBaseFinder.condition("compareScopeId", compareScopeId).useCache(false).one()
-        if (!compareScope) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} was not found")
-        }
-        String scopeRuleSetId = ReconciliationServices.normalize(compareScope.ruleSetId)
-        String compareScopeLabel = ReconciliationServices.compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
-        if (scopeRuleSetId != ruleSetId) {
-            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' belongs to RuleSet ${scopeRuleSetId}, not ${ruleSetId}")
-        }
-
-        List sources = compareScope.findRelated("sources", null, ["fileSide"], false, false) ?: []
-        if (!sources) {
-            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has no source definitions")
-        }
-        Map<String, Object> sourceBySide = sources.collectEntries { source ->
-            [(ReconciliationServices.normalize(source.fileSide)?.toUpperCase()): source]
-        }
-        String unsupportedFileSide = sourceBySide.keySet().find { String fileSide -> !(fileSide in FILE_SIDES) }
-        if (unsupportedFileSide) {
-            def source = sources.find { source -> ReconciliationServices.normalize(source.fileSide)?.toUpperCase() == unsupportedFileSide }
-            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has unsupported fileSide ${source?.fileSide}. Supported values: FILE_1, FILE_2")
-        }
+        Map<String, Object> loaded = loadCompareScope(ec, ruleSetId, compareScopeId)
+        def compareScope = loaded.compareScope
+        String compareScopeLabel = (String) loaded.label
+        Map<String, Object> sourceBySide = (Map<String, Object>) loaded.sourceBySide
         List<String> activeSides = resolveActiveSides(
                 ReconciliationServices.normalize(compareScope.scopeMode), sourceBySide.keySet(), compareScopeLabel)
         boolean singleSided = activeSides.size() == 1
 
-        // file2Location cannot be declared required on the service any more (an EVALUATE scope has no
-        // second side and a declarative requirement cannot be conditional), so it is enforced here,
-        // per ACTIVE side, where the count is finally known.
-        activeSides.each { String fileSide ->
-            if (!((Map<String, Object>) sideInputBySide[fileSide])?.get("fileLocation")) {
-                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' needs a " +
-                        "${SIDE_PREFIX_BY_SIDE[fileSide]}Location for its ${fileSide} source")
-            }
-        }
-
-        Map<String, Object> sideConfigBySide = activeSides.collectEntries { String fileSide ->
-            Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
-            def source = sourceBySide[fileSide]
-            [(fileSide): [
-                    fileSide            : ReconciliationServices.normalize(source.fileSide)?.toUpperCase(),
-                    systemEnumId        : ReconciliationServices.normalize(source.systemEnumId),
-                    fileTypeEnumId      : sideInput.fileTypeEnumId ?: ReconciliationServices.normalize(source.fileTypeEnumId),
-                    schemaFileName      : sideInput.schemaFileName ?: ReconciliationServices.normalize(source.schemaFileName),
-                    recordRootExpression: ReconciliationServices.normalize(source.recordRootExpression),
-                    primaryIdExpression : ReconciliationServices.normalize(source.primaryIdExpression),
-                    idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer),
-                    keyFields           : source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
-            ]]
-        }
-        List<String> fileTypeEnumIds = sideConfigBySide.values()
-                .collect { Map<String, Object> sideConfig -> ReconciliationServices.normalize(sideConfig.fileTypeEnumId) }
-                .findAll { String enumId -> enumId }
-                .unique()
-        Map<String, Object> fileTypeEnumById = fileTypeEnumIds ?
-                TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.Enumeration",
-                        "framework reference data: enumeration batch lookup for file type labels")
-                        .condition("enumId", "in", fileTypeEnumIds)
-                        .useCache(true)
-                        .list()
-                        .collectEntries { enumValue -> [(ReconciliationServices.normalize(enumValue.enumId)): enumValue] } :
-                [:]
-        Map<String, Object> sidePlanBySide = activeSides.collectEntries { String fileSide ->
-            Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
-            Map<String, Object> sideConfig = (Map<String, Object>) sideConfigBySide[fileSide]
-            String safeName = (String) sideInput.fileName ?:
-                    safeNameFromLocation((String) sideInput.fileLocation, SIDE_PREFIX_BY_SIDE[fileSide])
-            String fileType = ReconciliationServices.normalize(fileTypeEnumById[sideConfig.fileTypeEnumId]?.enumCode) ?:
-                    detectFileTypeFromName(safeName)
-            if (!fileType) {
-                processingWarnings.add("File type auto-detected as CSV for ${safeName} because compare scope '${compareScopeLabel}' has no ${fileSide} fileTypeEnumId")
-                fileType = "CSV"
-            }
-
-            fileType = fileType.toUpperCase()
-            validateSupportedFileType(compareScopeLabel, fileSide, fileType)
-            [(fileSide): [
-                    config      : sideConfig,
-                    fileLocation: sideInput.fileLocation,
-                    fileType    : fileType,
-                    idSpecs     : buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sideConfig, processingWarnings),
-                    label       : sideInput.fileLabel ?: ReconciliationServices.resolveEnumLabel(ec, (String) sideConfig.systemEnumId, SIDE_FALLBACK_LABEL_BY_SIDE[fileSide])
-            ]]
-        }
+        Map<String, Object> sidePlanBySide = planSides(ec, activeSides, sideInputBySide, sourceBySide, compareScopeLabel, processingWarnings)
         Map<String, Object> file1Plan = (Map<String, Object>) sidePlanBySide.FILE_1
         // Null on an EVALUATE scope. Every read of it below is guarded rather than branched, so the
         // COMPARE path executes exactly the statements it did before this change.
@@ -249,39 +157,16 @@ class RuleSetCompareScopeAdapter {
         List<Dataset> keepPersisted = []
         Map<String, Object> ingestBySide = [:]
         try {
-            activeSides.each { String fileSide ->
-                Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
-                Map<String, Object> config = (Map<String, Object>) plan.config
-                Map ingest
-                try {
-                    ingest = ReconciliationServices.ingestFile(
-                            ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
-                            hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
-                            (String) config.schemaFileName, (Map) keepBySide?.get(fileSide))
-                } catch (Exception e) {
-                    // DAR-BE-031: the ID field is not in this tenant's records; say so, not as a Spark struct error.
-                    String plain = CompareFieldErrors.plainMessage(e, (String) plan.label)
-                    // No cause attached: Moqui adds every cause's message as an error of its own, which would put the raw
-                    // Spark text back in front of the person. The server log keeps it.
-                    if (plain) { logger.warn("Compare scope {} {}: {}", compareScopeId, fileSide, e.toString()); throw new IllegalArgumentException(plain) }
-                    throw e
-                }
-                keepPersisted.addAll((List<Dataset>) ingest.persisted ?: [])
-                ingestBySide.put(fileSide, ingest)
-            }
+            ingestSides(ec, spark, activeSides, sidePlanBySide, hasHeader != null ? hasHeader : true, validationErrors, keepBySide,
+                    compareScopeId, keepPersisted, ingestBySide)
             Map<String, String> labelBySide = activeSides.collectEntries { String side -> [(side): (String) ((Map) sidePlanBySide[side]).label] }
             processingWarnings.addAll(keylessWarnings(ingestBySide, labelBySide, compareScopeLabel))
             // What each Keep side set aside, keyed file1/file2, read before anything below narrows the frames. A compare id held
             // by a kept and a set-aside record (review M8) is in both: the kept record takes part in the compare, and the id is
             // still named here, as the extractor's side file names every record it set aside.
-            Map<String, Set<String>> setAsideBySide = [:]
-            Map<String, Map> keepSummaryBySide = [:]
-            activeSides.each { String fileSide ->
-                Map ingest = (Map) ingestBySide[fileSide]
-                if (ingest.keepSummary == null) return
-                keepSummaryBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], (Map) ingest.keepSummary)
-                setAsideBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], compareIdSet((Dataset) ingest.asideIdDf))
-            }
+            Map keep = keepOutputs(activeSides, ingestBySide)
+            Map<String, Set<String>> setAsideBySide = (Map<String, Set<String>>) keep.setAsideBySide
+            Map<String, Map> keepSummaryBySide = (Map<String, Map>) keep.keepSummaryBySide
             // DAR-UI-048: a flowchart child asks only about its parent's branch, and reports what it asked about.
             String includeIdsLocation = ReconciliationServices.normalize(context.get("file1IncludeIdsLocation"))
             if (includeIdsLocation) {
@@ -362,6 +247,161 @@ class RuleSetCompareScopeAdapter {
             keepPersisted.each { Dataset frame -> frame.unpersist() }
             throw failure
         }
+    }
+
+    /** The caller's per-side inputs (the file1- and file2-prefixed context fields), FILE_1 and FILE_2 alike; the scope decides which are used. */
+    private static Map<String, Object> sideInputsFrom(Map<String, Object> context) {
+        return FILE_SIDES.collectEntries { String fileSide ->
+            String prefix = SIDE_PREFIX_BY_SIDE[fileSide]
+            [(fileSide): [
+                    fileLocation  : ReconciliationServices.normalize(context.get("${prefix}Location")),
+                    fileName      : ReconciliationServices.normalize(context.get("${prefix}Name")),
+                    fileTypeEnumId: ReconciliationServices.normalize(context.get("${prefix}FileTypeEnumId")),
+                    schemaFileName: ReconciliationServices.normalize(context.get("${prefix}SchemaFileName")),
+                    fileLabel     : ReconciliationServices.normalize(context.get("${prefix}Label"))
+            ]]
+        } as Map<String, Object>
+    }
+
+    /** The compare scope, read through its tenant-gated RuleSet, with its display label and its sources keyed by side. */
+    private static Map<String, Object> loadCompareScope(ExecutionContext ec, String ruleSetId, String compareScopeId) {
+        // RuleSetCompareScope has no companyUserGroupId — gate via parent RuleSet (directly-owned).
+        // findTenantScopedChildren gates the RuleSet and returns a pre-scoped finder for its compare scopes.
+        def compareScopeBaseFinder = TenantScopedFinder.findTenantScopedChildren(
+                ec, DarpanEntityConstants.RULE_SET_COMPARE_SCOPE,
+                "darpan.rule.RuleSet", "ruleSetId", ruleSetId, "ruleSetId")
+        if (compareScopeBaseFinder == null) {
+            throw new IllegalArgumentException("RuleSet ${ruleSetId} was not found or is not accessible in your active tenant")
+        }
+        def compareScope = compareScopeBaseFinder.condition("compareScopeId", compareScopeId).useCache(false).one()
+        if (!compareScope) {
+            throw new IllegalArgumentException("Compare scope ${compareScopeId} was not found")
+        }
+        String scopeRuleSetId = ReconciliationServices.normalize(compareScope.ruleSetId)
+        String compareScopeLabel = ReconciliationServices.compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
+        if (scopeRuleSetId != ruleSetId) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' belongs to RuleSet ${scopeRuleSetId}, not ${ruleSetId}")
+        }
+
+        List sources = compareScope.findRelated("sources", null, ["fileSide"], false, false) ?: []
+        if (!sources) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has no source definitions")
+        }
+        Map<String, Object> sourceBySide = sources.collectEntries { source ->
+            [(ReconciliationServices.normalize(source.fileSide)?.toUpperCase()): source]
+        }
+        String unsupportedFileSide = sourceBySide.keySet().find { String fileSide -> !(fileSide in FILE_SIDES) }
+        if (unsupportedFileSide) {
+            def source = sources.find { source -> ReconciliationServices.normalize(source.fileSide)?.toUpperCase() == unsupportedFileSide }
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has unsupported fileSide ${source?.fileSide}. Supported values: FILE_1, FILE_2")
+        }
+        return [compareScope: compareScope, label: compareScopeLabel, sourceBySide: sourceBySide] as Map<String, Object>
+    }
+
+    /** Each active side's plan: config (scope source over caller input), resolved file type, id specs and label. */
+    private static Map<String, Object> planSides(ExecutionContext ec, List<String> activeSides, Map<String, Object> sideInputBySide,
+                                                 Map<String, Object> sourceBySide, String compareScopeLabel, List<String> processingWarnings) {
+        // file2Location cannot be declared required on the service any more (an EVALUATE scope has no
+        // second side and a declarative requirement cannot be conditional), so it is enforced here,
+        // per ACTIVE side, where the count is finally known.
+        activeSides.each { String fileSide ->
+            if (!((Map<String, Object>) sideInputBySide[fileSide])?.get("fileLocation")) {
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' needs a " +
+                        "${SIDE_PREFIX_BY_SIDE[fileSide]}Location for its ${fileSide} source")
+            }
+        }
+
+        Map<String, Object> sideConfigBySide = activeSides.collectEntries { String fileSide ->
+            Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
+            def source = sourceBySide[fileSide]
+            [(fileSide): [
+                    fileSide            : ReconciliationServices.normalize(source.fileSide)?.toUpperCase(),
+                    systemEnumId        : ReconciliationServices.normalize(source.systemEnumId),
+                    fileTypeEnumId      : sideInput.fileTypeEnumId ?: ReconciliationServices.normalize(source.fileTypeEnumId),
+                    schemaFileName      : sideInput.schemaFileName ?: ReconciliationServices.normalize(source.schemaFileName),
+                    recordRootExpression: ReconciliationServices.normalize(source.recordRootExpression),
+                    primaryIdExpression : ReconciliationServices.normalize(source.primaryIdExpression),
+                    idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer),
+                    keyFields           : source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
+            ]]
+        }
+        List<String> fileTypeEnumIds = sideConfigBySide.values()
+                .collect { Map<String, Object> sideConfig -> ReconciliationServices.normalize(sideConfig.fileTypeEnumId) }
+                .findAll { String enumId -> enumId }
+                .unique()
+        Map<String, Object> fileTypeEnumById = fileTypeEnumIds ?
+                TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.Enumeration",
+                        "framework reference data: enumeration batch lookup for file type labels")
+                        .condition("enumId", "in", fileTypeEnumIds)
+                        .useCache(true)
+                        .list()
+                        .collectEntries { enumValue -> [(ReconciliationServices.normalize(enumValue.enumId)): enumValue] } :
+                [:]
+        Map<String, Object> sidePlanBySide = activeSides.collectEntries { String fileSide ->
+            Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
+            Map<String, Object> sideConfig = (Map<String, Object>) sideConfigBySide[fileSide]
+            String safeName = (String) sideInput.fileName ?:
+                    safeNameFromLocation((String) sideInput.fileLocation, SIDE_PREFIX_BY_SIDE[fileSide])
+            String fileType = ReconciliationServices.normalize(fileTypeEnumById[sideConfig.fileTypeEnumId]?.enumCode) ?:
+                    detectFileTypeFromName(safeName)
+            if (!fileType) {
+                processingWarnings.add("File type auto-detected as CSV for ${safeName} because compare scope '${compareScopeLabel}' has no ${fileSide} fileTypeEnumId")
+                fileType = "CSV"
+            }
+
+            fileType = fileType.toUpperCase()
+            validateSupportedFileType(compareScopeLabel, fileSide, fileType)
+            [(fileSide): [
+                    config      : sideConfig,
+                    fileLocation: sideInput.fileLocation,
+                    fileType    : fileType,
+                    idSpecs     : buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sideConfig, processingWarnings),
+                    label       : sideInput.fileLabel ?: ReconciliationServices.resolveEnumLabel(ec, (String) sideConfig.systemEnumId, SIDE_FALLBACK_LABEL_BY_SIDE[fileSide])
+            ]]
+        }
+        return sidePlanBySide
+    }
+
+    /**
+     * Ingests every active side into ingestBySide. A side's Keep frames go into keepPersisted as they are made, so the caller
+     * releases them even when a later side fails. DAR-BE-031: a missing ID field is reported in plain words.
+     */
+    private static void ingestSides(ExecutionContext ec, SparkSession spark, List<String> activeSides, Map<String, Object> sidePlanBySide,
+                                    boolean hasHeader, List<String> validationErrors, Map keepBySide, String compareScopeId,
+                                    List<Dataset> keepPersisted, Map<String, Object> ingestBySide) {
+        activeSides.each { String fileSide ->
+            Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
+            Map<String, Object> config = (Map<String, Object>) plan.config
+            Map ingest
+            try {
+                ingest = ReconciliationServices.ingestFile(
+                        ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
+                        hasHeader, (String) plan.label, validationErrors,
+                        (String) config.schemaFileName, (Map) keepBySide?.get(fileSide))
+            } catch (Exception e) {
+                // DAR-BE-031: the ID field is not in this tenant's records; say so, not as a Spark struct error.
+                String plain = CompareFieldErrors.plainMessage(e, (String) plan.label)
+                // No cause attached: Moqui adds every cause's message as an error of its own, which would put the raw
+                // Spark text back in front of the person. The server log keeps it.
+                if (plain) { logger.warn("Compare scope {} {}: {}", compareScopeId, fileSide, e.toString()); throw new IllegalArgumentException(plain) }
+                throw e
+            }
+            keepPersisted.addAll((List<Dataset>) ingest.persisted ?: [])
+            ingestBySide.put(fileSide, ingest)
+        }
+    }
+
+    /** DAR-BE-318. What each Keep side set aside (its compare ids) and its summary, keyed file1/file2; empty without Keep. */
+    private static Map keepOutputs(List<String> activeSides, Map<String, Object> ingestBySide) {
+        Map<String, Set<String>> setAsideBySide = [:]
+        Map<String, Map> keepSummaryBySide = [:]
+        activeSides.each { String fileSide ->
+            Map ingest = (Map) ingestBySide[fileSide]
+            if (ingest.keepSummary == null) return
+            keepSummaryBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], (Map) ingest.keepSummary)
+            setAsideBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], compareIdSet((Dataset) ingest.asideIdDf))
+        }
+        return [setAsideBySide: setAsideBySide, keepSummaryBySide: keepSummaryBySide]
     }
 
     /** DAR-BE-318. The distinct compare ids of an id frame. */

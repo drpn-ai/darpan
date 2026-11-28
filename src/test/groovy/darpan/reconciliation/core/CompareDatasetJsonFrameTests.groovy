@@ -242,6 +242,12 @@ class CompareDatasetJsonFrameTests {
         }.sort()
         assertEquals(groovy, spark)
         assertEquals(["12345678901", "1234567890123456", "7", "7.5"], spark)
+        // A decimal literal reads the same in both: 7.0 is "7", 1.50 is "1.5" (Session 012's a0ba8e9e on the Groovy side).
+        List<String> decimals = ['{"id":7.0}', '{"id":1.50}']
+        assertEquals(decimals.collect { String r ->
+            darpan.reconciliation.conclusion.ConclusionKeySupport.compareKey((Map) new groovy.json.JsonSlurper().parseText(r), ['$.id'], null)
+        }.sort(), ids(CompareDatasetSupport.buildJsonIdDf(json(decimals as String[]), paths('$.id'), "File 1", [null], ['$.id'])))
+        assertEquals(["1.5", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json(decimals as String[]), paths('$.id'), "File 1", [null], ['$.id'])))
         // An integer-only column was always read as a long: unchanged.
         assertEquals(["12345678901", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":7}', '{"id":12345678901}'), paths('$.id'), "File 1", [null], ['$.id'])))
     }

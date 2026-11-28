@@ -47,14 +47,16 @@
             defaultCronExpression="0 0/10 * * * ?"
             defaultPaused="N" minIntervalMinutes="5"/>
 
-    <!-- MACH P1: backfill denormalized tenant stamps on Rule children; idempotent no-op after
-         the first pass (NULL-stamp query walks the tenant index and finds nothing). -->
+    <!-- DAR-OPS-029 S35 (Aditi D13): retired, paused by default. New rule-set child rows are stamped on create
+         (entity/RuleChildTenant.eecas.xml), and the one backfill of older rows is the RULE_TENANT_STAMPS migration
+         (MigrationRegistrySeedData.xml), run once per environment. apply#JobDefaults pauses this job on every
+         environment that never edited it; the row stays so an operator can still resume it. -->
     <moqui.service.job.ServiceJob
             jobName="sweep_RuleChildTenantStamps_hourly" expireLockTime="360"
-            description="Backfill companyUserGroupId on Rule/RuleSetCompareScope/RuleSetCompareSource from the parent RuleSet."
+            description="Retired: RULE_TENANT_STAMPS is the one backfill; new rows are stamped on create (RuleChildTenant.eecas.xml)."
             serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
             defaultCronExpression="0 15 * * * ?"
-            defaultPaused="N" minIntervalMinutes="15"/>
+            defaultPaused="Y" minIntervalMinutes="15"/>
 
     <!-- DAR-BE-266: per-table retention. Seeded PAUSED, and every period (darpan.retention.<table>.days) is unset by
          default, which keeps the table forever: resuming the job deletes nothing until a period is set. -->

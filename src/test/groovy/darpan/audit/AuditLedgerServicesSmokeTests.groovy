@@ -183,10 +183,11 @@ class AuditLedgerServicesSmokeTests {
         insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Conclusion"])
         insert("moqui.basic.Enumeration", [enumId: "CONC_TEST_EXPLAINED", enumTypeId: "DarpanConclusion",
                                            description: "Lost warranty, credited in NetSuite"])
-        String id = (record(CHECK, "2026-10-07", [finding("R4", "SAME-1"), finding("R4", "SAME-2")]).findingIds as List)[0]
+        List sameIds = record(CHECK, "2026-10-07", [finding("R4", "SAME-1"), finding("R4", "SAME-2")]).findingIds as List
+        String id = sameIds[0]
         Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
                 reportDate: Date.valueOf("2026-10-07"), checkStamp: Timestamp.valueOf("2026-10-07 18:30:00"), checkStatusEnumId: "AUDCS_RAN",
-                examinedRecordKeys: ["SAME-1", "SAME-2"], reportedRecordKeys: ["SAME-2"],
+                examinedRecordKeys: ["SAME-1", "SAME-2"], reportedFindingIds: [sameIds[1]],
                 explanations: ["SAME-1": [conclusionEnumId: "CONC_TEST_EXPLAINED", diagnosisText: "Lost warranty, credited in NetSuite",
                                           headline: "Return SAME-1: Lost warranty, credited in NetSuite"]]]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
@@ -201,7 +202,7 @@ class AuditLedgerServicesSmokeTests {
         Timestamp closedAt = row(bare).closedStamp as Timestamp
         ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
                 reportDate: Date.valueOf("2026-10-10"), checkStamp: Timestamp.valueOf("2026-10-10 06:12:00"), checkStatusEnumId: "AUDCS_RAN",
-                examinedRecordKeys: ["SAME-3"], reportedRecordKeys: [],
+                examinedRecordKeys: ["SAME-3"], reportedFindingIds: [],
                 explanations: ["SAME-3": [conclusionEnumId: "CONC_TEST_EXPLAINED", diagnosisText: "Lost warranty, credited in NetSuite"]]]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(["AUDFS_FIXED", "CONC_TEST_EXPLAINED", closedAt], [row(bare).stateEnumId, row(bare).conclusionEnumId, row(bare).closedStamp])
@@ -224,7 +225,7 @@ class AuditLedgerServicesSmokeTests {
         explanations["BIG-BARE"] = why
         Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
                 reportDate: Date.valueOf("2026-11-17"), checkStamp: Timestamp.valueOf("2026-11-17 09:30:00"), checkStatusEnumId: "AUDCS_RAN",
-                examinedRecordKeys: explanations.keySet() as List, reportedRecordKeys: [], explanations: explanations]).call()
+                examinedRecordKeys: explanations.keySet() as List, reportedFindingIds: [], explanations: explanations]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals([open], out.closedFindingIds)
         assertEquals(["AUDFS_FIXED", "CONC_TEST_NOT_OPEN"], [row(open).stateEnumId, row(open).conclusionEnumId])

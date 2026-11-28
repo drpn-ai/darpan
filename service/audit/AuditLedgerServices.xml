@@ -309,14 +309,11 @@
                 <description>AuditCheckStatus of this morning's check; only AUDCS_RAN closes anything.</description></parameter>
             <parameter name="examinedRecordKeys" type="List">
                 <description>Every record key the check looked at this morning, reported or not.</description></parameter>
-            <parameter name="reportedRecordKeys" type="List">
-                <description>DAR-BE-118. The record keys this run reported (record#CheckFindings). Given: a finding closes when
-                    this run examined its record and did not report it, so a later run the same morning closes what an
-                    earlier one raised. Blank: "not reported" is read as lastSeenDate before reportDate.</description></parameter>
             <parameter name="reportedFindingIds" type="List">
-                <description>DAR-OPS-029 S13. The findingIds record#CheckFindings returned for this run. Given, "not reported"
-                    is judged per finding instead of per record, so a record still broken under one statement closes its
-                    fixed finding under another. Wins over reportedRecordKeys.</description></parameter>
+                <description>DAR-BE-118, DAR-OPS-029 S13. The findingIds record#CheckFindings returned for this run. Given: a
+                    finding closes when this run examined its record and did not report that finding, so a later run the
+                    same morning closes what an earlier one raised, and a record still broken under one statement closes its
+                    fixed finding under another. Absent: "not reported" is read as lastSeenDate before reportDate.</description></parameter>
             <parameter name="unjudgedStatementIds" type="List">
                 <description>DAR-OPS-029 S13. Statements this run could not judge, for any reason the caller knows (e.g. a link
                     naming a rule the run no longer has): their open findings are left open. Turned-off statements are added
@@ -345,7 +342,6 @@
                 <return/>
             </if>
             <set field="examined" from="new HashSet((examinedRecordKeys ?: [])*.toString())"/>
-            <set field="reported" from="new HashSet((reportedRecordKeys ?: [])*.toString())"/>
             <set field="reportedIds" from="reportedFindingIds != null ? new HashSet(reportedFindingIds*.toString()) : null"/>
             <!-- A statement this run did not judge (turned off, DAR-UI-063, or named by the caller) had no chance to report its
                  findings, so none of them reads as fixed. -->
@@ -357,11 +353,11 @@
                 <econdition field-name="stateEnumId" value="AUDFS_OPEN"/>
                 <econdition field-name="statementId" operator="not-in" from="unjudged" ignore="!unjudged"/>
                 <econdition field-name="lastSeenDate" operator="less" from="reportDate"
-                        ignore="reportedRecordKeys != null || reportedIds != null"/>
+                        ignore="reportedIds != null"/>
                 <order-by field-name="findingId"/>
             </entity-find>
             <iterate list="candidates" entry="finding">
-                <set field="notReported" from="reportedIds != null ? !reportedIds.contains(finding.findingId) : !reported.contains(finding.recordKey)"/>
+                <set field="notReported" from="reportedIds == null || !reportedIds.contains(finding.findingId)"/>
                 <!-- OC74: a close for a morning before the finding's last sighting writes that morning's fixed row only (when
                      it was not fixed that morning already); the later sighting keeps it open. -->
                 <set field="backdated" from="reportDate &lt; finding.lastSeenDate || (reportDate == finding.lastSeenDate

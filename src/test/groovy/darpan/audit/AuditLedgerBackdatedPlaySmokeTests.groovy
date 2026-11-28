@@ -122,7 +122,7 @@ class AuditLedgerBackdatedPlaySmokeTests {
     private Map close(String day, List<String> examined) {
         Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: TENANT, checkId: CHECK,
                 reportDate: Date.valueOf(day), period: "2026-10", checkStamp: nextStamp(),
-                checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: examined, reportedRecordKeys: [], reportedFindingIds: []]).call()
+                checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: examined, reportedFindingIds: []]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         return out
     }

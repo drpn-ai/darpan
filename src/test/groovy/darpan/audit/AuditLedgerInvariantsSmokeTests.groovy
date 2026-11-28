@@ -86,7 +86,7 @@ class AuditLedgerInvariantsSmokeTests {
         List ids = record(CHECK, "2026-10-07", [finding("R4", "PAIR-1"), finding("R9", "PAIR-1")]).findingIds as List
         String r4 = ids[0], r9 = ids[1]
         Map today = record(CHECK, "2026-10-08", [finding("R4", "PAIR-1")])
-        Map out = closeWith("2026-10-08", [examinedRecordKeys: ["PAIR-1"], reportedRecordKeys: ["PAIR-1"],
+        Map out = closeWith("2026-10-08", [examinedRecordKeys: ["PAIR-1"],
                 reportedFindingIds: today.findingIds])
         assertEquals([r9], out.closedFindingIds, "R9 no longer reported: fixed; R4 still reported: open")
         assertEquals(["AUDFS_OPEN", "AUDFS_FIXED"], [row(r4).stateEnumId, row(r9).stateEnumId])
@@ -105,7 +105,7 @@ class AuditLedgerInvariantsSmokeTests {
 
         Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: TENANT,
                 checkId: "TLINV_OFF", reportDate: Date.valueOf("2026-10-08"), checkStamp: Timestamp.valueOf("2026-10-08 06:12:00"),
-                checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: ["OFF-1"], reportedRecordKeys: [], reportedFindingIds: []]).call()
+                checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: ["OFF-1"], reportedFindingIds: []]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
 
         assertEquals(0, out.closedCount, "not judged is not fixed")
@@ -121,7 +121,7 @@ class AuditLedgerInvariantsSmokeTests {
     void aStatementTheRunCouldNotJudgeKeepsItsOpenFindings() {
         List ids = record(CHECK, "2026-10-07", [finding("R4", "UNJ-1"), finding("R9", "UNJ-1")]).findingIds as List
         String r4 = ids[0], r9 = ids[1]
-        Map out = closeWith("2026-10-08", [examinedRecordKeys: ["UNJ-1"], reportedRecordKeys: [], reportedFindingIds: [],
+        Map out = closeWith("2026-10-08", [examinedRecordKeys: ["UNJ-1"], reportedFindingIds: [],
                 unjudgedStatementIds: ["TLINV_R9"]])
         assertEquals([r4], out.closedFindingIds, "R4 was judged and not reported: fixed; R9 was not judged")
         assertEquals(["AUDFS_FIXED", "AUDFS_OPEN"], [row(r4).stateEnumId, row(r9).stateEnumId])
@@ -132,7 +132,7 @@ class AuditLedgerInvariantsSmokeTests {
     @Test
     void aSameMorningReopenDoesNotCountTheMorningTwice() {
         String id = (record(CHECK, "2026-10-07", [finding("R4", "REOPEN-1")]).findingIds as List)[0]
-        closeWith("2026-10-07", [examinedRecordKeys: ["REOPEN-1"], reportedRecordKeys: [], reportedFindingIds: []])
+        closeWith("2026-10-07", [examinedRecordKeys: ["REOPEN-1"], reportedFindingIds: []])
         assertEquals("AUDFS_FIXED", row(id).stateEnumId)
         // A later run of the same morning: its stamp follows the 18:00 close (an earlier stamp is a back-dated read, OC74).
         Map again = record(CHECK, "2026-10-07", [finding("R4", "REOPEN-1")], [checkStamp: Timestamp.valueOf("2026-10-07 19:00:00")])
@@ -326,7 +326,7 @@ class AuditLedgerInvariantsSmokeTests {
     private Map close(String day, String status, List<String> examined) {
         Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: TENANT, checkId: CHECK,
                 reportDate: Date.valueOf(day), checkStamp: Timestamp.valueOf("${day} 06:12:00"), checkStatusEnumId: status,
-                examinedRecordKeys: examined, reportedRecordKeys: []]).call()
+                examinedRecordKeys: examined, reportedFindingIds: []]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         return out
     }

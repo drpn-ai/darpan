@@ -11,6 +11,7 @@ import java.util.Locale
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class AuthFacadeSupportTests {
@@ -174,6 +175,38 @@ class AuthFacadeSupportTests {
         assertEquals("SHA-256", ecfi.requestedHashType)
         assertFalse(ecfi.requestedBase64)
         assertTrue(message.errors.isEmpty())
+    }
+
+    /** OC40': a failed-login count that cannot be written says so (false, logged at ERROR so it reaches Darpan's error
+     *  email; it was a WARN, which ErrorLogCapture never keeps). It does not throw: a two-factor wrong code counts inside
+     *  its own transaction (TwoFactorSupport.recordFailure), and a throw there would roll back the code counter too. The
+     *  wrong password is still refused. */
+    @Test
+    void anUncountableFailedLoginIsReportedAndTheGuessStillRefused() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        ServiceFacadeStub service = new ServiceFacadeStub(message: message, failuresByName: [
+                "org.moqui.impl.UserServices.increment#UserAccountFailedLogins": new IllegalStateException("lock wait timeout")])
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
+        user.userAccount = new Expando(username: "test.user", currentPassword: "hashed-password", passwordSalt: "salt",
+                passwordHashType: "SHA-256", passwordBase64: "N", timeZone: "Asia/Kolkata")
+        def ec = executionContext(message: message, user: user, service: service, ecfi: new EcfiStub(credentialsMatch: false))
+
+        assertFalse(AuthPrimitives.countFailedLogin(ec, "EX_USER"), "an uncounted guess must be reported")
+        assertFalse(AuthFacadeSupport.verifyOwnPassword(ec, "wrong-password").passwordVerified as boolean)
+
+        // The usual Moqui failure: no throw, the service's error text in ec.message. It stays out of the caller's reply,
+        // and the caller's own error and message come back untouched.
+        MessageFacadeStub callerMessage = new MessageFacadeStub()
+        callerMessage.addError("the caller's own error")
+        callerMessage.addMessage("the caller's own message")
+        ServiceFacadeStub erroring = new ServiceFacadeStub(message: callerMessage, errorsByName: [
+                "org.moqui.impl.UserServices.increment#UserAccountFailedLogins": "Lock wait timeout exceeded on USER_ACCOUNT"])
+        assertFalse(AuthPrimitives.countFailedLogin(executionContext(message: callerMessage, service: erroring), "EX_USER"))
+        assertEquals(["the caller's own error"], callerMessage.errors)
+        assertEquals(["the caller's own message"], callerMessage.messages)
+
+        ServiceFacadeStub working = new ServiceFacadeStub(message: new MessageFacadeStub())
+        assertTrue(AuthPrimitives.countFailedLogin(executionContext(service: working), "EX_USER"))
     }
 
     @Test
@@ -714,9 +747,13 @@ class AuthFacadeSupportTests {
                 "org.moqui.impl.UserServices.update#Password": [updateSuccessful: true, passwordIssues: false],
         ])
         FinderStub loginKeys = new FinderStub(deleteAllResult: 3)
+        FinderStub cliSessions = new FinderStub()
+        FinderStub deviceCodes = new FinderStub()
         EntityFacadeStub entity = new EntityFacadeStub(finders: [
                 "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "EX_USER", username: "avnindra.sharma", disabled: "N"]),
                 "moqui.security.UserLoginKey": loginKeys,
+                "darpan.auth.CliSession": cliSessions,
+                "darpan.auth.CliDeviceCode": deviceCodes,
         ])
         def ec = executionContext(message: message, entity: entity, service: service)
 
@@ -728,7 +765,58 @@ class AuthFacadeSupportTests {
         assertEquals([], result.errors)
         assertEquals("EX_USER", service.callTo("org.moqui.impl.UserServices.update#Password").parametersMap.userId)
         assertEquals("temp-pass", service.callTo("org.moqui.impl.UserServices.update#Password").parametersMap.oldPassword)
-        assertEquals(3, loginKeys.deleteAllResult)
+        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes)
+    }
+
+    /** OC39: a password change whose sign-out fails must fail, so its transaction rolls the new password back. Before,
+     *  the key delete was caught and logged: the password changed while every other device kept its key. */
+    @Test
+    void changeExpiredPasswordFailsClosedWhenItsSignOutFails() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        ServiceFacadeStub service = new ServiceFacadeStub(message: message, resultsByName: [
+                "org.moqui.impl.UserServices.update#Password": [updateSuccessful: true, passwordIssues: false],
+        ])
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "EX_USER", username: "avnindra.sharma", disabled: "N"]),
+                "moqui.security.UserLoginKey": new FinderStub(failure: new IllegalStateException("database unavailable")),
+        ])
+        def ec = executionContext(message: message, entity: entity, service: service)
+
+        assertThrows(IllegalStateException) {
+            AuthFacadeSupport.changeExpiredPassword(ec, "avnindra.sharma", "temp-pass", "N3w-password!", "N3w-password!")
+        }
+    }
+
+    /** OC39 + F4 (kept, Aditi): sign out everywhere ends CLI sign-ins too, and refuses rather than reporting a partial
+     *  sign-out. */
+    @Test
+    void logoutAllSessionsEndsEverySignInAndFailsClosed() {
+        FinderStub loginKeys = new FinderStub(deleteAllResult: 2)
+        FinderStub cliSessions = new FinderStub()
+        FinderStub deviceCodes = new FinderStub()
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
+        def ec = executionContext(user: user, entity: new EntityFacadeStub(finders: [
+                "moqui.security.UserLoginKey": loginKeys, "darpan.auth.CliSession": cliSessions, "darpan.auth.CliDeviceCode": deviceCodes]))
+
+        Map<String, Object> result = AuthFacadeSupport.logoutAllSessions(ec)
+
+        assertEquals(2, result.allSessionsRevoked)
+        assertTrue(result.authTokenRevoked as boolean)
+        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes)
+
+        UserStub failingUser = new UserStub(userId: "EX_USER", username: "test.user")
+        def failing = executionContext(user: failingUser, entity: new EntityFacadeStub(finders: [
+                "darpan.auth.CliDeviceCode": new FinderStub(failure: new IllegalStateException("database unavailable"))]))
+        assertThrows(IllegalStateException) { AuthFacadeSupport.logoutAllSessions(failing) }
+    }
+
+    /** Every key of the person deleted, every live CLI session revoked, every approved and uncollected CLI sign-in denied. */
+    private static void assertEndsEverySignIn(String userId, FinderStub loginKeys, FinderStub cliSessions, FinderStub deviceCodes) {
+        assertEquals([userId: userId], loginKeys.conditions)
+        assertEquals([userId: userId, revokedDate: null], cliSessions.conditions)
+        assertNotNull(cliSessions.updatedWith?.revokedDate, "live CLI sessions are revoked")
+        assertEquals([approvedByUserId: userId, statusId: "APPROVED"], deviceCodes.conditions)
+        assertEquals([statusId: "DENIED"], deviceCodes.updatedWith, "an approved CLI sign-in not yet collected is denied")
     }
 
     /** An unknown username and a wrong current password must be indistinguishable, or this anonymous endpoint
@@ -930,6 +1018,30 @@ class AuthFacadeSupportTests {
 
         List<Object> getValidationErrors() {
             return []
+        }
+
+        // OC40': AuthPrimitives.countFailedLogin isolates the counter's errors as ErrorLogCapture.flush does.
+        private final LinkedList<List<String>> savedErrors = new LinkedList<>()
+
+        void pushErrors() {
+            savedErrors.addFirst(new ArrayList<>(errors))
+            errors.clear()
+        }
+
+        void popErrors() {
+            if (savedErrors) errors.addAll(0, savedErrors.removeFirst())
+        }
+
+        List<Object> getMessageInfos() {
+            return messages.collect { new Expando(message: it, type: "info") }
+        }
+
+        List<Object> getPublicMessageInfos() {
+            return []
+        }
+
+        void addMessage(String message, Object type) {
+            messages.add(message)
         }
     }
 
@@ -1186,6 +1298,8 @@ class AuthFacadeSupportTests {
         MessageFacadeStub message
         /** Messages a stubbed service adds via addPublic — how update#Password reports identity failures. */
         Map<String, String> publicMessagesByName = [:]
+        /** Services whose call throws, as a lock wait or database error would. */
+        Map<String, RuntimeException> failuresByName = [:]
 
         ServiceCallStub sync() {
             ServiceCallStub call = new ServiceCallStub(facade: this)
@@ -1220,6 +1334,8 @@ class AuthFacadeSupportTests {
         }
 
         Map<String, Object> call() {
+            RuntimeException failure = facade?.failuresByName?.get(serviceName)
+            if (failure) throw failure
             String error = facade?.errorsByName?.get(serviceName)
             if (error) facade?.message?.addError(error)
             String publicMessage = facade?.publicMessagesByName?.get(serviceName)
@@ -1286,7 +1402,19 @@ class AuthFacadeSupportTests {
         }
 
         int deleteAll() {
+            if (failure) throw failure
             return deleteAllResult
+        }
+
+        /** OC39: what an updateAll wrote, for the session-ending helper's revoke and deny. */
+        Map<String, Object> updatedWith
+        /** Set to make every write on this finder fail, as a database error would. */
+        RuntimeException failure
+
+        int updateAll(Map<String, Object> values) {
+            if (failure) throw failure
+            updatedWith = values
+            return 1
         }
     }
 }

@@ -193,15 +193,12 @@ class PasswordResetSupport {
         return [passwordUpdated: false] + FacadeSupport.envelope(ec)
     }
 
-    /** End every session the account has, failing closed: unlike AuthFacadeSupport.deleteAllLoginKeysForUser,
-     *  a failure here is not swallowed, so it rolls the reset back instead of reporting a reset that left an
-     *  old session alive. Login keys cover darpan-ui (header token and persistent cookie); hasLoggedOut=Y is the
-     *  framework's broadcast that evicts session-authenticated requests elsewhere (UserFacadeImpl, legacy /apps),
-     *  and the account's next successful login clears it. */
+    /** End every session the account has, failing closed (AuthSessionSupport.endEverySignIn: login keys, CLI sessions
+     *  and approved CLI sign-ins not yet collected), so a failure rolls the reset back instead of reporting a reset that
+     *  left an old session alive. hasLoggedOut=Y is the framework's broadcast that evicts session-authenticated requests
+     *  elsewhere (UserFacadeImpl, legacy /apps), and the account's next successful login clears it. */
     private static void signOutEverywhere(def ec, String userId) {
-        TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
-                "self-scoped auth: delete all login keys for userId after a password reset")
-                .condition("userId", userId).deleteAll()
+        AuthSessionSupport.endEverySignIn(ec, userId)
         // Also clears an expired lockout's leftovers, as the realm does on a correct login.
         ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, hasLoggedOut: "Y",
                 disabledDateTime: null, successiveFailedLogins: 0]).call()

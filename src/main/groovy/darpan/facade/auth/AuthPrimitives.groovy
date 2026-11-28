@@ -61,16 +61,40 @@ class AuthPrimitives {
     /**
      * One failed login for the person (the framework's increment#UserAccountFailedLogins, in a transaction of its own so it
      * stands when the caller's refusal rolls back): a wrong password or a wrong second factor feeds the same lockout.
+     * Returns whether it was counted. OC40': a count that cannot be written is an ERROR, so every uncounted guess reaches
+     * Darpan's error email (ErrorLogCapture keeps ERROR, never WARN). It does not throw: the guess is already refused by
+     * its caller, and TwoFactorSupport.recordFailure counts inside its own transaction, which a throw would roll back,
+     * losing the wrong-code count too.
+     *
+     * A failed service call does not throw in Moqui: it rolls back and adds the exception text to ec.message's errors. So
+     * the call is isolated: its errors (database text) never reach the caller's reply or fail the caller's transaction,
+     * and the caller's own messages come back as they were (ErrorLogCapture.flush's way; clearErrors would turn the
+     * counter's errors into danger messages).
      */
     @CompileDynamic
-    static void countFailedLogin(def ec, String userId) {
-        if (!userId) return
+    static boolean countFailedLogin(def ec, String userId) {
+        if (!userId) return false
+        List infos = new ArrayList(ec.message.messageInfos)
+        List publics = new ArrayList(ec.message.publicMessageInfos)
+        String failure = null
+        ec.message.pushErrors()
         try {
             ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")
                     .parameters([userId: userId]).requireNewTransaction(true).call()
+            if (ec.message.hasError()) failure = ec.message.errors.join("; ")
         } catch (Exception e) {
-            logger.warn("Could not count a failed login for userId {}: {}", userId, e.message)
+            failure = e.message
+        } finally {
+            ec.message.clearAll()
+            infos.each { mi ->
+                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+                else ec.message.addMessage(mi.message, mi.type)
+            }
+            ec.message.popErrors()
         }
+        if (failure == null) return true
+        logger.error("A failed login for userId {} was not counted toward its lockout: {}", userId, failure)
+        return false
     }
 
     /**

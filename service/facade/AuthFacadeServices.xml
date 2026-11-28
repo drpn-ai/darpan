@@ -510,12 +510,10 @@
                     <field-map field-name="newPasswordVerify"/>
                 </service-call>
                 <set field="passwordUpdated" from="passwordUpdateOut.updateSuccessful == true &amp;&amp; !ec.message.hasError()"/>
-                <!-- Audit M1.3 — on successful password change, revoke every UserLoginKey for the user
-                     so any other active session (suspected-compromised device, lingering tokens) is
-                     immediately invalidated. The current session re-establishes a fresh login key
-                     via Moqui's login-key plumbing on the next call. -->
+                <!-- Audit M1.3, OC39: a password change ends every sign-in (login keys, CLI sessions, approved CLI
+                     sign-ins not yet collected). It fails closed: a failure fails this service and rolls the change back. -->
                 <if condition="passwordUpdated == true">
-                    <set field="ignoreRevokeCount" from="darpan.facade.auth.AuthFacadeSupport.deleteAllLoginKeysForUser(ec, ec.user.userId)"/>
+                    <script>darpan.facade.auth.AuthSessionSupport.endEverySignIn(ec, ec.user.userId)</script>
                 </if>
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>

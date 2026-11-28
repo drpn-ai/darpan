@@ -140,6 +140,13 @@ class AuthSessionSupport {
         return restored
     }
 
+    /** True when a key or CLI session issued at issuedDate predates the person's sessionsEndedDate (both dates): a
+     *  two-factor change ended every sign-in at that moment (TwoFactorSupport.endSessions). Pure. */
+    static boolean predatesSessionsEnd(Object issuedDate, Object sessionsEndedDate) {
+        return issuedDate instanceof Timestamp && sessionsEndedDate instanceof Timestamp &&
+                ((Timestamp) issuedDate).before((Timestamp) sessionsEndedDate)
+    }
+
     /**
      * Signs the request in as username without a password (internalLoginUser) on a NEW servlet session, as
      * UserFacadeImpl.loginUser does for a password (review M3): a session id the client held before this sign-in, one an
@@ -148,13 +155,6 @@ class AuthSessionSupport {
      * from every reply. Used by every sign-in that follows a check other than the password: the persistent-login cookie,
      * verify#SignInCode, and a setup challenge's confirm#TwoFactorSetup / finish#PasskeyRegistration.
      */
-    /** True when a key or CLI session issued at issuedDate predates the person's sessionsEndedDate (both dates): a
-     *  two-factor change ended every sign-in at that moment (TwoFactorSupport.endSessions). Pure. */
-    static boolean predatesSessionsEnd(Object issuedDate, Object sessionsEndedDate) {
-        return issuedDate instanceof Timestamp && sessionsEndedDate instanceof Timestamp &&
-                ((Timestamp) issuedDate).before((Timestamp) sessionsEndedDate)
-    }
-
     static boolean signInOnNewSession(def ec, String username, boolean saveHistory) {
         def web = ec?.web
         if (web != null && web.metaClass.respondsTo(web, "makeNewSession")) web.makeNewSession()
@@ -275,6 +275,28 @@ class AuthSessionSupport {
         } catch (IllegalStateException ignored) {
             // already invalidated by the logout
         }
+    }
+
+    /**
+     * OC39 (DAR-OPS-029). Ends every sign-in the person has, in the caller's transaction: deletes every login key (web and
+     * CLI), revokes every live CLI session, and denies every CLI sign-in they approved that its CLI has not collected yet,
+     * so the next poll#CliLogin answers DENIED instead of minting a key. Nothing is caught: a failure fails the caller,
+     * whose transaction then rolls back the password change, reset or two-factor change that asked for it, rather than
+     * reporting it done while a sign-in lives on. Used by change#OwnPassword, change#ExpiredPassword, complete#PasswordReset,
+     * logout#AllSessions and TwoFactorSupport.endSessions. Returns how many login keys it deleted.
+     */
+    static int endEverySignIn(def ec, String userId) {
+        if (!userId) throw new IllegalArgumentException("endEverySignIn needs a userId")
+        Timestamp endedAt = ec.user.nowTimestamp
+        def deleted = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
+                        "self-scoped auth: end every login key of the person")
+                .condition("userId", userId).deleteAll()
+        TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.CliSession", "self-scoped auth: revoke the person's live CLI sessions")
+                .condition("userId", userId).condition("revokedDate", null).updateAll([revokedDate: endedAt])
+        TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.CliDeviceCode",
+                        "self-scoped auth: deny the person's approved CLI sign-ins not yet collected")
+                .condition("approvedByUserId", userId).condition("statusId", "APPROVED").updateAll([statusId: "DENIED"])
+        return (deleted ?: 0) as int
     }
 
     /**

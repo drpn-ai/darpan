@@ -486,9 +486,9 @@ class TwoFactorSupport {
 
     /**
      * Ends every sign-in of the person, in the caller's transaction: UserAccount.sessionsEndedDate moves to now (never
-     * back), their login keys (web and CLI) are deleted, their CLI sessions marked revoked, and a CLI sign-in they approved
-     * but the CLI has not yet collected is denied (it would mint a key after this). The stamp is the rule; the deletes are
-     * housekeeping: a key or CLI session issued before the stamp is refused on every request
+     * back), then AuthSessionSupport.endEverySignIn (OC39: the same step a password change takes) deletes their login keys,
+     * revokes their CLI sessions and denies a CLI sign-in they approved that the CLI has not yet collected. The stamp is
+     * the rule; the deletes are housekeeping: a key or CLI session issued before the stamp is refused on every request
      * (AuthSessionSupport.predatesSessionsEnd), so one minted while this ran, which the delete missed, is refused too, and
      * so is a web session holding no key. A caller that keeps the person signed in on this request issues a fresh key
      * afterwards (AuthFacadeSupport.issueSignedInSession).
@@ -502,12 +502,7 @@ class TwoFactorSupport {
             account.sessionsEndedDate = endedAt
             account.update()
         }
-        find(ec, "moqui.security.UserLoginKey", "self-scoped auth: end the person's login keys after a two-factor change")
-                .condition("userId", userId).deleteAll()
-        find(ec, "darpan.auth.CliSession", "self-scoped auth: revoke the person's CLI sessions after a two-factor change")
-                .condition("userId", userId).condition("revokedDate", null).updateAll([revokedDate: endedAt])
-        find(ec, "darpan.auth.CliDeviceCode", "self-scoped auth: deny the person's approved, uncollected CLI sign-ins after a two-factor change")
-                .condition("approvedByUserId", userId).condition("statusId", "APPROVED").updateAll([statusId: "DENIED"])
+        AuthSessionSupport.endEverySignIn(ec, userId)
     }
 
     // ---- recovery codes ----

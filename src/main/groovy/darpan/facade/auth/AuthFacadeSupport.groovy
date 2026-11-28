@@ -394,8 +394,8 @@ class AuthFacadeSupport {
         if (updateOut?.updateSuccessful == true && !ec.message.hasError()) {
             // The framework success message names the account; darpan-ui renders its own confirmation copy.
             ec.message.clearAll()
-            // Match change#OwnPassword: a password change invalidates every other device immediately.
-            deleteAllLoginKeysForUser(ec, normalize(userAccount.userId))
+            // As change#OwnPassword: a password change ends every sign-in, CLI ones included (OC39).
+            AuthSessionSupport.endEverySignIn(ec, normalize(userAccount.userId))
             return true
         }
 
@@ -484,25 +484,8 @@ class AuthFacadeSupport {
         return matched
     }
 
-    /** Delete every UserLoginKey row for a given userId; returns the count removed. Used by
-     *  logoutAllSessions() and by change#OwnPassword to rotate every device after a password change.
-     *  Audit M1.2 / M1.3 — previously logout only removed the current key and password changes
-     *  did NOT invalidate other devices, so a live token on a compromised laptop kept working
-     *  after the user changed their password. */
-    static int deleteAllLoginKeysForUser(def ec, String userId) {
-        if (!userId) return 0
-        try {
-            def deleted = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
-                            "self-scoped auth: delete all login keys for userId (logout-all path)")
-                    .condition("userId", userId)
-                    .deleteAll()
-            return ((deleted ?: 0) as int)
-        } catch (Exception e) {
-            logger.warn("deleteAllLoginKeysForUser failed for userId=${userId}: ${e.message}")
-            return 0
-        }
-    }
-
+    /** logout#AllSessions: every sign-in of the caller ends (AuthSessionSupport.endEverySignIn, failing closed), then this
+     *  request signs out with the framework's hasLoggedOut broadcast. */
     static Map<String, Object> logoutAllSessions(def ec) {
         String userId = normalize(ec?.user?.userId)
         Map<String, Object> result = [authenticated: false, authTokenRevoked: false, allSessionsRevoked: 0]
@@ -511,11 +494,11 @@ class AuthFacadeSupport {
             result.putAll(FacadeSupport.envelope(ec))
             return result
         }
-        int removed = deleteAllLoginKeysForUser(ec, userId)
+        int removed = AuthSessionSupport.endEverySignIn(ec, userId)
         result.allSessionsRevoked = removed
         result.authTokenRevoked = removed > 0
 
-        // Audit W5 #39 — `deleteAllLoginKeysForUser` already removed the row this cookie pointed
+        // Audit W5 #39 — endEverySignIn already removed the row this cookie pointed
         // at, but the browser still holds the cookie value. Emit an expiring Set-Cookie so the
         // next request from this browser does not carry a usable-looking token.
         AuthSessionSupport.clearPersistentLoginCookie(ec)

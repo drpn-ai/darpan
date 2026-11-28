@@ -58,6 +58,8 @@ class CliLoginSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "cli-login-smoke")
         ec.entity.makeDataLoader().location("component://darpan/data/TwoFactorSeedData.xml").dummyFks(true).load()
+        // OC39's reset round: the reset-code purpose enum and email templates.
+        ec.entity.makeDataLoader().location("component://darpan/data/PasswordResetEmailSeedData.xml").dummyFks(true).load()
     }
 
     @AfterAll
@@ -451,6 +453,53 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("OC39: a password change, an expired-password change, a reset and sign-out-everywhere each deny an approved, uncollected CLI sign-in and revoke live CLI sessions")
+    void everySignOutDeniesAnApprovedUncollectedCliSignIn() {
+        Closure originalSendResetCode = PasswordResetSupport.sendResetCode
+        Closure originalSendEmail = PasswordResetSupport.sendEmail
+        String emailedCode = null
+        PasswordResetSupport.sendResetCode = { def ecArg, String to, Map params -> emailedCode = params.code; return true }
+        PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params -> }
+        Map<String, Closure<Map>> endings = [
+                "change#OwnPassword"    : { String current, String next ->
+                    signedInAuth(APPROVER_USERNAME, "change#OwnPassword", [currentPassword: current, newPassword: next, newPasswordVerify: next]) },
+                "change#ExpiredPassword": { String current, String next ->
+                    anonAuth("change#ExpiredPassword", [username: APPROVER_USERNAME, currentPassword: current, newPassword: next, newPasswordVerify: next]) },
+                "complete#PasswordReset": { String current, String next ->
+                    ec.entity.find("darpan.auth.PasswordResetCode").disableAuthz().deleteAll()
+                    assertEquals("sent", anonAuth("request#PasswordReset", [usernameOrEmail: APPROVER_USERNAME]).out.outcome)
+                    anonAuth("complete#PasswordReset", [usernameOrEmail: APPROVER_USERNAME, code: emailedCode, newPassword: next, newPasswordVerify: next]) },
+                "logout#AllSessions"    : { String current, String next -> signedInAuth(APPROVER_USERNAME, "logout#AllSessions", [:]) },
+        ]
+        try {
+            int round = 0
+            endings.each { String ending, Closure<Map> end ->
+                round++
+                String current = "Oc39-start-${round}-Aa1!".toString()
+                setPassword(APPROVER_ID, current)
+                String liveKey = signInByCli(APPROVER_USERNAME)
+                Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+                assertEquals([], signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+
+                Map ended = end(current, "Oc39-next-${round}-Bb2!".toString())
+                assertEquals([], ended.errors, "${ending}: ${ended}")
+
+                Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode])
+                assertEquals("DENIED", polled.out.status, "${ending}: an approved CLI sign-in must not outlive it")
+                assertNull(polled.out.authToken)
+                def liveSession = ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", AuthSessionSupport.hashLoginKey(ec, liveKey))
+                        .useCache(false).disableAuthz().one()
+                assertNotNull(liveSession.revokedDate, "${ending}: the live CLI session is revoked")
+                assertEquals(0L, ec.entity.find("moqui.security.UserLoginKey").condition("userId", APPROVER_ID).useCache(false).disableAuthz().count(),
+                        "${ending}: no key of the person survives")
+            }
+        } finally {
+            PasswordResetSupport.sendResetCode = originalSendResetCode
+            PasswordResetSupport.sendEmail = originalSendEmail
+        }
+    }
+
+    @Test
     @DisplayName("DAR-BE-195: someone the CLI is not turned on for cannot approve a CLI sign-in")
     void aNonAdminCannotApprove() {
         Map started = anon("start#CliLogin", [hostLabel: HOST]).out
@@ -654,6 +703,34 @@ class CliLoginSmokeTests {
         List<String> errors = new ArrayList<>(ec.message.errors)
         ec.message.clearAll()
         return [out: out, errors: errors]
+    }
+
+    /** A facade.AuthFacadeServices call with no session. */
+    private Map anonAuth(String verbNoun, Map params) {
+        ec.user.logoutUser()
+        return callService("facade.AuthFacadeServices.${verbNoun}".toString(), params)
+    }
+
+    /** A facade.AuthFacadeServices call signed in as username. */
+    private Map signedInAuth(String username, String verbNoun, Map params) {
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
+        return callService("facade.AuthFacadeServices.${verbNoun}".toString(), params)
+    }
+
+    private Map callService(String serviceName, Map params) {
+        ec.message.clearAll()
+        Map out = ec.service.sync().name(serviceName).parameters(params).call() ?: [:]
+        List<String> errors = new ArrayList<>(ec.message.errors)
+        ec.message.clearAll()
+        return [out: out, errors: errors]
+    }
+
+    private void setPassword(String userId, String password) {
+        ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal")
+                .parameters([userId: userId, newPassword: password, newPasswordVerify: password, requirePasswordChange: "N"]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), "fixture password refused: ${ec.message.errors} ${ec.message.messages}")
+        ec.message.clearAll()
     }
 
     private def deviceRow(String userCode) {

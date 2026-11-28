@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import groovy.xml.XmlParser
+import reconciliation.rule.FieldComparisonRuleLogicGenerator
 import org.junit.jupiter.api.Test
 
 import java.nio.file.Files
@@ -164,6 +165,25 @@ class AutomationEntityContractTests {
         assertShopifyGraphqlOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"), "Orders")
         // A released pack is history: it keeps the label it shipped (relabelled 2026-11-10, darpan-seed reloads it).
         assertShopifyGraphqlOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH), "Admin GraphQL Orders")
+    }
+
+    /**
+     * DAR-OPS-029 S99-205b. The test/UAT fixture's rules are what a tenant can author: generated field comparisons, each
+     * exactly FieldComparisonRuleLogicGenerator's output for its own expression, so a local stack that loads the fixture
+     * runs them through OC6's compile gate without darpan.rules.allowRawDrl.
+     */
+    @Test
+    void theFixtureRulesAreGeneratedFieldComparisons() {
+        List rules = parse("data/ReconciliationCompareScopeFixtureData.xml").'darpan.rule.Rule' as List
+        assertFalse(rules.isEmpty(), "the fixture carries rules")
+        rules.each { def rule ->
+            String id = rule.@ruleId as String
+            String logic = (rule.@ruleLogic ?: rule.ruleLogic.text()) as String
+            assertEquals(FieldComparisonRuleLogicGenerator.FIELD_COMPARISON_TYPE, rule.@ruleType as String, id)
+            assertEquals(FieldComparisonRuleLogicGenerator.generate(rule.@expression as String, "", "", id, rule.@severity as String, 0),
+                    logic, "${id} is the generator's output for its expression")
+            assertTrue(FieldComparisonRuleLogicGenerator.isGeneratedRuleLogic(logic), id)
+        }
     }
 
     @Test

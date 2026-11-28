@@ -37,43 +37,64 @@
             explosionPath="data.products"
             primaryKeyPath="productId"/>
 
-    <darpan.rule.RuleSet
-            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
-            ruleSetName="Darpan Test Broken Product RuleSet"
-            description="Smoke-test RuleSet for preserving base diffs when DRL compilation fails."
-            version="1.0"
-            explosionPath="data.products"
-            primaryKeyPath="productId"/>
-
+    <!-- DAR-OPS-029 S99-205b: what a tenant can author, generated field comparisons (the ruleLogic is
+         FieldComparisonRuleLogicGenerator's output for the expression; AutomationEntityContractTests checks it),
+         so a stack loading this fixture runs them through the compile gate without darpan.rules.allowRawDrl. -->
     <darpan.rule.Rule
             ruleId="DARPAN_TEST_PRODUCT_SKU_MISMATCH"
             ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
             sequenceNum="10"
-            ruleText="Emit a field diff when SKU differs for the same product"
-            ruleLogic='rule "DARPAN_TEST_PRODUCT_SKU_MISMATCH" salience 200 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "sku", ((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"), "WARN", "SKU mismatch"); end'
+            ruleText="sku = sku"
+            ruleType="FIELD_COMPARISON"
+            expression='{"type":"FIELD_COMPARISON","file1FieldPath":"sku","file2FieldPath":"sku","operator":"="}'
             enabled="Y"
-            ruleType="DRL"
-            severity="WARN"/>
+            severity="WARN">
+        <ruleLogic><![CDATA[rule "DARPAN_TEST_PRODUCT_SKU_MISMATCH"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("sku");
+    Object _file2Value = ((Map) $m.get("file2")).get("sku");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "sku = sku",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: sku = sku"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
 
     <darpan.rule.Rule
             ruleId="DARPAN_TEST_PRODUCT_PRICE_MISMATCH"
             ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
             sequenceNum="20"
-            ruleText="Emit a field diff when price differs for the same product"
-            ruleLogic='rule "DARPAN_TEST_PRODUCT_PRICE_MISMATCH" salience 100 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "price", ((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"), "WARN", "Price mismatch"); end'
+            ruleText="price = price"
+            ruleType="FIELD_COMPARISON"
+            expression='{"type":"FIELD_COMPARISON","file1FieldPath":"price","file2FieldPath":"price","operator":"="}'
             enabled="Y"
-            ruleType="DRL"
-            severity="WARN"/>
-
-    <darpan.rule.Rule
-            ruleId="DARPAN_TEST_PRODUCT_BROKEN_RULE"
-            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
-            sequenceNum="10"
-            ruleText="Broken DRL used to verify base-diff preservation"
-            ruleLogic='rule "DARPAN_TEST_PRODUCT_BROKEN_RULE" when $m : Map( this["file1"] != null ) then BROKEN end'
-            enabled="Y"
-            ruleType="DRL"
-            severity="ERROR"/>
+            severity="WARN">
+        <ruleLogic><![CDATA[rule "DARPAN_TEST_PRODUCT_PRICE_MISMATCH"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("price");
+    Object _file2Value = ((Map) $m.get("file2")).get("price");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "price = price",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: price = price"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
 
     <darpan.rule.RuleSetCompareScope
             compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
@@ -104,12 +125,6 @@
             objectType="PRODUCT"
             description="Smoke-test compare scope for product field mismatches."/>
 
-    <darpan.rule.RuleSetCompareScope
-            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
-            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
-            objectType="PRODUCT"
-            description="Smoke-test compare scope for broken DRL preservation behavior."/>
-
     <darpan.rule.RuleSetCompareSource
             compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"
             fileSide="FILE_1"
@@ -120,22 +135,6 @@
 
     <darpan.rule.RuleSetCompareSource
             compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"
-            fileSide="FILE_2"
-            systemEnumId="OMS"
-            fileTypeEnumId="DftJson"
-            recordRootExpression="data.products"
-            primaryIdExpression="productId"/>
-
-    <darpan.rule.RuleSetCompareSource
-            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
-            fileSide="FILE_1"
-            systemEnumId="SHOPIFY"
-            fileTypeEnumId="DftJson"
-            recordRootExpression="data.products"
-            primaryIdExpression="productId"/>
-
-    <darpan.rule.RuleSetCompareSource
-            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
             fileSide="FILE_2"
             systemEnumId="OMS"
             fileTypeEnumId="DftJson"

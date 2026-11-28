@@ -16,6 +16,7 @@ import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -143,8 +144,8 @@ class AutomationFilterCopySupportTests {
         def copy = rows.find { it.@migrationId == "AUTOMATION_FILTER_COPY" }
         assertEquals([SERVICE, "Y", "Y"], [copy.@serviceName.toString(), copy.@enabled.toString(), copy.@supportsDryRun.toString()])
         def ledger = ec.entity.find("darpan.migration.DarpanMigration").condition("migrationId", "AUTOMATION_FILTER_TABLE").disableAuthz().one()
-        assertTrue(ledger == null || ledger.enabled == "N" || ledger.serviceName == "retired",
-                "a test boot never registers the drop as runnable")
+        // No seed carries the row and clear() removes the one droppedHere() makes, so a test boot has none at all.
+        assertNull(ledger, "a test boot never registers the drop: ${ledger}")
     }
 
     private void droppedHere() {

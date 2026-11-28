@@ -4,6 +4,7 @@ import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
@@ -27,6 +28,13 @@ class MigrationLedgerSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "migration-ledger-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/MigrationRegistrySeedData.xml")
+    }
+
+    @BeforeEach
+    void clearLedger() {
+        // Under @SharedMoqui other classes' ledger rows share this database, and the exact-count
+        // assertions below (0 then 1 UNDECRYPTABLE_HOOKS row, 2 ENDPOINT_ACCESS rows) assume none.
+        ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().deleteAll()
     }
 
     @AfterAll

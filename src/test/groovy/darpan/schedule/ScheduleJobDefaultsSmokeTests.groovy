@@ -126,6 +126,28 @@ class ScheduleJobDefaultsSmokeTests {
         assertEquals("0 15 * * * ?", ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", job).one().cronExpression)
     }
 
+    /** DAR-OPS-029 S34 (OC62 step 2): prod loaded sweep_RuleChildTenantStamps_hourly running (defaultPaused N, paused N).
+     *  The seed now ships defaultPaused="Y" and states no live column, so the next seed load must pause it through
+     *  apply#JobDefaults, as long as nobody edited the job, and leave it unedited. */
+    @Test
+    void aJobRetiredByItsDefaultIsPausedByTheNextSeedLoad() {
+        String job = "sweep_RuleChildTenantStamps_hourly"
+        Closure<Map> row = { ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", job).one() }
+        try {
+            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: job, defaultPaused: "N", paused: "N"]).update() }
+            assertEquals("N", row().paused, "precondition: the job runs, as loaded on prod before the retirement")
+
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
+
+            assertEquals("Y", row().defaultPaused, "the seed load carries the new default")
+            assertEquals("Y", row().paused, "apply#JobDefaults pauses an unedited job whose default moved to paused")
+            assertNull(row().editedDate, "pausing by default is not an edit")
+            assertEquals("0 15 * * * ?", row().cronExpression)
+        } finally {
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
+        }
+    }
+
     @Test
     void seedRowsNeverStateLiveColumns() {
         // allow-list over every loaded type (seed, seed-initial, install, ext*, darpan-seed...); only fixtures are skipped

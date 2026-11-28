@@ -82,35 +82,38 @@ class CryptRotationSmokeTests {
         server.create()
         String serverId = server.getNoCheckSimple("sftpServerId")
 
-        String cipherBefore = rawPasswordColumn(serverId)
-        assertNotNull(cipherBefore)
-        assertNotEquals(PLAINTEXT_FIXTURE, cipherBefore, "password must be encrypted at rest")
+        try {
+            String cipherBefore = rawPasswordColumn(serverId)
+            assertNotNull(cipherBefore)
+            assertNotEquals(PLAINTEXT_FIXTURE, cipherBefore, "password must be encrypted at rest")
 
-        Map<String, Object> result = ec.service.sync()
-                .name("reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues")
-                .disableAuthz()
-                .call()
-        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        Map reencrypted = (Map) result.reencryptedByEntity
-        assertTrue(((reencrypted["darpan.reconciliation.SftpServer"] ?: 0) as int) >= 1, reencrypted.toString())
-        assertEquals(reencrypted.values().sum() ?: 0, result.totalRows)
+            Map<String, Object> result = ec.service.sync()
+                    .name("reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues")
+                    .disableAuthz()
+                    .call()
+            assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+            Map reencrypted = (Map) result.reencryptedByEntity
+            assertTrue(((reencrypted["darpan.reconciliation.SftpServer"] ?: 0) as int) >= 1, reencrypted.toString())
+            assertEquals(reencrypted.values().sum() ?: 0, result.totalRows)
 
-        String cipherAfter = rawPasswordColumn(serverId)
-        assertNotNull(cipherAfter)
-        assertNotEquals(PLAINTEXT_FIXTURE, cipherAfter, "password must stay encrypted at rest after the sweep")
-        // Moqui entity crypt uses a FIXED config salt (EntityJavaUtil.enDeCrypt, crypt-salt attr,
-        // default "default1"), so encryption is deterministic per key: a same-key rewrite produces
-        // byte-identical ciphertext and a byte-diff cannot observe the UPDATE. Under a REAL rotation
-        // the active key differs, so the bytes change. The rewrite mechanism itself is the framework's
-        // touchField -> isFieldModified -> UPDATE -> FieldInfo encrypt-at-write chain
-        // (EntityValueBase.java:182, FieldInfo.java:402); this assertion documents the determinism.
-        assertEquals(cipherBefore, cipherAfter, "same-key re-encryption is deterministic (fixed crypt-salt)")
+            String cipherAfter = rawPasswordColumn(serverId)
+            assertNotNull(cipherAfter)
+            assertNotEquals(PLAINTEXT_FIXTURE, cipherAfter, "password must stay encrypted at rest after the sweep")
+            // Moqui entity crypt uses a FIXED config salt (EntityJavaUtil.enDeCrypt, crypt-salt attr,
+            // default "default1"), so encryption is deterministic per key: a same-key rewrite produces
+            // byte-identical ciphertext and a byte-diff cannot observe the UPDATE. Under a REAL rotation
+            // the active key differs, so the bytes change. The rewrite mechanism itself is the framework's
+            // touchField -> isFieldModified -> UPDATE -> FieldInfo encrypt-at-write chain
+            // (EntityValueBase.java:182, FieldInfo.java:402); this assertion documents the determinism.
+            assertEquals(cipherBefore, cipherAfter, "same-key re-encryption is deterministic (fixed crypt-salt)")
 
-        def reloaded = ec.entity.find("darpan.reconciliation.SftpServer")
-                .condition("sftpServerId", serverId).useCache(false).one()
-        assertEquals(PLAINTEXT_FIXTURE, reloaded.getString("password"), "decrypted value must survive the rotation sweep")
-
-        reloaded.delete()
+            def reloaded = ec.entity.find("darpan.reconciliation.SftpServer")
+                    .condition("sftpServerId", serverId).useCache(false).one()
+            assertEquals(PLAINTEXT_FIXTURE, reloaded.getString("password"), "decrypted value must survive the rotation sweep")
+        } finally {
+            // a failed assertion above must not leave the fixture row for the next class sharing this database
+            ec.entity.find("darpan.reconciliation.SftpServer").condition("sftpServerId", serverId).deleteAll()
+        }
     }
 
     private String rawPasswordColumn(String serverId) {

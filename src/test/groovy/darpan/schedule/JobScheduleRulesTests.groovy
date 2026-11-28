@@ -66,8 +66,9 @@ class JobScheduleRulesTests {
     @Test
     void nextRunsAndGaps() {
         List<Instant> runs = JobScheduleRules.nextRuns("0 0 2 * * ?", NOW, 3)
-        // 02:00 in the zone the job runner uses (the JVM default), not UTC
-        java.time.ZonedDateTime first = java.time.ZonedDateTime.ofInstant(NOW, JobScheduleRules.zone()).plusDays(1).withHour(2).withMinute(0).withSecond(0).withNano(0)
+        // 02:00 in the zone the job runner uses (the JVM default), not UTC. Start from NOW's own local day: in
+        // UTC+12..+14 (and UTC-11/-12) that day's 02:00 is still ahead of NOW, so it is the first run.
+        java.time.ZonedDateTime first = java.time.ZonedDateTime.ofInstant(NOW, JobScheduleRules.zone()).withHour(2).withMinute(0).withSecond(0).withNano(0)
         if (!first.toInstant().isAfter(NOW)) first = first.plusDays(1)
         assertEquals([first, first.plusDays(1), first.plusDays(2)]*.toInstant(), runs)
         assertEquals(first.toInstant(), JobScheduleRules.firstRunAtOrAfter("0 0 2 * * ?", first.toInstant()))

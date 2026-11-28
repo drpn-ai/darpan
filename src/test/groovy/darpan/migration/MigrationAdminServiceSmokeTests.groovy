@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
@@ -16,6 +17,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -172,6 +174,7 @@ class MigrationAdminServiceSmokeTests {
         Map<String, Object> after = ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
+        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size(), (after.migrations as List).size())
         (after.migrations as List<Map<String, Object>>).each { assertEquals("APPLIED", it.status) }
     }
 
@@ -271,15 +274,14 @@ class MigrationAdminServiceSmokeTests {
         withProductionAuthz {
             // Control: without the admin.* fence above it, the same user writing a ledger row is
             // refused at the entity — so a pass below is the fence's grant, not a hollow test.
-            boolean refused
-            try {
+            // record#MigrationRun is authenticate="false", so the refusal is the entity-create authz check,
+            // which Moqui passes through a local service call as ArtifactAuthorizationException.
+            ArtifactAuthorizationException refusal = assertThrows(ArtifactAuthorizationException) {
                 ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
                         .parameters([migrationId: "AUTOMATION_STREAKS", statusId: "FAILED"]).call()
-                refused = ec.message.hasError()
-            } catch (Throwable expected) {
-                refused = true
             }
-            assertTrue(refused, "entity authz was not enforced, so nothing below proves the fence's grant")
+            assertTrue(refusal.message.contains("not authorized") && refusal.message.contains("DarpanMigrationRun"),
+                    "entity authz was not enforced on the ledger, so nothing below proves the fence's grant: ${refusal.message}")
             ec.message.clearErrors()
 
             Map<String, Object> history = ec.service.sync()

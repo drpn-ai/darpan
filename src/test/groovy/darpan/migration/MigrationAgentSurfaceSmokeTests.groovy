@@ -76,6 +76,9 @@ class MigrationAgentSurfaceSmokeTests {
                 .disableAuthz().call()
 
         assertEquals("NOT_FOUND", out.outcome)
+        assertFalse(out.ok as Boolean)
+        assertTrue(ec.message.hasError(), "an unknown id must put an error on the message facade, not just an outcome")
+        assertEquals(["No registered migration with id NO_SUCH_MIGRATION"], ec.message.errors)
         assertEquals(0L, ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().count())
         ec.message.clearErrors()
     }

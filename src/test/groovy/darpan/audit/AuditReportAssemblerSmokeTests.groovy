@@ -403,6 +403,40 @@ class AuditReportAssemblerSmokeTests {
         assertEquals(2, s8.size())
     }
 
+    // DAR-OPS-029 S10, OC80 (findings are never hidden): a statement whose categoryEnumId is not an AuditCategory enum (the
+    // foreign key takes any Enumeration; only the facade checks the type, so an import can bring one) vanished from the
+    // report: categories and summary iterate the AuditCategory enums. It is listed under "uncategorised" instead.
+    @Test
+    void aStatementOutsideTheCategoriesIsListedUncategorisedNotDropped() {
+        insert("moqui.security.UserGroup", [userGroupId: "TUNC", description: "Off-enum category"])
+        audit("TUNC", "TUNC_AUDIT", "off-enum", "Off enum", "AUDP_MONTH")
+        statement("TUNC", "TUNC_AUDIT", "TUNC_S1", "S1", "AUDSW_FIRM", "AUDSW_FIRM", 1, "off-enum S1")
+        insert("darpan.audit.AuditCheck", [checkId: "TUNC_C", companyUserGroupId: "TUNC", checkCode: "off-enum-check", label: "off enum"])
+        link("TUNC", "TUNC_C", "TUNC_S1", 1)
+        String id = (ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: "TUNC", checkId: "TUNC_C",
+                reportDate: Date.valueOf("2026-10-08"), findings: [[statementCode: "S1", recordKey: "U-1", headline: "U-1 is off"]]]).call()
+                .findingIds as List)[0]
+        noErrors()
+
+        Map doc = report("TUNC", "TUNC_AUDIT", "2026-10-08")
+        Map loose = doc.categories.uncategorised as Map
+        assertNotNull(loose, "listed, not dropped")
+        assertEquals(["Uncategorised", counted(1, 1, 0), [id]], [loose.label, loose.counts, (loose.statements.S1.findings as List<Map>)*.id])
+        assertEquals([1, counted(1, 1, 0)], [doc.summary.open, doc.summary.byCategory.uncategorised])
+        assertFalse((doc.categories as Map).findAll { k, v -> k != "uncategorised" }.values().any { (it.statements as Map).containsKey("S1") })
+        assertEquals([id: "uncategorised", label: "Uncategorised"], finding("TUNC", id).finding.category)
+        ec.artifactExecution.disableAuthz()
+        try {
+            assertEquals(["uncategorised"], AuditReportAssembler.findingsByOrder(ec, "TUNC", "TUNC_AUDIT", null, "2026-10")*.category)
+            Map page = AuditFindingsPage.findingsPage(ec, "TUNC", [[key: "category", comparator: "eq", values: ["uncategorised"]]], null, false, 10, null)
+            assertEquals([[id, "uncategorised"]], (page.page.edges as List<Map>).collect { [it.node.id, it.node.category] })
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        // A report with every statement categorised keeps its four categories only.
+        assertFalse((report(GORJANA, "2026-10-08").categories as Map).containsKey("uncategorised"))
+    }
+
     // ---- the finding ---------------------------------------------------------------------------------------------
 
     @Test

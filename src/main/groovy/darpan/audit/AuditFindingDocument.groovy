@@ -83,7 +83,8 @@ class AuditFindingDocument {
                         headline : f.headline,
                         audit    : [id: audit?.auditCode, name: audit?.auditName],
                         period   : f.period,
-                        category : [id: category?.enumCode, label: category?.description],
+                        category : category?.enumTypeId == "AuditCategory" ? [id: category.enumCode, label: category.description] :
+                                [id: AuditReportAssembler.UNCATEGORISED, label: AuditReportAssembler.UNCATEGORISED_LABEL],
                         statement: [id: statement.statementCode, text: statement.statementText, weight: codes.get(statement.weightEnumId as String)],
                         // DAR-BE-348: reason is the overriding conclusion's label when the level is the reason's.
                         priority : [level: level.level, source: level.source, reason: level.source == "reason" ? conclusion?.description : null],

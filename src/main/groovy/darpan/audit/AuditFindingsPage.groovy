@@ -57,7 +57,7 @@ class AuditFindingsPage {
             switch (t.key) {
                 case "audit": statements = statements.findAll { auditCodes[it.auditId as String] in values }; break
                 case "statement": statements = statements.findAll { it.statementCode in values }; break
-                case "category": statements = statements.findAll { codes[it.categoryEnumId as String] in values }; break
+                case "category": statements = statements.findAll { AuditReportAssembler.categoryOf(ec, it.categoryEnumId) in values }; break
                 case "state":
                     conditions << cf.makeCondition("stateEnumId", EntityCondition.IN,
                             codes.findAll { k, v -> k.startsWith("AUDFS_") && v in values }*.key ?: ["__NONE__"]); break
@@ -109,7 +109,7 @@ class AuditFindingsPage {
             Map st = statementById[row.statementId as String]
             Map brief = AuditReportAssembler.briefFinding([row: row, state: row.stateEnumId], today, records[row.findingId as String] ?: [:], codes)
             Map node = [id: brief.id, audit: auditCodes[st?.auditId as String], statement: st?.statementCode,
-                        category: codes[st?.categoryEnumId as String], period: row.period, headline: brief.headline,
+                        category: st == null ? null : AuditReportAssembler.categoryOf(ec, st.categoryEnumId), period: row.period, headline: brief.headline,
                         state: brief.state, firstFound: brief.firstFound, lastSeen: AuditReportAssembler.isoDate(row.lastSeenDate as Date),
                         ageDays: brief.ageDays, records: brief.records, difference: brief.difference, next: brief.next,
                         // get(), not [ ]: a null key there dispatches to getProperty(null) and throws.

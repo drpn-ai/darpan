@@ -46,6 +46,9 @@ class AuditReportAssembler {
     static final List<String> READ_STATUS_ORDER = [READ_COMPLETE, "AUDSR_PARTIAL", "AUDSR_FAILED"].asImmutable()
 
     static final int FINDINGS_CAP = 50
+    /** OC80. The category of a statement whose categoryEnumId is not an AuditCategory enum. */
+    static final String UNCATEGORISED = "uncategorised"
+    static final String UNCATEGORISED_LABEL = "Uncategorised"
     static final String NO_CHECK_REASON = "No check is configured for this statement yet."
 
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
@@ -190,12 +193,18 @@ class AuditReportAssembler {
 
         Map<String, Object> categoryJson = new LinkedHashMap<>()
         Map<String, Object> byCategory = new LinkedHashMap<>()
-        categories.each { Map cat ->
+        // OC80 (findings are never hidden): a statement whose category is not an AuditCategory enum (an import can bring one;
+        // the foreign key takes any Enumeration) is listed under "uncategorised" after the four, instead of vanishing.
+        Set<String> categoryIds = categories*.enumId as Set<String>
+        List<Map> groups = categories.collect { Map cat -> [code: cat.enumCode, label: cat.description, of: statements.findAll { it.categoryEnumId == cat.enumId }] }
+        List<Map> loose = statements.findAll { !categoryIds.contains(it.categoryEnumId as String) }
+        if (loose) groups << [code: UNCATEGORISED, label: UNCATEGORISED_LABEL, of: loose]
+        groups.each { Map g ->
             Map<String, Object> stJson = new LinkedHashMap<>()
-            statements.findAll { it.categoryEnumId == cat.enumId }.each { stJson[it.statementCode as String] = statementJsonById[it.statementId as String] }
+            (g.of as List<Map>).each { stJson.put(it.statementCode as String, statementJsonById.get(it.statementId as String)) }
             Map counts = sumCounts(stJson.values()*.counts)
-            categoryJson[cat.enumCode as String] = [label: cat.description, counts: counts, statements: stJson]
-            byCategory[cat.enumCode as String] = counts
+            categoryJson.put(g.code as String, [label: g.label, counts: counts, statements: stJson])
+            byCategory.put(g.code as String, counts)
         }
 
         Map oldest = ledger.findAll { it.state == OPEN && !waitingIds.contains(it.row.findingId as String) }.with { AuditOrderUnits.sortOldestFirst(it) }.find()
@@ -522,7 +531,7 @@ class AuditReportAssembler {
         return asked.collectMany { Map st ->
             (split[st.statementId as String].counted as List<Map>)
                     .findAll { Map unit -> wanted == "all" || (wanted == "acknowledged") == acknowledged(unit) }.collect { Map unit ->
-                unitFinding(unit, today, records, causes, codes, levels) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
+                unitFinding(unit, today, records, causes, codes, levels) + [statement: st.statementCode, category: categoryOf(ec, st.categoryEnumId)] +
                         (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById, levels)] : [:])
             }
         }.findAll { !priority || it.priority == priority } as List<Map>
@@ -729,6 +738,15 @@ class AuditReportAssembler {
     /** A tenant's rows of one entity, with the explicit companyUserGroupId condition every audit read carries; why names the reader. */
     static def tenantRows(def ec, String entityName, String tenantId, String why = WHY) {
         return TenantScopedFinder.findGlobalUnscoped(ec, entityName, why).condition("companyUserGroupId", tenantId).useCache(false)
+    }
+
+    /**
+     * OC80. A statement's category code: its AuditCategory enum's code, else UNCATEGORISED. Read from AuditCategory only:
+     * the audit vocabulary (enumCodes) also holds weights and states, so an off-type id there would read as a category.
+     */
+    static String categoryOf(def ec, Object categoryEnumId) {
+        def e = categoryEnumId ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", categoryEnumId as String).useCache(true).one() : null
+        return e?.enumTypeId == "AuditCategory" ? (e.enumCode as String) : UNCATEGORISED
     }
 
     /** enumId -> enumCode for the audit-run vocabulary (the JSON emits the code, never the id). */

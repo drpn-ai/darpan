@@ -564,6 +564,20 @@ class AuditAutomationSmokeTests {
         assertTrue((run.outsideRulesJson as String).contains('"M1"'), run.outsideRulesJson as String)
     }
 
+    // OC98 (QA refute, HIGH): a single-sided (evaluate) check has no second read. When its rule fails after a complete read,
+    // the check did not run: its keys were listed at load, before the rules, and must not close a still-true finding.
+    @Test
+    void aSingleSidedCheckWhoseRuleFailedClosesNothing() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-20", ["E1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("e1", [row("MISSING_IN_FILE_2", "E1", "missing in NetSuite")])], null)
+        assertEquals("AUDFS_OPEN", finding("E1").stateEnumId)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-08-21", ["E1"], []), omsSource, null,
+                [recordCount: 1], null, null, new IllegalStateException("A rule failed to build or evaluate."))
+        Map run = checkRun("2026-08-21")
+        assertEquals(["AUDCS_NOT_RUN", "The compare failed: A rule failed to build or evaluate."], [run.statusEnumId, run.reason])
+        assertEquals("AUDFS_OPEN", finding("E1").stateEnumId, "listed at load, never judged: still open")
+    }
+
     @Test
     void aFailedReadIsRecordedAndClosesNothing() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-10", ["F1"], []), omsSource, nsSource,

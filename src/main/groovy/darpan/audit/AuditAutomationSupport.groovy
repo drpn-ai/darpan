@@ -306,7 +306,9 @@ class AuditAutomationSupport {
                     [sideConfigIds: sideConfigIds, reconcileResult: reconcileResult,
                      readStamps: [FILE_1: file1Result?.replayedFromExecutionId ? replayReadAt : null,
                                   FILE_2: file2Result?.replayedFromExecutionId ? replayReadAt : null]])
-            String notRunReason = failure != null && file1Result != null && file2Result != null ?
+            // OC98: a failure when no read failed (both sides, or the one side of a single-sided check) is the
+            // compare's: the check did not run. A single-sided compare lists its keys at load, before its rules run.
+            String notRunReason = failure != null && reads && reads.every { it.statusEnumId != "AUDSR_FAILED" } ?
                     truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
             // DAR-BE-015: a window that ended NO_DATA with a side empty or kept nothing did not run; it closes nothing.
             if (notRunReason == null && noDataReason) notRunReason = truncate(noDataReason, REASON_MAX)

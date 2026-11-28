@@ -16,6 +16,12 @@ import java.sql.Timestamp
  * key material encrypt="true" columns use), so an altered token never opens, and neither does one from an instance with
  * another crypt pass. The instance id (the crypt pass with the transactional database URL) also refuses a token from an
  * instance that shares the crypt pass but not the database.
+ *
+ * <p>Not single-use, on purpose (DAR-OPS-029 S29, Coordinator 15:05): a token opens for every preview and apply until it
+ * expires, because a preview opens it as well as the apply. A replay gains nothing. It opens only on this instance, for this
+ * tenant and the key it was minted with. Using it takes a super admin on this instance. All it can do is write the same
+ * credentials into this tenant's own connections, which no read hands back. Making it single-use would need stored
+ * consumed tokens for no new protection. If that changes, it becomes its own backlog item.</p>
  */
 @CompileDynamic
 class SecretHandoff {
@@ -24,22 +30,35 @@ class SecretHandoff {
 
     /** [publicKey, handoffToken, keyFingerprint, expiresAt] for the target tenant. nowMillis is the clock, for tests. */
     static Map<String, Object> begin(def ec, String tenantId, long nowMillis = System.currentTimeMillis()) {
+        return beginFor(cryptPass(ec), databaseUrl(), tenantId, nowMillis)
+    }
+
+    /**
+     * [privateKey, keyFingerprint] when the token opens here, is the tenant's and is not expired; null for anything else.
+     * An instance with no crypt pass throws: that is a configuration fault, never a refused token.
+     */
+    static Map<String, String> open(def ec, String token, String tenantId, long nowMillis = System.currentTimeMillis()) {
+        if (!token?.trim()) return null
+        return openFor(cryptPass(ec), databaseUrl(), token, tenantId, nowMillis)
+    }
+
+    /** {@link #begin} on an instance named by its crypt pass and database URL: the seam a test proves the binding through. */
+    static Map<String, Object> beginFor(String cryptPass, String databaseUrl, String tenantId, long nowMillis) {
         Map<String, String> pair = SecretSeal.newKeyPair()
         long expiresAt = nowMillis + LIFETIME_MILLIS
-        String cryptPass = cryptPass(ec)
         String token = SecretSeal.sealToken(SecretSeal.handoffKey(cryptPass), JsonOutput.toJson([privateKey: pair.privateKey,
-                tenantUserGroupId: tenantId, expiresAt: expiresAt, keyFingerprint: pair.keyFingerprint, instanceId: instanceId(cryptPass)]))
+                tenantUserGroupId: tenantId, expiresAt: expiresAt, keyFingerprint: pair.keyFingerprint,
+                instanceId: instanceId(cryptPass, databaseUrl)]))
         return [publicKey: pair.publicKey, handoffToken: token, keyFingerprint: pair.keyFingerprint,
                 expiresAt: new Timestamp(expiresAt)] as Map<String, Object>
     }
 
-    /** [privateKey, keyFingerprint] when the token opens here, is the tenant's and is not expired; null for anything else. */
-    static Map<String, String> open(def ec, String token, String tenantId, long nowMillis = System.currentTimeMillis()) {
+    /** {@link #open} on an instance named by its crypt pass and database URL. */
+    static Map<String, String> openFor(String cryptPass, String databaseUrl, String token, String tenantId, long nowMillis) {
         if (!token?.trim()) return null
         try {
-            String cryptPass = cryptPass(ec)
             Map payload = new JsonSlurper().parseText(SecretSeal.openToken(SecretSeal.handoffKey(cryptPass), token.trim())) as Map
-            if (payload.instanceId != instanceId(cryptPass) || payload.tenantUserGroupId != tenantId) return null
+            if (payload.instanceId != instanceId(cryptPass, databaseUrl) || payload.tenantUserGroupId != tenantId) return null
             if (!(payload.expiresAt instanceof Number) || ((Number) payload.expiresAt).longValue() < nowMillis) return null
             return [privateKey: payload.privateKey as String, keyFingerprint: payload.keyFingerprint as String]
         } catch (Exception ignored) {
@@ -56,9 +75,12 @@ class SecretHandoff {
         return pass
     }
 
-    private static String instanceId(String cryptPass) {
-        String databaseUrl = SystemBinding.expand('${entity_ds_url}') ?: ""
-        return MessageDigest.getInstance("SHA-256").digest("${cryptPass}|${databaseUrl}".toString().getBytes(StandardCharsets.UTF_8))
+    private static String databaseUrl() {
+        return SystemBinding.expand('${entity_ds_url}') ?: ""
+    }
+
+    private static String instanceId(String cryptPass, String databaseUrl) {
+        return MessageDigest.getInstance("SHA-256").digest("${cryptPass}|${databaseUrl ?: ''}".toString().getBytes(StandardCharsets.UTF_8))
                 .encodeHex().toString()
     }
 }

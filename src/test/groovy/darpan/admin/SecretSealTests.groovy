@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.admin.transfer.SecretHandoff
 import darpan.admin.transfer.SecretSeal
 import org.junit.jupiter.api.Test
 
@@ -89,6 +90,26 @@ class SecretSealTests {
         chars[last] = chars[last] == ('A' as char) ? ('B' as char) : ('A' as char)
         assertThrows(GeneralSecurityException, { SecretSeal.openToken(key, new String(chars)) }, "an altered token does not open")
         assertThrows(GeneralSecurityException) { SecretSeal.openToken(key, "not-a-token") }
+    }
+
+    /** DAR-OPS-029 S29: a handoff opens only on its own instance (crypt pass AND database), for its tenant, unexpired. */
+    @Test
+    void aHandoffOpensOnlyOnItsInstanceForItsTenantUntilItExpires() {
+        long now = 1_800_000_000_000L
+        Map handoff = SecretHandoff.beginFor("pass-a", "jdbc:mysql://db-a/darpan", "T1", now)
+        String token = handoff.handoffToken as String
+        Map opened = SecretHandoff.openFor("pass-a", "jdbc:mysql://db-a/darpan", token, "T1", now)
+        assertEquals(handoff.keyFingerprint, opened?.keyFingerprint)
+        assertEquals(handoff.keyFingerprint, SecretSeal.fingerprint(handoff.publicKey as String))
+
+        assertNull(SecretHandoff.openFor("pass-a", "jdbc:mysql://db-b/darpan", token, "T1", now),
+                "an instance sharing the crypt pass but not the database refuses it")
+        assertNull(SecretHandoff.openFor("pass-b", "jdbc:mysql://db-a/darpan", token, "T1", now), "another crypt pass refuses it")
+        assertNull(SecretHandoff.openFor("pass-a", "jdbc:mysql://db-a/darpan", token, "T2", now), "another tenant refuses it")
+        assertNull(SecretHandoff.openFor("pass-a", "jdbc:mysql://db-a/darpan", token, "T1", now + SecretHandoff.LIFETIME_MILLIS + 1),
+                "an expired token refuses")
+        assertNotNull(SecretHandoff.openFor("pass-a", "jdbc:mysql://db-a/darpan", token, "T1", now + SecretHandoff.LIFETIME_MILLIS),
+                "it opens up to its expiry")
     }
 
     @Test

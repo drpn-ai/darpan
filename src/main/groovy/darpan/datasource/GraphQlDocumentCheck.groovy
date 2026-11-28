@@ -27,6 +27,13 @@ class GraphQlDocumentCheck {
     static final Set<String> REFUSED_FIELDS = ["__schema", "__type"].asImmutable() as Set<String>
 
     /**
+     * OC131 (DAR-OPS-029 S15a, security). The most field paths fieldPaths reports. A fragment is walked once per path, so a
+     * short document whose fragments each spread the next one twice expands to 2^levels paths and could run the shared JVM
+     * out of memory; the walk stops here and the document is refused, so a policing caller fails closed.
+     */
+    static final int MAX_FIELD_PATHS = 10_000
+
+    /**
      * [errors: [..], operationName, rootFields: [name or alias], variables: [name: [required: bool]]].
      * errors is empty when the document may be stored.
      */
@@ -93,14 +100,16 @@ class GraphQlDocumentCheck {
         Map<String, FragmentDefinition> fragments = doc.getDefinitionsOfType(FragmentDefinition).collectEntries { [(it.name): it] }
         List<OperationDefinition> ops = doc.getDefinitionsOfType(OperationDefinition)
         List<Map> fields = []
-        ops.each { OperationDefinition op ->
+        boolean complete = true
+        for (OperationDefinition op : ops) {
             // A $variable's default is what the server uses when no value is sent, so it is reported with the argument.
             Map<String, Map> defaults = (op.variableDefinitions ?: []).collectEntries { VariableDefinition v ->
                 [(v.name): v.defaultValue == null ? null : valueReport(v.defaultValue)]
             }
-            walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields, defaults)
+            if (!walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields, defaults)) { complete = false; break }
         }
         List<String> errors = []
+        if (!complete) errors << "The query selects more than ${MAX_FIELD_PATHS} fields.".toString()
         if (doc.definitions.size() != ops.size() + fragments.size()) errors << "The document holds something other than operations and fragments."
         return [errors: errors, operations: ops.collect { it.operation.name().toLowerCase() }, fields: fields]
     }
@@ -123,27 +132,30 @@ class GraphQlDocumentCheck {
                 v instanceof NullValue ? [kind: "null"] : [kind: "other"]
     }
 
-    private static void walkPaths(SelectionSet set, Map<String, FragmentDefinition> fragments, List<String> prefix,
+    /** Adds each field's path to `fields`; false as soon as MAX_FIELD_PATHS is reached, so the walk stops early. */
+    private static boolean walkPaths(SelectionSet set, Map<String, FragmentDefinition> fragments, List<String> prefix,
             Set<String> fragmentsOnPath, List<Map> fields, Map<String, Map> defaults) {
         for (Selection s : (set?.selections ?: [])) {
             if (s instanceof Field) {
+                if (fields.size() >= MAX_FIELD_PATHS) return false
                 Field f = (Field) s
                 List<String> path = prefix + [f.name]
                 fields << [path: path, arguments: argumentsOf(f, defaults)]
-                walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields, defaults)
+                if (!walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields, defaults)) return false
             } else if (s instanceof InlineFragment) {
                 InlineFragment inline = (InlineFragment) s
                 String type = inline.typeCondition?.name
-                walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, fields, defaults)
+                if (!walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, fields, defaults)) return false
             } else if (s instanceof FragmentSpread) {
                 String name = ((FragmentSpread) s).name
                 FragmentDefinition fragment = fragments.get(name)
                 // Once per path, so a fragment that spreads itself cannot loop; a fragment reused elsewhere is walked again there.
                 if (fragment == null || fragmentsOnPath.contains(name)) continue
-                walkPaths(fragment.selectionSet, fragments, prefix + ["on:${fragment.typeCondition?.name}".toString()],
-                        fragmentsOnPath + [name] as Set<String>, fields, defaults)
+                if (!walkPaths(fragment.selectionSet, fragments, prefix + ["on:${fragment.typeCondition?.name}".toString()],
+                        fragmentsOnPath + [name] as Set<String>, fields, defaults)) return false
             }
         }
+        return true
     }
 
     /** Walks every selection, through fragments (each once, so a cycle cannot loop), noting refused field names. */

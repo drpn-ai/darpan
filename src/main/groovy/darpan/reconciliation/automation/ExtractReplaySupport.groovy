@@ -72,9 +72,9 @@ class ExtractReplaySupport {
             if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) {
                 throw new IllegalStateException("Execution ${executionId}: the ${side} extract ${file.fileName} is no longer on disk.")
             }
-            // a location the compare can open, whichever shape was stamped (DAR-OPS-029 S07a)
+            // a location the compare can open, whichever shape was stamped (DAR-OPS-029 S07a). Only fileLocation: the runner stamps
+            // dataManagerPath ?: fileLocation, so a retry stamps the same location form a fresh read does (one shape: DAR-BE-409)
             file.fileLocation = landed.fileLocation
-            file.dataManagerPath = landed.dataManagerPath
             file.recordCount = counts[side]
             file.dataAvailable = true
             file.replayedFromExecutionId = executionId

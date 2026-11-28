@@ -80,7 +80,42 @@ class SqlReadOnlyRunnerTests {
             "SELECT `LOGIN_KEY` FROM x",
             "SELECT * FROM user_password_history",
             "select token_hash from t",
+            // security review 2026-11-28: a column can be read without naming it (a UNION takes the first branch's labels, a
+            // derived-table column list renames, a whole-row expression carries it), but never without naming its table.
+            "SELECT 1, 2, 3, 4 UNION SELECT * FROM USER_ACCOUNT",
+            "SELECT * FROM (SELECT * FROM cli_session) AS t (a, b, c)",
+            "SELECT JSON_OBJECTAGG(k.LOGIN_KEY_HASH, 1) FROM CLI_SESSION k",
+            "SELECT * FROM gql_api_key",
+            "SELECT * FROM SLACK_O_AUTH_STATE",
+            "SELECT authentication_string FROM mysql.user",
         ].each { assertTrue(SqlReadOnlyRunner.statementRefusal(it)?.contains("secret"), it) }
+    }
+
+    @Test
+    @DisplayName("drift guard: every table with an unencrypted hash, salt, password or token column is refused by name")
+    void everySecretTableIsRefused() {
+        File root = [new File("").absoluteFile, new File("../../..").absoluteFile, new File("darpan-backend").absoluteFile]
+                .find { new File(it, "runtime/component/darpan").isDirectory() && new File(it, "framework/entity").isDirectory() }
+        assertNotNull(root, "backend root not found from ${new File('').absolutePath}")
+        List<File> files = (new File(root, "framework/entity").listFiles() as List<File>) +
+                new File(root, "runtime/component").listFiles().collectMany { new File(it, "entity").listFiles() as List<File> ?: [] }
+        def secretField = ~/^(currentPassword|resetPassword|passwordHint|password|loginKey|stateToken|\w*(?<!credentialId|query|text|options|content|plan)Hash|\w*Salt)$/
+        Map<String, List<String>> found = [:]
+        files.findAll { it.name.endsWith(".xml") }.each { File f ->
+            def matcher = f.text =~ /(?s)<entity\s+entity-name="([^"]+)"[^>]*>(.*?)<\/entity>/
+            matcher.each { m ->
+                List<String> fields = ((m[2] as String) =~ /<field name="([^"]+)"([^>]*)>/).collect { it }
+                        .findAll { !(it[2] as String).contains('encrypt="true"') && (it[1] as String) ==~ secretField }.collect { it[1] as String }
+                if (fields) found[camelToTable(m[1] as String)] = fields
+            }
+        }
+        assertTrue(found.containsKey("USER_ACCOUNT") && found.containsKey("CLI_SESSION"), "the scan finds the known ones: ${found}")
+        Map missing = found.findAll { table, fields -> !(table in SqlReadOnlyRunner.SECRET_NAMES) }
+        assertTrue(missing.isEmpty(), "add these tables to SqlReadOnlyRunner.SECRET_TABLES (and keep them out of the read-only DB user's grants): ${missing}")
+    }
+
+    private static String camelToTable(String name) {
+        name.collect { it == it.toUpperCase() && it != it.toLowerCase() ? "_" + it : it.toUpperCase() }.join("").replaceFirst('^_', '')
     }
 
     @Test

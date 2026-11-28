@@ -30,9 +30,10 @@ import java.util.regex.Pattern
  *       {@link #readOnlySourceProblem} fails closed when it is not set up or uses the app's own DB user, because Moqui's
  *       getDatasourceFactory quietly falls back to the transactional datasource for a group it does not know.</li>
  * </ol>
- * Secret columns (password hashes, login keys, token hashes) are refused by name in the text and masked by name in the
- * result, so SELECT * shows them as {@link #MASK}. Fields marked encrypt="true" are ciphertext in the database already,
- * and the runner never decrypts. The real boundary for both is the read-only DB user's grants (the spec's ops step).
+ * Tables holding password hashes, login keys or token hashes are refused by name ({@link #SECRET_TABLES}); their columns
+ * are refused by name too and masked by name in a result, as a second net. Fields marked encrypt="true" are ciphertext
+ * in the database already, and the runner never decrypts. The real boundary is the read-only DB user's grants (the
+ * spec's ops step).
  */
 @CompileStatic
 class SqlReadOnlyRunner {
@@ -53,10 +54,21 @@ class SqlReadOnlyRunner {
             "REPAIR", "INSTALL", "UNINSTALL", "COMMIT", "ROLLBACK", "SAVEPOINT", "XA", "GET_LOCK", "RELEASE_LOCK"].asImmutable()
     private static final Pattern FOR_SHARE = Pattern.compile('(?i)\\bFOR\\s+SHARE\\b')
 
-    /** Column and table names that hold a password hash, a login key or a token hash (database names, upper case). */
-    static final Set<String> SECRET_NAMES = (["CURRENT_PASSWORD", "RESET_PASSWORD", "PASSWORD_SALT", "PASSWORD_HINT",
-            "LOGIN_KEY", "LOGIN_KEY_HASH", "ISSUED_LOGIN_KEY_HASH", "TOKEN_HASH", "KEY_HASH", "DEVICE_CODE_HASH", "CODE_HASH",
-            "CODE_SALT", "STATE_TOKEN", "USER_PASSWORD_HISTORY", "USER_LOGIN_KEY"] as Set<String>).asImmutable()
+    /**
+     * Tables holding an unencrypted password hash, salt, login key, token hash or OAuth state (database names). A column
+     * can be read without naming it (a UNION takes the first branch's labels, a derived-table column list renames it, a
+     * whole-row expression carries it), but never without naming its table, so these are refused whole: people are read
+     * with `darpan-admin users` / `user`. SqlReadOnlyRunnerTests.everySecretTableIsRefused scans every entity definition
+     * and fails when a new one is missing here. The read-only DB user gets no grant on them either.
+     */
+    static final Set<String> SECRET_TABLES = (["USER_ACCOUNT", "USER_LOGIN_KEY", "USER_PASSWORD_HISTORY", "PASSWORD_RESET_CODE",
+            "CLI_DEVICE_CODE", "CLI_SESSION", "SLACK_O_AUTH_STATE", "TWO_FACTOR_RECOVERY_CODE", "SIGN_IN_CHALLENGE",
+            "PASSKEY_SIGN_IN_CHALLENGE", "GQL_API_KEY", "SHOPIFY_INSTALL_STATE"] as Set<String>).asImmutable()
+
+    /** Secret tables, the secret columns themselves, and MySQL's own account table and hash column. */
+    static final Set<String> SECRET_NAMES = ((SECRET_TABLES + ["CURRENT_PASSWORD", "RESET_PASSWORD", "PASSWORD_SALT",
+            "PASSWORD_HINT", "LOGIN_KEY", "LOGIN_KEY_HASH", "ISSUED_LOGIN_KEY_HASH", "TOKEN_HASH", "KEY_HASH", "DEVICE_CODE_HASH",
+            "CODE_HASH", "CODE_SALT", "STATE_TOKEN", "MYSQL", "AUTHENTICATION_STRING"]) as Set<String>).asImmutable()
     /** Masked when they come back as a column (PASSWORD is UserPasswordHistory's hash; elsewhere it is ciphertext). */
     private static final Set<String> MASKED_COLUMNS = ((SECRET_NAMES + ["PASSWORD"]) as Set<String>).asImmutable()
 

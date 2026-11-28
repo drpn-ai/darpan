@@ -55,20 +55,6 @@ class ReconciliationSavedRunSupport {
         return flag == null || !flag.equalsIgnoreCase("N")
     }
 
-    /**
-     * The gate, applied at BOTH execution entry points rather than at one.
-     *
-     * <p>A manual run and a scheduled automation reach the pipeline by different routes
-     * (an automation is a second pipeline implementation, not a scheduler), so a single check
-     * would leave the other path running. A disabled run that still fires nightly is worse than
-     * no disable at all, because the operator believes it is off.</p>
-     *
-     * @return true when the run may proceed; adds the operator-facing error and returns false otherwise
-     */
-    /**
-     * DAR-BE-061. Whether a run is in the bin. Absent reads as NOT archived — nothing that
-     * predates the field arrives already binned.
-     */
     private static boolean asBoolean(Object value, boolean fallback) {
         if (value == null) return fallback
         if (value instanceof Boolean) return (Boolean) value
@@ -77,6 +63,10 @@ class ReconciliationSavedRunSupport {
         return text.equalsIgnoreCase("true") || text.equalsIgnoreCase("Y")
     }
 
+    /**
+     * DAR-BE-061. Whether a run is in the bin. Absent reads as NOT archived — nothing that
+     * predates the field arrives already binned.
+     */
     static boolean isRunArchived(def ruleSet) {
         if (ruleSet == null) return false
         return "Y".equalsIgnoreCase(normalize(readFieldValue(ruleSet, "isArchived")) ?: "N")
@@ -426,7 +416,7 @@ class ReconciliationSavedRunSupport {
         ]
     }
 
-    static List<Map<String, Object>> collectRuleSetRows(def ec) {
+    private static List<Map<String, Object>> collectRuleSetRows(def ec) {
         def ruleSetFinder = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RULE_SET)
                 .orderBy("ruleSetName,ruleSetId")
                 .useCache(false)
@@ -512,7 +502,7 @@ class ReconciliationSavedRunSupport {
         ]
     }
 
-    static Map<String, Object> buildRuleSetSavedRunRow(def ec, def ruleSet, def compareScope,
+    private static Map<String, Object> buildRuleSetSavedRunRow(def ec, def ruleSet, def compareScope,
             Map<String, Object> sourceBySide, List<Map<String, Object>> systemOptions = null) {
         List<Map<String, Object>> resolvedSystemOptions = systemOptions ?: buildRuleSetSystemOptions(ec, sourceBySide)
         return [
@@ -696,7 +686,7 @@ class ReconciliationSavedRunSupport {
      * not a brain row's: its guard is never compiled into the tree and names a field no record has (an extract that
      * checks its fields refused it, gorjana R7). The caller has already tenant-gated the scope.
      */
-    static List<String> conclusionReadFieldsForSide(def ec, Object compareScopeId, Object fileSide) {
+    private static List<String> conclusionReadFieldsForSide(def ec, Object compareScopeId, Object fileSide) {
         String scopeId = normalize(compareScopeId)
         String side = normalize(fileSide)?.toUpperCase()
         if (!scopeId || !(side in ["FILE_1", "FILE_2"])) return []
@@ -1225,7 +1215,7 @@ class ReconciliationSavedRunSupport {
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
     }
 
-    static String virtualSystemRemoteLabel(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+    private static String virtualSystemRemoteLabel(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
         if (isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }

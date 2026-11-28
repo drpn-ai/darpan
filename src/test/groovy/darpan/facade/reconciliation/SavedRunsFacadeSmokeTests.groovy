@@ -3108,7 +3108,6 @@ end'''
                       taskContextChain    : task.contextChain,
                       taskFoldDefinedBy   : task.foldDefinedBy,
                       sparkUiEnabled      : spark.conf().get("spark.ui.enabled")]
-        println "KEEP-CLASSLOADERS ${groovy.json.JsonOutput.toJson(record)}"
         assertTrue(((List<String>) task.contextChain).contains(record.moquiLoader as String),
                 "the Spark task threads resolve classes through Moqui's MClassLoader, where a deployed image keeps darpan: ${record}")
         assertEquals(fold.classLoader?.class?.name, task.foldDefinedBy, "driver and task threads resolve the same class: ${record}")

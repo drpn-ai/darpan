@@ -31,8 +31,8 @@ class SourceSystemConstantDuplicationRatchetTest {
 
     /**
      * System-enum-id string-literal declarations across the three source-dispatch classes as of
-     * DAR-299: ReconciliationSavedRunSupport (SHOPIFY/OMS/NETSUITE/SAPI = 4) + AutomationFacadeSupport
-     * (OMS/SHOPIFY/NETSUITE = 3) = 7. AutomationExecutionSupport no longer declares any (its copies were
+     * 2026-11-28: ReconciliationSavedRunSupport (SHOPIFY/OMS/NETSUITE/SAPI = 4) + AutomationFacadeSupport
+     * (SHOPIFY/NETSUITE = 2) = 6. AutomationExecutionSupport no longer declares any (its copies were
      * removed once dispatch became registry-driven).
      */
     static final int BASELINE = 6
@@ -66,7 +66,6 @@ class SourceSystemConstantDuplicationRatchetTest {
             }
         }
 
-        System.out.println("[SourceSystemConstantDuplicationRatchetTest] system-enum literal decls: ${count}/${BASELINE} — ${sites}")
         assertEquals(BASELINE, count,
                 "System-enum-id literal declarations (${count}) != BASELINE ${BASELINE}. " +
                         "If count > BASELINE: a new duplicate per-source constant was declared — reference the " +

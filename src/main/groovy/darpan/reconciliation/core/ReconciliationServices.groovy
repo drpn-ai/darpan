@@ -165,9 +165,13 @@ class ReconciliationServices {
             ] as Map<String, Object>
 
             // OC72: a side that read no records leaves the compare blind; the run says so instead of reading all-missing quietly.
+            // OC15: a record whose single-field key is blank is in no bucket; the run counts it instead of losing it.
             for (String side : ["FILE_1", "FILE_2"]) {
+                String sideRef = "${side} (${side == "FILE_1" ? label1 : label2})"
                 String empty = emptySideWarning(side, side == "FILE_1" ? label1 : label2, ((Map) ingestBySide.get(side)).dataDf, null)
                 if (empty) processingWarnings.add(empty)
+                long keyless = ((Number) (((Map) ingestBySide.get(side)).keylessCount ?: 0L)).longValue()
+                if (keyless > 0) processingWarnings.add(CompareDatasetSupport.keylessRecordWarning(sideRef, keyless))
             }
             // DAR-BE-165, as on the RuleSet path: a key on more than one record of a side is a finding for each of those
             // records and leaves the compare on both sides. The anti-join below used to match it and read clean.
@@ -311,6 +315,8 @@ class ReconciliationServices {
         if (!keep && path && new File(path).isFile()) KeepStepSupport.forgetKeep(new File(path))
         Dataset asideIdDf = null
         Map keepSummary = null
+        // OC15: records left out for a null or blank single-field key, so the caller can say so instead of losing them.
+        long keylessCount = 0L
         List<Dataset> persisted = []
 
         if (type == "JSON") {
@@ -359,8 +365,10 @@ class ReconciliationServices {
                     asideIdDf = CompareDatasetSupport.buildJsonIdDf(withWholeKeys((Dataset) applied.aside, readPathInfos, idNormalizers),
                             readPathInfos, label, idNormalizers, fieldExpressions)
                 }
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                Map frames = CompareDatasetSupport.buildJsonFrames(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                idDf = (Dataset) frames.idDf
+                dataDf = (Dataset) frames.dataDf
+                keylessCount = ((Number) (frames.keylessCount ?: 0L)).longValue()
             } catch (Throwable failure) {
                 // The caller never sees a failed ingest's persisted frames, so they are released here (none without Keep).
                 persisted.each { Dataset frame -> frame.unpersist() }
@@ -369,11 +377,13 @@ class ReconciliationServices {
         } else {
              // CSV
              df = readCsvDataset(spark, path, hasHeader)
-             idDf = CompareDatasetSupport.buildCsvIdDf(df, idSpecs, label, hasHeader)
-             dataDf = CompareDatasetSupport.buildCsvDataDf(df, idSpecs, label, hasHeader)
+             Map frames = CompareDatasetSupport.buildCsvFrames(df, idSpecs, label)
+             idDf = (Dataset) frames.idDf
+             dataDf = (Dataset) frames.dataDf
+             keylessCount = ((Number) (frames.keylessCount ?: 0L)).longValue()
         }
-        if (!keep) return [idDf: idDf, dataDf: dataDf]
-        return [idDf: idDf, dataDf: dataDf, asideIdDf: asideIdDf, keepSummary: keepSummary, persisted: persisted]
+        if (!keep) return [idDf: idDf, dataDf: dataDf, keylessCount: keylessCount]
+        return [idDf: idDf, dataDf: dataDf, keylessCount: keylessCount, asideIdDf: asideIdDf, keepSummary: keepSummary, persisted: persisted]
     }
 
     /**

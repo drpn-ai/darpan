@@ -105,6 +105,23 @@ class ReconciliationServicesEmptySideTests {
     }
 
     @Test
+    void aRecordWithABlankKeyIsCountedNotLost() {
+        // OC15 on the mapping path: the third HotWax record has no id; it is in no bucket, so the run says how many.
+        File hotwax = file("keyless-hw.json", '{"metadata":{},"records":[{"id":"A"},{"id":"B"},{"id":"  "},{"name":"no id"}]}')
+        File shopify = file("keyless-sh.json", '{"metadata":{},"records":[{"id":"A"}]}')
+        Map result = ReconciliationServices.reconcileUnifiedFiles(stubEc([
+                file1Location: hotwax.absolutePath, file2Location: shopify.absolutePath, file1Type: "JSON", file2Type: "JSON",
+                file1IdField : '$.records[*].id', file2IdField: '$.records[*].id', file1Label: "HotWax", file2Label: "Shopify",
+                outputLocation: "runtime://out"]))
+
+        assertEquals(1L, result.matchedCount)
+        assertEquals(1L, result.onlyInFile1Count, "B; the keyless records are not missing, they have no key")
+        assertTrue(((List<String>) result.processingWarnings).any { it.startsWith("FILE_1 (HotWax) has 2 record(s) with a blank key") },
+                "both keyless records are counted: ${result.processingWarnings}")
+        assertTrue(((List<String>) result.processingWarnings).every { !it.startsWith("FILE_2 (Shopify) has") })
+    }
+
+    @Test
     void aPreparedCompareNamesEachEmptySideButNotARestrictedOrAllDuplicateOne() {
         Dataset none = spark.range(0).toDF("compare_id")
         Dataset some = spark.range(2).toDF("compare_id")

@@ -165,8 +165,10 @@ class ErrorDigestAssembler {
             Map m = byKey.get(key)
             long n = (r.count ?: 0) as long
             if (m == null) {
-                byKey.put(key, [fingerprint: r.fingerprint, loggerName: r.loggerName, sampleMessage: r.sampleMessage,
-                                sampleStack: r.sampleStack, count: n, firstSeen: r.firstSeen, lastSeen: r.lastSeen,
+                // DAR-OPS-029 OC216: masked again on read, for rows stored before the masking was complete.
+                byKey.put(key, [fingerprint: r.fingerprint, loggerName: r.loggerName,
+                                sampleMessage: SecretRedactor.redact(r.sampleMessage as String),
+                                sampleStack: SecretRedactor.redact(r.sampleStack as String), count: n, firstSeen: r.firstSeen, lastSeen: r.lastSeen,
                                 tenantId: r.tenantId, logDay: r.logDay])
             } else {
                 m.count = (m.count as long) + n

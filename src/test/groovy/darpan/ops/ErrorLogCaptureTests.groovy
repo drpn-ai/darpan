@@ -123,6 +123,21 @@ class ErrorLogCaptureTests {
         assertDoesNotThrow({ capture.process(badLevel) } as org.junit.jupiter.api.function.Executable)
     }
 
+    // DAR-OPS-029 OC218: masked BEFORE the cut. Cut first, a URL's password can lose the '@' that marks it a password
+    // (https://svc:hunter2 | @db) and reach the digest; the window masked is wider than what is kept.
+    @Test
+    void aSecretTheCutWouldSplitIsMaskedFirst() {
+        String url = "https://svc:hunter2pass@db/x"
+        String head = "java.lang.IllegalStateException: "
+        String inStack = "x" * (ErrorLogCapture.STACK_MAX_CHARS - head.length() - "https://svc:hunter2".length()) + url
+        String inMessage = "y" * (1000 - "https://svc:hunter2".length()) + url
+        capture.process(event(message: inMessage, thrown: new IllegalStateException(inStack)))
+        Map aggregate = capture.drain()[0]
+        String stored = [aggregate.fingerprint, aggregate.sampleMessage, aggregate.sampleStack].join(" | ")
+        assertFalse(stored.contains("hunter2"), "the password reached the digest at the cut")
+        assertTrue((aggregate.sampleStack as String).length() <= ErrorLogCapture.STACK_MAX_CHARS)
+    }
+
     @Test
     void theStackIsCappedToFitTheColumn() {
         Throwable deep = new RuntimeException("outer", new IllegalStateException("inner " + "y" * 3000))

@@ -53,6 +53,14 @@ class ErrorChatSupportTests {
     @AfterAll
     void cleanup() { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }
 
+    // DAR-OPS-029 OC216: the alert's text is masked inside postAlertText, so a caller passing a raw error (a saved-run
+    // check failure, a pulse, the ID-index upkeep) cannot post a secret.
+    @Test
+    void anAlertsSecretIsMaskedBeforeItIsPosted() {
+        assertTrue(ErrorChatSupport.postAlertText(ec, "Check failed: NetSuite 401 for apiToken=sk_live_9 at https://svc:pw@ns"))
+        assertEquals([[url: WEBHOOK, text: "Check failed: NetSuite 401 for apiToken=*** at https://svc:***@ns"]], posted)
+    }
+
     // DAR-BE-378: what a client room must never get goes to the alerts room as it is; nothing when the room is not set.
     @Test
     void anAlertGoesToTheAlertsRoomAsItIsAndNowhereWithoutOne() {

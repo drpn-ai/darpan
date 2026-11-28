@@ -37,6 +37,15 @@ class ErrorDigestAssemblerTests {
         assertEquals("[prod] Darpan errors 2026-11-25: none", d.subject)
     }
 
+    // DAR-OPS-029 OC216: rows stored before the masking was complete are masked again on the way into the email.
+    @Test
+    void aStoredRowsSecretIsMaskedOnRead() {
+        Map d = ErrorDigestAssembler.assemble(input(logRows: [[fingerprint: "f1", count: 1, loggerName: "x",
+                sampleMessage: "login failed login_key=lk-9", sampleStack: "Cookie: JSESSIONID=s3ss"]]))
+        String text = d.logErrors.collect { "${it.sampleMessage} ${it.sampleStack}" }.join(" ")
+        assertTrue(!text.contains("lk-9") && !text.contains("s3ss"), text)
+    }
+
     @Test
     void subjectCountsChecksAndLogErrors() {
         Map d = ErrorDigestAssembler.assemble(input(

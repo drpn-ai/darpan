@@ -43,7 +43,8 @@ class ErrorChatSupport {
         try {
             webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
             if (!webhookUrl || !text) return false
-            Map payload = [text: text]
+            // DAR-OPS-029 OC216: masked here, so no caller (a check failure, a pulse, the ID-index upkeep) can post a secret.
+            Map payload = [text: SecretRedactor.redact(text)]
             Map delivery = (postHook != null ? postHook.call(webhookUrl, payload) :
                     TenantNotificationSupport.deliverToWebhook(webhookUrl, payload)) as Map
             if (delivery?.ok != true) logger.warn("Alert was not delivered (status {})", delivery?.statusCode)

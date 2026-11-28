@@ -79,6 +79,36 @@ class SecretRedactorTests {
         assertEquals("migration failed: webhook=*** (400)", masked("migration failed: webhook=https://hooks.slack.com/services/T/B/x (400)"))
     }
 
+    // DAR-OPS-029 OC218 (Session 010's re-verify): secrets the rule set let through.
+    @Test
+    void loginKeysCookiesAwsSecretsAndPassphrasesAreMasked() {
+        assertEquals("login_key=*** loginKey: ***", masked("login_key=lk-1 loginKey: lk-2"))
+        assertEquals("Cookie: ***", masked("Cookie: JSESSIONID=abc123; moqui_visitor=xyz"))
+        assertEquals("Set-Cookie: ***", masked("Set-Cookie: JSESSIONID=abc123; Path=/; HttpOnly"))
+        assertEquals("AWS_SECRET_ACCESS_KEY=***", masked("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG"))
+        assertEquals("passphrase=*** pwd=*** credentials: ***", masked("passphrase=open-sesame pwd=p1 credentials: c1"))
+    }
+
+    @Test
+    void aUrlsUserinfoAndSignedQueryValuesAreMasked() {
+        assertEquals("sftp://svc:***@host/in", masked("sftp://svc:pa/ss@host/in"), "a slash in the password")
+        assertEquals("https://:***@host/x", masked("https://:tok3n@host/x"), "an empty user")
+        assertEquals("GET /oauth/callback?code=***&state=s", masked("GET /oauth/callback?code=4%2F0AX&state=s"))
+        // A bare keyed value is masked to the next whitespace (the documented safe side), so the signature after it goes too.
+        assertEquals("https://b.s3.amazonaws.com/f?X-Amz-Credential=***",
+                masked("https://b.s3.amazonaws.com/f?X-Amz-Credential=AKIA%2F20261128&X-Amz-Signature=9f8e7d"))
+        assertEquals("https://b.s3.amazonaws.com/f?X-Amz-Signature=***&X-Amz-Date=20261128",
+                masked("https://b.s3.amazonaws.com/f?X-Amz-Signature=9f8e7d&X-Amz-Date=20261128"), "the signature alone, as a query value")
+    }
+
+    @Test
+    void oauthParametersAreMaskedOutsideAnAuthorizationHeaderToo() {
+        assertEquals('oauth_signature="***", oauth_nonce="***"', masked('oauth_signature="a%2Bb", oauth_nonce="n1"'))
+        assertEquals("https://x/api?oauth_verifier=***", masked("https://x/api?oauth_verifier=v1&page=2"), "to the next whitespace")
+        assertEquals("https://x/api?oauth_token=***", masked("https://x/api?oauth_token=t1&oauth_verifier=v1"),
+                "a bare keyed value is masked to the next whitespace")
+    }
+
     @Test
     void aBearerHeaderIsMasked() {
         assertEquals("Authorization: ***", masked("Authorization: Bearer eyJhbGciOi.payload.sig"))

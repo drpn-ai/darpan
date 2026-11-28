@@ -20,8 +20,11 @@ import java.util.regex.Pattern
  *       after =, : or => on the same line: a quoted value up to its closing quote on that line (escapes allowed, at most 512
  *       characters), a quote that does not close on its line up to the line's end, a bare value up to whitespace (a comma or
  *       ")" in a secret stays masked; the old migration-ledger rule, kept so no path masks less);</li>
- *   <li>an Authorization or Proxy-Authorization value of any scheme, whole: quoted up to its closing quote, else to the
- *       line's end (OC83);</li>
+ *   <li>an Authorization or Proxy-Authorization value of any scheme, and a Cookie or Set-Cookie header, whole: quoted up to its
+ *       closing quote, else to the line's end (OC83, OC218);</li>
+ *   <li>OC218: a login key, passphrase, pwd, credentials, an AWS secret access key and any oauth_* value, as keyed values; a URL's
+ *       password with a '/' in it or no user before it; and its code, X-Amz-Signature, X-Amz-Credential, X-Amz-Security-Token
+ *       and oauth_* query values;</li>
  *   <li>a Bearer token.</li>
  * </ul>
  * <p>Never past a line end (but for PEM), so a stack trace's other lines stay readable. A key that only ends in a secret word
@@ -34,17 +37,18 @@ final class SecretRedactor {
     static final String MASK = "***"
 
     private static final Pattern PEM_BLOCK = ~/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END \1-----|\z)/
-    private static final Pattern URL_USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]+:)[^@\s\/]+@/
-    private static final Pattern URL_SECRET_PARAM = ~/(?i)([?&](?:key|token|sig|signature|access_token)=)[^&\s"'#]+/
+    private static final Pattern URL_USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]*:)[^@\s]+@/
+    private static final Pattern URL_SECRET_PARAM =
+            ~/(?i)([?&](?:key|token|sig|signature|access_token|code|x-amz-signature|x-amz-credential|x-amz-security-token|oauth_[a-z_]+)=)[^&\s"'#]+/
     private static final Pattern SECRET_VALUE =
-            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
+            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|passphrase|pwd|credentials?|login[_-]?key|privateKey|apiToken|api[_-]?key|clientSecret|secret[_-]?access[_-]?key|secret|oauth_[a-z_]+|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
     /**
      * OC83 (DAR-OPS-029 S29). An Authorization header's value, any scheme: quoted up to its closing quote on the line, else to
      * the line's end (a Digest value holds spaces, commas and quotes, and a scheme cannot be told from a credential).
      * NetSuite's record type "Return Authorization" (a status reads "Return Authorization : Pending Refund") is no header.
      */
     private static final Pattern AUTHORIZATION_VALUE =
-            ~/(?i)(?<!return[ \t])(\\?["']?)([A-Za-z0-9_-]*?)(authorization)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|[^\r\n]+)/
+            ~/(?i)(?<!return[ \t])(\\?["']?)([A-Za-z0-9_-]*?)(authorization|cookie)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|[^\r\n]+)/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     private SecretRedactor() {}

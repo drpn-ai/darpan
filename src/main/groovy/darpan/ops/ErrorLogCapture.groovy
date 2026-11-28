@@ -50,6 +50,11 @@ class ErrorLogCapture implements LogEventSubscriber {
     static final int STACK_MAX_CHARS = 4000
     /** Masking reads at most this much of a message: an ERROR can carry a megabyte of SQL. */
     private static final int MASK_MAX_CHARS = 1000
+    /**
+     * DAR-OPS-029 OC218: text is masked over a window wider than what is kept, then cut. Cut first, a secret can lose what marks
+     * it one (a URL's password its '@') and pass the mask; the window still bounds what the patterns read.
+     */
+    private static final int REDACT_WINDOW_FACTOR = 4
     static final String TENANT_MDC_KEY = "darpan.tenant"
     /**
      * Set in the log4j thread context while a flush runs. log4j copies the context onto each event on the logging thread (before
@@ -94,7 +99,7 @@ class ErrorLogCapture implements LogEventSubscriber {
             String loggerName = event.getLoggerName() ?: ""
             String raw = event.getMessage()?.getFormattedMessage() ?: ""
             // DAR-BE-408: a secret in an ERROR line never reaches the digest; only the head the fingerprint reads is masked
-            String message = SecretRedactor.redact(raw.length() > MASK_MAX_CHARS ? raw.substring(0, MASK_MAX_CHARS) : raw)
+            String message = cap(SecretRedactor.redact(cap(raw, MASK_MAX_CHARS * REDACT_WINDOW_FACTOR)), MASK_MAX_CHARS)
             Throwable thrown = event.getThrown()
             String tenantId = tenantOf(context)
 
@@ -228,20 +233,20 @@ class ErrorLogCapture implements LogEventSubscriber {
         StringBuilder sb = new StringBuilder()
         Throwable t = thrown
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>())
-        while (t != null && seen.add(t) && sb.length() < STACK_MAX_CHARS) {
+        int window = STACK_MAX_CHARS * REDACT_WINDOW_FACTOR
+        while (t != null && seen.add(t) && sb.length() < window) {
             if (t != thrown) sb.append("Caused by: ")
             sb.append(t.getClass().name)
             String msg = t.getMessage()
-            if (msg != null) sb.append(": ").append(msg.length() > STACK_MAX_CHARS ? msg.substring(0, STACK_MAX_CHARS) : msg)
+            if (msg != null) sb.append(": ").append(cap(msg, window))
             sb.append('\n')
             StackTraceElement[] frames = t.getStackTrace()
             int shown = Math.min(frames.length, FRAMES_PER_THROWABLE)
-            for (int i = 0; i < shown && sb.length() < STACK_MAX_CHARS; i++) sb.append("\tat ").append(frames[i].toString()).append('\n')
+            for (int i = 0; i < shown && sb.length() < window; i++) sb.append("\tat ").append(frames[i].toString()).append('\n')
             if (frames.length > shown) sb.append("\t... ").append(frames.length - shown).append(" more\n")
             t = t.getCause()
         }
-        // DAR-BE-408: masked, then capped again (a mask can be longer than what it hides)
-        String masked = SecretRedactor.redact(sb.length() > STACK_MAX_CHARS ? sb.substring(0, STACK_MAX_CHARS) : sb.toString())
-        return masked.length() > STACK_MAX_CHARS ? masked.substring(0, STACK_MAX_CHARS) : masked
+        // DAR-BE-408, OC218: masked over the window, then cut to the column (a mask can also be longer than what it hides)
+        return cap(SecretRedactor.redact(cap(sb.toString(), window)), STACK_MAX_CHARS)
     }
 }

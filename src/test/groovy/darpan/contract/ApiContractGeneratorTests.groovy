@@ -134,6 +134,104 @@ class ApiContractGeneratorTests {
         assert methods.findAll { it.startsWith("facade.") && it.contains("AdminServices") }.isEmpty()
     }
 
+    // ---- DAR-OPS-029 S31: <implements> resolved as Moqui does, and container types that mean what they say ----
+
+    private static File fixtureTree(Map<String, String> files) {
+        File root = File.createTempDir("contract-implements")
+        files.each { String path, String xml ->
+            File f = new File(root, path)
+            f.parentFile.mkdirs()
+            f.text = '<?xml version="1.0" encoding="UTF-8"?>\n<services>\n' + xml + '\n</services>\n'
+        }
+        return root
+    }
+
+    private static Map props(Map schema) { (Map) schema.get('properties') }
+
+    /** ServiceDefinition: the interface's parameters first, then the service's own merged over them by name. */
+    @Test
+    void implementsMergesTheInterfaceParametersTheWayMoquiDoes() {
+        File root = fixtureTree([
+                "darpan/service/common/Envelopes.xml": '''
+    <service verb="reply" noun="Envelope" type="interface">
+        <in-parameters><parameter name="tenantId" required="true"><description>From the interface</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="info" type="Map"><parameter name="a"/></parameter>
+        </out-parameters>
+    </service>
+    <service verb="reply" noun="Paged" type="interface">
+        <implements service="common.Envelopes.reply#Envelope"/>
+        <out-parameters><parameter name="total" type="Long"/></out-parameters>
+    </service>''',
+                "darpan/service/facade/OneFacadeServices.xml": '''
+    <service verb="get" noun="Thing" allow-remote="true">
+        <implements service="common.Envelopes.reply#Paged"/>
+        <in-parameters>
+            <parameter name="tenantId" required="false"><description>Own words</description></parameter>
+            <parameter name="thingId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="info" type="Map"><parameter name="b"/></parameter>
+            <parameter name="thing" type="Map"/>
+        </out-parameters>
+    </service>
+    <service verb="list" noun="Things" allow-remote="true">
+        <implements service="common.Envelopes.reply#Envelope" required="false"/>
+    </service>'''])
+        try {
+            ApiContractGenerator.ServiceIndex index = new ApiContractGenerator.ServiceIndex(new File(root, "darpan"))
+            List<Map> ops = ApiContractGenerator.parseServiceFile(new File(root, "darpan/service/facade/OneFacadeServices.xml"), "facade", index)
+            Map get = ops.find { it.method == "facade.OneFacadeServices.get#Thing" }
+            // In: the interface's tenantId first, its attributes overridden (required off) and its description replaced.
+            assertEquals(["tenantId", "thingId"], new ArrayList(props((Map) get.paramsSchema).keySet()))
+            assertEquals(["thingId"], ((Map) get.paramsSchema).required)
+            assertEquals("Own words", props((Map) get.paramsSchema).tenantId.description)
+            // Out: Paged pulls Envelope in first (nested), then its own total; the service's info merges children (a + b).
+            Map out = props((Map) get.resultSchema)
+            assertEquals(["ok", "errors", "info", "total", "thing"], new ArrayList(out.keySet()))
+            assertEquals(["a", "b"], new ArrayList(props((Map) out.info).keySet()))
+            // implements required="false" clears an interface's required flag.
+            Map list = ops.find { it.method == "facade.OneFacadeServices.list#Things" }
+            assertEquals(null, ((Map) list.paramsSchema).required)
+            assertEquals(["tenantId"], new ArrayList(props((Map) list.paramsSchema).keySet()))
+        } finally {
+            root.deleteDir()
+        }
+    }
+
+    @Test
+    void anInterfaceThatCannotBeFoundStopsGeneration() {
+        File root = fixtureTree(["darpan/service/facade/OneFacadeServices.xml": '''
+    <service verb="get" noun="Thing" allow-remote="true"><implements service="common.Nowhere.reply#Envelope"/></service>'''])
+        try {
+            ApiContractGenerator.ServiceIndex index = new ApiContractGenerator.ServiceIndex(new File(root, "darpan"))
+            IllegalStateException e = assertThrows(IllegalStateException) {
+                ApiContractGenerator.parseServiceFile(new File(root, "darpan/service/facade/OneFacadeServices.xml"), "facade", index)
+            }
+            assertTrue(e.message.contains("common.Nowhere.reply#Envelope"), e.message)
+        } finally {
+            root.deleteDir()
+        }
+    }
+
+    /** A list of maps is an array of objects, and a map without declared children is an open object, not an empty one. */
+    @Test
+    void containerTypesMeanWhatTheXmlSays() {
+        Map listOfMaps = ApiContractGenerator.parameterToSchema(new XmlParser().parseText(
+                '<parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>'), "m")
+        assertEquals([type: "array", items: [type: "object", additionalProperties: true]], listOfMaps)
+        Map listOfLists = ApiContractGenerator.parameterToSchema(new XmlParser().parseText(
+                '<parameter name="rows" type="List"><parameter name="row" type="List"/></parameter>'), "m")
+        assertEquals([type: "array", items: [type: "array", items: [:]]], listOfLists)
+        Map openMap = ApiContractGenerator.parameterToSchema(new XmlParser().parseText('<parameter name="report" type="Map"/>'), "m")
+        assertEquals([type: "object", additionalProperties: true], openMap)
+        Map listOfStrings = ApiContractGenerator.parameterToSchema(new XmlParser().parseText(
+                '<parameter name="ids" type="List"><parameter name="id"/></parameter>'), "m")
+        assertEquals([type: "array", items: [type: "string"]], listOfStrings, "a list of scalars is unchanged")
+    }
+
     /** The committed contract must match the XML — same gate CI enforces via --check. */
     @Test
     void committedContractMatchesGeneratedContract() {

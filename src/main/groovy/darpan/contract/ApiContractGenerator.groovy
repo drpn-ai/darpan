@@ -54,7 +54,11 @@ class ApiContractGenerator {
     //            replaced by the TenantQuery / TenantQuerySchedule methods on moqui-jexl (DAR-BE-334); also
     //            save#Automation no longer takes sources[].excludeFilters (DAR-BE-318) and add#TenantMember's
     //            welcomeQueued became welcomeSent / welcomeWithPassword.
-    static final int CONTRACT_VERSION = 6
+    // 7 (DAR-OPS-029 S31): a list whose element is declared type="Map" (or "List") is an array of objects (or arrays),
+    //            no longer string[]: 43 request/response fields (audit findings, lifecycle details, settings, jobs, ...).
+    //            The wire data were always maps; only the published types change. A Map with no declared children is
+    //            an open object (additionalProperties: true), no longer an object with no properties.
+    static final int CONTRACT_VERSION = 7
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],
@@ -108,6 +112,7 @@ class ApiContractGenerator {
 
     static Map generate(File componentRoot) {
         List<Map> operations = []
+        ServiceIndex index = new ServiceIndex(componentRoot)
         for (List<String> serviceDir in SERVICE_DIRS) {
             String dir = serviceDir[0]
             String prefix = serviceDir[1]
@@ -119,7 +124,7 @@ class ApiContractGenerator {
                         "component under runtime/component (the production image and CI carry every one of SERVICE_DIRS).")
             }
             facadeDir.listFiles({ File f -> f.name.endsWith(".xml") } as FileFilter).sort { it.name }.each { File xml ->
-                operations.addAll(parseServiceFile(xml, prefix))
+                operations.addAll(parseServiceFile(xml, prefix, index))
             }
         }
         operations = operations.sort { it.method as String }
@@ -231,7 +236,7 @@ class ApiContractGenerator {
         ]
     }
 
-    static List<Map> parseServiceFile(File xmlFile, String prefix) {
+    static List<Map> parseServiceFile(File xmlFile, String prefix, ServiceIndex index) {
         def root = new XmlParser().parse(xmlFile)
         String fileBase = xmlFile.name.replace(".xml", "")
         List<Map> ops = []
@@ -243,19 +248,19 @@ class ApiContractGenerator {
             String pascal = "${pascalCase(verb)}${pascalCase(noun)}".toString()
             String description = svc.description ? svc.description[0].text().trim() : null
 
-            Map paramsSchema = parametersToSchema(svc."in-parameters"[0], method, true)
+            Map paramsSchema = parametersToSchema(index.mergedParameters(svc, "in-parameters", method), method, true)
             if (description) paramsSchema.description = description
-            Map resultSchema = parametersToSchema(svc."out-parameters"[0], method, false)
+            Map resultSchema = parametersToSchema(index.mergedParameters(svc, "out-parameters", method), method, false)
 
             ops << [method: method, pascal: pascal, paramsSchema: paramsSchema, resultSchema: resultSchema]
         }
         return ops
     }
 
-    static Map parametersToSchema(def parametersNode, String method, boolean trackRequired) {
+    static Map parametersToSchema(List parameters, String method, boolean trackRequired) {
         Map<String, Object> properties = new LinkedHashMap<>()
         List<String> required = []
-        parametersNode?.parameter?.each { param ->
+        parameters.each { param ->
             properties[param.@name as String] = parameterToSchema(param, method)
             if (trackRequired && param.@required == "true") required << (param.@name as String)
         }
@@ -274,7 +279,11 @@ class ApiContractGenerator {
         if (children) {
             if (type == "List") {
                 if (children.size() == 1 && !(children[0].parameter)) {
-                    schema = [type: "array", items: scalarSchema(children[0].@type as String)]
+                    // DAR-OPS-029 S31: an element declared Map or List is a container, not a string (a list of maps was typed
+                    // string[], so clients could not use the generated types).
+                    String elementType = children[0].@type as String
+                    schema = [type: "array", items: (elementType in ["Map", "List"] ? parameterToSchema(children[0], method) :
+                            scalarSchema(elementType))]
                 } else {
                     Map entryProps = new LinkedHashMap<>()
                     children.each { child -> entryProps[child.@name as String] = parameterToSchema(child, method) }
@@ -293,7 +302,9 @@ class ApiContractGenerator {
         } else if (type == "List") {
             schema = [type: "array", items: [:]]
         } else if (type == "Map") {
-            schema = [type: "object"]
+            // DAR-OPS-029 S31: a Map with no declared children holds keys the XML does not name. A bare {type: object} reads as
+            // an object with no properties (Record<string, never> in generated TypeScript); it is an open object.
+            schema = [type: "object", additionalProperties: true]
         } else {
             schema = scalarSchema(type)
         }
@@ -336,6 +347,95 @@ class ApiContractGenerator {
     static String pascalCase(String value) {
         if (!value) return ""
         return value[0].toUpperCase() + value.substring(1)
+    }
+
+    /**
+     * DAR-OPS-029 S31. Finds services by name across the component and its siblings (pkg.File.verb#noun lives in
+     * service/pkg/File.xml of some component), and merges a service's parameters the way Moqui's ServiceDefinition does:
+     * each {@code <implements>}'s parameters first (deep copies; {@code required} set from the implements when it has one;
+     * an interface's own implements resolved first), then the service's own parameters merged over them by name
+     * (attributes override, nested parameters merge, a description replaces). Without this a service built on an interface
+     * would publish only its own parameters, so the shared envelopes (sessionInfo, ok/messages/errors) could not move into
+     * one interface without shrinking the contract.
+     */
+    static class ServiceIndex {
+        private final List<File> serviceRoots
+        private final Map<String, Object> parsedFiles = [:]
+
+        ServiceIndex(File componentRoot) {
+            File componentsDir = componentRoot.canonicalFile.parentFile
+            List<File> siblings = (componentsDir?.listFiles({ File f -> f.isDirectory() } as FileFilter) ?: []) as List<File>
+            serviceRoots = ([componentRoot.canonicalFile] + siblings.sort { it.name })
+                    .unique { it.canonicalPath }.collect { new File(it, "service") }.findAll { it.isDirectory() }
+        }
+
+        /** The service named pkg.File.verb#noun (or pkg.File.verb), or null when no component holds it. */
+        Object find(String serviceName) {
+            String name = serviceName?.trim()
+            if (!name) return null
+            int hash = name.indexOf('#')
+            String path = hash >= 0 ? name.substring(0, hash) : name
+            String noun = hash >= 0 ? name.substring(hash + 1) : null
+            int lastDot = path.lastIndexOf('.')
+            if (lastDot <= 0) return null
+            String verb = path.substring(lastDot + 1)
+            String fileRel = path.substring(0, lastDot).replace('.', '/') + ".xml"
+            for (File serviceRoot in serviceRoots) {
+                File xml = new File(serviceRoot, fileRel)
+                if (!xml.isFile()) continue
+                def root = parsedFiles.computeIfAbsent(xml.canonicalPath) { new XmlParser().parse(xml) }
+                def svc = root.service.find { it.@verb == verb && ((it.@noun ?: null) == (noun ?: null)) }
+                if (svc != null) return svc
+            }
+            return null
+        }
+
+        /** The service's parameter nodes of one kind ("in-parameters" / "out-parameters"), interfaces merged in. */
+        List mergedParameters(def svc, String kind, String method, Set<String> seen = new HashSet<String>()) {
+            List merged = []
+            svc.implements.each { impl ->
+                String implName = impl.@service as String
+                if (!seen.add(implName)) throw new IllegalStateException("${method}: <implements> cycle through ${implName}")
+                def iface = find(implName)
+                if (iface == null) {
+                    throw new IllegalStateException("${method} implements ${implName}, which no component under " +
+                            "${serviceRoots*.parentFile*.parentFile.unique()} defines; the contract would lose its parameters.")
+                }
+                String implRequired = (impl.@required as String) ?: null
+                mergedParameters(iface, kind, method, seen).each { param ->
+                    def copy = param.clone()
+                    if (implRequired != null) copy.attributes().put("required", implRequired)
+                    merged << copy
+                }
+                seen.remove(implName)
+            }
+            (svc."${kind}"[0]?.parameter ?: []).each { own -> mergeParameter(merged, own) }
+            return merged
+        }
+
+        /** ServiceDefinition.mergeParameter: an own parameter overrides the attributes of the same-named one, else joins. */
+        private static void mergeParameter(List parameters, def own) {
+            def base = parameters.find { it.@name == own.@name }
+            if (base == null) {
+                parameters << own.clone()
+                return
+            }
+            base.attributes().putAll(own.attributes())
+            own.children().each { child ->
+                if (!(child instanceof groovy.util.Node)) return
+                if (child.name() == "description") {
+                    base.children().removeAll { it instanceof groovy.util.Node && it.name() == "description" }
+                    base.append(child.clone())
+                } else if (child.name() == "parameter") {
+                    List nested = base.parameter
+                    def nestedBase = nested.find { it.@name == child.@name }
+                    if (nestedBase == null) base.append(child.clone())
+                    else mergeParameter(nested, child)
+                } else {
+                    base.append(child.clone())
+                }
+            }
+        }
     }
 
     static String readComponentVersion(File componentRoot) {

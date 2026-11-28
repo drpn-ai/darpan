@@ -30,6 +30,15 @@ class ConclusionKeySupportTests {
         assertEquals("M1", ConclusionKeySupport.compareKey([omsOrderId: "M1"], ['$.records[*].omsOrderId'], null))
     }
 
+    // DAR-OPS-029 S03a (lens E4): Spark's trim (CompareDatasetSupport.applyIdNormalizer) takes off spaces only, so a tab or
+    // line break at a key's edge stays in the compare's key and must stay in the key rebuilt here, or the evidence misses it.
+    @Test
+    void trimsOnlySpacesLikeSpark() {
+        assertEquals("M1\t\u001F01", ConclusionKeySupport.compareKey([o: " M1\t ", u: "01 "], ["o", "u"], null))
+        assertEquals("M2\n", ConclusionKeySupport.compareKey([o: "M2\n"], ["o"], null))
+        assertNull(ConclusionKeySupport.compareKey([o: "   "], ["o"], null))
+    }
+
     @Test
     void aBlankFieldHasNoKey() {
         assertNull(ConclusionKeySupport.compareKey([a: "x", b: " "], ["a", "b"], null))

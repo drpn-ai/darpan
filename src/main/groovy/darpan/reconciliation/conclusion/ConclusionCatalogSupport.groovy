@@ -61,7 +61,7 @@ class ConclusionCatalogSupport {
     }
 
     private static boolean visibleTo(Map<String, String> ownerById, String enumId, String tenantId) {
-        String owner = ownerById[enumId]
+        String owner = ownerById.get(enumId)
         return owner == null || owner == tenantId
     }
 }

@@ -32,7 +32,7 @@ class ConclusionConditionSupport {
         if (!field || !operator) {
             return [passed: true, value: presence?.toLowerCase()]
         }
-        List<String> wanted = ((List) (condition.get("conditionValues") ?: [])).collect { it?.toString()?.trim()?.toUpperCase() }
+        List<String> wanted = ((List) (condition.get("conditionValues") ?: [])).collect { it?.toString()?.trim()?.toUpperCase(Locale.ROOT) }
         List<String> values = records.collectMany { Map r -> valuesAt(r, field) }
         boolean any = "ANY" == text(condition.get("quantifier"))
         boolean passed = any ? values.any { String v -> holds(operator, v, wanted) }
@@ -65,8 +65,8 @@ class ConclusionConditionSupport {
 
     private static boolean holds(String operator, String value, List<String> wanted) {
         switch (operator) {
-            case "IN": return value != null && wanted.contains(value.toUpperCase())
-            case "NOT_IN": return value == null || !wanted.contains(value.toUpperCase())
+            case "IN": return value != null && wanted.contains(value.toUpperCase(Locale.ROOT))
+            case "NOT_IN": return value == null || !wanted.contains(value.toUpperCase(Locale.ROOT))
             // DAR-BE-345: a name prefix (a HotWax exchange order's lines carry only its name, EXC-...); case ignored as IN.
             case "STARTS_WITH_ANY": return startsWithAny(value, wanted)
             case "NOT_STARTS_WITH_ANY": return !startsWithAny(value, wanted)
@@ -85,7 +85,7 @@ class ConclusionConditionSupport {
 
     private static boolean startsWithAny(String value, List<String> prefixes) {
         if (!value) return false
-        String upper = value.toUpperCase()
+        String upper = value.toUpperCase(Locale.ROOT)
         return prefixes.any { String p -> p && upper.startsWith(p) }
     }
 

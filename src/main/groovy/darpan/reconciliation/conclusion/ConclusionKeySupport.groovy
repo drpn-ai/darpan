@@ -5,7 +5,7 @@ import darpan.reconciliation.core.ReconciliationServices
 
 /**
  * DAR-UI-044. The compare key, rebuilt in plain Groovy so the conclude pass can index a side's records
- * the way the Spark compare keyed them: each field trimmed, then normalized, joined with the composite
+ * the way the Spark compare keyed them: each field trimmed of spaces (as Spark's trim), then normalized, joined with the composite
  * delimiter. The normalizer follows RuleSetCompareScopeAdapter: a composite key field carries its own
  * inline `field|NORMALIZER` (the caller passes no idNormalizer), a legacy key uses the source's
  * idValueNormalizer ?: its inline one, both through resolveIdNormalizer's aliases. A blank field has no
@@ -22,7 +22,7 @@ class ConclusionKeySupport {
             String field = plainField(expression) ?: CompareIdExpressionSupport.topLevelRecordField(expression) ?: (String) split.idExpr
             String normalizer = configured ?: CompareIdExpressionSupport.resolveIdNormalizer((String) split.normalizer)
             Object raw = field == null ? null : record.get(field)
-            String value = raw == null ? null : normalize(raw.toString().trim(), normalizer)
+            String value = raw == null ? null : normalize(sparkTrim(raw.toString()), normalizer)
             if (!value) return null
             parts.add(value)
         }
@@ -47,6 +47,14 @@ class ConclusionKeySupport {
         return at < 0 ? compareKey : compareKey.substring(0, at)
     }
 
+    /** Spark's trim (CompareDatasetSupport.applyIdNormalizer): spaces only. String.trim() also takes tabs and line breaks. */
+    private static String sparkTrim(String value) {
+        int start = 0, end = value.length()
+        while (start < end && value.charAt(start) == (char) ' ') start++
+        while (end > start && value.charAt(end - 1) == (char) ' ') end--
+        return value.substring(start, end)
+    }
+
     private static String normalize(String value, String idNormalizer) {
         if (!value || !idNormalizer) return value
         if ("SHOPIFY_GID_TAIL" == idNormalizer) {
@@ -55,7 +63,7 @@ class ConclusionKeySupport {
             def digits = (value =~ /(\d+)$/)
             return digits.find() ? digits.group(1) : value
         }
-        if ("CASE_FOLD" == idNormalizer) return value.toLowerCase()
+        if ("CASE_FOLD" == idNormalizer) return value.toLowerCase(Locale.ROOT)
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
     }
 }

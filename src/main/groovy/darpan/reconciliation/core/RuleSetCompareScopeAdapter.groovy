@@ -12,7 +12,9 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import static org.apache.spark.sql.functions.col
+import static org.apache.spark.sql.functions.lower
 import static org.apache.spark.sql.functions.lit
+import static org.apache.spark.sql.functions.trim
 import static org.apache.spark.sql.functions.when
 
 class RuleSetCompareScopeAdapter {
@@ -393,16 +395,22 @@ class RuleSetCompareScopeAdapter {
         Map<String, Object> out = new LinkedHashMap<String, Object>(ingestBySide)
         out.put(fileSide, copy)
         boolean keptNone = idCount > 0 && ((Dataset) copy.idDf).isEmpty()
-        return [ingestBySide: out, idCount: idCount, keptNone: keptNone]
+        // OC139: with no exact match, do the keys match once case and outer whitespace are folded? Then the two questions
+        // build their key differently (e.g. one folds case), which a one-source child must also hear about.
+        boolean matchesWhenFolded = keptNone && !ids.select(lower(trim(col("compare_id"))).alias("folded"))
+                .join(dataDf.select(lower(trim(col("compare_id"))).alias("folded")), "folded").isEmpty()
+        return [ingestBySide: out, idCount: idCount, keptNone: keptNone, matchesWhenFolded: matchesWhenFolded]
     }
 
     /**
-     * DAR-UI-048 (final review I5). Only a two-source question's FILE_1 is the whole window, so only there
-     * does "kept none of the handed-down keys" point at a key problem. A one-source question's FILE_1 holds
-     * just its failures, and matching none of them is the correct all-pass answer.
+     * DAR-UI-048 (final review I5) / OC139. A two-source question's FILE_1 is the whole window, so "kept none of the
+     * handed-down keys" always points at a key problem. A one-source question's FILE_1 holds just its failures, so
+     * matching none of them is normally the correct all-pass answer; it warns only when the keys DO match once case and
+     * outer whitespace are folded (branch "ABC", finding "abc"), which is the key problem, not an all-pass.
      */
     static String keyMismatchWarning(boolean singleSided, Map restricted, String compareScopeLabel) {
-        if (singleSided || restricted?.keptNone != true) return null
+        if (restricted?.keptNone != true) return null
+        if (singleSided && restricted?.matchesWhenFolded != true) return null
         return ("Compare scope '${compareScopeLabel}': none of the ${restricted.idCount} keys handed down from " +
                 "the previous question matched a record on FILE_1. The two questions probably build their key " +
                 "differently.").toString()

@@ -105,12 +105,50 @@ class QuestionKeyFilterTests {
     }
 
     @Test
-    void theNothingMatchedWarningIsOnlyForTwoSourceQuestions() {
+    void theNothingMatchedWarningForAOneSourceQuestionNeedsTheKeysToDifferOnlyInForm() {
         Map keptNone = [keptNone: true, idCount: 4L]
-        // A one-source (EVALUATE) child's FILE_1 holds only failures, so matching nothing is the correct
-        // all-pass answer, not a key problem (live: "Billed, never shipped" = 0).
-        assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(true, keptNone, "Scope"))
+        // A two-source child's FILE_1 is the whole window: matching none of the keys is always a key problem.
         assertTrue(RuleSetCompareScopeAdapter.keyMismatchWarning(false, keptNone, "Scope").contains("none of the 4 keys"))
         assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(false, [keptNone: false, idCount: 4L], "Scope"))
+        // A one-source (EVALUATE) child's FILE_1 holds only failures, so matching nothing is usually the correct
+        // all-pass answer (live: "Billed, never shipped" = 0) ...
+        assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(true, keptNone, "Scope"))
+        // ... unless the keys match once case and outer whitespace are folded (OC139: branch "ABC", finding "abc").
+        assertTrue(RuleSetCompareScopeAdapter.keyMismatchWarning(true, keptNone + [matchesWhenFolded: true], "Scope")
+                .contains("none of the 4 keys"))
+    }
+
+    @Test
+    void aOneSourceChildWhoseKeysDifferOnlyInCaseIsFlagged() {
+        // OC139: the parent handed down upper-case keys; the child's normalizer folded case.
+        File keys = tmp.resolve("upper.txt").toFile()
+        QuestionKeyFiles.write(keys, ["K1", "K3"])
+        Dataset lower = rows('{"compare_id":"k1","data":{}}', '{"compare_id":"k3","data":{}}')
+        Map out = RuleSetCompareScopeAdapter.restrictSideToIdFile([FILE_1: [dataDf: lower, idDf: lower.select("compare_id")]],
+                "FILE_1", keys.absolutePath)
+        assertTrue(out.keptNone as boolean)
+        assertTrue(out.matchesWhenFolded as boolean)
+        assertTrue(RuleSetCompareScopeAdapter.keyMismatchWarning(true, out, "Scope").contains("none of the 2 keys"))
+        // A genuine all-pass child (no key, folded or not) stays quiet.
+        Map allPass = RuleSetCompareScopeAdapter.restrictSideToIdFile(ingestBySide(), "FILE_1", tmp.resolve("none2.txt").toFile().with {
+            QuestionKeyFiles.write(it, ["X1"]); it.absolutePath })
+        assertFalse(allPass.matchesWhenFolded as boolean)
+        assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(true, allPass, "Scope"))
+    }
+
+    @Test
+    void aKeyEndingInATabOrCarriageReturnIsTheSameKeyAfterTheKeysFileRoundTrip() {
+        // OC140: the compare trims a key the way the keys file is read back (Java trim: every char <= U+0020),
+        // so "K1\t" and "K2\r" are asked about in the child question, not dropped as unasked.
+        Dataset raw = spark.read().json(spark.createDataset([' {"id":" K1\\t"}', '{"id":"K2\\r"}', '{"id":"K3"}'],
+                org.apache.spark.sql.Encoders.STRING()))
+        List<Map> path = [darpan.reconciliation.core.CompareIdExpressionSupport.convertJsonPathToSpark('$.id')]
+        Dataset data = darpan.reconciliation.core.CompareDatasetSupport.buildJsonDataDf(raw, path, "File 1", [null], ['$.id'])
+        assertEquals(["K1", "K2", "K3"], ids(data))
+        File out = tmp.resolve("trim/keys.txt").toFile()
+        RuleSetCompareScopeAdapter.writeSideIds([FILE_1: [dataDf: data, idDf: data.select("compare_id")]], "FILE_1", out.absolutePath)
+        Map kept = RuleSetCompareScopeAdapter.restrictSideToIdFile([FILE_1: [dataDf: data, idDf: data.select("compare_id")]],
+                "FILE_1", out.absolutePath)
+        assertEquals(["K1", "K2", "K3"], ids((Dataset) ((Map) kept.ingestBySide).FILE_1.dataDf))
     }
 }

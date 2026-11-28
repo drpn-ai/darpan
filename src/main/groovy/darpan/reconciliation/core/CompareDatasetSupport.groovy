@@ -31,7 +31,7 @@ class CompareDatasetSupport {
      * other records hold (S01b I5 parity).
      */
     static Column applyIdNormalizer(Column sourceCol, String idNormalizer, DataType sourceType = null) {
-        Column normalized = trim(keyText(sourceCol, sourceType))
+        Column normalized = trimControl(keyText(sourceCol, sourceType))
         if (!idNormalizer) return normalized
 
         if ("SHOPIFY_GID_TAIL".equals(idNormalizer)) {
@@ -46,6 +46,15 @@ class CompareDatasetSupport {
             return lower(normalized)
         }
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
+    }
+
+    /**
+     * OC140: a key is trimmed as Java's String.trim trims (every leading/trailing char <= U+0020: spaces, tabs, CR, LF),
+     * the way the keys file is read back (QuestionKeyFiles) and the conclude pass reads a record (ConclusionKeySupport).
+     * Spark's trim takes spaces only, so "K1\t" stayed "K1\t" here but read "K1" there, and was never asked about.
+     */
+    private static Column trimControl(Column text) {
+        return regexp_replace(text, '^[\\x00-\\x20]+|[\\x00-\\x20]+$', '')
     }
 
     /**

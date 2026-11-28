@@ -423,12 +423,11 @@ class PeakScheduleScanTests {
     }
 
     @Test
-    void resolveDueScheduledFireTimeStillAnswersOnlyFiresNotAfterNow() {
+    void resolveCandidateFireTimeAnswersTheStoredFireBeforeAndAtItsTime() {
         Map automation = [scheduleExpr: "0 15 2 * * ?", windowTimeZone: "America/Los_Angeles",
                           nextScheduledFireTime: la(11, 28, 2, 15)]
-        assertNull(AutomationExecutionSupport.resolveDueScheduledFireTime(automation, la(11, 28, 1, 0)))
         assertEquals(la(11, 28, 2, 15), AutomationExecutionSupport.resolveCandidateFireTime(automation, la(11, 28, 1, 0)))
-        assertEquals(la(11, 28, 2, 15), AutomationExecutionSupport.resolveDueScheduledFireTime(automation, la(11, 28, 2, 15)))
+        assertEquals(la(11, 28, 2, 15), AutomationExecutionSupport.resolveCandidateFireTime(automation, la(11, 28, 2, 15)))
     }
 
     // --- a minimal Moqui stand-in: entity finds by equality, an async service recorder --------------------------------

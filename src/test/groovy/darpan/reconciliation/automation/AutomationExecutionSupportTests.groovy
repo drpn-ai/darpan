@@ -3118,7 +3118,8 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void stateModeDispatchOmitsDateParametersEntirely() {
+    void everyExtractIsSentItsWindowEvenWhereAConnectorRowStillSaysStateExtract() {
+        // DAR-OPS-029 S06: state-based dispatch is retired with HotWax REST; a stale supportsStateExtract row changes nothing.
         Map<String, Object> serviceParams = [:]
         AutomationExecutionSupport.applyWindowParameters(serviceParams,
                 [relativeWindowTypeEnumId: "AUT_WIN_STATE"],
@@ -3128,24 +3129,8 @@ class AutomationExecutionSupportTests {
                 [childWindowStartDate: Timestamp.valueOf("2026-08-05 00:00:00"),
                  childWindowEndDate  : Timestamp.valueOf("2026-08-06 00:00:00")])
 
-        assertFalse(serviceParams.containsKey("windowStart"))
-        assertFalse(serviceParams.containsKey("windowEnd"))
-    }
-
-    @Test
-    void stateModeStillSendsDatesWhenTheConnectorDoesNotSupportStateExtraction() {
-        Map<String, Object> serviceParams = [:]
-        AutomationExecutionSupport.applyWindowParameters(serviceParams,
-                [relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [:],
-                [dateFromParameterName: "windowStart", dateToParameterName: "windowEnd",
-                 supportsStateExtract: false],
-                [childWindowStartDate: Timestamp.valueOf("2026-08-05 00:00:00"),
-                 childWindowEndDate  : Timestamp.valueOf("2026-08-06 00:00:00")])
-
-        // Fail safe: a connector that cannot do state extraction gets the window it expects rather
-        // than a silently unbounded request. Task 11 rejects this combination at save time.
         assertEquals(Timestamp.valueOf("2026-08-05 00:00:00"), serviceParams.windowStart)
+        assertEquals(Timestamp.valueOf("2026-08-06 00:00:00"), serviceParams.windowEnd)
     }
 
     @Test
@@ -3597,14 +3582,14 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void windowNoDataReasonCountsTheRecordsKeepWasGivenNotOnlyTheRecentRead() {
+    void windowNoDataFindingCountsTheRecordsKeepWasGivenNotOnlyTheRecentRead() {
         // A re-check appended 4 records to a side whose recent read was empty; Keep kept none of them.
         Map summary = [keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 4]]]
-        assertEquals("The A side kept 0 of 4 records.", AutomationExecutionSupport.windowNoDataReason("A", "B",
-                [readCount: 0, recordCount: 0], [readCount: 6, recordCount: 6], summary, false))
-        assertNull(AutomationExecutionSupport.windowNoDataReason("A", "B",
+        assertEquals("The A side kept 0 of 4 records.", AutomationExecutionSupport.windowNoDataFinding("A", "B",
+                [readCount: 0, recordCount: 0], [readCount: 6, recordCount: 6], summary, false)?.reason)
+        assertNull(AutomationExecutionSupport.windowNoDataFinding("A", "B",
                 [readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
-        assertNull(AutomationExecutionSupport.windowNoDataReason("A", "B",
+        assertNull(AutomationExecutionSupport.windowNoDataFinding("A", "B",
                 [readCount: 5, recordCount: 5], [readCount: 0, recordCount: 0], null, true), "an evaluate never reports an empty side 2")
     }
 

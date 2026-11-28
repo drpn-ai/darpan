@@ -260,14 +260,12 @@ class AutomationExecutionSupport {
         noDataWindowRecorder = null
         errorCardPoster = null
         errorNoticeCopy = null
-        try {
-            resetExecutionHooks()
-            peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
-            tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
-            peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
-            RunAdmission.resetForTests()
-            runAdmission = RunAdmission.SHARED
-        } catch (Throwable ignored) { }
+        resetExecutionHooks()
+        peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
+        tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
+        peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
+        RunAdmission.resetForTests()
+        runAdmission = RunAdmission.SHARED
     }
 
     /**
@@ -942,7 +940,7 @@ class AutomationExecutionSupport {
                 boolean ruleExecutionFailed = reconcileResult.ruleExecutionFailed == true
                 // Task 6 fix round 1: the API path reaches a FAILED terminal WITHOUT throwing too — a rule
                 // build/eval failure is only the flag above — so neither checkpoint nor catch can see a
-                // cancel that lands in the window between the last checkpoint (:331) and here, which spans
+                // cancel that lands in the window between the last checkpoint (after the compare) and here, which spans
                 // the artifact write and the run-result persist and can run for seconds on a large diff.
                 // Left unguarded, the operator is told FAILED and ALERTED about their own cancellation.
                 // Exactly the guard SftpAutomationSupport already carries on its own non-throwing error
@@ -1329,10 +1327,6 @@ class AutomationExecutionSupport {
     static Closure<ZoneId> tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
     static Closure<Map<String, AllowanceSpec>> peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
 
-    static void setPeakAllowancesLoader(Closure<Map<String, AllowanceSpec>> loader) {
-        peakAllowancesLoader = loader ?: DEFAULT_PEAK_ALLOWANCES_LOADER
-    }
-
     static void setPeakWindowsLoader(Closure<List<PeakWindow>> loader) { peakWindowsLoader = loader ?: DEFAULT_PEAK_WINDOWS_LOADER }
 
     static void setTenantZoneLoader(Closure<ZoneId> loader) { tenantZoneLoader = loader ?: DEFAULT_TENANT_ZONE_LOADER }
@@ -1659,12 +1653,6 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * Operator re-drive (DAR-300 item 5): reset a FAILED or dead-lettered execution back to PENDING with
-     * a fresh retry budget and nextRetryDate=now, so the 5-min scanner re-drives it. Tenant ownership +
-     * run-permission are gated by the facade service (reprocess#AutomationExecution); this performs the
-     * state transition and returns any user error in the result map (no ec.message, to stay unit-testable).
-     */
-    /**
      * DAR-BE-142. Each side's file and count go on the execution as soon as that side is read, not only when the window
      * succeeds, so a window that fails later still names the extracts a retry can replay. Best effort.
      */
@@ -1731,6 +1719,12 @@ class AutomationExecutionSupport {
                 extracts             : files.collect { String side, Map f -> [side: side, fileName: f.fileName, recordCount: f.recordCount] }]
     }
 
+    /**
+     * Operator re-drive (DAR-300 item 5): reset a FAILED or dead-lettered execution back to PENDING with
+     * a fresh retry budget and nextRetryDate=now, so the 5-min scanner re-drives it. Tenant ownership +
+     * run-permission are gated by the facade service (reprocess#AutomationExecution); this performs the
+     * state transition and returns any user error in the result map (no ec.message, to stay unit-testable).
+     */
     static Map<String, Object> reprocessAutomationExecution(def ec, Map params) {
         Map<String, Object> input = params ?: [:]
         String executionId = normalize(input.automationExecutionId)
@@ -2052,7 +2046,6 @@ class AutomationExecutionSupport {
         return null
     }
 
-    /** The diff document the compare just wrote, which the verification pass rewrites in place. */
     /**
      * DAR-UI-044: names each verified finding via the shared RunConclusionStep seam. Guarded end to end,
      * including resolving the diff file: a conclusion is never allowed to fail a run whose compare
@@ -2073,6 +2066,7 @@ class AutomationExecutionSupport {
         }
     }
 
+    /** The diff document the compare just wrote, which the verification pass rewrites in place. */
     protected static File resolveDiffFile(def ec, Map<String, Object> reconcileResult) {
         String location = normalize(reconcileResult?.diffLocation)
         if (location) {
@@ -2153,10 +2147,9 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * State-based automations define their population by record status rather than by a date window.
-     * The window they still carry is bookkeeping only — it keeps execution rows, the findOrCreateExecution
-     * dedup key, run metadata and the UI window display working unchanged — and is never sent to the
-     * extractor (see applyWindowParameters).
+     * Whether the automation was saved with the retired state-based window (AUT_WIN_STATE): a population by record status
+     * rather than a date window. No connector reads that way any more (DAR-BE-052); the pulse and the automation facade still
+     * ask, to refuse such a row.
      */
     static boolean isStateWindowMode(def automation) {
         return WINDOW_STATE == normalize(readField(automation, "relativeWindowTypeEnumId"))
@@ -2316,13 +2309,6 @@ class AutomationExecutionSupport {
             while (!next.isAfter(nowLocal)) next = next.plus(duration)
             return Timestamp.from(next.toInstant())
         }
-    }
-
-    /** The fire this automation waits on, if it has come (callers outside the scan; the scan asks the candidate). */
-    static Timestamp resolveDueScheduledFireTime(def automation, Timestamp now) {
-        Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
-        Timestamp candidate = resolveCandidateFireTime(automation, nowValue)
-        return candidate != null && !candidate.after(nowValue) ? candidate : null
     }
 
     /**
@@ -2628,7 +2614,7 @@ class AutomationExecutionSupport {
         // DAR-BE-318 plan 3a: the window from the tenant's kept copy when the copy covers it; otherwise the live read below.
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [
                 tenantId   : serviceParams.companyUserGroupId, windowStart: serviceParams.windowStartDate,
-                windowEnd  : serviceParams.windowEndDate, stateMode: isStateWindowMode(automation) && connectorForService?.supportsStateExtract,
+                windowEnd  : serviceParams.windowEndDate,
                 outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId,
                 // DAR-BE-318 (plan 3b-2b): an effective-SPARK side's plan, so the slice leaves Keep to Spark and a projecting
                 // source keeps the fields Spark's Keep reads (KeptCopySupport.callProjection); any other side slices as today.
@@ -2826,19 +2812,13 @@ class AutomationExecutionSupport {
 
     /**
      * Date-parameter names are data-driven: a source-level override wins, then the connector, then
-     * fromDate/toDate. A state-mode automation on a connector that declares supportsStateExtract sends
-     * NO date parameters at all — its population is defined by status. The automation still carries a
-     * window (bookkeeping only), so the connector flag is what decides, not the presence of a window.
-     *
-     * Fail safe: a state-mode automation on a connector that cannot do state extraction still receives
-     * its window rather than an unbounded request. That combination is rejected at save time.
+     * fromDate/toDate. Every extract is sent its window: the one connector that could read by status with
+     * no window (REST OMS_TRANSFER_ORDERS) was retired with HotWax REST (DAR-BE-052).
      */
     protected static Map<String, Object> applyWindowParameters(Map<String, Object> serviceParams,
                                                                def automation, def source,
                                                                Map<String, Object> connector,
                                                                Map<String, Object> window) {
-        if (isStateWindowMode(automation) && connector?.supportsStateExtract) return serviceParams
-
         String dateFromParameterName = normalize(readField(source, "dateFromParameterName")) ?:
                 (normalize(connector?.dateFromParameterName) ?: "fromDate")
         String dateToParameterName = normalize(readField(source, "dateToParameterName")) ?:
@@ -3077,16 +3057,6 @@ class AutomationExecutionSupport {
             logger.warn("Failed to detect single active source config for ${configEntityName}", e)
             return null
         }
-    }
-
-    protected static String findSingleActiveOmsRestSourceConfigId(def ec, String companyUserGroupId, String systemEnumId) {
-        return findSingleActiveConfigId(ec, companyUserGroupId,
-                DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, "omsRestSourceConfigId", systemEnumId)
-    }
-
-    protected static String findSingleActiveShopifyAuthConfigId(def ec, String companyUserGroupId, String systemEnumId) {
-        return findSingleActiveConfigId(ec, companyUserGroupId,
-                DarpanEntityConstants.SHOPIFY_AUTH_CONFIG, "shopifyAuthConfigId", systemEnumId)
     }
 
     protected static String sourceLabel(def ec, String systemEnumId, String fallback) {
@@ -3489,23 +3459,18 @@ class AutomationExecutionSupport {
         return ((priorKept?.get(sideKey) as Integer) ?: 0) > 0
     }
 
-    /**
-     * DAR-BE-015. The did-not-run reason of a NO_DATA window. A side's read is what its recent read returned, or the records Keep
-     * was given when more (an audit re-check appends records to a side whose recent read was empty); its kept count is its
-     * recordCount, which the post-Keep path has already set from Keep. An evaluate reads one side by design: only its side 1
-     * can have kept nothing.
-     */
-    static String windowNoDataReason(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
-        return windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)?.reason
-    }
-
     /** DAR-BE-015. The finding a NO_DATA close persists: none for a verify, which reads one side by design (its empty side is its answer). */
     static Map<String, String> closeFinding(Object verifying, String label1, String label2, Map file1Result, Map file2Result,
                                             Map reconcileResult, boolean evaluateMode, Map priorKept = null) {
         return verifying ? null : windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode, priorKept)
     }
 
-    /** The kind and reason together, from the one derivation (persisted as the execution's noDataKind and errorMessage). */
+    /**
+     * DAR-BE-015. The did-not-run finding of a NO_DATA window (persisted as the execution's noDataKind and errorMessage). A side's
+     * read is what its recent read returned, or the records Keep was given when more (an audit re-check appends records to a side
+     * whose recent read was empty); its kept count is its recordCount, which the post-Keep path has already set from Keep. An
+     * evaluate reads one side by design: only its side 1 can have kept nothing.
+     */
     static Map<String, String> windowNoDataFinding(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult,
                                                    boolean evaluateMode, Map priorKept = null) {
         Integer read1 = keepGiven(file1Result, reconcileResult, "file1")
@@ -3651,8 +3616,7 @@ class AutomationExecutionSupport {
                 runResultValue.set("lastHeartbeatDate", startedAt)
                 runResultValue.set("createdDate", startedAt)
                 runResultValue.set("lastUpdatedDate", startedAt)
-                // currentStage is deliberately left unset: automations emit no per-stage steps, and a
-                // stage label frozen at RESOLVE for the whole run would misreport progress.
+                // currentStage is left unset here: the run loop's RunObservability.beginStep calls set it as each stage opens.
                 runResultValue.setSequencedIdPrimary()
                 runResultValue.create()
                 return normalize(readField(runResultValue, "reconciliationRunResultId"))
@@ -3720,9 +3684,8 @@ class AutomationExecutionSupport {
      * {@code lastHeartbeatDate} (and, on the execution row, {@code lastUpdatedDate}) purely so that
      * {@code .update()} has something real to write.</p>
      *
-     * <p>Mirrors the interactive path's beginStep/endStep heartbeats, moved to automation phase
-     * boundaries since automations write no {@code ReconciliationRunStep} rows (non-goal, unchanged).
-     * Called after each source extraction and after the reconcile call in
+     * <p>Complements the step rows' own heartbeats (RunObservability.beginStep/endStep) at the automation phase
+     * boundaries. Called after each source extraction and after the reconcile call in
      * {@code executeAutomationForTenant} — the three points where a real, potentially slow I/O call
      * (a Shopify/OMS extract, or the Spark reconcile) has just finished.</p>
      *

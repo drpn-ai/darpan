@@ -1440,7 +1440,7 @@ class AutomationExecutionSupportTests {
                 companyUserGroupId: "TENANT_A",
         ]
 
-        Map<String, Object> metadata = AutomationExecutionSupport.resolveSourceExtractorMetadata(ec, source, [:])
+        Map<String, Object> metadata = AutomationSourceConfig.resolveSourceExtractorMetadata(ec, source, [:])
 
         assertEquals("reconciliation.AcmeExtractionServices.extract#AcmeOrders", metadata.extractServiceName)
         assertEquals("ACME_1", ((Map) metadata.parameters).acmeConfigId)

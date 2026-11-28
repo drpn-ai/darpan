@@ -38,10 +38,25 @@ class IdIndexRunHook {
         if (original == null || !original.isFile()) return [error: "no file at ${fileLocation}".toString()]
         File lines = IdIndexer.toJsonLines(original)
         try {
-            return IdIndexer.indexFile(ec, tenantId, source, connectionId, lines, kindHint(ec, source, connectionId))
+            return IdIndexer.indexFile(ec, tenantId, source, connectionId, lines, kindHint(ec, source, connectionId),
+                    { -> connectionStillThere(ec, systemEnumId, connectionId) })
         } finally {
             if (lines != original) lines.delete()
         }
+    }
+
+    /**
+     * OC92: whether the run's connection is still there: its connector's configEntityName row, by key (both run paths pass that
+     * config's id), read for update so a deletion and an index batch cannot interleave. True when the connector names no config
+     * entity: nothing to check.
+     */
+    static boolean connectionStillThere(def ec, String systemEnumId, String connectionId) {
+        def connector = ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", systemEnumId)
+                .useCache(false).disableAuthz().one()
+        String entityName = connector?.configEntityName as String
+        if (!entityName || !ec.entity.isEntityDefined(entityName)) return true
+        String pk = ec.entity.getEntityDefinition(entityName).getPkFieldNames()[0]
+        return !ec.entity.find(entityName).condition(pk, connectionId).forUpdate(true).useCache(false).disableAuthz().list().isEmpty()
     }
 
     /** The read's record kind named outside its records (IdIndexSource.kindHintEntity/kindHintField keyed by the connection), or null. */

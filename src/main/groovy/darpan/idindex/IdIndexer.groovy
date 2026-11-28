@@ -29,6 +29,11 @@ class IdIndexer {
     static final int BATCH_ROWS = 500
     static final String ENTITY = "darpan.idindex.RecordIdIndex"
 
+    /** Test seam (OC92): called with (tenantId, connectionId) at the start of each batch's transaction, before anything is read. */
+    static Closure beforeBatchHook = null
+
+    static void resetForTests() { beforeBatchHook = null }
+
     /**
      * A dataset read's file (records under one JSON document's "records", or a bare array) as one record per line, in a temp
      * file of the index's own (the caller deletes it) so Spark reads it line by line; a file already ending .jsonl is returned
@@ -55,30 +60,47 @@ class IdIndexer {
         return out
     }
 
-    /** Indexes a read's JSON-lines file for one tenant connection: [records: n, rows: n]. kindHint: see IdIndexRows.recordKindOf. */
-    static Map indexFile(def ec, String tenantId, Map source, String connectionId, File jsonLines, String kindHint = null) {
+    /**
+     * Indexes a read's JSON-lines file for one tenant connection: [records: n, rows: n, stopped]. kindHint: see
+     * IdIndexRows.recordKindOf. live (OC92), when given, is asked at the start of every batch's transaction whether what the
+     * rows belong to is still there (the dataset, or the run's connection), under the row lock its deletion takes; once it
+     * says no, nothing more is written and stopped is true.
+     */
+    static Map indexFile(def ec, String tenantId, Map source, String connectionId, File jsonLines, String kindHint = null,
+                         Closure<Boolean> live = null) {
         List<Map> fields = IdIndexCatalog.fields(ec, tenantId, source.systemEnumId as String)
         int records = 0, rows = 0
+        boolean stopped = false
         List<Map> batch = []
         Iterator<Map> it = extract(sharedSpark(), jsonLines, source, fields)
-        while (it.hasNext()) {
+        while (it.hasNext() && !stopped) {
             List<Map> recordRows = IdIndexRows.rowsFromValues(source, fields, it.next(), connectionId, kindHint)
             if (!recordRows) continue
             records++
             batch.addAll(recordRows)
-            if (batch.size() >= BATCH_ROWS) { rows += upsertRows(ec, tenantId, connectionId, batch); batch = [] }
+            if (batch.size() >= BATCH_ROWS) {
+                Map wrote = writeBatches(ec, tenantId, connectionId, batch, live)
+                rows += wrote.written as int
+                stopped = wrote.stopped as boolean
+                batch = []
+            }
         }
-        if (batch) rows += upsertRows(ec, tenantId, connectionId, batch)
-        return [records: records, rows: rows]
+        if (batch && !stopped) {
+            Map wrote = writeBatches(ec, tenantId, connectionId, batch, live)
+            rows += wrote.written as int
+            stopped = wrote.stopped as boolean
+        }
+        return [records: records, rows: rows, stopped: stopped]
     }
 
     /** Indexes records already in hand (a kept copy's current version) through the same path: written as JSON lines, then indexFile. */
-    static Map indexRecords(def ec, String tenantId, Map source, String connectionId, Iterator<Map> records, File workDir, String kindHint = null) {
+    static Map indexRecords(def ec, String tenantId, Map source, String connectionId, Iterator<Map> records, File workDir, String kindHint = null,
+                            Closure<Boolean> live = null) {
         workDir.mkdirs()
         File lines = new File(workDir, "idindex-${System.nanoTime()}.records.jsonl")
         try {
             lines.withWriter("UTF-8") { Writer w -> while (records.hasNext()) { w.write(JsonOutput.toJson(records.next())); w.write("\n") } }
-            return indexFile(ec, tenantId, source, connectionId, lines, kindHint)
+            return indexFile(ec, tenantId, source, connectionId, lines, kindHint, live)
         } finally {
             lines.delete()
         }
@@ -112,13 +134,23 @@ class IdIndexer {
      * a read may carry only some of a record's fields. One transaction per 500 rows. Returns rows written or touched.
      */
     static int upsertRows(def ec, String tenantId, String connectionId, List<Map> rows) {
+        return writeBatches(ec, tenantId, connectionId, rows, null).written as int
+    }
+
+    /** upsertRows with an optional live check per batch (see indexFile): [written, stopped]. */
+    static Map writeBatches(def ec, String tenantId, String connectionId, List<Map> rows, Closure<Boolean> live) {
         Map<String, Map> byKey = new LinkedHashMap<>()
         rows.each { Map row -> byKey.put(rowKey(tenantId, connectionId, row), row) }
         int written = 0
-        byKey.keySet().toList().collate(BATCH_ROWS).each { List<String> keys ->
+        boolean stopped = false
+        for (List<String> keys : byKey.keySet().toList().collate(BATCH_ROWS)) {
             ec.transaction.runRequireNew(null, "ID index write failed") {
+                if (beforeBatchHook != null) beforeBatchHook.call(tenantId, connectionId)
                 boolean was = ec.artifactExecution.disableAuthz()
                 try {
+                    // OC92: inside this batch's transaction and under the row lock a drop takes, so a drop that committed
+                    // first is seen here, and one that comes after waits and deletes what this batch wrote.
+                    if (live != null && !live.call()) { stopped = true; return }
                     Timestamp now = ec.user.nowTimestamp
                     Set<String> existing = ec.entity.find(ENTITY).condition("rowKey", EntityCondition.IN, keys).selectField("rowKey")
                             .useCache(false).list()*.rowKey as Set<String>
@@ -136,8 +168,9 @@ class IdIndexer {
                     if (!was) ec.artifactExecution.enableAuthz()
                 }
             }
+            if (stopped) break
         }
-        return written
+        return [written: written, stopped: stopped]
     }
 
     /** One row per tenant, connection, kind, record, field and value: the same id written twice lands on the same key. */

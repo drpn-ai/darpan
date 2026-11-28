@@ -24,7 +24,7 @@ class IdIndexDatasetHook {
             Map out
             try {
                 out = IdIndexer.indexFile(ec, dataset.companyUserGroupId as String, source, dataset.sourceConfigId as String, lines,
-                        IdIndexRunHook.kindHint(ec, source, dataset.sourceConfigId as String))
+                        IdIndexRunHook.kindHint(ec, source, dataset.sourceConfigId as String), datasetLive(ec, dataset))
             } finally {
                 if (lines != original) lines.delete()
             }
@@ -54,16 +54,37 @@ class IdIndexDatasetHook {
         }
     }
 
-    /** Upserts the dataset's cursor row in its own transaction. */
-    static void writeCursor(def ec, Map dataset, Map fields) {
-        ec.transaction.runRequireNew(null, "ID index cursor write failed") {
+    /**
+     * Upserts the dataset's cursor row in its own transaction; returns whether it wrote. OC92: not for a dataset that is gone
+     * (drop#ConnectionKeptData took it while this pass ran), checked under the dataset's row lock, so a drop never finds its
+     * cursor written back.
+     */
+    static boolean writeCursor(def ec, Map dataset, Map fields) {
+        return (boolean) ec.transaction.runRequireNew(null, "ID index cursor write failed") {
             boolean was = ec.artifactExecution.disableAuthz()
             try {
+                if (!datasetStillThere(ec, dataset)) return false
                 ec.entity.makeValue(CURSOR).setAll([companyUserGroupId: dataset.companyUserGroupId, datasetId: dataset.datasetId,
                         systemEnumId: dataset.systemEnumId, connectionId: dataset.sourceConfigId] + fields).createOrUpdate()
+                return true
             } finally {
                 if (!was) ec.artifactExecution.enableAuthz()
             }
         }
+    }
+
+    /**
+     * OC92: whether the dataset is still there, read for update: drop#ConnectionKeptData locks the same row, so a drop and an
+     * index batch or cursor write cannot interleave. The tenant is in the WHERE beside datasetId (a list, not one(): Moqui
+     * drops a condition beside a full key).
+     */
+    static boolean datasetStillThere(def ec, Map dataset) {
+        return !ec.entity.find("darpan.dataset.Dataset").condition("companyUserGroupId", dataset.companyUserGroupId)
+                .condition("datasetId", dataset.datasetId).forUpdate(true).useCache(false).disableAuthz().list().isEmpty()
+    }
+
+    /** The per-batch check IdIndexer.indexFile asks while it indexes this dataset (OC92). */
+    static Closure<Boolean> datasetLive(def ec, Map dataset) {
+        return { -> datasetStillThere(ec, dataset) }
     }
 }

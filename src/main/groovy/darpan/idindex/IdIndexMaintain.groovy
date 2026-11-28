@@ -39,11 +39,13 @@ class IdIndexMaintain {
                     // each entry is [id, stamp, readAt, record]: the index reads the record
                     Iterator<Map> records = [hasNext: { entries.hasNext() }, next: { (Map) entries.next().record }] as Iterator<Map>
                     IdIndexer.indexRecords(ec, dataset.companyUserGroupId as String, source, dataset.sourceConfigId as String, records,
-                            new File(dir, "idindex-work"), IdIndexRunHook.kindHint(ec, source, dataset.sourceConfigId as String))
+                            new File(dir, "idindex-work"), IdIndexRunHook.kindHint(ec, source, dataset.sourceConfigId as String),
+                            IdIndexDatasetHook.datasetLive(ec, dataset))
                 } as Map
-                IdIndexDatasetHook.writeCursor(ec, dataset, [indexedVersion: dataset.currentVersion, lastIndexedAt: ec.user.nowTimestamp,
-                        rowsLastPass: out.rows, lastStatus: "OK", lastError: null])
-                indexed++
+                // OC92: a dataset dropped mid-pass (drop#ConnectionKeptData) stops the pass and gets no cursor back
+                if (out.stopped) continue
+                if (IdIndexDatasetHook.writeCursor(ec, dataset, [indexedVersion: dataset.currentVersion, lastIndexedAt: ec.user.nowTimestamp,
+                        rowsLastPass: out.rows, lastStatus: "OK", lastError: null])) indexed++
             } catch (Throwable t) {
                 logger.warn("ID index catch-up of dataset ${dataset.datasetId} failed", t)
                 IdIndexDatasetHook.recordFailure(ec, dataset, t)

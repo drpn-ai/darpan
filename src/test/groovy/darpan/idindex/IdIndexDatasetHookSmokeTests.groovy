@@ -4,6 +4,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
+import org.moqui.Moqui
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 import org.junit.jupiter.api.AfterAll
@@ -159,6 +160,92 @@ class IdIndexDatasetHookSmokeTests {
         assertEquals([], out.errors)
         assertEquals(1, out.out.deleted as int)
         assertEquals(["NEW"], rows("c")*.idNorm)
+    }
+
+    /**
+     * OC92 (from S42c): a catch-up pass already holding a dataset when its connection's kept data is dropped
+     * (drop#ConnectionKeptData, Shopify's shop/redact) must not write that dataset's rows or cursor back. The index commits per
+     * batch, so the drop is run, and committed, at the start of the second batch.
+     */
+    @Test
+    void "OC92: a catch-up pass that loses its dataset to a drop mid-pass writes no rows and no cursor back"() {
+        source([recordKind: null, recordKindField: "kind", recordKindMapJson: "{not json"])
+        String id = dataset("idx-drop")
+        List<Map> orders = (1..300).collect { order(it, "#DROP${it}") + [kind: "SalesOrd"] }   // 600 rows: two batches
+        assertEquals([], refresh(id, stub(orders)).errors)                                       // its own index pass fails
+        assertNull(cursor(id).indexedVersion)
+        source([:])
+
+        int batches = 0
+        Throwable dropFailure = null
+        IdIndexer.beforeBatchHook = { String tenant, String connection ->
+            if (connection != "conn-idx-drop" || ++batches != 2) return
+            dropFailure = onOwnThread {
+                it.service.sync().name("${SERVICES}.drop#ConnectionKeptData".toString())
+                        .parameters([companyUserGroupId: A, sourceConfigIds: ["conn-idx-drop"]]).disableAuthz().call()
+            }
+        }
+        Map out
+        try {
+            out = asJob { ec.service.sync().name("idindex.IdIndexServices.maintain#IdIndex").call() }
+        } finally {
+            IdIndexer.resetForTests()
+        }
+        assertNull(dropFailure, "the drop itself: ${dropFailure}")
+        assertEquals([], out.errors)
+        assertNull(datasetRow(id), "the drop took the dataset")
+        assertEquals([], rows("conn-idx-drop"), "no index row of the dropped connection is written back after the drop")
+        assertNull(cursor(id), "no cursor is written back for a dataset that is gone")
+    }
+
+    /** OC92, the run path: a run's extract indexed in the background stops writing once its connection is gone. */
+    @Test
+    void "OC92: a run's extract stops being indexed once its connection is deleted mid-pass"() {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" configEntityName="darpan.reconciliation.NsSuiteQlSourceQuery"/>
+            <darpan.reconciliation.NsSuiteQlSourceQuery nsSuiteQlSourceQueryId="Q_GONE" nsAuthConfigId="NS1" companyUserGroupId="${A}"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        File extract = File.createTempFile("idx-run-gone", ".json")
+        extract.text = JsonOutput.toJson([metadata: [:], records: (1..300).collect { [id: "${it}".toString(), name: "IF${it}".toString()] }])
+        int batches = 0
+        Throwable deleteFailure = null
+        IdIndexer.beforeBatchHook = { String tenant, String connection ->
+            if (connection != "Q_GONE" || ++batches != 2) return
+            deleteFailure = onOwnThread {
+                it.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", "Q_GONE").disableAuthz().deleteAll()
+            }
+        }
+        try {
+            IdIndexRunHook.indexExtract(ec, A, "KC_ISO", "Q_GONE", extract.absolutePath)
+        } finally {
+            IdIndexer.resetForTests()
+            extract.delete()
+            ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+                <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" configEntityName=""/></entity-facade-xml>""").load()
+        }
+        assertNull(deleteFailure, "the delete itself: ${deleteFailure}")
+        assertEquals(500, rows("Q_GONE").size(), "the first batch went in before the connection was deleted; nothing after it")
+    }
+
+    /** Runs work on a thread of its own (its own ExecutionContext and transaction), committed before this returns. */
+    private Throwable onOwnThread(Closure work) {
+        Throwable failure = null
+        Thread t = new Thread({
+            ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()
+            try {
+                if (!tec.user.internalLoginUser(EDITOR_USERNAME)) throw new IllegalStateException("could not sign in ${EDITOR_USERNAME}")
+                tec.artifactExecution.disableAuthz()
+                tec.transaction.runRequireNew(null, "OC92 test: the concurrent change") { work.call(tec) }
+                if (tec.message.hasError()) failure = new IllegalStateException(tec.message.errors.join("; "))
+            } catch (Throwable e) {
+                failure = e
+            } finally {
+                tec.destroy()
+            }
+        } as Runnable, "oc92-concurrent")
+        t.start()
+        t.join(60_000L)
+        return failure
     }
 
     // ---- helpers ----

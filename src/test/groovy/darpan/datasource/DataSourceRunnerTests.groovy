@@ -197,4 +197,26 @@ class DataSourceRunnerTests {
         }
         assertEquals("CURSOR_REPEATED", loop.code)
     }
+
+    /**
+     * OC132 (DAR-OPS-029 S15a). maxPages bounds the pages a read may need, not the pages it may take: a read whose last page
+     * is page maxPages is complete and succeeds; only a read with another page beyond it fails, rather than truncating.
+     */
+    @Test
+    void aReadThatEndsOnItsLastAllowedPageSucceedsAndOneThatNeedsMoreFails() {
+        Map exact = AcmeLedgerFixture.definition()
+        ((Map) ((List<Map>) exact.steps)[0].paging).maxPages = 1
+        Map r = new DataSourceRunner(exact, new AcmeLedgerFixture.ScriptedTransport())
+                .run([mode: "ids", keys: ["A1", "A2"], keyField: "invoiceNo"]) { }
+        assertEquals(2, r.rootRecords, "both invoices came on the one page allowed")
+
+        Map tight = AcmeLedgerFixture.definition()
+        Map paging = (Map) ((List<Map>) tight.steps)[0].paging
+        paging.maxPages = 1
+        paging.pageSize = 1
+        DataSourceCallException e = assertThrows(DataSourceCallException) {
+            new DataSourceRunner(tight, new AcmeLedgerFixture.ScriptedTransport()).run([mode: "ids", keys: ["A1", "A2"], keyField: "invoiceNo"]) { }
+        }
+        assertEquals("TOO_MANY_PAGES", e.code)
+    }
 }

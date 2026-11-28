@@ -265,8 +265,11 @@ class DataSourceRunner {
             List<Map> page = JsonPathValues.values(connection, (String) step.recordsAt).findAll { it instanceof Map } as List<Map>
             if (set) page.each { Map r -> r.putAll(set) }
             take.call(page)
-            if (++pages >= maxPages) throw new DataSourceCallException("TOO_MANY_PAGES", "Step '${step.id}' passed ${maxPages} pages.".toString())
+            pages++
             if (JsonPathValues.value(connection, (String) step.hasNextAt) != true) return
+            // OC132: maxPages bounds the pages a read may need. A read that ends on page maxPages is complete; only another
+            // page beyond it fails the run (never a truncated read).
+            if (pages >= maxPages) throw new DataSourceCallException("TOO_MANY_PAGES", "Step '${step.id}' has more than ${maxPages} pages.".toString())
             cursor = JsonPathValues.value(connection, (String) step.cursorAt)?.toString()
             if (!cursor || !seen.add(cursor)) {
                 throw new DataSourceCallException("CURSOR_REPEATED", "Step '${step.id}': the next page has no new cursor.".toString())

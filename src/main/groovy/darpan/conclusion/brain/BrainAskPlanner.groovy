@@ -70,7 +70,7 @@ class BrainAskPlanner {
     }
 
     /** An order's id, a product's (DAR-BE-186), a replacement's return's (DAR-BE-192), or a Shopify order's (DAR-BE-204). */
-    static String subjectId(Object subject) {
+    private static String subjectId(Object subject) {
         if (subject instanceof Order) return ((Order) subject).orderId
         if (subject instanceof Product) return ((Product) subject).productId
         if (subject instanceof ReplacementReturn) return ((ReplacementReturn) subject).returnId

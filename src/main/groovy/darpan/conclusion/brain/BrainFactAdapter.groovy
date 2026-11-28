@@ -261,8 +261,10 @@ class BrainFactAdapter {
         facts.add(new Answered(PRODUCT_NETSUITE_ID, product))
     }
 
-    /** Amounts lose trailing zeros so "181" and "181.00" are the same amount to a rule. */
-    /** An answer whose read filled its slots may have cut a row off: it marks the order answered and adds no payments. */
+    /**
+     * An answer whose read filled its slots may have cut a row off: it marks the order answered and adds no payments. Amounts
+     * lose trailing zeros so "181" and "181.00" are the same amount to a rule.
+     */
     private static void addAnswer(List<Object> facts, Order order, Map<String, Map> answersByOrderId) {
         if (answersByOrderId == null || !answersByOrderId.containsKey(order.orderId)) return
         facts.add(new Answered(ORDER_PAYMENTS, order))

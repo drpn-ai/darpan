@@ -70,6 +70,54 @@ class RetiredSkuPackTests {
                 BrainConclude.fill("{product.sku} -> {liveSku}", c.because.find { it.getClass().simpleName == "SoldOnRetiredSku" }))
     }
 
+    // DAR-OPS-029 S03b (lens E3): the same findings in another document order conclude the same, evidence included. An order
+    // with two retired SKUs keeps ONE cause (Cause is equal on subject and code), so which SKU it names must not depend on
+    // which line the read listed first.
+    @Test
+    void twoRetiredSkusOnOneOrderConcludeTheSameInAnyRowOrder() {
+        Map answers = [orderPayments    : [M2: paidInFull(697.06)],
+                       productNetsuiteId: ["20001": product("20001", "AAA-OLD", null), "20002": product("20002", "BBB-OLD", null)]]
+        Closure<Map> conclude = { List<Map> findings ->
+            BrainConclude.run([kind: "orderLine", tenantId: "T_ORDER", findings: findings, shareAnswers: false,
+                    fetchQuestion: { String q, List ids -> ids.collectEntries { [(it): ((Map) answers.get(q))?.get(it)] } }]).byKey as Map
+        }
+        Map a = r1("M2", "20001", "AAA-OLD", "01")
+        Map b = r1("M2", "20002", "BBB-OLD", "02")
+        Map forward = conclude([a, b])
+        Map backward = conclude([b, a])
+        assertEquals("CONC_RETIRED_SKU", ((Map) forward.get(a.key)).code, "the case is not hollow")
+        assertEquals(forward, backward)
+    }
+
+    // DAR-OPS-029 S03b (lens E3): a statement's Conclusion stands only while its BestCause does. When a higher cause arrives
+    // after a statement fired, the stale Conclusion goes with the retracted BestCause, so a finding never holds two causes.
+    @Test
+    void aRetractedBestCauseTakesItsConclusionWithIt() {
+        org.kie.api.runtime.KieContainer container = BrainEngine.forPacks(["oms-netsuite"]).@container
+        org.kie.api.runtime.KieSession session = container.newKieSession()
+        try {
+            BrainEngine.params([:]).each { session.insert(it) }
+            Map world = [:]
+            BrainFactAdapter.facts("orderLine", r1("M3", "30001", "PLAIN-SKU"), [M3: paidInFull(697.06)], world,
+                    ["30001": product("30001", "PLAIN-SKU", null)]).each { session.insert(it) }
+            session.fireAllRules()
+            Closure<List<String>> concluded = { ->
+                session.getObjects(new org.kie.api.runtime.ClassObjectFilter(Conclusion)).collect { ((Conclusion) it).cause.code }.sort()
+            }
+            assertEquals(["CONC_PRODUCT_NOT_IN_NETSUITE"], concluded(), "the case is not hollow")
+            org.kie.api.definition.type.FactType inFlight =
+                    container.kieBase.getFactType("darpan.conclusion.brain.omsnetsuite", "OrderInFlightToNetsuite")
+            Object young = inFlight.newInstance()
+            inFlight.set(young, "order", world.get("M3"))
+            inFlight.set(young, "hours", new BigDecimal("24"))
+            session.insert(young)
+            session.fireAllRules()
+            assertEquals(["NS_IN_FLIGHT"], concluded(), "the finding takes the new best cause, and only it")
+        } finally {
+            session.dispose()
+        }
+    }
+
     @Test
     void theSkuCanComeFromTheAnswerWhenTheLineHadNone() {
         assertEquals(["CONC_RETIRED_SKU"], codes(fire([r1("M1100892", "10274", null)], [M1100892: paidInFull(856.05)],

@@ -30,7 +30,7 @@ class BrainAnswerStore {
     private static String key(String tenantId, String question, String subjectId) { "${tenantId}|${question}|${subjectId}".toString() }
 
     /** A question's time to live; a question the catalogue does not hold is `run`. */
-    static long ttlFor(String question) {
+    private static long ttlFor(String question) {
         String freshness = BrainQuestionCatalog.entry(question)?.freshness
         return TTL_MILLIS.get(freshness) ?: RUN_TTL_MILLIS
     }

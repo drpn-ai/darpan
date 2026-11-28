@@ -40,7 +40,7 @@ class BrainEngine {
         return CACHE.computeIfAbsent(packs.join(","), { String k -> compile(packs) })
     }
 
-    static String packText(String pack) {
+    private static String packText(String pack) {
         InputStream in = BrainEngine.classLoader.getResourceAsStream(RESOURCE_DIR + pack + ".drl")
         if (in == null) throw new IllegalArgumentException("No brain pack ${pack} on the classpath")
         return in.withCloseable { it.getText("UTF-8") }

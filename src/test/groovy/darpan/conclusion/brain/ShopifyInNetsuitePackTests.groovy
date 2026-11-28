@@ -147,6 +147,17 @@ class ShopifyInNetsuitePackTests {
         assertTrue(codes(fired)["2"] != "PAY_EXPIRED", "money was taken")
     }
 
+    // DAR-OPS-029 S03b (lens E2): "nothing was taken" needs HotWax's payments read whole. When the read filled its slots and
+    // cut rows off (here a settled one), no settled payment is evidence of nothing; the order is not concluded "never paid",
+    // an expected cause no audit counts.
+    @Test
+    void aVoidedOrderWhosePaymentsWereCutOffIsNotNeverPaid() {
+        Map cutOff = hc("o3", "DK3", 80, "ORDER_APPROVED", "STANDARD", [["EXT_SHOP_PAYMENTS", "PAYMENT_SETTLED", 80]]) +
+                [paymentPreferenceSlotsFull: true]
+        Map fired = fire([shopify("3", "DK3", "VOIDED", 80, 80)], ["3": cutOff])
+        assertTrue(codes(fired)["3"] != "PAY_EXPIRED", "payments not read whole: ${codes(fired)}")
+    }
+
     @Test
     void aShopifyOrderHotwaxDoesNotHaveIsNotInHotwax() {
         assertEquals(["9999": "NOT_IN_HC"], codes(fire([shopify("9999", "DK9999999", "PAID", 10, 10)], ["9999": null])))

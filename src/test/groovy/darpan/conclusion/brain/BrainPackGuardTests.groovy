@@ -44,6 +44,20 @@ class BrainPackGuardTests {
         assertEquals(ranks.size(), ranks.unique(false).size())
     }
 
+    // DAR-OPS-029 S03b: an ask's @mayEnable codes set the rank above which the ask planner drops it (BrainQuestions); a code
+    // no rule @concludes reads as rank 0, so a typo would silently drop the question. Every code must be a concluded cause.
+    @Test
+    void everyCodeAnAskMayEnableIsACauseThePackConcludes() {
+        List<String> rs = rules(pack())
+        Set<String> concluded = rs.collect { (it =~ /@concludes\("([^"]+)"\)/) }.findAll { it.find() }.collect { it.group(1) } as Set<String>
+        Set<String> enabled = rs.collectMany { String r ->
+            def m = (r =~ /@mayEnable\("([^"]+)"\)/)
+            m.find() ? m.group(1).split(",").collect { it.trim() } : []
+        } as Set<String>
+        assertFalse(enabled.isEmpty())
+        assertEquals([] as Set<String>, enabled - concluded, "@mayEnable names causes no rule concludes")
+    }
+
     // DAR-BE-229: a tunable number is a GraphParam fact, never a decimal literal in a rule's when-part.
     @Test
     void noRuleWhenPartHoldsADecimalLiteral() {

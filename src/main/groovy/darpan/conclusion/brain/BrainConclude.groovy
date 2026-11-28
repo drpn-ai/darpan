@@ -41,12 +41,15 @@ class BrainConclude {
         Closure captureServed = (Closure) args.captureServed
         Closure labelFor = (Closure) (args.labelFor ?: { String c -> c })
         BrainEngine engine = BrainEngine.forPacks((List<String>) (args.packs ?: PILOT_PACKS))
-        List<List<Map>> batches = batches(kind, (List<Map>) (args.findings ?: []))
+        // DAR-OPS-029 S03b (lens E3): by key, so the facts each world is built from, and so the evidence a cause names when
+        // several facts justify it (two retired SKUs on one order), follow the findings, not the order the read listed them.
+        List<Map> findings = ((List<Map>) (args.findings ?: [])).sort(false) { Map f -> f?.key?.toString() ?: "" }
+        List<List<Map>> batches = batches(kind, findings)
         List<BrainQuestionCatalog.Entry> catalog = (List<BrainQuestionCatalog.Entry>) (args.catalog ?: BrainQuestionCatalog.ENTRIES)
         // DAR-BE-225: each question's answers by subject id, one map per catalogue entry.
         Map<String, Map<String, Map>> answers = catalog.collectEntries { [(it.name): [:]] } as Map<String, Map<String, Map>>
         // DAR-BE-227: answers the records already carry, so the worlds never ask them.
-        Map<String, Map<String, Map>> fromFacts = answersInRecords(kind, (List<Map>) (args.findings ?: []), catalog)
+        Map<String, Map<String, Map>> fromFacts = answersInRecords(kind, findings, catalog)
         fromFacts.each { String q, Map<String, Map> byId -> answers.get(q).putAll(byId) }
         int answeredFromFacts = (fromFacts.values()*.size().sum() ?: 0) as int
         // DAR-BE-228: per question, what this pass did with it.

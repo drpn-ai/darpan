@@ -519,12 +519,14 @@ then
 end
 
 // Dolls Kill DK5170816 (2026-11-25, Aditi: "insufficient payment ... never go to netsuite"): the card authorization was
-// voided, so nothing was captured; HotWax holds the payment cancelled. A settled HotWax payment means money was taken.
+// voided, so nothing was captured; HotWax holds the payment cancelled. A settled HotWax payment means money was taken, so
+// "nothing taken" needs HotWax's payments read whole (DAR-OPS-029 S03b: without them no settled row proved nothing).
 rule "A Shopify order's authorization was voided and nothing was taken"
-    @reads("OrderNotInNetsuite, ShopifyOrder, Payment") @produces("PaymentNeverMade")
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("PaymentNeverMade")
 when
     OrderNotInNetsuite( $o : order )
     $s : ShopifyOrder( order == $o, financialStatus == "VOIDED" )
+    Order( this == $o, paymentsComplete == true )
     not Payment( order == $o, state == "SETTLED" )
 then
     insertLogical( new PaymentNeverMade( $o, $s ) );
@@ -807,7 +809,8 @@ then
     insertLogical( new BestCause( $s, $c ) );
 end
 
-// ---- statements: whose cause a finding takes (line and return causes join here as they are ported)
+// ---- statements: whose cause a finding takes (line and return causes join here as they are ported). Each conclusion is
+// logical: it stands only while the BestCause it took does, so a better cause found later replaces it (DAR-OPS-029 S03b).
 
 rule "R1 · the order's cause, when NetSuite has no line for it"
     @reads("Finding, OrderNotInNetsuite, BestCause") @states("R1")
@@ -816,7 +819,7 @@ when
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then
-    insert( Conclusion.of( $f, $c ) );
+    insertLogical( Conclusion.of( $f, $c ) );
 end
 
 rule "R2 · its order's cause"
@@ -826,7 +829,7 @@ when
     Return( this == $r, $o : order )
     BestCause( subject == $o, $c : cause )
 then
-    insert( Conclusion.of( $f, $c ) );
+    insertLogical( Conclusion.of( $f, $c ) );
 end
 
 // DAR-BE-192: R7 (gorjana "Every order HotWax approves reaches NetSuite within a day"): an approved order takes its cause.
@@ -840,7 +843,7 @@ when
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then
-    insert( Conclusion.of( $f, $c ) );
+    insertLogical( Conclusion.of( $f, $c ) );
 end
 
 // DAR-BE-204: Dolls Kill "Every Shopify order is in NetSuite within a day": a Shopify order takes its HotWax order's cause,
@@ -852,7 +855,7 @@ when
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then
-    insert( Conclusion.of( $f, $c ) );
+    insertLogical( Conclusion.of( $f, $c ) );
 end
 
 rule "Shopify in NetSuite · a Shopify order HotWax does not have"
@@ -861,5 +864,5 @@ when
     $f : Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", order == null, $s : shopifyOrder, shopifyOrder != null )
     BestCause( subject == $s, $c : cause )
 then
-    insert( Conclusion.of( $f, $c ) );
+    insertLogical( Conclusion.of( $f, $c ) );
 end

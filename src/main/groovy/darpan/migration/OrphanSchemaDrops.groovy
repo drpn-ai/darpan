@@ -47,6 +47,8 @@ class OrphanSchemaDrops {
              why: "HotWaxOmsRestSourceConfig.ordersPath, unread since the OMS REST path retired (DAR-OPS-029 S99)"],
             [table: "HOTWAX_OMS_REST_SOURCE_CONFIG", column: "RETURNS_PAGE_SIZE",
              why: "HotWaxOmsRestSourceConfig.returnsPageSize, unread since the OMS REST path retired (DAR-OPS-029 S99)"],
+            [table: "AUDIT_STATEMENT_CHECK", column: "CONCLUSION_CODES",
+             why: "AuditStatementCheck.conclusionCodes, emptied by STATEMENT_LINK_EXPECTED (DAR-BE-196) and deleted in DAR-OPS-029 S99-323"],
     ].asImmutable()
 
     /** The connection's entity group: every DROPS table lives in Darpan's own database. */

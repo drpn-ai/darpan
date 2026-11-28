@@ -117,7 +117,7 @@
             description="Drop the tables and columns deleted entities and fields left behind (DAR-OPS-029): RUN_DATA_DOCUMENT,
                 RUN_SYSTEM_INSTANCE, AUTH_SECRET, PASSKEY_SIGN_IN_CHALLENGE.USERNAME_HINT, TENANT_CHAT_SPACE.GOOGLE_CHAT_WEBHOOK_URL,
                 SOURCE_SYSTEM_CONNECTOR.EXCHANGE_STATE_LOOKUP_SERVICE_NAME, CONFIG_ID_RESOLVER_SERVICE_NAME and VALIDATION_SERVICE_NAME,
-                SLACK_POSTED_MESSAGE, HOTWAX_OMS_REST_SOURCE_CONFIG.ORDERS_PATH and RETURNS_PAGE_SIZE.
+                SLACK_POSTED_MESSAGE, HOTWAX_OMS_REST_SOURCE_CONFIG.ORDERS_PATH and RETURNS_PAGE_SIZE, AUDIT_STATEMENT_CHECK.CONCLUSION_CODES.
                 Drops only what exists and nothing the entity model still defines or another table references; the chat
                 column waits while any space's only webhook is still in it. The dry run gives each one's row count. Schema
                 only. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it. An orphan added later is one more

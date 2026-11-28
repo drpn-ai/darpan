@@ -542,4 +542,40 @@ class MissingDiffVerificationSupportTests {
         assertEquals(before, file.text)
         assertTrue(((List) result.warnings).any { it.toString().contains("could not be read") }, "warnings: ${result.warnings}")
     }
+    /**
+     * QA refute (R1 regression): a repeated key's rows carry missingIn "" and are never missing rows. A run with real missing
+     * rows and duplicate rows under an id the lookup finds removes only the missing row, and its counts match the pass before
+     * R1 exactly: one row less, nothing taken from the duplicate count.
+     */
+    @Test
+    void duplicateRowsUnderAFoundIdAreLeftAndTheCountsMatchThePassBeforeR1() {
+        Map dupInOms = [type: "DUPLICATE_IN_FILE_1", id: "1001", presentIn: FILE1, missingIn: "", data: "{}", note: "Duplicated in OMS"]
+        Map pairedInShopify = [diffType: "DUPLICATE_IN_FILE_1_PAIRED", primaryId: "1001", presentIn: FILE2, missingIn: "", data: "{}"]
+        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2), missingRow("1002", FILE1, FILE2), dupInOms, dupInOms, pairedInShopify], [
+                totalDifferences            : 5,
+                onlyInFile1Count            : 2,
+                onlyInFile2Count            : 0,
+                missingObjectDifferenceCount: 2,
+                duplicateDifferenceCount    : 3,
+        ])
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: PLENTY,
+                sideLookups      : [(SIDE1): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                                    (SIDE2): { List<String> ids -> [ok: true, foundIds: ["1001"], missingIds: ids - ["1001"], errors: []] }],
+        ])
+
+        assertEquals(1, result.removedCount)
+        assertEquals(0, result.removedMissingInFile1)
+        assertEquals(1, result.removedMissingInFile2)
+        Map document = parseDocument(file)
+        assertEquals(["1002", "1001", "1001", "1001"], ((List) document.differences).collect { it.primaryId ?: it.id })
+        Map summary = (Map) document.summary
+        assertEquals(4, summary.totalDifferences)
+        assertEquals(1, summary.onlyInFile1Count)
+        assertEquals(1, summary.missingObjectDifferenceCount)
+        assertEquals(3, summary.duplicateDifferenceCount)
+    }
 }

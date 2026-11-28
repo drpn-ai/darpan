@@ -100,23 +100,26 @@ class DiffDocumentStreamSupport {
 
     /**
      * S20 HANDOFF R1: which side a missing row is missing from, FILE_1 or FILE_2. The compare's own diffType says it first
-     * (MISSING_IN_FILE_n, as DiffDetailClassifier reads it). Only when the two sides' labels differ does a label settle it
-     * (missingIn, a missing_in_label diffType, or presentIn). Null when nothing can: two sides of one system share a label,
-     * and a guess would verify one side against the other's lookup.
+     * (MISSING_IN_FILE_n, as DiffDetailClassifier reads it). Only when the row names a side in missingIn and the two
+     * sides' labels differ does a label settle it (missingIn, or a missing_in_label diffType). Null when nothing can: two
+     * sides of one system share a label, and a guess would verify one side against the other's lookup.
+     *
+     * A row that names no side it is missing from is not a missing row and gets no side: a repeated key's rows
+     * (DUPLICATE_IN_FILE_n and its _PAIRED partner) and a single-sided finding carry missingIn "" (CompareDatasetSupport
+     * .buildDuplicateRows), so no verify pass may look them up or remove them (QA refute of R1: presentIn must not decide).
      */
     static String missingSide(Map row, String file1Label, String file2Label) {
         String type = DiffDetailClassifier.normalizeToken(row?.get("diffType") ?: row?.get("type"))
         if (type == "missing_in_file_1") return FILE_1
         if (type == "missing_in_file_2") return FILE_2
+        if (type.startsWith("duplicate_in_")) return null
+        String missingIn = DiffDetailClassifier.normalizeToken(row?.get("missingIn"))
+        if (!missingIn) return null
         String file1 = DiffDetailClassifier.normalizeToken(file1Label)
         String file2 = DiffDetailClassifier.normalizeToken(file2Label)
         if (!file1 || !file2 || file1 == file2) return null
-        String missingIn = DiffDetailClassifier.normalizeToken(row?.get("missingIn"))
         if (missingIn == file1 || type == "missing_in_${file1}".toString()) return FILE_1
         if (missingIn == file2 || type == "missing_in_${file2}".toString()) return FILE_2
-        String presentIn = DiffDetailClassifier.normalizeToken(row?.get("presentIn"))
-        if (presentIn == file1) return FILE_2
-        if (presentIn == file2) return FILE_1
         return null
     }
 

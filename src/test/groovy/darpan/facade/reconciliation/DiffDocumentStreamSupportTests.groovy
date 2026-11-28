@@ -308,4 +308,26 @@ class DiffDocumentStreamSupportTests {
             DiffDocumentStreamSupport.removeMissingRowsBySide(f, ".verify-tmp", [FILE_2: ["1"] as Set], null)
         }
     }
+    /**
+     * QA refute (S21a, R1 regression): a repeated key's rows (DUPLICATE_IN_FILE_n and its _PAIRED partner) and a single-sided
+     * finding are written with missingIn "" (CompareDatasetSupport.buildDuplicateRows). Nothing is missing, so they get no
+     * side and no verify pass may remove them, even when their id is listed and their presentIn names a side.
+     */
+    @Test
+    void aRowThatNamesNoSideItIsMissingFromIsNeverAMissingRow() {
+        List<Map> rows = [
+                [type: "DUPLICATE_IN_FILE_1", id: "K1", presentIn: "OMS", missingIn: "", data: "{}", note: "Duplicated in OMS"],
+                [diffType: "DUPLICATE_IN_FILE_2_PAIRED", primaryId: "K1", presentIn: "NS", missingIn: "", data: "{}"],
+                [diffType: "FINDING", primaryId: "F1", presentIn: "OMS", missingIn: "", data: "{}"],
+        ]
+        rows.each { Map row -> assertEquals(null, DiffDocumentStreamSupport.missingSide(row, "OMS", "NS"), row.toString()) }
+
+        File f = writeDiffDocument(rows, [file1Label: "OMS", file2Label: "NS"], [totalDifferences: 3, duplicateDifferenceCount: 2])
+        Map<String, Integer> dropped = DiffDocumentStreamSupport.removeMissingRowsBySide(f, ".verify-tmp",
+                [FILE_1: ["K1", "F1"] as Set, FILE_2: ["K1", "F1"] as Set], null)
+
+        assertEquals([FILE_1: 0, FILE_2: 0], dropped)
+        assertEquals(3, ((List) parse(f).differences).size(), "nothing a verify pass may remove was removed")
+        assertEquals(3, ((Map) parse(f).summary).totalDifferences)
+    }
 }

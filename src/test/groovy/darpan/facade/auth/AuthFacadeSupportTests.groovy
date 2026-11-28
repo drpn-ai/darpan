@@ -1373,6 +1373,14 @@ class AuthFacadeSupportTests {
             return this
         }
 
+        /** OC78: login#Session takes the person lock (TwoFactorRecords.lockPerson) after the password matched. */
+        boolean lockedForUpdate = false
+
+        FinderStub forUpdate(boolean forUpdate) {
+            lockedForUpdate = forUpdate
+            return this
+        }
+
         FinderStub orderBy(String orderBy) {
             return this
         }

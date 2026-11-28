@@ -105,6 +105,11 @@ class AuthFacadeSupport {
         Map<String, Object> result
         boolean settled = !authenticated
         try {
+            // OC78: the person lock, held to commit, so this sign-in and a change turning a first factor on (which holds the
+            // same lock) cannot both decide on the factors as they were: a confirm committed first is seen here, and one
+            // waiting behind this sign-in ends its key (TwoFactorSupport.endSessions). Taken only after the password matched:
+            // the realm counts a wrong one on this row in a transaction of its own, which the lock would block.
+            if (authenticated) TwoFactorRecords.lockPerson(ec, userId)
             // DAR-BE-264: the password matched; a person with two-factor on (or due and not set up) gets a challenge,
             // not a session. Said only after a right password, so it reveals nothing new (as [PWDCHG]).
             twoFactorStep = authenticated ? TwoFactorSupport.signInStep(ec, userId) : null
@@ -556,7 +561,7 @@ class AuthFacadeSupport {
      *  flag force-logs-out every other session at its next request, and the reset update it
      *  forces on the next auth serializes all logins on the single row (observed as 50s+
      *  lock-wait login failures). logout#AllSessions remains the revoke-everywhere path. */
-    static void logoutCurrentSessionOnly(def ec) {
+    private static void logoutCurrentSessionOnly(def ec) {
         try {
             ec.user.logoutLocal()
         } catch (Exception e) {

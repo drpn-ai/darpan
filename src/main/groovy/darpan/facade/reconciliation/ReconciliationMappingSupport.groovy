@@ -121,7 +121,13 @@ class ReconciliationMappingSupport {
         String normalizedExpression = normalizeMappingJsonIdExpression(idFieldExpression)
         if (!normalizedExpression || !schemaText?.trim()) return false
 
-        def schemaDocument = new JsonSlurper().parseText(schemaText)
+        // DAR-OPS-029 S99-023: a malformed saved schema is not resolvable; it used to throw through list#SavedRuns/list#Mappings.
+        def schemaDocument
+        try {
+            schemaDocument = new JsonSlurper().parseText(schemaText)
+        } catch (groovy.json.JsonException ignored) {
+            return false
+        }
         if (!normalizedExpression.startsWith('$')) {
             String propertyName = extractJsonPropertyName(normalizedExpression)
             return propertyName ? schemaContainsProperty(schemaDocument, propertyName, [] as Set<Integer>) : false

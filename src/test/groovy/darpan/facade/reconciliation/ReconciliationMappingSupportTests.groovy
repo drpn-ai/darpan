@@ -58,6 +58,13 @@ class ReconciliationMappingSupportTests {
         assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("\$.foo.legacyResourceId", NESTED_SCHEMA))
     }
 
+    /** DAR-OPS-029 S99-023 (S21b F9): a malformed saved schema is "not resolvable", never a throw through list#SavedRuns. */
+    @Test
+    void aMalformedSchemaIsNotResolvableInsteadOfThrowing() {
+        assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("orderId", '{"properties": {"orderId": '))
+        assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("\$.orders[*].orderId", "not json at all"))
+    }
+
     @Test
     void rejectsUnknownJsonSchemaProperty() {
         assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("order_id", NESTED_SCHEMA))

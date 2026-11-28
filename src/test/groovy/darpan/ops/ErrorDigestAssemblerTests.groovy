@@ -152,6 +152,14 @@ class ErrorDigestAssemblerTests {
         assertTrue(d.watchdog.isEmpty())
     }
 
+    /** OC143: the digest masks a secret in a stored errorMessage when it reads it. */
+    @Test
+    void aSecretInAStoredErrorIsMaskedInTheDigest() {
+        Map d = ErrorDigestAssembler.assemble(input(checks: [check()],
+                executions: [failed(completedDate: hoursAgo(1), scheduledDate: hoursAgo(1), errorMessage: "401: token=abc123secret")]))
+        assertEquals("401: token=***", d.runErrors[0].errorText)
+    }
+
     @Test
     void onlyExecutionsEndedSinceTheLastDigestAreListed() {
         Map d = ErrorDigestAssembler.assemble(input(

@@ -1,5 +1,7 @@
 package darpan.ops
 
+import darpan.common.SecretRedactor
+
 import java.sql.Timestamp
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -111,7 +113,7 @@ class ErrorDigestAssembler {
             subjectsOf.each { Map c ->
                 out << [tenant: ex.companyUserGroupId, auditName: c.auditName, statement: c.statementId, check: c.checkId,
                         automationId: ex.automationId, kind: kind, triggerType: (ex.triggerType?.toString()?.trim() ?: "scheduled"),
-                        daysInARow: streak, errorText: ex.errorMessage,
+                        daysInARow: streak, errorText: SecretRedactor.redact(ex.errorMessage as String),
                         readCounts: [file1: ex.file1ReadCount, file2: ex.file2ReadCount],
                         keptCounts: [file1: ex.file1RecordCount, file2: ex.file2RecordCount],
                         files: [ex.file1Name, ex.file2Name].findAll { it },

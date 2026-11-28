@@ -80,6 +80,14 @@ class ErrorChatSupportTests {
                 scheduledDate: Timestamp.from(Instant.parse("2026-11-25T15:00:00Z")), zoneId: "America/Los_Angeles"] + over
     }
 
+    /** OC143: the card masks a secret in the stored error when it reads it (a row stored unmasked must not leak). */
+    @Test
+    void theCardMasksASecretInTheStoredError() {
+        String text = ErrorChatSupport.cardText(event(errorFirstLine: "HTTP 401 from HotWax: Bearer eyJhbGciOi.payload.sig"), 1)
+        assertFalse(text.contains("eyJhbGciOi.payload.sig"), text)
+        assertTrue(text.contains("HTTP 401 from HotWax: Bearer ***"), text)
+    }
+
     @Test
     void theCardNamesTenantStatementCheckAndCounts() {
         assertTrue(ErrorChatSupport.postErrorCard(ec, event()))

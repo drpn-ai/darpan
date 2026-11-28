@@ -36,6 +36,22 @@ class SourceSystemConnectorLookupShapeTests {
         assertFalse(SourceSystemConnectorSupport.isAllowedLookupServiceShape(""))
     }
 
+    /**
+     * DAR-OPS-029 S07b (security review of de0989ba). One enabled rule for dispatch and the endpoint catalog, and it fails closed:
+     * a blank flag is enabled (seed rows predate it), an unrecognised one never is.
+     */
+    @Test
+    void anUnrecognisedEnabledFlagReadsDisabledAndABlankOneEnabled() {
+        assertTrue(SourceSystemConnectorSupport.isEnabled([:]))
+        assertTrue(SourceSystemConnectorSupport.isEnabled([enabled: null]))
+        assertTrue(SourceSystemConnectorSupport.isEnabled([enabled: " "]))
+        assertTrue(SourceSystemConnectorSupport.isEnabled([enabled: "Y"]))
+        assertTrue(SourceSystemConnectorSupport.isEnabled([enabled: "true"]))
+        assertFalse(SourceSystemConnectorSupport.isEnabled([enabled: "N"]))
+        assertFalse(SourceSystemConnectorSupport.isEnabled([enabled: "X"]), "a value that means nothing must not open an endpoint")
+        assertFalse(SourceSystemConnectorSupport.isEnabled([enabled: "disabled"]))
+    }
+
     @Test
     void lookupFenceIsDisjointFromExtractorFence() {
         // a name accepted by one fence is rejected by the other, so a misconfigured row cannot

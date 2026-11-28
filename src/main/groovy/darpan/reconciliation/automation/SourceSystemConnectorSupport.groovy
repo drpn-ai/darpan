@@ -169,8 +169,13 @@ class SourceSystemConnectorSupport {
         return s != null && PROBE_SERVICE_NAME.matcher(s).matches()
     }
 
+    /**
+     * The one enabled rule for dispatch and the endpoint catalog. It fails closed: a blank flag is enabled (rows predate it),
+     * and only a value that means yes is; anything unrecognised keeps the endpoint shut (DAR-OPS-029 S07b security review).
+     */
     protected static boolean isEnabled(def record) {
-        return normalizeBool(readField(record, "enabled"), true)
+        Object flag = readField(record, "enabled")
+        return !normalize(flag) || normalizeBool(flag, false)
     }
 
     protected static Set<String> aliasKeys(def record) {

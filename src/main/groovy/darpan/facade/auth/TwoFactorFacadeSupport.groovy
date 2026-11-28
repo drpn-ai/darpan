@@ -132,11 +132,11 @@ class TwoFactorFacadeSupport {
      * DAR-BE-301 begin#PasskeyFirstSignIn: sign in with a passkey alone, no password. Request options (publicKeyOptions,
      * JSON text) and the challengeToken finish#PasskeyFirstSignIn takes (300 s, one attempt). Discoverable only (OC77): no
      * account is read and allowCredentials is empty, so every begin answers alike; each is held to
-     * TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS after its writes commit. typedUsername is accepted and not read: the service
-     * still declares it, and the UI still sends it (DAR-OPS-029 S23 handoff to S25/U17a to drop both). Refusals
-     * (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
+     * TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS after its writes commit. The service takes no username: a client that still
+     * sends one has it dropped by Moqui as an undeclared parameter. Refusals (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel
+     * in the refusal envelope.
      */
-    static Map<String, Object> beginPasskeyFirstSignIn(def ec, Object typedUsername) {
+    static Map<String, Object> beginPasskeyFirstSignIn(def ec) {
         long started = System.nanoTime()
         Map<String, Object> begun = PasskeySupport.firstSignInOptions(ec)
         TwoFactorSupport.holdToFloor(started)

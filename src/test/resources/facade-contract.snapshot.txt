@@ -716,8 +716,7 @@ SERVICE begin PasskeyFirstSignIn
   type        : inline
   authenticate: anonymous-all
   allow-remote: true
-  IN:
-    username : String
+  IN: (none)
   OUT:
     challengeToken : String
     errors : List

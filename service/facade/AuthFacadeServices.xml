@@ -1220,13 +1220,9 @@
 
     <service verb="begin" noun="PasskeyFirstSignIn" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-301. Start a sign-in with a passkey alone (no password). Request options for
-            navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. With a username, allowCredentials
-            lists that account's passkeys, and for a username that names no account with a passkey one decoy credential
-            (the same for the same username, which no authenticator holds); with no username it is empty and the browser
-            offers its own passkeys for this site. The answer never says whether the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS).</description>
-        <in-parameters>
-            <parameter name="username"><description>Optional: the username or email typed first.</description></parameter>
-        </in-parameters>
+            navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. Discoverable only (DAR-OPS-029 OC77,
+            Aditi 2026-11-28): allowCredentials is always empty and no account is read, so the browser offers its own passkeys
+            for this site and every begin answers alike. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS).</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
@@ -1236,12 +1232,12 @@
             <parameter name="challengeToken" type="String">
                 <description>For finish#PasskeyFirstSignIn: held in page memory only, good for one finish.</description></parameter>
             <parameter name="publicKeyOptions" type="String">
-                <description>PublicKeyCredentialRequestOptionsJSON: {challenge, rpId, timeout, allowCredentials[{type, id,
-                    transports}], userVerification: "required"}.</description></parameter>
+                <description>PublicKeyCredentialRequestOptionsJSON: {challenge, rpId, timeout, allowCredentials: [],
+                    userVerification: "required"}.</description></parameter>
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds the challengeToken lives: 300.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginPasskeyFirstSignIn(ec, username)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginPasskeyFirstSignIn(ec)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>

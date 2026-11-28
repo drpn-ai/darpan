@@ -39,7 +39,7 @@ class AutomationFacadeSupportSharedConfigTests {
         def ec = ecForNsAuth("BETSEY_JOHNSON", [ownedRow, sharedRow],
                 [grant("SCFG_NS_AUTH", "NS_AUTH_SM", "BETSEY_JOHNSON")])
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.listNsAuthConfigOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsAuthConfigOptions(ec)
 
         assertEquals(["NS_AUTH_MEMBER_OWN", "NS_AUTH_SM"] as Set,
                 options.collect { it.nsAuthConfigId } as Set,
@@ -54,7 +54,7 @@ class AutomationFacadeSupportSharedConfigTests {
                           description: "Not shared", isActive: "Y"]
         def ec = ecForNsAuth("THIRD_LOVE", [foreignRow], [])
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.listNsAuthConfigOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsAuthConfigOptions(ec)
 
         assertTrue(options.isEmpty(),
                 "sharing must widen access to named peers only — a tenant with no grant and no " +
@@ -69,7 +69,7 @@ class AutomationFacadeSupportSharedConfigTests {
                            description: "Inactive", isActive: "N"]
         def ec = ecForNsAuth("STEVE_MADDEN", [activeRow, inactiveRow], [])
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.listNsAuthConfigOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsAuthConfigOptions(ec)
 
         assertEquals(["NS_AUTH_ACTIVE"], options.collect { it.nsAuthConfigId },
                 "the source picker must not offer an inactive config — listAccessibleConfigRows " +
@@ -88,7 +88,7 @@ class AutomationFacadeSupportSharedConfigTests {
         def ec = ecForNsRestlet("BETSEY_JOHNSON", [ownedRow, sharedRow],
                 [grant("SCFG_NS_RESTLET", "NS_RESTLET_SM", "BETSEY_JOHNSON")])
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.listNsRestletOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsRestletOptions(ec)
 
         assertEquals(["NS_RESTLET_MEMBER_OWN", "NS_RESTLET_SM"] as Set,
                 options.collect { it.nsRestletConfigId } as Set,
@@ -101,7 +101,7 @@ class AutomationFacadeSupportSharedConfigTests {
                           description: "Not shared", isActive: "Y"]
         def ec = ecForNsRestlet("THIRD_LOVE", [foreignRow], [])
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.listNsRestletOptions(ec)
+        List<Map<String, Object>> options = AutomationSourceOptionsSupport.listNsRestletOptions(ec)
 
         assertTrue(options.isEmpty(),
                 "a tenant with no grant and no ownership must still see nothing")
@@ -112,13 +112,13 @@ class AutomationFacadeSupportSharedConfigTests {
         Map ownedRow = [nsRestletConfigId: "NS_RESTLET_OWN", companyUserGroupId: "STEVE_MADDEN",
                         description: "Owned, unshared", isActive: "Y"]
         def ecAsOwner = ecForNsRestlet("STEVE_MADDEN", [ownedRow], [])
-        assertEquals(["NS_RESTLET_OWN"], AutomationFacadeSupport.listNsRestletOptions(ecAsOwner)
+        assertEquals(["NS_RESTLET_OWN"], AutomationSourceOptionsSupport.listNsRestletOptions(ecAsOwner)
                 .collect { it.nsRestletConfigId },
                 "with zero grants the owner must still see its own restlet — byte-identical to " +
                 "pre-DAR-BE-005 behavior")
 
         def ecAsForeign = ecForNsRestlet("THIRD_LOVE", [ownedRow], [])
-        assertTrue(AutomationFacadeSupport.listNsRestletOptions(ecAsForeign).isEmpty(),
+        assertTrue(AutomationSourceOptionsSupport.listNsRestletOptions(ecAsForeign).isEmpty(),
                 "with zero grants a foreign tenant must still be rejected exactly as before")
     }
 
@@ -135,7 +135,7 @@ class AutomationFacadeSupportSharedConfigTests {
         finders.put(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, new FailingFinderStub())
 
         assertThrows(IllegalStateException) {
-            AutomationFacadeSupport.listEnabledConfigEndpoints(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
+            AutomationSourceOptionsSupport.listEnabledConfigEndpoints(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
         }
     }
 

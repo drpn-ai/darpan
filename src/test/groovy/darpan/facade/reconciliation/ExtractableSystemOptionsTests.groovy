@@ -10,7 +10,7 @@ class ExtractableSystemOptionsTests {
     private static final Set<String> CONNECTORS = ["OMS_GQL", "OMS_RETURNS_GQL", "SHOPIFY", "SHOPIFY_RETURN_REFS"] as Set
 
     private static List<Map<String, Object>> pick(List<Map<String, Object>> options) {
-        return AutomationFacadeSupport.extractableSystemOptions(options, { String id -> id in CONNECTORS })
+        return AutomationSourceOptionsSupport.extractableSystemOptions(options, { String id -> id in CONNECTORS })
     }
 
     @Test

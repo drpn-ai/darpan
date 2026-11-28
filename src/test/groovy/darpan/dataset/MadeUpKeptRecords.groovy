@@ -10,14 +10,25 @@ import groovy.json.JsonSlurper
  * only some fields stands in only when it kept every field the side keeps and filters on; it writes "<file>.madeup.json"
  * beside its file and answers its location as madeUpFileLocation; its read cannot select a field named unread*. Every call
  * is recorded in CALLS.
+ *
+ * S99-214 (S16a Q4) hooks, set by a test and cleared in its finally: {@link #errorOnCall} adds that error on every call (the
+ * service then answers nothing, as a failed one does); {@link #onCheck} runs during the serving check (a call with neither
+ * recordsFile nor unionFields), between the slice reading the copy's manifest and opening its records.
  */
 class MadeUpKeptRecords {
     static final List<Map> CALLS = Collections.synchronizedList([])
     /** A file outside any slice folder the hostile mode lists as written (M2: core must never delete it). */
     static File outsideFile
+    static volatile String errorOnCall
+    static volatile Closure onCheck
 
     static Map<String, Object> project(def ec, Map ctx) {
         CALLS << new LinkedHashMap(ctx)
+        if (errorOnCall) {
+            ec.message.addError(errorOnCall)
+            return [:]
+        }
+        if (!ctx.recordsFile && ctx.unionFields == null && onCheck != null) onCheck.call()
         // a planned dataset read: the made-up read cannot select a field named unread*
         if (ctx.unionFields != null) return [keepableFields: (ctx.unionFields as List).findAll { !(it as String).startsWith("unread") }]
         Map copy = (ctx.copy ?: [:]) as Map, side = (ctx.side ?: [:]) as Map

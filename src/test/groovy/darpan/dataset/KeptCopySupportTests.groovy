@@ -1044,6 +1044,146 @@ class KeptCopySupportTests {
         assertTrue((served.reason as String).contains("wrote 2 record lines of 1"), served.reason as String)
     }
 
+    /**
+     * S99-214 (S16a Q4): the copy is replaced between the slice reading its manifest and opening its records (a full read
+     * landed meanwhile). The slice refuses (COPY_CHANGED) rather than serve one version's records under the other's
+     * manifest, leaves nothing in its folder, and the next slice serves the new version.
+     */
+    @Test
+    void aCopyReplacedWhileTheSliceOpensItIsNotServedAndTheNextSliceServesTheNewOne() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-swap", "id", "createdAt")
+        copyOf(A, id, [[id: "old-1", createdAt: "2026-11-10T09:00:00Z"]], "id", "createdAt")
+        String before = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id)).version as String
+        MadeUpKeptRecords.onCheck = { copyOf(A, id, [[id: "new-1", createdAt: "2026-11-10T10:00:00Z"]], "id", "createdAt") }
+        Map swapped
+        try {
+            swapped = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id"], "proj-swap"))
+        } finally {
+            MadeUpKeptRecords.onCheck = null
+        }
+        assertFalse(swapped.served as boolean)
+        assertEquals(KeptCopySupport.COPY_CHANGED, swapped.reason)
+        assertTrue(before != KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id)).version, "test precondition: a new version")
+        assertEquals([], (locationFile(runLocation("proj-swap")).list() ?: []) as List, "nothing is left in the slice's folder")
+
+        Map served = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id"], "proj-swap"))
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals(["new-1"], (json(locationFile(served.fileLocation as String)).records as List<Map>)*.id)
+    }
+
+    /**
+     * S99-214 (S16a Q4): each lookup the slice makes leaves the message facade as it found it when its service fails: the
+     * error is taken off (never turned into a danger message that rides out in the caller's reply) and the caller's own
+     * messages stay. The projection check and the kept-fields union read their failure as "read live" / "whole records".
+     */
+    @Test
+    void aFailingProjectionCheckOrUnionCallLeavesNoErrorOnTheFacade() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-err", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z"]], "id", "createdAt")
+        Map dataset = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one().getMap() as Map
+        ec.message.clearAll()
+        ec.message.addMessage("the caller's own note")
+        MadeUpKeptRecords.errorOnCall = "made-up projection failed at db-7.internal"
+        try {
+            Map refused = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id"], "proj-err"))
+            assertFalse(refused.served as boolean)
+            assertEquals("the connector's projection service failed: made-up projection failed at db-7.internal", refused.reason)
+            assertFacadeKeptOnlyTheCallersNote("db-7")
+
+            assertNull(DatasetSupport.keptFields(ec, dataset), "a failed union call keeps whole records")
+            assertFacadeKeptOnlyTheCallersNote("db-7")
+        } finally {
+            MadeUpKeptRecords.errorOnCall = null
+            ec.message.clearAll()
+        }
+    }
+
+    /** S99-214 (S16a Q4): find#ServingDataset failing (its options cannot be keyed) makes the side read live, facade clean. */
+    @Test
+    void aFailingServingLookupReadsLiveAndLeavesNoErrorOnTheFacade() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        Map side = projSide(connector, ["id"], "proj-find") + [options: [bad: new UnkeyableOption()]]
+        ec.message.clearAll()
+        ec.message.addMessage("the caller's own note")
+        try {
+            Map refused = KeptCopySupport.sliceIfServed(ec, side)
+            assertFalse(refused.served as boolean)
+            // the reason (logged at info, never shown to a tenant) names the service's own failure
+            assertTrue((refused.reason as String).startsWith("the copy could not be read: "), refused.reason as String)
+            assertTrue((refused.reason as String).contains("options read failed at vault-9"), refused.reason as String)
+            assertFacadeKeptOnlyTheCallersNote("vault-9")
+        } finally {
+            ec.message.clearAll()
+        }
+    }
+
+    /**
+     * S99-214 (S16a Q4): the rebuild queue refusing (the dataset moved to another tenant during the check, so
+     * queue#DatasetRefresh answers "does not exist") still reads live with the projection's reason, facade clean.
+     */
+    @Test
+    void aRefusedRebuildQueueLeavesNoErrorOnTheFacade() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-gone", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", a: 1]], "id", "createdAt", new Timestamp(READ_THRU.time - 60 * DAY),
+                [keptFields: ["id", "createdAt", "a"]])
+        ec.message.clearAll()
+        ec.message.addMessage("the caller's own note")
+        MadeUpKeptRecords.onCheck = {
+            def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one()
+            row.companyUserGroupId = B
+            row.update()
+        }
+        try {
+            Map refused = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "b"], "proj-gone"))
+            assertFalse(refused.served as boolean)
+            assertEquals("the made-up copy lacks b", refused.reason)
+            assertFacadeKeptOnlyTheCallersNote("does not exist")
+        } finally {
+            MadeUpKeptRecords.onCheck = null
+            ec.message.clearAll()
+        }
+    }
+
+    /** S99-214 (S16a Q4): the real extractor throws what its service put on the facade, and takes it off. */
+    @Test
+    void theLiveExtractorThrowsItsServicesErrorAndLeavesNoErrorOnTheFacade() {
+        ec.message.clearAll()
+        ec.message.addMessage("the caller's own note")
+        MadeUpKeptRecords.errorOnCall = "made-up extract failed at db-7.internal"
+        try {
+            IllegalStateException e = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException) {
+                DatasetRefreshSupport.liveExtractor(ec).call("test.KeptCopyTestServices.project#MadeUpKeptRecords",
+                        [systemEnumId: "KC_PROJ", unionFields: ["id"]])
+            }
+            assertTrue(e.message.contains("made-up extract failed at db-7.internal"), e.message)
+            assertFacadeKeptOnlyTheCallersNote("db-7")
+        } finally {
+            MadeUpKeptRecords.errorOnCall = null
+            ec.message.clearAll()
+        }
+    }
+
+    /** No error or validation error is left, no message names the failure, and the caller's note is still there. */
+    private void assertFacadeKeptOnlyTheCallersNote(String failureText) {
+        assertFalse(ec.message.hasError(), "errors left on the facade: ${ec.message.errors}")
+        assertEquals([], ec.message.validationErrors)
+        List<String> messages = ec.message.messageInfos.collect { it.message as String }
+        assertEquals(["the caller's own note"], messages, "only the caller's note: ${messages}")
+        assertFalse(messages.any { it.contains(failureText) })
+    }
+
+    /** An options value that cannot be keyed: reading it (optionsHash's JSON) throws. */
+    static class UnkeyableOption {
+        String getValue() { throw new IllegalStateException("options read failed at vault-9") }
+    }
+
     /** A test-only connector row of a made-up system that names the test-only extract and projection service. */
     private void loadProjectionConnector() {
         ec.entity.makeDataLoader().location("classpath://dataset/MadeUpProjectionConnector.xml").dummyFks(true).load()

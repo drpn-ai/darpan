@@ -598,6 +598,18 @@ class ReconciliationServices {
                     ])
                     .call()
 
+            // DAR-OPS-029 S01a: a failure that is not an Exception (a StackOverflowError in a rule) escapes the engine's
+            // catch; Moqui records it as a message error, returns no result and refuses every later call. That is a
+            // failed rule stage, not "no rule differences".
+            if (ruleExec == null || ec.message.hasError()) {
+                ruleExecutionFailed = true
+                String reason = normalize(ec.message.hasError() ? ec.message.errorsString : null) ?: "the rule engine returned no result"
+                ruleErrors.add(reason)
+                processingWarnings.add(buildRuleStageWarning(ruleSetId, compareScopeDescription, batch, reason))
+                logger.error("RuleSet compare stage failed without a result; remaining matched-pair batches skipped ruleSet={} compareScope={} error={}",
+                        ruleSetId, compareScopeId, reason)
+                break
+            }
             processingWarnings.addAll(toNormalizedStringList(ruleExec?.warnings))
             if (ruleExec?.error) {
                 // Audit 2026-06-11 #4: a rule build/eval failure was downgraded to a warning and the

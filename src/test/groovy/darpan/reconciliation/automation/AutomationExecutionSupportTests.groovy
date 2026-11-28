@@ -3203,6 +3203,37 @@ class AutomationExecutionSupportTests {
 
     private static final String ACME_EXTRACT = "reconciliation.AcmeKeepExtractionServices.extract#AcmeRecords"
 
+    // DAR-OPS-029 OC158 (S14, security): the ID index is told when the side BEGAN reading, captured before the fetch, so a read
+    // that straddles a connection drop never counts as read after it (and never re-indexes data the drop erased).
+    @Test
+    void aLiveReadTellsTheIdIndexWhenItBeganReadingNotWhenTheFileWasWritten() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        List<List> handed = []
+        darpan.idindex.IdIndexRunHook.metaClass.static.afterLiveRead = { def hookEc, String tenantId, String systemEnumId, String connectionId,
+                                                                        String fileLocation, java.sql.Timestamp readStartedAt = null ->
+            handed << [systemEnumId, fileLocation, readStartedAt]
+        }
+        Timestamp beforeFetch = (Timestamp) ec.user.nowTimestamp
+        Timestamp afterFetch = new Timestamp(beforeFetch.time + 10 * 60_000L)
+        try {
+            def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+            def source = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.automationId == "AUTO_API" && it.fileSide == "FILE_1" }
+            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
+                    [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")],
+                    [automationExecutionId: "AUTO_EXEC_X", liveExtractor: { String serviceName, Map params ->
+                        ec.user.nowTimestamp = afterFetch   // the read takes ten minutes; the file is written at its end
+                        [dataAvailable: true, fileLocation: "runtime://tmp/FILE_1.json", recordCount: 10]
+                    }])
+
+            assertEquals(1, handed.size())
+            assertEquals("runtime://tmp/FILE_1.json", handed[0][1])
+            assertEquals(beforeFetch, handed[0][2], "readStartedAt is the moment before the fetch, never the end of the write")
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(darpan.idindex.IdIndexRunHook)
+        }
+    }
+
     @Test
     void anotherTenantsFilterRowsAreNeverRead() {
         // Review Focus 4. The scheduler has no active tenant, so nothing but the explicit condition keeps tenant B's

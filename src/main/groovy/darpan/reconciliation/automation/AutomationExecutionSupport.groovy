@@ -1697,6 +1697,7 @@ class AutomationExecutionSupport {
         try {
             prepared = RunVerificationSupport.prepareReturnPresencePass([
                     ec                 : ec,
+                    serviceResult      : reconcileResult,
                     diffFile           : resolveDiffFile(ec, reconcileResult),
                     sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
                                           [source: file2Source, extractResult: file2Result, label: file2Label]],
@@ -2243,6 +2244,9 @@ class AutomationExecutionSupport {
         // A caller's own live extractor (params.liveExtractor, a Closure(serviceName, serviceParams)), for tests, as
         // RunExtractSupport.extractApiSource takes its serviceCaller; absent in production, which calls the service.
         Closure liveExtractor = params?.liveExtractor instanceof Closure ? (Closure) params.liveExtractor : null
+        // OC158 (S14): when this side BEGAN reading, before the fetch. The ID index decides by it whether a connection drop came
+        // after the read; the extract file's modified time is when the write ended, so a fetch straddling a drop read as later.
+        Timestamp readStartedAt = nowTimestamp(ec)
         Map<String, Object> result = ((liveExtractor != null ? liveExtractor.call(serviceName, serviceParams) : call.call()) ?: [:]) as Map<String, Object>
         List<String> errors = (result.errors instanceof Collection ? (Collection) result.errors : [])
                 .collect { Object error -> normalize(error) }
@@ -2258,7 +2262,7 @@ class AutomationExecutionSupport {
         // DAR-BE-374: what this run read feeds the ID index, in the background
         darpan.idindex.IdIndexRunHook.afterLiveRead(ec, normalize(serviceParams.companyUserGroupId), normalize(connectorForService?.systemEnumId),
                 normalize(serviceParams[normalize(connectorForService?.configParameterName) ?: "sourceConfigId"]),
-                normalize(result.fileLocation ?: result.dataManagerPath))
+                normalize(result.fileLocation ?: result.dataManagerPath), readStartedAt)
         // DAR-BE-320 phase 1b: the window THIS side read (HotWax reads from its last covered day, the other side a
         // little earlier), recorded on the audit's source read.
         result = new LinkedHashMap<String, Object>(result)

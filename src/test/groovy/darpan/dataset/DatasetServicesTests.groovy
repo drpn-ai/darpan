@@ -133,6 +133,24 @@ class DatasetServicesTests {
     }
 
     /**
+     * OC212: a SuiteQL query (a tenant's own row, never shared) passed no validator, so tenant B could keep a copy on
+     * tenant A's query id; only the extractor refused at read time. Its owner may; anyone else is refused as missing.
+     */
+    @Test
+    void aQueryRowOfAnotherTenantIsRefused() {
+        insert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ns-a", companyUserGroupId: A, isActive: "Y"])
+        insert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "suiteql-a", nsAuthConfigId: "ns-a",
+                recordType: "salesOrder", companyUserGroupId: A, isActive: "Y"])
+        Map suiteQl = [systemEnumId: "NETSUITE_SUITEQL", sourceConfigId: "suiteql-a", options: [kind: "oc212"], idField: "id",
+                stampField: "lastModifiedDate", windowField: "tranDate"]
+        actAs(EDITOR_USERNAME, B)
+        Map refused = call("store#Dataset", suiteQl)
+        assertEquals(["Dataset source config 'suiteql-a' was not found."], refused.errors)
+        actAs(EDITOR_USERNAME, A)
+        assertEquals([], call("store#Dataset", suiteQl).errors, "the owner may keep it")
+    }
+
+    /**
      * I1: a dataset reads by its own window field, so its system's extract service must take windowFieldName. Shopify line
      * units' does not (Moqui would drop the parameter and window on createdAt): an active dataset of it is refused, as is
      * a system no connector reads. A paused one may be stored, but not switched on.

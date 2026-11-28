@@ -996,9 +996,16 @@ class ReconciliationSavedRunSupport {
             // extractor — see SourceSystemConnectorSeedData.xml) so it can never resolve through the
             // registry branches above; dispatch stays a direct, unchanged call.
             validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId)
+        } else if (configTypeEnumId) {
+            // OC212: any other shareable config type (a data-defined system on NsAuthConfig) passes the same
+            // owner-or-shared, active, enabled gate; it had no validator at all
+            validateSharedConfig(ec, sourceLabel, sourceConfigId, configTypeEnumId, systemEnumId)
+        } else if (connector?.configEntityName) {
+            // OC212: a config row no tenant shares (a SuiteQL or database query) must be the tenant's own, as its
+            // extractor checks at read time; an entity with no tenant field is refused (fail closed)
+            validateTenantOwnedConfig(ec, sourceLabel, sourceConfigId, connector.configEntityName as String)
         }
-        // else: unregistered system (e.g. SAPI, or no connector row at all) — no validator, exactly
-        // the prior "default: break" behavior.
+        // else: a system whose connector names no config (e.g. SAPI, or no connector row at all): no validator.
 
         return [sourceConfigId: sourceConfigId, sourceConfigType: sourceConfigType]
     }
@@ -1084,6 +1091,44 @@ class ReconciliationSavedRunSupport {
         }
         requireEndpointEnabledForSide(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, sourceConfigId,
                 systemEnumId)
+    }
+
+    /** OC212: a registered shareable config by its registry row: one message for missing and not-yours (no existence oracle). */
+    protected static void validateSharedConfig(def ec, String sourceLabel, String sourceConfigId, String configTypeEnumId,
+                                               String systemEnumId) {
+        Map<String, String> type = SharedConfigAccessSupport.configType(configTypeEnumId)
+        def config = TenantScopedFinder.findGlobalUnscoped(ec, type.entityName,
+                        "source config resolved by explicit PK; SharedConfigAccessSupport gates owner-or-shared access " +
+                        "on the next line (DAR-BE-005, OC212)")
+                .condition(type.pkField, sourceConfigId).useCache(false).one()
+        if (config == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec, configTypeEnumId, config)) {
+            ec.message.addError("${sourceLabel} ${type.label} '${sourceConfigId}' was not found.")
+            return
+        }
+        if (normalize(config.isActive) == "N") ec.message.addError("${sourceLabel} ${type.label} '${sourceConfigId}' is inactive.")
+        requireEndpointEnabledForSide(ec, configTypeEnumId, sourceConfigId, systemEnumId)
+    }
+
+    /** OC212: a config row only its own tenant uses (no sharing): the active tenant's, or refused as missing. */
+    protected static void validateTenantOwnedConfig(def ec, String sourceLabel, String sourceConfigId, String entityName) {
+        String notFound = "${sourceLabel} source config '${sourceConfigId}' was not found.".toString()
+        def definition = ec.entity.getEntityDefinition(entityName)
+        List<String> pk = definition?.getPkFieldNames() as List<String>
+        if (pk?.size() != 1 || !definition.isField("companyUserGroupId")) {
+            ec.message.addError(notFound)
+            return
+        }
+        def config = TenantScopedFinder.findGlobalUnscoped(ec, entityName,
+                        "source config resolved by explicit PK; its companyUserGroupId is checked against the active " +
+                        "tenant on the next line (OC212)")
+                .condition(pk[0], sourceConfigId).useCache(false).one()
+        if (!TenantAccessSupport.canAccessTenantRecord(ec, config)) {
+            ec.message.addError(notFound)
+            return
+        }
+        if (definition.isField("isActive") && normalize(config.isActive) == "N") {
+            ec.message.addError("${sourceLabel} source config '${sourceConfigId}' is inactive.")
+        }
     }
 
     protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId) {

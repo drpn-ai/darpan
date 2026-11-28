@@ -237,6 +237,18 @@ class AuditReportAssemblerSmokeTests {
         }
     }
 
+    // DAR-OPS-029 S10 (no hollow green): an audit with no check configured read complete, so its Run health said
+    // "complete" with nothing asking for attention.
+    @Test
+    void anAuditWithNoCheckIsNotComplete() {
+        insert("moqui.security.UserGroup", [userGroupId: "TNOC", description: "No checks"])
+        audit("TNOC", "TNOC_AUDIT", "no-checks", "No checks", "AUDP_MONTH")
+        statement("TNOC", "TNOC_AUDIT", "TNOC_S1", "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "no-checks S1")
+        Map health = report("TNOC", "TNOC_AUDIT", "2026-10-08").health as Map
+        assertEquals([complete: false, summary: "No check is configured yet. S1 has no check yet.",
+                      checks: [ran: 0, partial: 0, notRun: 0], notCovered: ["S1"]], health.subMap(["complete", "summary", "checks", "notCovered"]))
+    }
+
     @Test
     void aPastMorningReadsEachFindingsStateFromItsHistory() {
         Map doc = report(GORJANA, "2026-10-07")

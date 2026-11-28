@@ -97,9 +97,7 @@ class AuditReportAssembler {
 
         List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
                 .orderBy("sequenceNum").useCache(true).list()*.getMap()
-        // DAR-UI-063. A statement turned off is not part of the report.
-        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId)
-                .orderBy(["sequenceNum", "statementCode"]).list()*.getMap().findAll { (it.isActive ?: "Y") != "N" }
+        List<Map> statements = activeStatements(ec, tenantId, auditId)
         Set<String> statementIds = statements*.statementId.toSet() as Set<String>
         Map<String, Map> checksById = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).list()
                 .collectEntries { [(it.checkId): it.getMap()] }
@@ -291,7 +289,8 @@ class AuditReportAssembler {
         int ran = configuredCheckIds.count { checkStatus[it] == RAN } as int
         int partial = configuredCheckIds.count { checkStatus[it] == PARTIAL } as int
         int notRun = configuredCheckIds.count { checkStatus[it] == NOT_RUN } as int
-        boolean complete = partial == 0 && notRun == 0
+        // No hollow green: an audit with no check configured has read nothing, so it is not complete.
+        boolean complete = !configuredCheckIds.isEmpty() && partial == 0 && notRun == 0
 
         List<String> sentences = []
         if (configuredCheckIds.isEmpty()) sentences << "No check is configured yet."
@@ -472,35 +471,39 @@ class AuditReportAssembler {
 
     /**
      * DAR-BE-250. Earliest step wins: each statement's order units (statements in story order, sequenceNum then code),
-     * split into those it counts and those waiting on an earlier step of the same order (OrderWorlds). A unit waits when
-     * every one of its lines does. Each waiting unit is hung, with its statement, on the first open unit its order world
-     * counts (the earliest step's), as waitingUnits. Returns statementId -> [counted: units, waiting: units].
+     * split into those it counts and those waiting on an earlier step of the same order (OrderWorlds). A unit's open lines
+     * wait together (they share its world and its step); its fixed lines never wait, so when its open lines wait, they
+     * are a waiting unit and its fixed lines stay counted as fixed at their own step (DAR-OPS-029 S10: before, such an
+     * order was counted open at both steps). Each waiting unit is hung, with its statement, on the first open unit of its
+     * order world that a statement counts, which is at the step it waits on. Returns statementId -> [counted, waiting].
      */
     static Map<String, Map> stepUnits(List<Map> statements, Map<String, List<Map>> entriesByStatement, Map<String, Map> recordsByFinding) {
         Map<String, Long> step = statements.collectEntries { [(it.statementId as String): it.sequenceNum == null ? null : (it.sequenceNum as Long)] }
-        List<Map> all = statements.collectMany { (entriesByStatement[it.statementId as String] ?: []) as List<Map> } as List<Map>
+        List<Map> all = statements.collectMany { (entriesByStatement.get(it.statementId as String) ?: []) as List<Map> } as List<Map>
         Map<String, Map> worlds = OrderWorlds.rank(all, recordsByFinding, step)
         Map<String, Map> out = new LinkedHashMap<>()
         Map<String, Map> holderByWorld = [:]
         statements.each { Map st ->
             List<Map> counted = [], waiting = []
-            orderUnits((entriesByStatement[st.statementId as String] ?: []) as List<Map>, recordsByFinding).each { Map unit ->
+            orderUnits((entriesByStatement.get(st.statementId as String) ?: []) as List<Map>, recordsByFinding).each { Map unit ->
                 List<Map> lines = unit.entries as List<Map>
-                Map first = worlds[lines[0].row.findingId as String]
-                unit.world = first?.world
-                if (lines.every { worlds[it.row.findingId as String]?.waitingOn != null }) {
-                    unit.waitingOn = first.waitingOn
-                    waiting << unit
-                } else {
-                    counted << unit
-                    if (unit.state == OPEN && unit.world != null && !holderByWorld.containsKey(unit.world)) holderByWorld[unit.world as String] = unit
+                String world = worlds.get(lines[0].row.findingId as String)?.world
+                List<Map> open = lines.findAll { it.state == OPEN }
+                String waitingOn = open ? worlds.get(open[0].row.findingId as String)?.waitingOn : null
+                if (waitingOn == null) {
+                    counted << (unit + [world: world])
+                    return
                 }
+                waiting << (unit + [row: open[0].row, state: OPEN, entries: open, world: world, waitingOn: waitingOn])
+                List<Map> fixed = lines.findAll { it.state != OPEN }
+                if (fixed) counted << (unit + [row: fixed[0].row, state: FIXED, entries: fixed, world: world])
             }
-            out[st.statementId as String] = [counted: counted, waiting: waiting]
+            counted.each { Map unit -> if (unit.state == OPEN && unit.world != null) holderByWorld.putIfAbsent(unit.world as String, unit) }
+            out.put(st.statementId as String, [counted: counted, waiting: waiting])
         }
         out.each { String statementId, Map split ->
             (split.waiting as List<Map>).each { Map unit ->
-                Map holder = holderByWorld[unit.world as String]
+                Map holder = holderByWorld.get(unit.world as String)
                 if (holder != null) ((List) (holder.waitingUnits = holder.waitingUnits ?: [])) << (unit + [statementId: statementId])
             }
         }
@@ -702,12 +705,7 @@ class AuditReportAssembler {
      * read, even for one statement's list, to know which orders an earlier step already reports.
      */
     private static Map openStepUnits(def ec, String tenantId, String auditId, String period) {
-        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
-                .findAll { (it.isActive ?: "Y") != "N" }
-                .sort(false) { Map a, Map b ->
-                    ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
-                            (a.statementCode as String) <=> (b.statementCode as String)
-                }
+        List<Map> statements = activeStatements(ec, tenantId, auditId)
         Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
             def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
                     .condition("stateEnumId", OPEN)
@@ -939,10 +937,7 @@ class AuditReportAssembler {
                     conditions << cf.makeCondition("firstFoundDate", COMPARATORS[t.comparator as String], day); break
             }
         }
-        statements = statements.sort(false) { Map a, Map b ->
-            ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
-                    (a.statementCode as String) <=> (b.statementCode as String) ?: (a.statementId as String) <=> (b.statementId as String)
-        }
+        statements = statements.sort(false, STATEMENT_ORDER)
         Map<String, Map> statementById = statements.collectEntries { [(it.statementId): it] }
 
         // DAR-BE-348: a level is resolved from the finding's statement and reason, so the filter runs on the rows read,
@@ -1583,6 +1578,21 @@ class AuditReportAssembler {
         try { zone = setting?.timeZone ? ZoneId.of(setting.timeZone as String) : ZoneId.of("UTC") }
         catch (Exception ignored) { zone = ZoneId.of("UTC") }
         return [name: group.description ?: tenantId, zone: zone]
+    }
+
+    /**
+     * Statements in story order: sequenceNum (none last), then code, then id. The one order the report, the by-order
+     * list and the findings page share (DAR-OPS-029 S10: the report sorted in the database, where NULL comes first).
+     */
+    static final Comparator<Map> STATEMENT_ORDER = { Map a, Map b ->
+        ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
+                (a.statementCode as String) <=> (b.statementCode as String) ?: (a.statementId as String) <=> (b.statementId as String)
+    } as Comparator<Map>
+
+    /** One audit's statements that are on (DAR-UI-063: a statement turned off is not part of the report), in STATEMENT_ORDER. */
+    private static List<Map> activeStatements(def ec, String tenantId, String auditId) {
+        return tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
+                .findAll { (it.isActive ?: "Y") != "N" }.sort(false, STATEMENT_ORDER)
     }
 
     private static def tenantRows(def ec, String entityName, String tenantId) {

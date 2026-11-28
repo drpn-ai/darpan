@@ -281,8 +281,9 @@
          four children carry the tenant like their parent so the filter applies to each directly. -->
     <entity entity-name="AuditFinding" package="darpan.audit" use="transactional" sequence-primary-prefix="F-">
         <description>One record that breaks one statement, as found by one check. Identity is (tenant, check, statement,
-            recordKey): the same record found again on a later morning is the same finding, and one record that breaks two
-            statements of one check is two findings.</description>
+            period, recordKey), held by the unique index AUDF_TENANT_KEY: the same record found again on a later morning of
+            the period is the same finding, one record that breaks two statements of one check is two findings, and each
+            period is its own run (DAR-BE-091).</description>
         <field name="findingId" type="id" is-pk="true">
             <description>F-&lt;n&gt;. The stored id and the JSON id are the same string.</description>
         </field>

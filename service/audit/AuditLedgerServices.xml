@@ -93,7 +93,8 @@
                 <!-- DAR-BE-254. A check moved to another statement keeps its findings: an open one it left under a statement
                      it no longer tests is the same problem, so it moves here with its history (RAILS 2026-11-12: the ship
                      group check moved R8 -> R10 and every order showed twice). If this statement already holds one, the
-                     left-behind copy closes, saying where it went. -->
+                     left-behind copy closes, saying where it went. Of several left behind, the one found first moves, so the
+                     record keeps its first-found day on every database (DAR-OPS-029 S13). -->
                 <entity-find entity-name="darpan.audit.AuditFinding" list="leftBehind" for-update="true">
                     <econdition field-name="companyUserGroupId"/>
                     <econdition field-name="checkId"/>
@@ -101,6 +102,8 @@
                     <econdition field-name="recordKey" from="f.recordKey"/>
                     <econdition field-name="stateEnumId" value="AUDFS_OPEN"/>
                     <econdition field-name="statementId" operator="not-in" from="statementIdByCode.values()"/>
+                    <order-by field-name="firstFoundDate"/>
+                    <order-by field-name="findingId"/>
                 </entity-find>
                 <if condition="!existingList &amp;&amp; leftBehind">
                     <set field="existingList" from="[leftBehind[0]]"/>
@@ -124,7 +127,9 @@
                     <if condition="finding.stateEnumId == 'AUDFS_FIXED'">
                         <set field="eventTypeEnumId" value="AUDFE_REOPENED"/>
                         <set field="reopenedCount" from="reopenedCount + 1"/>
-                        <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
+                        <!-- timesSeen counts mornings: a reopen the morning it was last seen is not another morning. -->
+                        <if condition="finding.lastSeenDate &lt; reportDate">
+                            <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/></if>
                         <set field="finding.lastSeenDate" from="reportDate"/>
                         <set field="finding.closedStamp" from="null"/>
                         <set field="finding.closedByTypeEnumId" from="null"/>
@@ -233,6 +238,14 @@
                 <description>DAR-BE-118. The record keys this run reported (record#CheckFindings). Given: a finding closes when
                     this run examined its record and did not report it, so a later run the same morning closes what an
                     earlier one raised. Blank: "not reported" is read as lastSeenDate before reportDate.</description></parameter>
+            <parameter name="reportedFindingIds" type="List">
+                <description>DAR-OPS-029 S13. The findingIds record#CheckFindings returned for this run. Given, "not reported"
+                    is judged per finding instead of per record, so a record still broken under one statement closes its
+                    fixed finding under another. Wins over reportedRecordKeys.</description></parameter>
+            <parameter name="unjudgedStatementIds" type="List">
+                <description>DAR-OPS-029 S13. Statements this run could not judge, for any reason the caller knows (e.g. a link
+                    naming a rule the run no longer has): their open findings are left open. Turned-off statements are added
+                    here by the ledger itself.</description></parameter>
             <parameter name="explanations" type="Map">
                 <description>DAR-BE-118. recordKey -> {conclusionEnumId, diagnosisText, headline}: why this run did not report
                     it (a conclusion the statement does not count). The closed finding keeps it.</description></parameter>
@@ -258,15 +271,23 @@
             </if>
             <set field="examined" from="new HashSet((examinedRecordKeys ?: [])*.toString())"/>
             <set field="reported" from="new HashSet((reportedRecordKeys ?: [])*.toString())"/>
+            <set field="reportedIds" from="reportedFindingIds != null ? new HashSet(reportedFindingIds*.toString()) : null"/>
+            <!-- A statement this run did not judge (turned off, DAR-UI-063, or named by the caller) had no chance to report its
+                 findings, so none of them reads as fixed. -->
+            <set field="unjudged" from="((tenantCheck.inactiveStatementIds ?: []) + (unjudgedStatementIds ?: []))*.toString().unique()"/>
             <entity-find entity-name="darpan.audit.AuditFinding" list="candidates" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
                 <econdition field-name="period"/>
                 <econdition field-name="stateEnumId" value="AUDFS_OPEN"/>
-                <econdition field-name="lastSeenDate" operator="less" from="reportDate" ignore="reportedRecordKeys != null"/>
+                <econdition field-name="statementId" operator="not-in" from="unjudged" ignore="!unjudged"/>
+                <econdition field-name="lastSeenDate" operator="less" from="reportDate"
+                        ignore="reportedRecordKeys != null || reportedIds != null"/>
+                <order-by field-name="findingId"/>
             </entity-find>
             <iterate list="candidates" entry="finding">
-                <if condition="examined.contains(finding.recordKey) &amp;&amp; !reported.contains(finding.recordKey)">
+                <set field="notReported" from="reportedIds != null ? !reportedIds.contains(finding.findingId) : !reported.contains(finding.recordKey)"/>
+                <if condition="examined.contains(finding.recordKey) &amp;&amp; notReported">
                     <set field="why" from="explanations?.get(finding.recordKey)"/>
                     <if condition="why">
                         <set field="finding.conclusionEnumId" from="why.conclusionEnumId"/>
@@ -450,6 +471,7 @@
             <parameter name="check" type="Map"/>
             <parameter name="statementIdByCode" type="Map"/>
             <parameter name="auditIds" type="List"><description>DAR-BE-091. The audits the check's statements belong to.</description></parameter>
+            <parameter name="inactiveStatementIds" type="List"><description>DAR-UI-063. The check's statements turned off (isActive N).</description></parameter>
         </out-parameters>
         <actions>
             <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
@@ -476,6 +498,7 @@
                 <return error="true" message="Audit check ${checkId} tests two statements coded ${sharedCodes.join(', ')}; a check's statements need distinct codes"/></if>
             <set field="statementIdByCode" from="statements.collectEntries { [(it.statementCode): it.statementId] }"/>
             <set field="auditIds" from="statements*.auditId.unique()"/>
+            <set field="inactiveStatementIds" from="statements.findAll { it.isActive == 'N' }*.statementId"/>
         </actions>
     </service>
 
@@ -660,7 +683,7 @@
         </actions>
     </service>
 
-    <!-- DAR-BE-206: registered migration AUDIT_FINDINGS_NO_PENDING (data/MigrationRegistrySeedData.xml). -->
+    <!-- DAR-UI-152: registered migration ACK_NOTE_NULLABLE (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="AcknowledgementNoteNullable" authenticate="false" allow-remote="false">
         <description>One-time (DAR-UI-152): an acknowledgement's note is optional, so AuditFindingAcknowledgement.note allows no
             value. Moqui never relaxes an existing column, so a database made before 3.4.15 keeps NOT NULL until this runs.
@@ -684,6 +707,7 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-206: registered migration AUDIT_FINDINGS_NO_PENDING (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="AuditFindingsNoPending" authenticate="false" allow-remote="false">
         <description>One-time: a finding is only open or fixed, so every stored finding still pending (the retired
             check-level grace) becomes open. Its dates, history and evidence are kept; no event is written, as none was

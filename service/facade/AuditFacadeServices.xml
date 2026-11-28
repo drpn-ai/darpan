@@ -109,7 +109,7 @@
             <parameter name="submitted" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for audits.')"/>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for audits.')"/>
             <if condition="ec.message.hasError()"><return error="true"/></if>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
@@ -721,9 +721,9 @@
         <actions>
             <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audit changes.')"/>
             <if condition="!ec.message.hasError()">
-            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
-            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+                <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+                <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
                 <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map, runEmail as Map, reasons as List)</script>
                 <if condition="!ec.message.hasError()">
                     <set field="settings" from="darpan.audit.AuditSettingsSupport.settings(ec, tenantId, darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit))"/>
@@ -820,11 +820,11 @@
                 <parameter name="run" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for running audits.')"/>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for running audits.')"/>
             <if condition="!ec.message.hasError()">
-            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
-            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+                <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+                <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
                 <script>
                     try {
                         runs = darpan.audit.AuditSettingsSupport.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),

@@ -44,22 +44,7 @@
 
     <service verb="get" noun="TenantSettings" authz-action="view" allow-remote="true" authenticate="true">
         <description>Get active-tenant settings shared by users in the tenant.</description>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="tenantSettings" type="Map">
-                <parameter name="companyUserGroupId"/>
-                <parameter name="companyLabel"/>
-                <parameter name="timeZone"/>
-                <parameter name="streaksChatSpaceId">
-                    <description>DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated.</description>
-                </parameter>
-                <parameter name="createdByUserId"/>
-                <parameter name="createdDate" type="Timestamp"/>
-                <parameter name="lastUpdatedDate" type="Timestamp"/>
-            </parameter>
-        </out-parameters>
+        <implements service="common.ReplyInterfaces.define#TenantSettingsReply"/>
         <actions>
             <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.readActiveTenantSettings(ec)"/>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -70,6 +55,7 @@
 
     <service verb="save" noun="TenantSettings" allow-remote="true" authenticate="true">
         <description>Save active-tenant settings shared by users in the tenant.</description>
+        <implements service="common.ReplyInterfaces.define#TenantSettingsReply"/>
         <in-parameters>
             <parameter name="timeZone">
                 <description>Timezone identifier for the active tenant, such as UTC or America/Los_Angeles. Absent leaves it unchanged.</description>
@@ -78,22 +64,6 @@
                 <description>DAR-BE-108. Chat space (owned by the active tenant, active) for tenant-wide streak messages. Empty string clears it; absent leaves it unchanged.</description>
             </parameter>
         </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="tenantSettings" type="Map">
-                <parameter name="companyUserGroupId"/>
-                <parameter name="companyLabel"/>
-                <parameter name="timeZone"/>
-                <parameter name="streaksChatSpaceId">
-                    <description>DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated.</description>
-                </parameter>
-                <parameter name="createdByUserId"/>
-                <parameter name="createdDate" type="Timestamp"/>
-                <parameter name="lastUpdatedDate" type="Timestamp"/>
-            </parameter>
-        </out-parameters>
         <actions>
             <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.saveActiveTenantSettings(ec, timeZone, streaksChatSpaceId)"/>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -637,8 +607,6 @@
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
             <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="servers" from="[]"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="sftpServerFinder" from="ec.entity.find('darpan.reconciliation.SftpServer').orderBy('description,sftpServerId').useCache(false)"/>
             <set field="rows" from="(activeTenantUserGroupId ? sftpServerFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false, hostKeyFingerprint: item.hostKeyFingerprint, hostKeyPinnedDate: item.hostKeyPinnedDate] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.sftpServerId, row.description, row.host, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
@@ -801,8 +769,6 @@
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
             <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="authConfigs" from="[]"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <!-- DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
                  With zero grants this is identical to the previous tenant-only finder. -->
             <set field="accessibleRows" from="darpan.facade.common.SharedConfigAccessSupport.listAccessibleConfigRows(ec, 'SCFG_NS_AUTH')"/>

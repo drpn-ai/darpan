@@ -1,5 +1,6 @@
 package darpan.facade
 
+import darpan.contract.ApiContractGenerator
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
 
@@ -13,9 +14,10 @@ import static org.junit.jupiter.api.Assertions.fail
  * recorded per service) and compares it to a checked-in snapshot. Fails on any IN/OUT
  * parameter drift so that removing or renaming a facade parameter breaks CI instead of
  * breaking the SPA silently at runtime. Parameters a service inherits through
- * <implements service="..."/> are resolved (recursively) against every service definition
- * under the component's service/** tree, so moving a shared parameter set into an interface
- * service leaves the snapshot unchanged.
+ * <implements service="..."/> are merged the way Moqui's ServiceDefinition merges them
+ * (ApiContractGenerator.ServiceIndex: interface first, own attributes override, nested
+ * parameters merge by name), so moving a shared parameter set into an interface service
+ * leaves the snapshot unchanged.
  *
  * A missing snapshot fails the test; it is only written in update mode.
  *
@@ -38,8 +40,8 @@ class FacadeContractSnapshotTests {
 
         assertTrue(!xmlFiles.isEmpty(), "No XML files found in ${facadeDir.absolutePath}")
 
-        // Index every service definition under service/** so <implements> can be resolved.
-        Map<String, Node> serviceIndex = indexServices(facadeDir.parentFile)
+        // Resolves <implements> across this component and its siblings, as the API contract does.
+        ApiContractGenerator.ServiceIndex serviceIndex = new ApiContractGenerator.ServiceIndex(facadeDir.canonicalFile.parentFile.parentFile)
 
         // Parse every service from every facade file.
         List<Map<String, Object>> services = []
@@ -170,65 +172,20 @@ class FacadeContractSnapshotTests {
      * bare "verb#Noun". A bare name defined in more than one file keeps the first file in
      * path order; the full name is always unambiguous.
      */
-    private static Map<String, Node> indexServices(File serviceDir) {
-        Map<String, Node> index = [:]
-        if (serviceDir == null || !serviceDir.isDirectory()) return index
-        List<File> files = []
-        serviceDir.eachFileRecurse { File f -> if (f.isFile() && f.name.endsWith('.xml')) files.add(f) }
-        files.sort { it.path }
-        String basePath = serviceDir.absoluteFile.toPath().normalize().toString()
-        for (File f : files) {
-            Node root
-            try {
-                root = new XmlParser().parse(f)
-            } catch (Exception ignored) {
-                continue  // not a parseable service file; the facade parse fails on its own files
-            }
-            String rel = f.absoluteFile.toPath().normalize().toString().substring(basePath.length() + 1)
-            String prefix = rel.substring(0, rel.length() - '.xml'.length()).replace(File.separator, '.')
-            root.children().each { Object child ->
-                if (!(child instanceof Node)) return
-                Node svc = child as Node
-                if (svc.name() != 'service') return
-                String verb = svc.attributes().get('verb') ?: ''
-                String noun = svc.attributes().get('noun') ?: ''
-                String bare = noun ? "${verb}#${noun}".toString() : verb
-                index.put("${prefix}.${bare}".toString(), svc)
-                if (!index.containsKey(bare)) index.put(bare, svc)
-            }
-        }
-        return index
-    }
-
     /**
-     * Collect the parameters of an in-parameters or out-parameters block, including those
-     * inherited through <implements service="..."/> (resolved recursively, interface first,
-     * local parameters overriding by top-level name). For each parameter: name, type
-     * (defaulting to "String"), required (defaulting to "false"). One level of nested
-     * <parameter> children is listed as "name.childName" entries. Sorted by name.
-     * A service with no <implements> renders exactly its own parameters.
+     * The parameters of an in-parameters or out-parameters block, including those inherited through
+     * <implements service="..."/>, merged as Moqui merges them (S99-055: a service that re-declares an inherited Map
+     * only to give it its own description keeps the interface's nested fields). For each parameter: name, type
+     * (defaulting to "String"), required (defaulting to "false"). One level of nested <parameter> children is listed as
+     * "name.childName" entries. Sorted by name. A service with no <implements> renders exactly its own parameters.
      */
-    private static List<Map<String, String>> collectParams(Node svcNode, String blockName, Map<String, Node> serviceIndex) {
+    private static List<Map<String, String>> collectParams(Node svcNode, String blockName,
+            ApiContractGenerator.ServiceIndex serviceIndex) {
         if (implementsOf(svcNode).isEmpty()) {
             return sortByName(ownParams(svcNode, blockName).values().flatten() as List<Map<String, String>>)
         }
-        Map<String, List<Map<String, String>>> merged = resolveParams(svcNode, blockName, serviceIndex, new HashSet<Node>())
-        return sortByName(merged.values().flatten() as List<Map<String, String>>)
-    }
-
-    private static Map<String, List<Map<String, String>>> resolveParams(Node svcNode, String blockName,
-            Map<String, Node> serviceIndex, Set<Node> visiting) {
-        Map<String, List<Map<String, String>>> merged = new LinkedHashMap<>()
-        if (visiting.contains(svcNode)) return merged  // implements cycle: stop
-        visiting.add(svcNode)
-        for (String ref : implementsOf(svcNode)) {
-            Node iface = serviceIndex.get(ref)
-            if (iface == null) continue  // defined outside this component; cannot resolve here
-            merged.putAll(resolveParams(iface, blockName, serviceIndex, visiting))
-        }
-        merged.putAll(ownParams(svcNode, blockName))
-        visiting.remove(svcNode)
-        return merged
+        List merged = serviceIndex.mergedParameters(svcNode, blockName, "${svcNode.attributes().get('verb')}#${svcNode.attributes().get('noun')}".toString())
+        return sortByName(merged.collectMany { Object param -> entriesOf(param as Node) } as List<Map<String, String>>)
     }
 
     private static List<String> implementsOf(Node svcNode) {
@@ -256,32 +213,29 @@ class FacadeContractSnapshotTests {
                 Node paramNode = paramChild as Node
                 if (paramNode.name() != 'parameter') return
 
-                Map pAttrs = paramNode.attributes()
-                String pName     = pAttrs.get('name') ?: ''
-                String pType     = pAttrs.get('type') ?: 'String'
-                String pRequired = pAttrs.get('required') ?: 'false'
-
-                List<Map<String, String>> entries = []
-                entries.add([name: pName, type: pType, required: pRequired])
-
-                // One level of nested parameters (Map/List children).
-                paramNode.children().each { Object nestedChild ->
-                    if (!(nestedChild instanceof Node)) return
-                    Node nestedNode = nestedChild as Node
-                    if (nestedNode.name() != 'parameter') return
-
-                    Map nAttrs = nestedNode.attributes()
-                    String nName     = nAttrs.get('name') ?: ''
-                    String nType     = nAttrs.get('type') ?: 'String'
-                    String nRequired = nAttrs.get('required') ?: 'false'
-                    entries.add([name: "${pName}.${nName}".toString(), type: nType, required: nRequired])
-                }
+                String pName = paramNode.attributes().get('name') ?: ''
+                List<Map<String, String>> entries = entriesOf(paramNode)
                 // A duplicate name inside one block is kept (not collapsed) so the render stays faithful.
                 String key = result.containsKey(pName) ? "${pName}#dup${dupCount++}".toString() : pName
                 result.put(key, entries)
             }
         }
         return result
+    }
+
+    /** One parameter and its one level of nested parameters (Map/List children). */
+    private static List<Map<String, String>> entriesOf(Node paramNode) {
+        Map pAttrs = paramNode.attributes()
+        String pName = pAttrs.get('name') ?: ''
+        List<Map<String, String>> entries = [[name: pName, type: (pAttrs.get('type') ?: 'String') as String,
+                                              required: (pAttrs.get('required') ?: 'false') as String]]
+        paramNode.children().each { Object nestedChild ->
+            if (!(nestedChild instanceof Node) || (nestedChild as Node).name() != 'parameter') return
+            Map nAttrs = (nestedChild as Node).attributes()
+            entries.add([name: "${pName}.${nAttrs.get('name') ?: ''}".toString(), type: (nAttrs.get('type') ?: 'String') as String,
+                         required: (nAttrs.get('required') ?: 'false') as String])
+        }
+        return entries
     }
 
     private static List<Map<String, String>> sortByName(List<Map<String, String>> params) {

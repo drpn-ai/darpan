@@ -51,6 +51,7 @@
     <service verb="create" noun="AppContentEntry" allow-remote="true" authenticate="true">
         <description>Makes a new ADMIN entry with the key `admin:` + slug. Every rule runs; any problem (or dryRun) saves nothing.
             whereShown previews where the mascot will say it. The caller reads `problems` and `saved`: non-empty problems means nothing was saved, and dryRun never saves. Markup characters are refused by the rules in `problems`, not as a service error. Writes an AdminAuditLog row.</description>
+        <implements service="common.ReplyInterfaces.define#AppContentEntrySaveResult"/>
         <in-parameters>
             <parameter name="kind" required="true"/>
             <parameter name="slug" required="true"/>
@@ -64,12 +65,6 @@
             <parameter name="sequence" type="Integer"/>
             <parameter name="dryRun" type="Boolean"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="key"/>
-            <parameter name="problems" type="List"><parameter name="problem"/></parameter>
-            <parameter name="whereShown"/>
-            <parameter name="saved" type="Boolean"/>
-        </out-parameters>
         <actions>
             <set field="problems" from="[]"/>
             <set field="saved" from="false"/>
@@ -91,6 +86,7 @@
             title or body equal to its default is stored as none); the binding (matchPattern, route, condition, anchor, sequence)
             is for ADMIN entries. Every rule runs; any problem (or dryRun) saves nothing. Writes an AdminAuditLog row naming each
             changed field, old -> new; nothing changed writes none. The caller reads `problems` and `saved`: non-empty problems means nothing was saved, and dryRun never saves. Markup characters are refused by the rules in `problems`, not as a service error.</description>
+        <implements service="common.ReplyInterfaces.define#AppContentEntrySaveResult"/>
         <in-parameters>
             <parameter name="kind" required="true"/>
             <parameter name="key" required="true"/>
@@ -105,12 +101,6 @@
             <parameter name="sequence" type="Integer"/>
             <parameter name="dryRun" type="Boolean"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="key"/>
-            <parameter name="problems" type="List"><parameter name="problem"/></parameter>
-            <parameter name="whereShown"/>
-            <parameter name="saved" type="Boolean"/>
-        </out-parameters>
         <actions>
             <set field="problems" from="[]"/>
             <set field="saved" from="false"/>

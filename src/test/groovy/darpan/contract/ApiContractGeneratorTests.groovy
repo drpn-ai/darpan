@@ -64,7 +64,16 @@ class ApiContractGeneratorTests {
         try {
             File facade = new File(root, "service/facade")
             facade.mkdirs()
-            new File(facade, "OneFacadeServices.xml").text = new File(componentRoot, "service/facade/AuthFacadeServices.xml").text
+            // One self-contained remote service: a copy of a real facade file would fail first on its <implements>, whose
+            // interface lives in a file this bare root lacks (S99-055).
+            new File(facade, "OneFacadeServices.xml").text = '''<?xml version="1.0" encoding="UTF-8"?>
+<services>
+    <service verb="get" noun="Thing" allow-remote="true" authenticate="true">
+        <out-parameters><parameter name="ok" type="Boolean"/></out-parameters>
+        <actions><set field="ok" from="true"/></actions>
+    </service>
+</services>
+'''
             IllegalStateException e = assertThrows(IllegalStateException) { ApiContractGenerator.generate(root) }
             assertTrue(e.message.contains("darpan-hotwax") && e.message.contains("is missing"), e.message)
         } finally {

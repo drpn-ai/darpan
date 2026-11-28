@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-OPS-029 S99-055. Reply shapes several remote services share, declared once and pulled in with <implements>.
+         Kept outside service/facade/ on purpose: everything there is a published facade service (the facade contract
+         snapshot lists each one), and these are never called. An implementing service lists its own fields after these,
+         so a shape here must be the leading fields of every service that uses it, or the published field order changes. -->
+
+    <!-- S99-055: the reply of the services that answer with the session, in this order, so their contract is unchanged.
+         Implemented by get#SessionInfo, save#ActiveTenant and save#UserSettings, which keep their own descriptions. The
+         other services that return sessionInfo declare it between their own fields, so moving them here would reorder
+         their published fields; they go with DAR-BE-419 (the reply envelope). -->
+    <service verb="define" noun="SessionInfoReply" type="interface">
+        <description>Out-parameters of a reply that carries the refreshed session (ok, messages, errors, authenticated, sessionInfo).</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the session info lookup completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages emitted during session-info lookup.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>Errors returned while resolving session state.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
+            <parameter name="sessionInfo" type="Map">
+                <description>Authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
+                <parameter name="lastRun" type="Map">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants" type="List">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <!-- S99-055: get#TenantSettings and save#TenantSettings answer with the same reply. -->
+    <service verb="define" noun="TenantSettingsReply" type="interface">
+        <description>Out-parameters of get#TenantSettings and save#TenantSettings.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="tenantSettings" type="Map">
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="timeZone"/>
+                <parameter name="streaksChatSpaceId">
+                    <description>DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated.</description>
+                </parameter>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <!-- S99-055: create and update answer alike. Their in-parameters differ in order and requiredness (slug/key,
+         hidden), so sharing those would reorder the published fields; that goes with DAR-BE-419. -->
+    <service verb="define" noun="AppContentEntrySaveResult" type="interface">
+        <description>Out-parameters of create#AppContentEntry and update#AppContentEntry.</description>
+        <out-parameters>
+            <parameter name="key"/>
+            <parameter name="problems" type="List"><parameter name="problem"/></parameter>
+            <parameter name="whereShown"/>
+            <parameter name="saved" type="Boolean"/>
+        </out-parameters>
+    </service>
+</services>

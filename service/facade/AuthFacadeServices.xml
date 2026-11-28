@@ -135,6 +135,7 @@
 
     <service verb="get" noun="SessionInfo" allow-remote="true" authenticate="anonymous-all">
         <description>Return session metadata for darpan-ui route guards. Moqui resolves the request user from the explicit `login_key` header when present.</description>
+        <implements service="common.ReplyInterfaces.define#SessionInfoReply"/>
         <out-parameters>
             <parameter name="ok" type="Boolean">
                 <description>True when the session info lookup completed without facade errors.</description>
@@ -152,39 +153,6 @@
             </parameter>
             <parameter name="sessionInfo" type="Map">
                 <description>Authenticated session metadata returned to darpan-ui.</description>
-                <parameter name="userId" type="String"/>
-                <parameter name="username" type="String"/>
-                <parameter name="displayName" type="String"/>
-                <parameter name="locale" type="String"/>
-                <parameter name="timeZone" type="String"/>
-                <parameter name="userTimeZone" type="String"/>
-                <parameter name="tenantTimeZone" type="String"/>
-                <parameter name="lastLoginDate" type="Timestamp"/>
-                <parameter name="recoveryEmailMissing" type="Boolean"/>
-                <parameter name="emailAddressMasked" type="String"/>
-                <parameter name="lastRun" type="Map">
-                    <parameter name="reconciliationRunResultId" type="String"/>
-                    <parameter name="savedRunId" type="String"/>
-                    <parameter name="savedRunType" type="String"/>
-                    <parameter name="reconciliationRunId" type="String"/>
-                    <parameter name="createdDate" type="Timestamp"/>
-                </parameter>
-                <parameter name="scopeType" type="String"/>
-                <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeTenantUserGroupId" type="String"/>
-                <parameter name="activeTenantLabel" type="String"/>
-                <parameter name="availableTenants" type="List">
-                    <parameter name="userGroupId" type="String"/>
-                    <parameter name="label" type="String"/>
-                </parameter>
-                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
-                <parameter name="canViewActiveTenantData" type="Boolean"/>
-                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
-                <parameter name="canEditActiveTenantData" type="Boolean"/>
-                <parameter name="canManageDarpanCore" type="Boolean"/>
-                <parameter name="isSuperAdmin" type="Boolean"/>
-                <parameter name="twoFactorEnabled" type="Boolean"/>
-                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -205,6 +173,7 @@
 
     <service verb="save" noun="ActiveTenant" allow-remote="true" authenticate="true">
         <description>Persist the authenticated user's active tenant selection and return refreshed session metadata.</description>
+        <implements service="common.ReplyInterfaces.define#SessionInfoReply"/>
         <in-parameters>
             <parameter name="activeTenantUserGroupId" required="true">
                 <description>User-group id for the tenant the user wants to work in.</description>
@@ -227,39 +196,6 @@
             </parameter>
             <parameter name="sessionInfo" type="Map">
                 <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
-                <parameter name="userId" type="String"/>
-                <parameter name="username" type="String"/>
-                <parameter name="displayName" type="String"/>
-                <parameter name="locale" type="String"/>
-                <parameter name="timeZone" type="String"/>
-                <parameter name="userTimeZone" type="String"/>
-                <parameter name="tenantTimeZone" type="String"/>
-                <parameter name="lastLoginDate" type="Timestamp"/>
-                <parameter name="recoveryEmailMissing" type="Boolean"/>
-                <parameter name="emailAddressMasked" type="String"/>
-                <parameter name="lastRun" type="Map">
-                    <parameter name="reconciliationRunResultId" type="String"/>
-                    <parameter name="savedRunId" type="String"/>
-                    <parameter name="savedRunType" type="String"/>
-                    <parameter name="reconciliationRunId" type="String"/>
-                    <parameter name="createdDate" type="Timestamp"/>
-                </parameter>
-                <parameter name="scopeType" type="String"/>
-                <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeTenantUserGroupId" type="String"/>
-                <parameter name="activeTenantLabel" type="String"/>
-                <parameter name="availableTenants" type="List">
-                    <parameter name="userGroupId" type="String"/>
-                    <parameter name="label" type="String"/>
-                </parameter>
-                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
-                <parameter name="canViewActiveTenantData" type="Boolean"/>
-                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
-                <parameter name="canEditActiveTenantData" type="Boolean"/>
-                <parameter name="canManageDarpanCore" type="Boolean"/>
-                <parameter name="isSuperAdmin" type="Boolean"/>
-                <parameter name="twoFactorEnabled" type="Boolean"/>
-                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -279,6 +215,7 @@
 
     <service verb="save" noun="UserSettings" allow-remote="true" authenticate="true">
         <description>Persist authenticated user-level settings and return refreshed session metadata.</description>
+        <implements service="common.ReplyInterfaces.define#SessionInfoReply"/>
         <in-parameters>
             <parameter name="displayName">
                 <description>Optional user display name shown by darpan-ui instead of username.</description>
@@ -304,39 +241,6 @@
             </parameter>
             <parameter name="sessionInfo" type="Map">
                 <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
-                <parameter name="userId" type="String"/>
-                <parameter name="username" type="String"/>
-                <parameter name="displayName" type="String"/>
-                <parameter name="locale" type="String"/>
-                <parameter name="timeZone" type="String"/>
-                <parameter name="userTimeZone" type="String"/>
-                <parameter name="tenantTimeZone" type="String"/>
-                <parameter name="lastLoginDate" type="Timestamp"/>
-                <parameter name="recoveryEmailMissing" type="Boolean"/>
-                <parameter name="emailAddressMasked" type="String"/>
-                <parameter name="lastRun" type="Map">
-                    <parameter name="reconciliationRunResultId" type="String"/>
-                    <parameter name="savedRunId" type="String"/>
-                    <parameter name="savedRunType" type="String"/>
-                    <parameter name="reconciliationRunId" type="String"/>
-                    <parameter name="createdDate" type="Timestamp"/>
-                </parameter>
-                <parameter name="scopeType" type="String"/>
-                <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeTenantUserGroupId" type="String"/>
-                <parameter name="activeTenantLabel" type="String"/>
-                <parameter name="availableTenants" type="List">
-                    <parameter name="userGroupId" type="String"/>
-                    <parameter name="label" type="String"/>
-                </parameter>
-                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
-                <parameter name="canViewActiveTenantData" type="Boolean"/>
-                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
-                <parameter name="canEditActiveTenantData" type="Boolean"/>
-                <parameter name="canManageDarpanCore" type="Boolean"/>
-                <parameter name="isSuperAdmin" type="Boolean"/>
-                <parameter name="twoFactorEnabled" type="Boolean"/>
-                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>

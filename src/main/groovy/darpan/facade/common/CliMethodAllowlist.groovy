@@ -109,7 +109,6 @@ class CliMethodAllowlist {
 
             "facade.SearchFacadeServices.search#NavigationTargets",
 
-            "facade.SettingsFacadeServices.get#LlmSettings",
             // DAR-UI-123: writes nothing; its spaces carry no webhook URL.
             "facade.SettingsFacadeServices.get#NotificationRoutes",
             "facade.SettingsFacadeServices.get#TenantSettings",
@@ -436,7 +435,6 @@ class CliMethodAllowlist {
             "facade.SettingsFacadeServices.list#NsRestletConfigs", // returns raw headersJson, which may carry an auth header
             "facade.SettingsFacadeServices.list#SftpServers", // returns the SFTP login username
             "facade.SettingsFacadeServices.list#TenantChatSpaces", // returns each webhook URL in clear text
-            "facade.SettingsFacadeServices.save#LlmSettings",
             "facade.SettingsFacadeServices.save#NsAuthConfig",
             "facade.SettingsFacadeServices.save#NsRestletConfig",
             "facade.SettingsFacadeServices.save#SftpServer",

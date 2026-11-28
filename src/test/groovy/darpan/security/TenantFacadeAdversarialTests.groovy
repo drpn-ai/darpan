@@ -211,13 +211,6 @@ class TenantFacadeAdversarialTests {
     // ---- platform-wide config that every tenant reads ------------------------------------------
 
     @Test
-    void tenantEditorCannotRewriteGlobalLlmSettings() {
-        Map out = h.call("facade.SettingsFacadeServices.save#LlmSettings", [llmProvider: "OPENAI", llmApiKey: "attacker-key",
-                llmBaseUrl: "https://attacker.example.invalid/v1"])
-        assertNotEquals(true, out.ok, "a tenant editor saved platform LLM settings: ${out}")
-    }
-
-    @Test
     void tenantEditorCannotCreateGlobalDataSourceDefinition() {
         Map out = h.call("facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition", [definitionId: "ADV_EVIL",
                 definitionName: "evil", protocol: "REST_JSON", definitionJson: "{}"])

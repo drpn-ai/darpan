@@ -36,7 +36,6 @@ class CliMethodAllowlistTests {
             "facade.SettingsFacadeServices.delete#NsAuthConfig",
             "facade.SettingsFacadeServices.save#NsRestletConfig",
             "facade.SettingsFacadeServices.save#SftpServer",
-            "facade.SettingsFacadeServices.save#LlmSettings",
             "facade.SettingsFacadeServices.save#TenantChatSpace",
             "facade.SettingsFacadeServices.delete#TenantChatSpace",
             "facade.ShopifyFacadeServices.save#ShopifyAuthConfig",
@@ -100,10 +99,9 @@ class CliMethodAllowlistTests {
     ].asImmutable()
 
     /** Final review Important 2: credentials by name, so a NEW credential service is caught, not only today's names. */
-    private static final java.util.regex.Pattern CREDENTIAL_NOUN = ~/AuthConfig|RestletConfig|SftpServer|TenantChatSpace|LlmSettings|BotToken|Install|Passkey|TwoFactor|Password|Recovery|SecretHandoff|ApiKey|Webhook|Credential|SignIn|Login/
+    private static final java.util.regex.Pattern CREDENTIAL_NOUN = ~/AuthConfig|RestletConfig|SftpServer|TenantChatSpace|BotToken|Install|Passkey|TwoFactor|Password|Recovery|SecretHandoff|ApiKey|Webhook|Credential|SignIn|Login/
     /** Getters that return only redaction flags (has*), never the secret; each checked by hand when it was allowed. */
-    private static final Set<String> MASKED_GETTERS = ["facade.SettingsFacadeServices.get#LlmSettings",
-                                                       "facade.ShopifyFacadeServices.get#ShopifyAuthConfig",
+    private static final Set<String> MASKED_GETTERS = ["facade.ShopifyFacadeServices.get#ShopifyAuthConfig",
                                                        "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs",
                                                        "facade.SlackFacadeServices.get#SlackInstall"] as Set
 

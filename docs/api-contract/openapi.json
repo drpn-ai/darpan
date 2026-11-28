@@ -873,9 +873,6 @@
                                         "$ref": "#/components/schemas/DeleteTenantChatSpaceRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/GetLlmSettingsRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/GetNotificationRoutesRequest"
                                     },
                                     {
@@ -898,9 +895,6 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/ListTenantChatSpacesRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/SaveLlmSettingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveNsAuthConfigRequest"
@@ -1321,7 +1315,6 @@
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
                                         "facade.SettingsFacadeServices.delete#NsAuthConfig": "#/components/schemas/DeleteNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
-                                        "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.get#NotificationRoutes": "#/components/schemas/GetNotificationRoutesRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.get#UserNotificationDefault": "#/components/schemas/GetUserNotificationDefaultRequest",
@@ -1330,7 +1323,6 @@
                                         "facade.SettingsFacadeServices.list#NsRestletConfigs": "#/components/schemas/ListNsRestletConfigsRequest",
                                         "facade.SettingsFacadeServices.list#SftpServers": "#/components/schemas/ListSftpServersRequest",
                                         "facade.SettingsFacadeServices.list#TenantChatSpaces": "#/components/schemas/ListTenantChatSpacesRequest",
-                                        "facade.SettingsFacadeServices.save#LlmSettings": "#/components/schemas/SaveLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.save#NsAuthConfig": "#/components/schemas/SaveNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.save#NsRestletConfig": "#/components/schemas/SaveNsRestletConfigRequest",
                                         "facade.SettingsFacadeServices.save#SftpServer": "#/components/schemas/SaveSftpServerRequest",
@@ -2241,9 +2233,6 @@
                                             "$ref": "#/components/schemas/DeleteTenantChatSpaceResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/GetLlmSettingsResponse"
-                                        },
-                                        {
                                             "$ref": "#/components/schemas/GetNotificationRoutesResponse"
                                         },
                                         {
@@ -2266,9 +2255,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListTenantChatSpacesResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SaveLlmSettingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveNsAuthConfigResponse"
@@ -36671,127 +36657,6 @@
                     "result"
                 ]
             },
-            "GetLlmSettingsParams": {
-                "type": "object",
-                "properties": {
-                    "llmProvider": {
-                        "type": "string"
-                    }
-                },
-                "description": "Get LLM provider settings with stored-secret indicators."
-            },
-            "GetLlmSettingsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "llmSettings": {
-                        "type": "object",
-                        "properties": {
-                            "activeProvider": {
-                                "type": "string"
-                            },
-                            "llmProvider": {
-                                "type": "string"
-                            },
-                            "llmModel": {
-                                "type": "string"
-                            },
-                            "llmBaseUrl": {
-                                "type": "string"
-                            },
-                            "llmTimeoutSeconds": {
-                                "type": "string"
-                            },
-                            "llmEnabled": {
-                                "type": "string"
-                            },
-                            "hasStoredLlmApiKey": {
-                                "type": "boolean"
-                            },
-                            "hasFallbackLlmApiKey": {
-                                "type": "boolean"
-                            },
-                            "fallbackLlmKeyEnvName": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "GetLlmSettingsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.get#LlmSettings",
-                "x-darpan-method": "facade.SettingsFacadeServices.get#LlmSettings",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.get#LlmSettings"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/GetLlmSettingsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "GetLlmSettingsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.get#LlmSettings. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/GetLlmSettingsResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "GetNotificationRoutesParams": {
                 "type": "object",
                 "properties": {
@@ -37942,139 +37807,6 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ListTenantChatSpacesResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "SaveLlmSettingsParams": {
-                "type": "object",
-                "properties": {
-                    "llmProvider": {
-                        "type": "string"
-                    },
-                    "llmApiKey": {
-                        "type": "string"
-                    },
-                    "llmModel": {
-                        "type": "string"
-                    },
-                    "llmBaseUrl": {
-                        "type": "string"
-                    },
-                    "llmTimeoutSeconds": {
-                        "type": "string"
-                    },
-                    "llmEnabled": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "llmProvider"
-                ],
-                "description": "Save LLM provider settings while preserving existing key when blank."
-            },
-            "SaveLlmSettingsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "llmSettings": {
-                        "type": "object",
-                        "properties": {
-                            "activeProvider": {
-                                "type": "string"
-                            },
-                            "llmProvider": {
-                                "type": "string"
-                            },
-                            "llmModel": {
-                                "type": "string"
-                            },
-                            "llmBaseUrl": {
-                                "type": "string"
-                            },
-                            "llmTimeoutSeconds": {
-                                "type": "string"
-                            },
-                            "llmEnabled": {
-                                "type": "string"
-                            },
-                            "hasStoredLlmApiKey": {
-                                "type": "boolean"
-                            }
-                        }
-                    }
-                }
-            },
-            "SaveLlmSettingsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.save#LlmSettings",
-                "x-darpan-method": "facade.SettingsFacadeServices.save#LlmSettings",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.save#LlmSettings"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/SaveLlmSettingsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "SaveLlmSettingsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.save#LlmSettings. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/SaveLlmSettingsResult"
                     }
                 },
                 "required": [
@@ -43439,7 +43171,6 @@
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
         "facade.SettingsFacadeServices.delete#NsAuthConfig": "DeleteNsAuthConfig",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
-        "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
         "facade.SettingsFacadeServices.get#NotificationRoutes": "GetNotificationRoutes",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",
         "facade.SettingsFacadeServices.get#UserNotificationDefault": "GetUserNotificationDefault",
@@ -43448,7 +43179,6 @@
         "facade.SettingsFacadeServices.list#NsRestletConfigs": "ListNsRestletConfigs",
         "facade.SettingsFacadeServices.list#SftpServers": "ListSftpServers",
         "facade.SettingsFacadeServices.list#TenantChatSpaces": "ListTenantChatSpaces",
-        "facade.SettingsFacadeServices.save#LlmSettings": "SaveLlmSettings",
         "facade.SettingsFacadeServices.save#NsAuthConfig": "SaveNsAuthConfig",
         "facade.SettingsFacadeServices.save#NsRestletConfig": "SaveNsRestletConfig",
         "facade.SettingsFacadeServices.save#SftpServer": "SaveSftpServer",

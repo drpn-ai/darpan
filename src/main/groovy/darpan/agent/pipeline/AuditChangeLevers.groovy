@@ -48,7 +48,7 @@ class AuditChangeLevers {
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
     static final List<String> CHECK_TEXT_FIELDS = ["label", "file1RecordType", "file2RecordType", "matchedBy", "fixOwner",
             "expectedSource", "actualSource", "headlineTemplate", "fixActionTemplate", "passesWhenTemplate"].asImmutable()
-    // DAR-BE-196: a link no longer lists causes (AuditStatementCheck.conclusionCodes is retired); a cause is expected on its run.
+    // DAR-BE-196: a link no longer lists causes (AuditStatementCheck.conclusionCodes is removed, S99-323); a cause is expected on its run.
     static final List<String> NARROWING_KEYS = ["diffTypes", "ruleIds"].asImmutable()
     static final List<String> NODE_KEYS = ["key", "parent", "conclusion", "bucket", "question", "fix", "conditions"].asImmutable()
     static final List<String> CONDITION_KEYS = ["subject", "presence", "keyScope", "quantifier", "field", "operator", "values",

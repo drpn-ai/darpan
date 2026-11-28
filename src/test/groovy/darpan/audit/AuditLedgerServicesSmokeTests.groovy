@@ -139,28 +139,6 @@ class AuditLedgerServicesSmokeTests {
     }
 
     @Test
-    void aFindingStillPendingFromTheRetiredGraceIsOpenedOnceForEveryTenant() {
-        // DAR-BE-206, migration AUDIT_FINDINGS_NO_PENDING. Rows written under the old check-level grace, in two tenants;
-        // an installation that had them still has the AUDFS_PENDING enumeration (seed loads never delete).
-        insert("moqui.basic.Enumeration", [enumId: "AUDFS_PENDING", enumTypeId: "AuditFindingState", enumCode: "pending", description: "Pending"])
-        String gorjana = (record(CHECK, "2026-10-07", [finding("R4", "MIG-1")]).findingIds as List)[0]
-        String krewe = (ec.service.sync().name("${SVC}.record#CheckFindings").parameters([companyUserGroupId: KREWE, checkId: KREWE_CHECK,
-                reportDate: Date.valueOf("2026-10-07"), findings: [finding("R4", "MIG-K1")]]).call().findingIds as List)[0]
-        [gorjana, krewe].each { ec.entity.find("darpan.audit.AuditFinding").condition("findingId", it).one().set("stateEnumId", "AUDFS_PENDING").update() }
-
-        Map dry = migrate(true)
-        assertEquals(2, dry.rowsUpdated, "${dry.messages}")
-        assertEquals(["AUDFS_PENDING", "AUDFS_PENDING"], [row(gorjana).stateEnumId, row(krewe).stateEnumId], "a dry run writes nothing")
-
-        Map done = migrate(false)
-        assertEquals(2, done.rowsUpdated, "${done.messages}")
-        assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [row(gorjana).stateEnumId, row(krewe).stateEnumId])
-        assertEquals([Date.valueOf("2026-10-07"), ["AUDFE_FOUND"]], [row(gorjana).firstFoundDate, events(gorjana)*.eventTypeEnumId],
-                "dates and history are kept; no event is written")
-        assertEquals(0, migrate(false).rowsUpdated, "a second run changes nothing")
-    }
-
-    @Test
     void aSecondRunTheSameMorningRefreshesTheEvidenceAndWritesNoEvent() {
         String id = (record(CHECK, "2026-10-07", [finding("R4", "RERUN-1")]).findingIds as List)[0]
         Map again = finding("R4", "RERUN-1") + [headline: "Refreshed headline",
@@ -372,13 +350,6 @@ class AuditLedgerServicesSmokeTests {
                 reportDate: Date.valueOf(day), checkStamp: Timestamp.valueOf("${day} 06:12:00"), checkStatusEnumId: status,
                 examinedRecordKeys: examined]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
-        return out
-    }
-
-    private Map migrate(boolean dryRun) {
-        Map out = ec.service.sync().name("${SVC}.migrate#AuditFindingsNoPending").parameters([dryRun: dryRun]).disableAuthz().call()
-        assertFalse(ec.message.hasError(), ec.message.errorsString)
-        assertTrue(out.ok as boolean)
         return out
     }
 

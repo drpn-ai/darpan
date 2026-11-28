@@ -473,7 +473,8 @@ class ConfigTransferImporter {
 
     /**
      * A record's columns: each must exist here (UNKNOWN_FIELD), be one a transfer writes in that part of the record
-     * (FIELD_NOT_ALLOWED: never a key, the tenant, a stamp, a secret, or an id column sent as a plain value), name
+     * (FIELD_NOT_ALLOWED: never a key, the tenant, a stamp, a secret, an id column sent as a plain value, or a list column
+     * this instance retired, retiredListRefs), name
      * reference data this instance has (MISSING_REFERENCE_DATA), and a lookups column must read as lookups.
      */
     private static void checkFields(Map ctx, Map spec, Map rec, String ownerRef) {
@@ -482,9 +483,10 @@ class ConfigTransferImporter {
         def ed = ec.entity.getEntityDefinition(entityName)
         Map<String, Set<String>> allowed = [fields  : valueFields(ec, spec) as Set<String>, refs: refColumns(spec),
                                             listRefs: ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>]
+        Set<String> retiredLists = ((spec.retiredListRefs ?: []) as List<String>) as Set<String>   // TransferSpecs: why refused
         allowed.each { String part, Set<String> columns ->
             ((rec.get(part) ?: [:]) as Map).keySet().collect { it as String }.each { String name ->
-                if (!ed.isField(name)) {
+                if (!ed.isField(name) && !(name in retiredLists)) {
                     block(ctx, "UNKNOWN_FIELD", ownerRef, "${entityName} has no field ${name} on this instance; the source is ahead. " +
                             "Deploy this instance first.")
                 } else if (!(name in columns)) {

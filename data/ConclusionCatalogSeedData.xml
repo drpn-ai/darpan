@@ -13,8 +13,6 @@
             enumCode="CONC_RETIRED_SKU" description="Sold on a retired SKU"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NOT_IN_NETSUITE" enumTypeId="DarpanConclusion"
             enumCode="CONC_PRODUCT_NOT_IN_NETSUITE" description="Product not in NetSuite"/>
-    <!-- Codes are short (12 characters at most): a statement link lists its codes in one 255-character column
-         (AuditStatementCheck.conclusionCodes; gorjana R1's 16 codes overflowed it, 2026-11-04). -->
     <!-- DAR-BE-151 (Aditi 2026-11-06): an exchange HotWax holds until its original order ships, unfulfilled in NetSuite. -->
     <moqui.basic.Enumeration enumId="ORIG_OPEN" enumTypeId="DarpanConclusion"
             enumCode="ORIG_OPEN" description="Waits on its original order"/>

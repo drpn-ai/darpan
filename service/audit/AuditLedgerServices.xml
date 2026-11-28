@@ -752,60 +752,6 @@
         </actions>
     </service>
 
-    <!-- DAR-BE-199: registered migration AUDIT_SCHEDULE_OWNED (data/MigrationRegistrySeedData.xml). -->
-    <service verb="migrate" noun="AuditScheduleOwned" authenticate="false" allow-remote="false">
-        <description>One-time: every audit that has automations and no schedule of its own is stamped with one
-            (Audit.scheduleTime, scheduleTimeZone, scheduleActive): the time and zone most of its running automations
-            share, on when any runs. No automation is rewritten; one off the stamped schedule is named, and saving the
-            audit's settings puts it on. Idempotent: a stamped audit is skipped. Not remote: the migration supervisor runs
-            it, with authz disabled.</description>
-        <in-parameters>
-            <parameter name="dryRun" type="Boolean" default="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="rowsUpdated" type="Integer"/>
-            <parameter name="auditsOffSchedule" type="Integer"/>
-        </out-parameters>
-        <actions>
-            <set field="out" from="darpan.audit.AuditScheduleOwnedMigration.run(ec, dryRun as boolean)"/>
-            <set field="rowsUpdated" from="out.rowsUpdated"/>
-            <set field="auditsOffSchedule" from="out.auditsOffSchedule"/>
-            <set field="messages" from="out.messages"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="errors" from="ec.message.errors ?: []"/>
-        </actions>
-    </service>
-
-    <!-- DAR-BE-196: registered migration STATEMENT_LINK_EXPECTED (data/MigrationRegistrySeedData.xml). -->
-    <service verb="migrate" noun="StatementLinkExpected" authenticate="false" allow-remote="false">
-        <description>One-time: each statement link's list of the causes that break its statement moves onto its check's run.
-            Every conclusion rule whose cause the list left out gets outcome EXPECTED (a HIDE rule stays hidden), then the
-            list is cleared; Unexplained, never a rule, now counts on every statement. A run two links read with different
-            lists is reported and left untouched. Idempotent: a second run changes nothing. Not remote: the migration
-            supervisor runs it, with authz disabled.</description>
-        <in-parameters>
-            <parameter name="dryRun" type="Boolean" default="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="rowsUpdated" type="Integer"/>
-            <parameter name="linksCleared" type="Integer"/>
-        </out-parameters>
-        <actions>
-            <set field="out" from="darpan.audit.StatementLinkExpectedMigration.run(ec, dryRun as boolean)"/>
-            <set field="rowsUpdated" from="out.rowsUpdated"/>
-            <set field="linksCleared" from="out.linksCleared"/>
-            <set field="messages" from="out.messages"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="errors" from="ec.message.errors ?: []"/>
-        </actions>
-    </service>
-
     <!-- DAR-UI-152: registered migration ACK_NOTE_NULLABLE (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="AcknowledgementNoteNullable" authenticate="false" allow-remote="false">
         <description>One-time (DAR-UI-152): an acknowledgement's note is optional, so AuditFindingAcknowledgement.note allows no
@@ -825,41 +771,6 @@
             <if condition="result.error"><message error="true">${result.message}</message></if>
             <set field="rowsUpdated" from="0" type="Integer"/>
             <set field="messages" from="[result.message]"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="errors" from="ec.message.errors ?: []"/>
-        </actions>
-    </service>
-
-    <!-- DAR-BE-206: registered migration AUDIT_FINDINGS_NO_PENDING (data/MigrationRegistrySeedData.xml). -->
-    <service verb="migrate" noun="AuditFindingsNoPending" authenticate="false" allow-remote="false">
-        <description>One-time: a finding is only open or fixed, so every stored finding still pending (the retired
-            check-level grace) becomes open. Its dates, history and evidence are kept; no event is written, as none was
-            when a grace ran out. Every tenant at once: a state is not tenant data, and the supervisor runs this with
-            authz disabled, so the find is by state alone. Idempotent: a second run finds nothing. Not remote.</description>
-        <in-parameters>
-            <parameter name="dryRun" type="Boolean" default="false"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="rowsUpdated" type="Integer"/>
-        </out-parameters>
-        <actions>
-            <entity-find entity-name="darpan.audit.AuditFinding" list="pendingList" for-update="true">
-                <econdition field-name="stateEnumId" value="AUDFS_PENDING"/>
-                <order-by field-name="companyUserGroupId"/>
-            </entity-find>
-            <set field="rowsUpdated" from="pendingList.size()" type="Integer"/>
-            <if condition="!dryRun">
-                <iterate list="pendingList" entry="finding">
-                    <set field="finding.stateEnumId" value="AUDFS_OPEN"/>
-                    <entity-update value-field="finding"/>
-                </iterate>
-            </if>
-            <set field="perTenant" from="pendingList*.companyUserGroupId.countBy { it }"/>
-            <set field="messages" from="[(dryRun ? 'Would open' : 'Opened') + ' ' + rowsUpdated + ' pending finding(s)' +
-                    (perTenant ? ': ' + perTenant.collect { k, v -> k + ' ' + v }.join(', ') : '') + '.']"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="errors" from="ec.message.errors ?: []"/>
         </actions>

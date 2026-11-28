@@ -128,7 +128,6 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals(MINE, row.companyUserGroupId)
         assertFalse(saved.containsKey("graceDays"), "DAR-BE-206: an old caller's graceDays is ignored, not refused")
         assertEquals("FINDING", link(row.checkId, "${MINE}_R4").diffTypes)
-        assertEquals(null, link(row.checkId, "${MINE}_R4").conclusionCodes)
         assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
                 .condition("sequenceNum", 10L).disableAuthz().one().outcome)
         List<Map> named = ((List) (((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)

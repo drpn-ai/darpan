@@ -189,7 +189,7 @@ class AuditSettingsSupport {
      * there; Unexplained is no reason (its findings carry none and take the statement's level). checks: how many of the
      * statement's checks reach it; closesOn: on how many it is expected (EXPECTED, which closes the finding); closes: all,
      * some or none. An override no check reaches any more is listed as well (checks 0), so its level shows and can be cleared.
-     * (AuditStatementCheck.conclusionCodes is retired, DAR-BE-196, and not read.)
+     * (A link's own code list, AuditStatementCheck.conclusionCodes, was retired by DAR-BE-196 and removed in S99-323.)
      */
     private static Map<String, List<Map>> reasonsOf(def ec, String tenantId, Map<String, List<Map>> checksByStatement,
                                                     Map<String, Map<String, String>> overrides) {

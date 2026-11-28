@@ -167,9 +167,12 @@ class TransferSpecs {
              refFields: [savedRunId: RUN], dropFields: ["automationId", "pairFactTypeId"], heldRefs: [automationId: AUTOMATION],
              retiredFields: ["graceDays"],
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
-             // DAR-BE-196: conclusionCodes no longer travels (expected causes are the run's rules); a bundle carrying it is refused.
+             // DAR-BE-196: conclusionCodes no longer travels (expected causes are the run's rules); S99-323 removed the column.
+             // retiredListRefs: a bundle made before still carrying it is refused (FIELD_NOT_ALLOWED), not dropped like a
+             // retiredFields column: its list meant something, which STATEMENT_LINK_EXPECTED moved onto the runs in the
+             // database and not in the bundle, so importing it without the list would quietly lose that. Export it again.
              links: [entityName: "darpan.audit.AuditStatementCheck", parentFields: ["checkId"], refFields: [statementId: STATEMENT],
-                     textListRefs: [ruleIds: RULE], dropFields: ["conclusionCodes"]]],
+                     textListRefs: [ruleIds: RULE], retiredListRefs: ["conclusionCodes"]]],
             // DAR-BE-160. The morning audit runs an automation's own copy of its run's sources and exclusion filters, so a
             // version holds them. When it last and next fires and whether it is on are operational: they stay the
             // target's, and changing them is no config change. A source's config id travels as a ref inside

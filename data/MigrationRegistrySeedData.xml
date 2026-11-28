@@ -50,32 +50,6 @@
                 clean-run Chat line reads the day count from the first message (DAR-BE-144).
                 Idempotent — a fold reads only slots past the stored cursor."/>
 
-    <darpan.migration.DarpanMigration migrationId="STATEMENT_LINK_EXPECTED" componentName="darpan"
-            serviceName="audit.AuditLedgerServices.migrate#StatementLinkExpected"
-            sequenceNum="90" supportsDryRun="Y"
-            description="Move each audit statement link's list of counted causes onto its run: the causes it left out
-                become expected (rule outcome EXPECTED) and the list is cleared; Unexplained then counts on every
-                statement (DAR-BE-196). Idempotent; a run whose links disagree is reported and left untouched."/>
-
-    <darpan.migration.DarpanMigration migrationId="AUDIT_SCHEDULE_OWNED" componentName="darpan"
-            serviceName="audit.AuditLedgerServices.migrate#AuditScheduleOwned"
-            sequenceNum="100" supportsDryRun="Y"
-            description="Give each audit its own schedule (time, zone, on/off) from the automations its checks run
-                through (DAR-BE-199): the time most running checks share. No automation is rewritten; one off the
-                audit's schedule is named and put on it by saving the audit's settings. Idempotent."/>
-
-    <darpan.migration.DarpanMigration migrationId="AUDIT_FINDINGS_NO_PENDING" componentName="darpan"
-            serviceName="audit.AuditLedgerServices.migrate#AuditFindingsNoPending"
-            sequenceNum="110" supportsDryRun="Y"
-            description="Open every audit finding still pending: a finding is only open or fixed, and a grace is an
-                expected conclusion rule, not a state (DAR-BE-206). Every tenant; dates and history kept. Idempotent."/>
-
-    <darpan.migration.DarpanMigration migrationId="RETIRED_JOB_PARAMETERS" componentName="darpan"
-            serviceName="retention.RetentionMigrations.move#PurgeJobRetentionParameters"
-            sequenceNum="130" supportsDryRun="Y"
-            description="Move each nightly purge job's edited retentionDays parameter into its darpan.purge.* setting and delete
-                the row, and delete the stuck-run reaper job's retired staleMinutes parameter (DAR-BE-306, DAR-BE-304). Seed loads
-                never delete, and a live parameter row would keep overriding the setting. Idempotent."/>
     <darpan.migration.DarpanMigration migrationId="TENANT_SCRIPTS_TO_QUERIES" componentName="darpan"
             serviceName="query.QueryHostServices.migrate#TenantScriptsToQueries"
             sequenceNum="150" supportsDryRun="N"

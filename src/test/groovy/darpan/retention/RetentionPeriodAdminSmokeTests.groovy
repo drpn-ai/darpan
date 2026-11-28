@@ -46,10 +46,8 @@ class RetentionPeriodAdminSmokeTests {
     private static final String PLAIN_ID = "RPA_PLAIN"
     private static final String PLAIN = "rpa.plain"
     private static final long DAY = 86_400_000L
-    private static final String MIGRATION = "retention.RetentionMigrations.move#PurgeJobRetentionParameters"
     private static final String GENERATED = "purge_ReconciliationGeneratedFiles_daily"
     private static final String EXTRACTS = "purge_ReconciliationExtractFiles_daily"
-    private static final String REAPER = "sweep_StuckReconciliationRuns_10m"
 
     private ExecutionContext ec
 
@@ -391,72 +389,7 @@ class RetentionPeriodAdminSmokeTests {
         assertEquals([], auditRows())
     }
 
-    // ------------------------------------------------------------------ the migration
-
-    @Test
-    void anEditedPurgeParameterMovesIntoTheSettingOnceAndTheRetiredStaleRowGoes() {
-        asSystem {
-            jobParam(GENERATED, "retentionDays", "10")
-            jobParam(EXTRACTS, "retentionDays", "7")      // the shipped value: not an edit
-            jobParam(REAPER, "staleMinutes", "30")
-        }
-        Map dry = migrate(true)
-        assertEquals(3, dry.rowsUpdated)
-        assertEquals(3L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays", "staleMinutes"]]), "a dry run writes nothing")
-        assertEquals(0, count("darpan.config.DarpanSetting"))
-
-        Map first = migrate(false)
-        assertEquals(3, first.rowsUpdated)
-        assertEquals(10, DarpanSettings.intValue("darpan.purge.generatedOutput.days"))
-        assertEquals(7, DarpanSettings.intValue("darpan.purge.extract.days"))
-        assertEquals(["darpan.purge.generatedOutput.days"], settingKeys(), "only the edited one is stored")
-        assertEquals(0L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays", "staleMinutes"]]))
-        assertEquals(1, auditRows().size())
-        assertEquals("darpan.purge.generatedOutput.days: 15 -> 10 (moved from the ${GENERATED} job parameter (DAR-BE-306))".toString(), auditRows()[0].detailText)
-
-        Map second = migrate(false)
-        assertEquals(0, second.rowsUpdated, "a second run changes nothing")
-        assertEquals(["darpan.purge.generatedOutput.days"], settingKeys())
-        assertEquals(1, auditRows().size())
-    }
-
-    @Test
-    void aSettingAlreadySetWinsAndAnInvalidParameterIsLeftInPlace() {
-        setSetting("darpan.purge.extract.days", "12")
-        asSystem {
-            jobParam(EXTRACTS, "retentionDays", "10")
-            jobParam(GENERATED, "retentionDays", "400")   // over the 365 day maximum of the setting
-        }
-        Map out = migrate(false)
-        assertEquals(1, out.rowsUpdated)
-        assertEquals(12, DarpanSettings.intValue("darpan.purge.extract.days"), "the setting someone chose is not overwritten")
-        assertEquals(15, DarpanSettings.intValue("darpan.purge.generatedOutput.days"))
-        assertEquals(1L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays"]]), "the invalid one stays")
-        assertTrue((out.messages as List<String>).any { it.contains("left in place") }, "${out.messages}")
-    }
-
-    @Test
-    void aParameterThatIsNotAWholeNumberIsLeftInPlaceAndReported() {
-        asSystem { jobParam(GENERATED, "retentionDays", "10.0") }
-        Map out = migrate(false)
-        assertEquals(0, out.rowsUpdated)
-        assertEquals(1L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays"]]))
-        assertEquals(0, count("darpan.config.DarpanSetting"))
-        assertTrue((out.messages as List<String>).any { it.contains("left in place: not a whole number") }, "${out.messages}")
-    }
-
     // ------------------------------------------------------------------ helpers
-
-    private Map migrate(boolean dryRun) {
-        Map out = ec.service.sync().name(MIGRATION).parameters([dryRun: dryRun]).disableAuthz().call()
-        assertTrue(out.ok as boolean, "${out}")
-        ec.message.clearErrors()
-        return out
-    }
-
-    private void jobParam(String job, String name, String value) {
-        ec.entity.makeValue("moqui.service.job.ServiceJobParameter").setAll([jobName: job, parameterName: name, parameterValue: value]).createOrUpdate()
-    }
 
     private void setJobPaused(String paused) {
         ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", JOB).useCache(false).one().with { it.paused = paused; it.update() }

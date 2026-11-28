@@ -248,8 +248,11 @@ class RulesTenantScopeTests {
         assertEquals([], created.errors)
         String orphanId = created.out.ruleSetId as String
         assertEquals(null, row("rules.RuleSet", [ruleSetId: orphanId]).companyUserGroupId, "left blank, owned by no tenant")
-        assertEquals([], underFacadeGrant("create#rules.FactType", [factTypeId: "RTS_NO_TENANT"]).errors)
+        // It has a status field, so only the tenant filter can answer update#FactField's find with "has no field".
+        assertEquals([], underFacadeGrant("create#rules.FactType", [factTypeId: "RTS_NO_TENANT",
+                fields: [[fieldName: "status", valueTypeEnumId: "FVT_TEXT"]]]).errors)
         assertEquals(null, row("rules.FactType", [factTypeId: "RTS_NO_TENANT"]).companyUserGroupId)
+        assertEquals(null, row("rules.FactField", [factTypeId: "RTS_NO_TENANT", fieldName: "status"]).companyUserGroupId)
 
         // A tenantless writer cannot hang a row on a tenant's decision, nor stamp a root for a tenant.
         Map<String, List<Map>> before = snapshot()

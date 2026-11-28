@@ -13,6 +13,7 @@ import org.moqui.screen.ScreenTest
 import java.nio.file.Path
 import java.sql.Timestamp
 
+import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -105,7 +106,7 @@ class ScreenUiAuthzTests {
     private static boolean screenPermittedFor(String userId) {
         ec.artifactExecution.disableAuthz()
         try {
-            ec.user.internalLoginUser(userId)
+            loginAs(userId)
         } finally {
             ec.artifactExecution.enableAuthz()
         }
@@ -120,16 +121,16 @@ class ScreenUiAuthzTests {
      * Render-path leak test (Task 9, Important #1).
      *
      * <p>Asserts that rendering the Reconciliation screen as a non-super-admin via Moqui's
-     * {@code ScreenTest} harness does NOT leak any {@code component://} path in the output.
-     * The harness runs without an HTTP request/response context ({@code ec.web == null}), so
-     * the guard's inline 403 body write is skipped (that branch is intentionally protected by
-     * {@code if (ec.web != null)}); however {@code sri.dontDoRender = true} still fires, which
-     * suppresses the widgets subtree — the protected sub-screen content is never rendered.</p>
+     * {@code ScreenTest} harness is refused and does NOT leak any {@code component://} path in the output.
+     * ScreenTest renders on its own thread through a {@code WebFacadeStub}, with authz ON. The webroot
+     * always-actions pass pushes the target screen (the GenericReconciliation/Main default) with an authz
+     * check, so URL-authz (no DARPAN_SCREEN_UI grant for DARPAN_USER) throws ArtifactAuthorizationException
+     * before the isSuperAdmin() pre-actions guard runs; the render produces no output at all.</p>
      *
-     * <p><strong>HTTP 403 status assertion limitation:</strong> the 403 status code is set via
-     * {@code ec.web.response.setStatus(403)}, which requires a live HTTP context that the
-     * non-web {@code ScreenTest} harness does not provide. Therefore the 403 STATUS cannot be
-     * unit-tested here; it is verified via live HTTP (browser / curl against a running dev stack).
+     * <p><strong>HTTP 403 status assertion limitation:</strong> the guard's 403 status and body are never
+     * reached in this harness (URL-authz refuses first), and the servlet's own 403 for an authz refusal is
+     * outside ScreenTest. Therefore the 403 STATUS cannot be unit-tested here; it is verified via live HTTP
+     * (browser / curl against a running dev stack).
      * This test covers only the render-path leak: no {@code component://} path must appear in
      * the harness output for a non-super-admin user.</p>
      */
@@ -138,23 +139,34 @@ class ScreenUiAuthzTests {
         // Switch to a regular DARPAN_USER (no super-admin privilege).
         ec.artifactExecution.disableAuthz()
         try {
-            ec.user.internalLoginUser(REGULAR_USER_ID)
+            loginAs(REGULAR_USER_ID)
         } finally {
             ec.artifactExecution.enableAuthz()
         }
 
-        // Render the Reconciliation screen via the ScreenTest harness (no HTTP context → ec.web == null).
-        // The guard fires: isSuperAdmin() returns false → sri.dontDoRender = true → widgets are suppressed.
-        // The 403 inline body write is skipped because ec.web is null in this non-HTTP context —
-        // the HTTP 403 STATUS is therefore not assertable here; see Javadoc above.
+        // Render the Reconciliation screen via the ScreenTest harness (WebFacadeStub, authz ON).
+        // URL-authz refuses the target screen; the HTTP 403 STATUS is not assertable here; see Javadoc above.
         ScreenTest screenTest = ec.screen.makeTest().baseScreenPath("apps/darpan/Reconciliation")
         ScreenTest.ScreenTestRender str = screenTest.render("", [:], "get")
         String output = str.output ?: ""
+
+        // The refusal fired, and it is the screen authz (not an unrelated render error or an empty page).
+        assertTrue(str.errorMessages.any { m ->
+                    m.toString().contains("ArtifactAuthorizationException") &&
+                            m.toString().contains("is not authorized for View on Screen component://darpan/screen/Reconciliation/") },
+                "a non-super-admin render must be refused by screen authz; errors were: ${str.errorMessages}")
+        assertEquals("", output, "a refused render must produce no output")
 
         // Primary assertion: no component:// paths must appear in the rendered output.
         // A component:// leak would disclose internal filesystem structure to the caller.
         assertFalse(output.contains("component://"),
                 "Rendered output for a non-super-admin must NOT contain any component:// path. Output was: ${output.take(500)}")
+    }
+
+    /** Logs in by userId (the realm's case-insensitive username lookup matches userId.toLowerCase()) and proves it took. */
+    private static void loginAs(String userId) {
+        assertTrue(ec.user.internalLoginUser(userId), "could not log in ${userId}")
+        assertEquals(userId, ec.user.userId, "logged in as the wrong user")
     }
 
     private static void createUserInGroup(String userId, String userGroupId) {

@@ -11,7 +11,6 @@ import org.junit.jupiter.api.TestInstance
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
-import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
@@ -48,13 +47,6 @@ class TenantFilterAdversarialTests {
 
     @AfterAll
     void cleanup() { h.close() }
-
-    /** A fresh tenant-B row per write attack, so one attack's damage never feeds another test. */
-    private String freshB(String id) {
-        h.insert("darpan.reconciliation.Reconciliation", [reconciliationId: id, reconciliationName: "orig ${id}".toString(),
-                companyUserGroupId: B, isActive: "Y", isArchived: "N"])
-        return id
-    }
 
     @BeforeEach
     void attacker() { h.asAttacker() }
@@ -98,6 +90,8 @@ class TenantFilterAdversarialTests {
         Object saved = h.ec.user.context.remove("activeTenantUserGroupId")
         try {
             Map out = h.call("facade.ReconciliationFacadeServices.list#Reconciliations")
+            assertNull(out.thrown, "list#Reconciliations threw instead of answering: ${out}")
+            assertEquals([], out._errors, "list#Reconciliations reported errors: ${out}")
             List ids = (out.reconciliations as List ?: [])*.reconciliationId
             assertFalse(ids.contains(REC_B), "list#Reconciliations leaked tenant B: ${ids}")
         } finally {
@@ -111,9 +105,15 @@ class TenantFilterAdversarialTests {
     void findDeleteAllUnderFacadeGrantCannotDeleteForeignRow() {
         h.insert("darpan.reconciliation.Reconciliation", [reconciliationId: "ADV_REC_B_DEL2", reconciliationName: "victim",
                 companyUserGroupId: B, isActive: "Y", isArchived: "N"])
-        h.underFacadeGrant {
-            h.ec.entity.find("darpan.reconciliation.Reconciliation").condition("reconciliationId", "ADV_REC_B_DEL2").deleteAll()
-        }
+        // Positive control: A's own row, named in the same delete under the same grant, IS deleted.
+        h.insert("darpan.reconciliation.Reconciliation", [reconciliationId: "ADV_REC_A_DEL2", reconciliationName: "own",
+                companyUserGroupId: A, isActive: "Y", isArchived: "N"])
+        long deleted = h.underFacadeGrant {
+            h.ec.entity.find("darpan.reconciliation.Reconciliation").condition("reconciliationId", "in", ["ADV_REC_A_DEL2", "ADV_REC_B_DEL2"])
+                    .deleteAll()
+        } as long
+        assertEquals(1L, deleted, "the filtered delete must remove exactly A's own row")
+        assertNull(h.raw("darpan.reconciliation.Reconciliation", [reconciliationId: "ADV_REC_A_DEL2"]), "positive control: A's own row was not deleted")
         assertNotNull(h.raw("darpan.reconciliation.Reconciliation", [reconciliationId: "ADV_REC_B_DEL2"]))
     }
 
@@ -130,9 +130,10 @@ class TenantFilterAdversarialTests {
                         .useCache(false).list()*.turnId
             } as List
         } catch (org.moqui.context.ArtifactAuthorizationException refused) {
+            assertTrue((refused.message ?: "").contains("authorized data filter"), "refused for another reason: ${refused}")
             return
         }
-        assertFalse(seen.contains("ADV_TURN_B"), "view leaked tenant B's turn: ${seen}")
+        assertEquals(["ADV_TURN_A"], seen, "the view must show exactly tenant A's turn")
     }
 
     @Test
@@ -148,7 +149,7 @@ class TenantFilterAdversarialTests {
                     "unexpected failure: ${refused}")
             return
         }
-        assertTrue(n <= 1L, "view count included tenant B: ${n}")
+        assertEquals(1L, n, "the view count must be exactly tenant A's turn")
     }
 
     // ---- 4. tenant switching ------------------------------------------------------------------
@@ -156,7 +157,10 @@ class TenantFilterAdversarialTests {
     @Test
     void saveActiveTenantRefusesATenantTheUserIsNotIn() {
         Map out = h.call("facade.AuthFacadeServices.save#ActiveTenant", [activeTenantUserGroupId: B])
-        assertNotEquals(true, out.activeTenantSaved, "save#ActiveTenant accepted tenant B: ${out}")
+        assertNull(out.thrown, "save#ActiveTenant threw instead of refusing: ${out}")
+        // TenantAccessSupport.ACTIVE_TENANT_UNAVAILABLE_MESSAGE
+        assertTrue((out._errors as List).contains("Requested tenant is not available for current user."),
+                "save#ActiveTenant must refuse tenant B as not one of the user's: ${out}")
         h.actAs(TenantAttackHarness.ATTACKER, null)
         assertEquals(A, h.ec.user.context.activeTenantUserGroupId, "active tenant moved to B")
     }
@@ -171,16 +175,22 @@ class TenantFilterAdversarialTests {
 
     @Test
     void requestedTenantForForeignTenantIsRefused() {
-        assertThrows(org.moqui.context.ArtifactAuthorizationException) {
+        // Positive control: the attacker's own tenant, requested the same way, resolves.
+        assertEquals(A, TenantAccessSupport.withRequestedTenant(A) { TenantAccessSupport.currentActiveTenantUserGroupId(h.ec) })
+        def refused = assertThrows(org.moqui.context.ArtifactAuthorizationException) {
             TenantAccessSupport.withRequestedTenant(B) { TenantAccessSupport.currentActiveTenantUserGroupId(h.ec) }
         }
+        assertEquals("Tenant ${B} is not one of your tenants".toString(), refused.message)
     }
 
     @Test
     void callerTenantForForeignTenantIsRefused() {
-        assertThrows(org.moqui.context.ArtifactAuthorizationException) {
+        // Positive control: the attacker's own tenant runs the body, in that tenant.
+        assertEquals(A, TenantAccessSupport.withCallerTenant(h.ec, A) { TenantAccessSupport.currentActiveTenantUserGroupId(h.ec) })
+        def refused = assertThrows(org.moqui.context.ArtifactAuthorizationException) {
             TenantAccessSupport.withCallerTenant(h.ec, B) { "ran" }
         }
+        assertEquals("Tenant ${B} is not one of your tenants".toString(), refused.message)
     }
 
     @Test
@@ -194,6 +204,7 @@ class TenantFilterAdversarialTests {
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: TenantAttackHarness.FROM_DATE,
                 thruDate: java.sql.Timestamp.valueOf("2026-05-01 00:00:00")])
         h.actAs("adv.expired", B)
-        assertNotEquals(B, h.ec.user.context.activeTenantUserGroupId, "an expired membership still activates tenant B")
+        assertEquals(TenantAccessSupport.NO_ACTIVE_TENANT_FILTER_VALUE, h.ec.user.context.activeTenantUserGroupId,
+                "an expired membership must leave no active tenant (B, or any other)")
     }
 }

@@ -21,6 +21,7 @@ class TenantGqlAdversarialTests {
     static final String A = TenantAttackHarness.TENANT_A
     static final String B = TenantAttackHarness.TENANT_B
     static final String LIST = "{ reconciliationResults(first: 100) { edges { node { reconciliationRunResultId } } } }"
+    static final String ONE_A = "{ reconciliationResult(reconciliationRunResultId: \"ADV_GQL_RR_A\") { reconciliationRunResultId } }"
     static final String ONE_B = "{ reconciliationResult(reconciliationRunResultId: \"ADV_GQL_RR_B\") { reconciliationRunResultId } }"
 
     TenantAttackHarness h
@@ -72,7 +73,13 @@ class TenantGqlAdversarialTests {
 
     @Test
     void sessionByPkCannotReadForeignRow() {
+        // Positive control: the same by-pk root returns A's own row, so a null for B's row is the tenant pin, not a broken query.
+        Map own = gql(ONE_A)
+        assertEquals([], own?.errors, "by-pk control query errored: ${own}")
+        assertEquals("ADV_GQL_RR_A", own?.data?.reconciliationResult?.reconciliationRunResultId, "positive control: own row missing by pk: ${own}")
+
         Map out = gql(ONE_B)
+        assertEquals([], out?.errors, "by-pk read of tenant B's row errored instead of finding no row: ${out}")
         assertEquals(null, out?.data?.reconciliationResult, "session GQL by-pk read tenant B's row: ${out}")
     }
 
@@ -86,20 +93,25 @@ class TenantGqlAdversarialTests {
 
     @Test
     void publicKeyRealmWithBlankTenantSeesNothing() {
-        List<String> seen = ids(gql(LIST, [scopeTenantId: "", callerId: "adv-key-blank"]))
-        assertEquals([], seen.findAll { it.startsWith("ADV_GQL_") })
+        Map out = gql(LIST, [scopeTenantId: "", callerId: "adv-key-blank"])
+        assertEquals([], out?.errors, "a blank key tenant must deny with zero rows, not error: ${out}")
+        assertEquals([], ids(out).findAll { it.startsWith("ADV_GQL_") })
     }
 
     /**
-     * A caller profile with a productStore scope REPLACES the tenant filter on the session path (GqlEngine.execute);
-     * ProductStoreScopeFilter leaves entities without a productStoreId column (ReconciliationRunResult) unscoped.
+     * A caller profile with a productStore scope used to REPLACE the tenant filter on the session path (GqlEngine.execute;
+     * DAR-BE-282 made it only narrow the pin); ProductStoreScopeFilter leaves entities without a productStoreId column
+     * (ReconciliationRunResult) unscoped, so only the tenant pin keeps B's row out and A's row in.
      */
     @Test
     void sessionCallerWithStoreScopedProfileStillPinnedToTenant() {
         h.insert("moqui.gql.GqlCallerProfile", [profileId: "ADV_STORE_PROFILE", description: "store-scoped", scopeProductStoreId: "ANY_STORE"])
         h.insert("moqui.gql.GqlCallerProfileMember", [userId: TenantAttackHarness.ATTACKER_ID, profileId: "ADV_STORE_PROFILE"])
         try {
-            List<String> seen = ids(gql(LIST))
+            Map out = gql(LIST)
+            assertEquals([], out?.errors, "store-scoped list errored: ${out}")
+            List<String> seen = ids(out)
+            assertTrue(seen.contains("ADV_GQL_RR_A"), "positive control: own row missing under the store-scoped profile: ${out}")
             assertFalse(seen.contains("ADV_GQL_RR_B"), "store-scoped profile dropped the tenant pin; listed tenant B: ${seen}")
         } finally {
             h.ec.entity.find("moqui.gql.GqlCallerProfileMember").condition("userId", TenantAttackHarness.ATTACKER_ID).disableAuthz().deleteAll()

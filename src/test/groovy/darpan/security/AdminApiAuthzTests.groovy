@@ -69,6 +69,13 @@ class AdminApiAuthzTests {
         def adminAuthzIds = root.'moqui.security.ArtifactAuthz'
                 .findAll { it.@artifactGroupId == 'DARPAN_ADMIN_API' }
                 .collect { it.@artifactAuthzId.text() }
+        // Not vacuous: both admin grants are named, so a zero below means they carry no filter.
+        assertEquals(['DARPAN_ADMIN_API_ADMIN', 'DARPAN_ADMIN_API_SUPER_ADMIN'], adminAuthzIds.sort(false),
+                "DARPAN_ADMIN_API authz rows must carry their artifactAuthzIds")
+        // Positive control: the same lookup finds the tenant filter on the facade grant that does carry it.
+        assertTrue(root.'moqui.security.ArtifactAuthzFilter'.any {
+            it.@artifactAuthzId.text() == 'DARPAN_FACADE_APP_USER' && it.@entityFilterSetId.text() == 'DARPAN_ACTIVE_COMPANY_SCOPE'
+        }, "control: DARPAN_FACADE_APP_USER must carry DARPAN_ACTIVE_COMPANY_SCOPE")
         def filterRefs = root.'moqui.security.ArtifactAuthzFilter'.findAll {
             it.@artifactAuthzId.text() in adminAuthzIds
         }

@@ -142,6 +142,14 @@ class AgentQuerySupportTests {
     }
 
     @Test
+    void "refuse: a log row that cannot be written never hides the refusal (S30b OC162)"() {
+        Map result = AgentQuerySupport.refuseCore([queryText: "DELETE FROM x", secrets: ["acme.test"]], "Only a SELECT from acme.test may be sent.",
+                { Map row -> throw new IllegalStateException("log table is down") })
+        assertEquals("REFUSED", result.code)
+        assertEquals("Only a SELECT from [hidden] may be sent.", result.error)
+    }
+
+    @Test
     void "owned connection: only the active tenant's own connection passes (final review R25)"() {
         assertNull(AgentQuerySupport.ownedConnectionRefusal("KREWE", "KREWE"))
         assertEquals(AgentQuerySupport.SHARED_CONNECTION_REFUSAL, AgentQuerySupport.ownedConnectionRefusal("KREWE", "GORJANA"))

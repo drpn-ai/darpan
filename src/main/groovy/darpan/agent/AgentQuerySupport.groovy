@@ -192,8 +192,13 @@ class AgentQuerySupport {
     /** Logs a request refused before it was sent (a failed check), so the refusal is on the record. */
     static Map refuse(def ec, Map meta, String reason) {
         String tenantId = darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        Map row = logRow(meta, OUTCOME_REFUSED, 0, 0)
-        writeLog(ec, tenantId, ec?.user?.userId, row)
+        String userId = ec?.user?.userId
+        return refuseCore(meta, reason) { Map row -> writeLog(ec, tenantId, userId, row) }
+    }
+
+    /** The body of {@link #refuse} without Moqui: the log sink is passed in. */
+    static Map refuseCore(Map meta, String reason, Closure logSink) {
+        sink(logSink, logRow(meta, OUTCOME_REFUSED, 0, 0))
         // Final review B7: a refusal's words can carry the connection's host or token URL; strip them here, in the
         // core, so every system's refusals are covered (callers set meta.secrets before anything can refuse).
         return [error: refusalText(meta, reason), code: OUTCOME_REFUSED]

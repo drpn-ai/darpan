@@ -172,8 +172,11 @@ class AgentReadSupport {
         if (connector == null) { ec.message.addError("Read ${readId} has no endpoint on this installation.".toString()); return null }
         String configType = connector.expectedSourceConfigType as String
         Map<String, String> type = SharedConfigAccessSupport.configType(configType)
+        // OC160 (Aditi 2026-11-28, R25): a lookup is a fresh query, so it runs only on a connection the tenant owns, never
+        // on one another tenant shared.
         Object config = type == null ? null : SharedConfigAccessSupport.listAccessibleConfigRows(ec, configType).find { row ->
-            "N" != row.get("isActive")?.toString()?.toUpperCase() &&
+            AgentQuerySupport.requireOwnedConnection(ec, row.get("companyUserGroupId")) == null &&
+                    "N" != row.get("isActive")?.toString()?.toUpperCase() &&
                     darpan.reconciliation.automation.SourceEndpointAccessSupport.isEndpointEnabled(ec, configType, row.get(type.pkField) as String, connector.systemEnumId as String)
         }
         if (config == null) { ec.message.addError("Your tenant has no connection for ${entry.systemCode}.".toString()); return null }

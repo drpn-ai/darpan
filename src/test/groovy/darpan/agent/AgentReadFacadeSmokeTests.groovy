@@ -293,6 +293,43 @@ class AgentReadFacadeSmokeTests {
         }
     }
 
+    /**
+     * DAR-OPS-029 S30b OC160 (Aditi 2026-11-28: "own connections only"). A by-key lookup is a fresh query the agent sends,
+     * so, as R25 holds for every fresh query, it runs only on a connection the active tenant owns: a connection another tenant
+     * shared keeps working for saved runs, never for the agent, and the owner never sees queries it did not send.
+     */
+    @Test
+    void "inspect#AgentRecord never reads through a connection another tenant shared"() {
+        def previous = darpan.datasource.DataDefinedExtract.transportFactory
+        List<String> endpoints = []
+        darpan.datasource.DataDefinedExtract.transportFactory = { Map d, Map conn ->
+            [execute: { String doc, Map vars, int reservation ->
+                endpoints << (conn.endpointUrl as String)
+                [docs: [nodes: [new LinkedHashMap(DOC_ROWS[0])], page: [more: false, next: null]]]
+            }]
+        }
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", isActive: "N"])
+            insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanSharedConfigType", description: "Shared config type"])
+            insert("moqui.basic.Enumeration", [enumId: "SCFG_NS_RESTLET", enumTypeId: "DarpanSharedConfigType", description: "NetSuite Restlet config"])
+            insert("moqui.security.UserGroup", [userGroupId: MINE, description: "Krewe"])
+            insert("darpan.auth.ConfigTenantAccess", [configTypeEnumId: "SCFG_NS_RESTLET", configId: "AGR_CFG_OTHER", tenantUserGroupId: MINE,
+                    fromDate: new java.sql.Timestamp(System.currentTimeMillis() - 60_000L)])
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+            Map out = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D1"])
+            assertEquals([], endpoints, "the other tenant's system was queried")
+            assertTrue(out.hadError as boolean, "no own connection: refused")
+            assertTrue((out.errorText as String).contains("no connection"), out.errorText as String)
+        } finally {
+            ec.artifactExecution.disableAuthz()
+            ec.entity.find("darpan.auth.ConfigTenantAccess").condition("configId", "AGR_CFG_OTHER").deleteAll()
+            insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", isActive: "Y"])
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+            darpan.datasource.DataDefinedExtract.transportFactory = previous
+        }
+    }
+
     @Test
     void "an upstream error carrying customer data reaches the agent as a code only"() {
         def previous = darpan.datasource.DataDefinedExtract.transportFactory

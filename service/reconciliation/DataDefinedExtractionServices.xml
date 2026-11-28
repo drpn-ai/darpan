@@ -16,6 +16,7 @@
         <description>Reads a data-defined endpoint into one extract file ({records, metadata}), by the run's window or by
             lookup keys, with the run's exclusion rules applied and the excluded records written beside it. Same output
             contract as every coded extract.</description>
+        <implements service="reconciliation.SourceConnectorContractServices.define#SourceExtractOutputs"/>
         <in-parameters>
             <parameter name="systemEnumId" required="true"><description>The endpoint read: its connector row names the
                 definition.</description></parameter>
@@ -44,15 +45,6 @@
             <parameter name="progressStageCode"/>
             <parameter name="expectedRecordCount" type="Integer"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="dataAvailable" type="Boolean"/>
-            <parameter name="fileLocation"/>
-            <parameter name="fileName"/>
-            <parameter name="recordCount" type="Integer"/>
-            <parameter name="requestMetadata" type="Map"/>
-            <parameter name="warnings" type="List"/>
-            <parameter name="errors" type="List"/>
-        </out-parameters>
         <actions>
             <script>darpan.datasource.DataDefinedExtract.run(ec, context)</script>
         </actions>

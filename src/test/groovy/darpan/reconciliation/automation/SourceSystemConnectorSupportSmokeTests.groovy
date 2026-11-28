@@ -887,4 +887,14 @@ class SourceSystemConnectorSupportSmokeTests {
                 .condition("dataSourceDefinitionId", "ACME_INVOICES_V1").one().protocol)
         assertNull(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY").dataSourceDefinitionId)
     }
+
+    /** S99-057: the data-defined extract returns what the automation edge reads, from darpan's define#SourceExtractOutputs. */
+    @Test
+    void theDataDefinedExtractReturnsTheSharedExtractOutputs() {
+        def contract = ec.service.getServiceDefinition("reconciliation.SourceConnectorContractServices.define#SourceExtractOutputs")
+        def extract = ec.service.getServiceDefinition("reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource")
+        assertEquals(["dataAvailable", "fileLocation", "fileName", "recordCount", "requestMetadata", "warnings", "errors"],
+                contract.getOutParameterNames() as List)
+        assertEquals(contract.getOutParameterNames() as List, extract.getOutParameterNames() as List)
+    }
 }

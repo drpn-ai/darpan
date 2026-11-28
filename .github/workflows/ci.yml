@@ -206,8 +206,13 @@ jobs:
           DARPAN_TEST_DB_PASSWORD: darpan_ci_root
         run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:mysqlTest
 
-      # Coverage ratchet (MACH P1): reuses the execution data from :test — no test rerun.
-      # Floors sit ~2 points below the measured baseline (build.gradle jacoco block).
+      # DAR-OPS-029 S36b: component locations, docs paths and the removed legacy artifacts (build.gradle verifyOrganization).
+      # Pure Gradle, no Moqui boot: seconds. It ran only by hand before, so a broken docs path or a re-added legacy screen
+      # went unnoticed. (The coverage floors run once over all shards in the `coverage` job below.)
+      - name: Verify component organization (locations, docs paths, removed legacy artifacts)
+        if: matrix.shard == 1
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:verifyOrganization
 
       # Contract-drift guard (MACH P0, API management). The XML <-> committed-contract gate
       # already runs inside :test (ApiContractGeneratorTests); this step extends the guard to

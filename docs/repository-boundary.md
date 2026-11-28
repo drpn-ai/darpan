@@ -17,16 +17,16 @@ Do not implement or extend custom UI/PWA surfaces in `darpan-backend`.
 ## Operational notes
 
 - No CI job blocks changes by path. `.github/workflows/ci.yml` has no path filter or path guard;
-  the boundary is held by review, by the `verifyOrganization` Gradle task, and by the wrapper's
+  the boundary is held by review, by the `verifyOrganization` Gradle task (CI, shard 1), and by the wrapper's
   `plugins/darpan-workflows/scripts/check_repo_boundary.sh`, which the review-gate skills run to
   flag changed files under `screen/` or `template/`.
 - The early UI mockups (`ui-mockups.md` and its SVGs) moved to `docs/archive/`; they are history.
-- `./gradlew :runtime:component:darpan:verifyOrganization --console=plain` is run by hand (it is
-  not wired into `check` or CI). It fails when:
+- `./gradlew :runtime:component:darpan:verifyOrganization --console=plain` runs in CI (backend-tests, shard 1)
+  since DAR-OPS-029 S36b, and by hand. It fails when:
   - a `location="component://darpan/..."` in `service/**` or `screen/**` XML points at a missing file;
   - a backticked path beginning runtime/component/darpan/ in `docs/**/*.md` does not exist;
   - a removed legacy artifact is back (the old Rules screen and rule-service XML, the party
-    entities, the `UiFacadePoc` screen; the exact list is in `build.gradle`);
+    entities, the legacy `/apps/darpan` screen UI and its theme library; the exact list is in `build.gradle`);
   - production service, screen or Groovy code references the sample namespace
     (`reconciliation.ReconciliationSampleServices`, `reconciliation/sample/`) or the `UiFacadePoc`
     surface, or service/screen XML references a `debug.*` service;
@@ -34,7 +34,6 @@ Do not implement or extend custom UI/PWA surfaces in `darpan-backend`.
     `docs/reconciliation/history/`) name the legacy Rules screen, the old rule-service namespace,
     or the removed rule/party entities. Docs under `docs/archive/` get no exception, so archived
     files must avoid those names too;
-  - the `Debug` subscreen in `screen/darpan.xml` is visible in the menu, or a `Rules` subscreen exists.
 - The legacy backend screens and their theme library were deleted (DAR-OPS-029 S36a/S36b, 2026-11-28). `screen/**` now
   holds only `darpan.xml` (the `csrfToken` and Slack-callback transitions) and the email bodies under `screen/email/`;
   `template/**` holds email templates. New UI goes to `darpan-ui` (tenant app) or `darpan-admin-ui` (operator app).

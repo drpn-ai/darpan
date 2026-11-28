@@ -743,23 +743,27 @@ task verifyOrganization {
             }
         }
 
+        // Removed on purpose; each must stay removed. DAR-OPS-029 S36a/S36b: the legacy /apps/darpan screen UI (super-admin
+        // only, facade-bypassing) and the theme library only it loaded.
         List<String> forbiddenLegacyArtifacts = [
                 "screen/Rules.xml",
+                "screen/Rules",
                 "service/darpan/rule/RuleServices.xml",
                 "src/main/groovy/darpan/rule/service/generateDrlFromPrompt.groovy",
                 "entity/PartyEntities.xml",
-                "screen/Reconciliation/UiFacadePoc.xml",
-                "docs/reconciliation/poc/ui-facade-poc-screen.md"
+                "docs/reconciliation/poc/ui-facade-poc-screen.md",
+                "screen/Reconciliation.xml",
+                "screen/Reconciliation",
+                "screen/Settings.xml",
+                "screen/Settings",
+                "screen/Migrations.xml",
+                "theme-library"
         ]
         forbiddenLegacyArtifacts.each { String relativePath ->
             File artifact = new File(projectDir, relativePath)
             if (artifact.exists()) {
-                failures.add("${artifact.path}:1 legacy Rules/party artifact must be removed")
+                failures.add("${artifact.path}:1 removed legacy artifact must stay removed")
             }
-        }
-        File legacyRulesDir = new File(projectDir, "screen/Rules")
-        if (legacyRulesDir.exists()) {
-            failures.add("${legacyRulesDir.path}:1 legacy Rules screen directory must be removed")
         }
 
         List<File> productionFiles = fileTree(
@@ -835,27 +839,6 @@ task verifyOrganization {
             while (legacyEntityMatcher.find()) {
                 int lineNumber = lineNumberFor(sourceText, legacyEntityMatcher.start())
                 failures.add("${sourceFile.path}:${lineNumber} references removed legacy rule/party entities")
-            }
-        }
-
-        File mainNavFile = new File(projectDir, "screen/darpan.xml")
-        if (mainNavFile.exists()) {
-            String navText = mainNavFile.getText("UTF-8")
-            def debugRoutePattern = ~/<subscreens-item\b[^>]*\bname\s*=\s*"Debug"[^>]*>/
-            def debugRouteMatcher = debugRoutePattern.matcher(navText)
-            while (debugRouteMatcher.find()) {
-                String debugRouteTag = debugRouteMatcher.group()
-                if (!debugRouteTag.contains('menu-include="false"')) {
-                    int lineNumber = lineNumberFor(navText, debugRouteMatcher.start())
-                    failures.add("${mainNavFile.path}:${lineNumber} Debug route must stay hidden with menu-include=\"false\"")
-                }
-            }
-
-            def legacyRulesSubscreenPattern = ~/<subscreens-item\b[^>]*\bname\s*=\s*"Rules"\b[^>]*>/
-            def legacyRulesSubscreenMatcher = legacyRulesSubscreenPattern.matcher(navText)
-            while (legacyRulesSubscreenMatcher.find()) {
-                int lineNumber = lineNumberFor(navText, legacyRulesSubscreenMatcher.start())
-                failures.add("${mainNavFile.path}:${lineNumber} legacy /Rules navigation item must not exist")
             }
         }
 

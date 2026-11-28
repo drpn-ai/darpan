@@ -3,10 +3,10 @@ package darpan.security
 import org.junit.jupiter.api.Test
 
 import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * Pins the DARPAN_ADMIN_API fence shape: the admin.* service namespace is granted ONLY to
@@ -14,21 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * authz rows carry no ArtifactAuthzFilter (admin services are deliberately cross-tenant).
  */
 class AdminApiAuthzTests {
-
-    private static Path componentRoot() {
-        Path cwd = Paths.get("").toAbsolutePath().normalize()
-        List<Path> candidates = [
-                cwd,
-                cwd.resolve("runtime/component/darpan"),
-                cwd.resolve("darpan-backend/runtime/component/darpan")
-        ]
-        for (Path candidate : candidates) {
-            if (candidate.resolve("data/SecuritySeedData.xml").toFile().exists()) {
-                return candidate
-            }
-        }
-        return candidates[0] // fall through to first candidate for error message
-    }
 
     private static groovy.xml.slurpersupport.GPathResult seedXml() {
         Path root = componentRoot()

@@ -4,12 +4,10 @@ import darpan.facade.reconciliation.RunConclusionStep
 import groovy.xml.XmlSlurper
 import org.junit.jupiter.api.Test
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-BE-063. A real conclusion catalogue (DAR-UI-044, flat; the fixture data/test/ConclusionParityCatalogueData.xml,
@@ -21,16 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class ConclusionEngineParityTests {
 
     private static final List<String> ORACLE_OPERATORS = ["IN", "NOT_IN", "GT_ZERO", "BLANK", "NOT_BLANK"]
-
-    private static Path componentRoot() {
-        Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
-        while (p != null && !Files.exists(p.resolve("entity/RuleEntities.xml"))) {
-            Path candidate = p.resolve("runtime/component/darpan")
-            if (Files.exists(candidate.resolve("entity/RuleEntities.xml"))) return candidate
-            p = p.parent
-        }
-        return p
-    }
 
     private static Map attrs(def node) {
         Map m = new LinkedHashMap(node.attributes())

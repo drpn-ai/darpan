@@ -3,12 +3,10 @@ package darpan.reconciliation.source
 import groovy.xml.XmlSlurper
 import org.junit.jupiter.api.Test
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-BE-063 §1.5: a connector that declares filterParameterName filters through SourceFilterSupport, and the conclude pass
@@ -24,16 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class FilteringConnectorSidecarContractTests {
 
     static final String ROW = 'darpan.reconciliation.SourceSystemConnector'
-
-    private static Path componentRoot() {
-        Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
-        while (p != null && !Files.exists(p.resolve("entity/RuleEntities.xml"))) {
-            Path candidate = p.resolve("runtime/component/darpan")
-            if (Files.exists(candidate.resolve("entity/RuleEntities.xml"))) return candidate
-            p = p.parent
-        }
-        return p
-    }
 
     /** Every other component's data files, by component. */
     private static Map<String, List<File>> otherComponentsData() {

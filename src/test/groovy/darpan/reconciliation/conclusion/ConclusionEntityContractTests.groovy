@@ -3,28 +3,16 @@ package darpan.reconciliation.conclusion
 import org.junit.jupiter.api.Test
 
 import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-UI-044. The conclusion rules are tenant configuration a run reads, so their shape is a contract:
  * tenant-scoped, and free of a field named `values` (on a Groovy Map that name resolves to Map.values()).
  */
 class ConclusionEntityContractTests {
-
-    private static Path componentRoot() {
-        Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
-        while (p != null && !Files.exists(p.resolve("entity/RuleEntities.xml"))) {
-            Path candidate = p.resolve("runtime/component/darpan")
-            if (Files.exists(candidate.resolve("entity/RuleEntities.xml"))) return candidate
-            p = p.parent
-        }
-        if (p == null) throw new IllegalStateException("darpan component root not found")
-        return p
-    }
 
     private static String read(String rel) {
         return Files.readString(componentRoot().resolve(rel))

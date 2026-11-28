@@ -5,9 +5,9 @@ import org.junit.jupiter.api.Test
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-BE-187: Moqui loads a component's data files in file-name order, and one FK failure skips the rest of
@@ -19,16 +19,6 @@ class ConnectorSeedLoadOrderContractTests {
 
     static final String CONNECTOR = 'darpan.reconciliation.SourceSystemConnector'
     static final String FIELD = 'darpan.reconciliation.SourceSystemConnectorField'
-
-    private static Path componentRoot() {
-        Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
-        while (p != null && !Files.exists(p.resolve("entity/RuleEntities.xml"))) {
-            Path candidate = p.resolve("runtime/component/darpan")
-            if (Files.exists(candidate.resolve("entity/RuleEntities.xml"))) return candidate
-            p = p.parent
-        }
-        return p
-    }
 
     @Test
     void connectorFieldRowsLoadAfterTheirParentConnectors() {

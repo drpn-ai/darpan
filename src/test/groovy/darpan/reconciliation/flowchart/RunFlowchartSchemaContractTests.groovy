@@ -3,14 +3,12 @@ package darpan.reconciliation.flowchart
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-UI-048. The flowchart's columns exist, are nullable with no default (so every row written before
@@ -73,11 +71,5 @@ class RunFlowchartSchemaContractTests {
 
     private static def parse(String relativePath) {
         return new XmlParser(false, false).parse(componentRoot().resolve(relativePath).toFile())
-    }
-
-    private static Path componentRoot() {
-        Path cwd = Paths.get("").toAbsolutePath().normalize()
-        return [cwd, cwd.resolve("runtime/component/darpan"), cwd.resolve("darpan-backend/runtime/component/darpan")]
-                .find { Files.exists(it.resolve("entity/ReconciliationEntities.xml")) }
     }
 }

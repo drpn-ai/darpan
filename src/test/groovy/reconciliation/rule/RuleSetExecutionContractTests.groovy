@@ -5,11 +5,11 @@ import org.junit.jupiter.api.Test
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 class RuleSetExecutionContractTests {
 
@@ -65,25 +65,8 @@ class RuleSetExecutionContractTests {
         assertFalse(saveRule.attributes().containsKey("location"))
         assertTrue(saveRule.actions.size() == 1)
 
+        // save#RuleSet (and its create#darpan.rule.RuleSet) was deleted in DAR-OPS-029 S99-027 (d8931ccf); save#Rule stays.
         String serviceText = Files.readString(serviceXml)
-        assertTrue(serviceText.contains('name="create#darpan.rule.RuleSet"'))
         assertTrue(serviceText.contains('name="create#darpan.rule.Rule"'))
-    }
-
-    private static Path componentRoot() {
-        Path cwd = Paths.get("").toAbsolutePath().normalize()
-        List<Path> candidates = [
-                cwd,
-                cwd.resolve("runtime/component/darpan"),
-                cwd.resolve("darpan-backend/runtime/component/darpan"),
-        ]
-
-        Path root = candidates.find {
-            Files.exists(it.resolve("service/reconciliation/ReconciliationRuleEngineServices.xml"))
-        }
-        if (!root) {
-            throw new IllegalStateException("Unable to resolve Darpan component root from ${cwd}")
-        }
-        return root
     }
 }

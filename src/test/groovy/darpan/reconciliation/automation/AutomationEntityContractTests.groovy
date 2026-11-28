@@ -5,13 +5,13 @@ import org.junit.jupiter.api.Test
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 class AutomationEntityContractTests {
     private static final int MAX_ENUM_ID_LENGTH = 20
@@ -454,22 +454,5 @@ class AutomationEntityContractTests {
             assertTrue(chain.contains(".disableAuthz()"), "Expected ${needle} read chain to call disableAuthz()")
             index = source.indexOf(needle, index + needle.length())
         }
-    }
-
-    private static Path componentRoot() {
-        Path cwd = Paths.get("").toAbsolutePath().normalize()
-        List<Path> candidates = [
-                cwd,
-                cwd.resolve("runtime/component/darpan"),
-                cwd.resolve("darpan-backend/runtime/component/darpan"),
-        ]
-
-        Path root = candidates.find {
-            Files.exists(it.resolve("entity/ReconciliationEntities.xml"))
-        }
-        if (!root) {
-            throw new IllegalStateException("Unable to resolve Darpan component root from ${cwd}")
-        }
-        return root
     }
 }

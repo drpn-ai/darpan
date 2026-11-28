@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
+import static darpan.reconciliation.support.TestHelpers.componentRoot
 
 /**
  * DAR-BE-176. The data-defined source code in darpan core names no system (Aditi 2026-11-02: "make sure nothing in the
@@ -25,19 +26,14 @@ class DataSourceNoSystemNameTests {
             "DataSourceDefinitionFacadeServices.xml": ["as the shipped OMS_ORDERS_GQL_V1"],
     ]
 
-    private static File componentRoot() {
-        // Gradle runs tests from the component directory.
-        return new File(System.getProperty("user.dir"))
-    }
-
     private static List<File> groovySources() {
         List<File> files = []
-        new File(componentRoot(), "src/main/groovy/darpan/datasource").eachFileRecurse { File f -> if (f.name.endsWith(".groovy")) files << f }
+        new File(componentRoot().toFile(), "src/main/groovy/darpan/datasource").eachFileRecurse { File f -> if (f.name.endsWith(".groovy")) files << f }
         return files
     }
 
     private static List<File> sources() {
-        File root = componentRoot()
+        File root = componentRoot().toFile()
         List<File> files = groovySources()
         files << new File(root, "entity/DataSourceEntities.xml")
         files << new File(root, "service/facade/DataSourceDefinitionFacadeServices.xml")

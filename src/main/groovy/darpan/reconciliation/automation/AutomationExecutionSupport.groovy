@@ -3785,6 +3785,42 @@ class AutomationExecutionSupport {
      * @param run reconciliationRunResultId, companyUserGroupId, savedRunId, runName (blank falls back to savedRunId), resultDataManagerPath
      */
     static void notifySavedRunError(def ec, Map run, String reason) {
+        deliverSavedRunError(ec, run, RunErrorKinds.FAILED, reason)
+    }
+
+    /**
+     * DAR-OPS-029 S06 for S18 (OC19). A manual saved run that compared nothing closes as a scheduled one does (executeAutomation's
+     * closeAsNoData), after its run result is NO_DATA. A did-not-run finding (AutomationNoDataJudge.closeFinding: ONE_SIDE_EMPTY or
+     * KEPT_NOTHING) takes notifySavedRunError's route with the finding's kind and reason: one card to Darpan's error space, the
+     * neutral client.runfailed line to notify-me subscribers. No finding is a quiet day: the client.nothing line ("Order sync · Apr 30:
+     * nothing to compare (Shopify 0, HotWax 0)", the window's days in windowTimeZone, else the tenant's zone) to notify-me
+     * subscribers only, never a chat room. Either way the run result is claimed, so it is told once. Never throws.
+     *
+     * @param run reconciliationRunResultId, companyUserGroupId, savedRunId, runName (blank falls back to savedRunId), resultDataManagerPath
+     */
+    static void notifySavedRunNoData(def ec, Map run, Map<String, String> finding, def file1Source, def file2Source,
+                                     Map file1Result, Map file2Result, boolean evaluateMode,
+                                     Timestamp windowStart, Timestamp windowEnd, String windowTimeZone) {
+        if (finding != null) {
+            deliverSavedRunError(ec, run, normalize(finding.kind) ?: RunErrorKinds.FAILED, finding.reason)
+            return
+        }
+        String runResultId = normalize(run?.reconciliationRunResultId)
+        try {
+            String tenantId = normalize(run?.companyUserGroupId)
+            ZoneId zone = normalize(windowTimeZone) ? resolveZoneId(windowTimeZone) :
+                    (TenantNotificationSupport.resolveTenantZone(ec, tenantId) ?: ZoneId.of("UTC"))
+            String line = quietDayLine(ec, normalize(run?.runName) ?: normalize(run?.savedRunId), windowStart, windowEnd, zone,
+                    file1Source, file2Source, file1Result, file2Result, evaluateMode)
+            TenantNotificationSupport.notifyRunLine(ec, tenantId, null, runResultId, line)
+        } catch (Throwable notifyError) {
+            logger.warn("Manual quiet day notification failed (best-effort): {}", notifyError.getClass().name)
+            purgeAfterFailedNotify(ec, runResultId)
+        }
+    }
+
+    /** DAR-BE-362: a saved run's error card (kind FAILED, or a no-data finding's kind) and its subscribers' neutral line. */
+    private static void deliverSavedRunError(def ec, Map run, String kind, String reason) {
         String runResultId = normalize(run?.reconciliationRunResultId)
         deliverRunError(ec, runResultId, ERROR_NOTICE_RUN_FAILED) { ->
             String tenantId = normalize(run.companyUserGroupId)
@@ -3795,7 +3831,7 @@ class AutomationExecutionSupport {
                     tenantName    : tenantName(ec, tenantId),
                     subjectKey    : savedRunId ? "savedRun:${savedRunId}".toString() : runResultId,
                     automationName: name,
-                    kind          : RunErrorKinds.FAILED,
+                    kind          : kind,
                     errorFirstLine: reason,
                     runUrl        : runErrorUrl(ec, [savedRunId: savedRunId, automationName: name, companyUserGroupId: tenantId],
                             [resultDataManagerPath: run.resultDataManagerPath], runResultId),
@@ -3848,15 +3884,34 @@ class AutomationExecutionSupport {
                     logger.warn("Run error card for {} failed: {}", card.automationId ?: card.subjectKey, postError.getClass().name)
                 }
             }
-            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
-                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(blockId, [name: plan.name])
+            String line = noticeCopy(ec).text(blockId, [name: plan.name])
             TenantNotificationSupport.notifyRunLine(ec, plan.tenantId as String, null, runResultId, line)
         } catch (Throwable notifyError) {
             logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
-            try {
-                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
-            } catch (Throwable ignored) { }
+            purgeAfterFailedNotify(ec, runResultId)
         }
+    }
+
+    /** The neutral-line copy (DARPAN_ERROR_NOTICE), or the test seam's. */
+    private static EmailCopyReader noticeCopy(def ec) {
+        return errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) : new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)
+    }
+
+    /** A notify that failed still drops the run's subscriptions, so none outlives the run; a failed purge is logged, not thrown. */
+    private static void purgeAfterFailedNotify(def ec, String runResultId) {
+        try {
+            TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+        } catch (Throwable purgeError) {
+            logger.warn("Could not purge the subscriptions of run {} after a failed notify: {}", runResultId, purgeError.getClass().name)
+        }
+    }
+
+    /** DAR-BE-390/393. The quiet-day line: the run's name, the window's days in zone, and what each side kept. */
+    private static String quietDayLine(def ec, String name, Timestamp windowStart, Timestamp windowEnd, ZoneId zone,
+                                       def file1Source, def file2Source, Map file1Result, Map file2Result, boolean evaluateMode) {
+        List<String> sides = [sideName(ec, file1Source)] + (evaluateMode ? [] : [sideName(ec, file2Source)])
+        return noticeCopy(ec).text("client.nothing", [name: name, day: windowDayWords(windowStart, windowEnd, zone),
+                counts: AutomationNoDataJudge.quietDayCounts(sides, [file1Result, file2Result].take(sides.size()))])
     }
 
     /**
@@ -3869,20 +3924,13 @@ class AutomationExecutionSupport {
                                Map file1Result = null, Map file2Result = null) {
         try {
             String name = normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId"))
-            String day = windowDayWords(toTimestamp(window?.childWindowStartDate), toTimestamp(window?.childWindowEndDate),
-                    resolveZoneId(readField(automation, "windowTimeZone")))
-            List<String> sides = [sideName(ec, file1Source)] + (evaluateMode ? [] : [sideName(ec, file2Source)])
-            // DAR-BE-393: what each side kept, so a first kept-nothing day says "Shopify 59, HotWax 0"
-            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
-                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text("client.nothing",
-                    [name: name, day: day, counts: AutomationNoDataJudge.quietDayCounts(sides, [file1Result, file2Result].take(sides.size()))])
+            String line = quietDayLine(ec, name, toTimestamp(window?.childWindowStartDate), toTimestamp(window?.childWindowEndDate),
+                    resolveZoneId(readField(automation, "windowTimeZone")), file1Source, file2Source, file1Result, file2Result, evaluateMode)
             TenantNotificationSupport.notifyRunLine(ec, normalize(readField(automation, "companyUserGroupId")),
                     normalize(readField(automation, "chatSpaceId")), runResultId, line)
         } catch (Throwable notifyError) {
             logger.warn("Quiet day notification failed (best-effort): {}", notifyError.getClass().name)
-            try {
-                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
-            } catch (Throwable ignored) { }
+            purgeAfterFailedNotify(ec, runResultId)
         }
     }
 

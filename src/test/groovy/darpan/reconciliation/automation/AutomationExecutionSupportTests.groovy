@@ -4072,6 +4072,83 @@ class AutomationExecutionSupportTests {
         }
     }
 
+    // DAR-OPS-029 S06 for S18 (OC19): a manual saved run that compared nothing closes as a scheduled one does.
+    private static final Map MANUAL_RUN = [reconciliationRunResultId: "RR_MAN", companyUserGroupId: "TENANT_A", savedRunId: "RS_1",
+                                           runName: "Order sync"]
+
+    private static FakeEc manualRunWithSubscriber() {
+        FakeEc ec = fakeEc()
+        [SHOPIFY: "Shopify", OMS_GQL: "HotWax"].each { String id, String name ->
+            ec.entity.add("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanSystemSource", description: name])
+        }
+        addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        addChatSpace(ec, "CS_ME", ME_WEBHOOK)
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "RR_MAN", companyUserGroupId: "TENANT_A",
+                savedRunId: "RS_1", statusEnumId: AutomationExecutionSupport.STATUS_NO_DATA])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [reconciliationRunResultId: "RR_MAN", userId: "USER_A",
+                chatSpaceId: "CS_ME"])
+        return ec
+    }
+
+    @Test
+    void aManualRunWithOneSideEmptyCardsDarpanAndTellsSubscribersOnlyTheNeutralLine() {
+        FakeEc ec = manualRunWithSubscriber()
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            Map side1 = [readCount: 5, recordCount: 5], side2 = [readCount: 0, recordCount: 0]
+            Map<String, String> finding = AutomationNoDataJudge.closeFinding(false, "HotWax", "Shopify", side1, side2, null, false)
+            AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, finding, [systemEnumId: "OMS_GQL"], [systemEnumId: "SHOPIFY"],
+                    side1, side2, false, timestamp("2026-04-30T00:00:00Z"), timestamp("2026-05-01T00:00:00Z"), "UTC")
+
+            assertEquals(1, cards.size())
+            assertEquals(["ONE_SIDE_EMPTY", "The Shopify side read no records.", "manual", "savedRun:RS_1", "Order sync"],
+                    [cards[0].kind, cards[0].errorFirstLine, cards[0].trigger, cards[0].subjectKey, cards[0].automationName])
+            assertEquals([[webhookUrl: ME_WEBHOOK, payload: [text: "Order sync did not finish. Darpan has been alerted and is working on a fix."]]],
+                    deliveries, "the subscriber gets the neutral line, never the reason; no chat room is told")
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty())
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aManualQuietDayTellsOnlyItsSubscribersOnce() {
+        FakeEc ec = manualRunWithSubscriber()
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            Map side0 = [readCount: 0, recordCount: 0]
+            Closure notify = { ->
+                AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
+                        side0, side0, false, timestamp("2026-04-30T07:00:00Z"), timestamp("2026-05-01T07:00:00Z"), "America/Los_Angeles")
+            }
+            notify()
+            assertTrue(cards.isEmpty(), "a quiet day is not an error")
+            assertEquals([[webhookUrl: ME_WEBHOOK, payload: [text: "Order sync · Apr 30: nothing to compare (Shopify 0, HotWax 0)"]]],
+                    deliveries, "subscribers only, the window's day in its zone; the automation room CS_OPS is never told")
+            notify()
+            assertEquals(1, deliveries.size(), "the run result is claimed: a second call tells no one")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aManualNoDataNotifyNeverThrowsAndStillDropsItsSubscriptions() {
+        FakeEc ec = manualRunWithSubscriber()
+        captureErrorCards()
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> throw new IllegalStateException("copy unreadable") }
+        try {
+            Map side0 = [readCount: 0, recordCount: 0]
+            AutomationExecutionSupport.notifySavedRunNoData(ec, MANUAL_RUN, null, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"],
+                    side0, side0, false, timestamp("2026-04-30T00:00:00Z"), timestamp("2026-05-01T00:00:00Z"), null)
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(), "no subscription outlives the run")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
     // DAR-BE-390: a verify reads by design and answers the person on the finding; an empty read there tells no room. A side
     // empty while the other read stays the DAR-BE-015 run error.
     @Test

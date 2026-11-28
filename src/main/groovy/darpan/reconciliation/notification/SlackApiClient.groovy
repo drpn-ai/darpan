@@ -3,13 +3,9 @@ package darpan.reconciliation.notification
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
-import java.net.URI
 import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 
 /**
  * Slack Web API calls Darpan makes, plus the response contract that governs all of them.
@@ -28,6 +24,7 @@ import java.time.Duration
  */
 class SlackApiClient {
     static final String API_BASE = "https://slack.com/api"
+    static final String API_HOST = "slack.com"
 
     private static Closure transportHook = null
 
@@ -299,14 +296,9 @@ class SlackApiClient {
         if (transportHook != null) {
             return (transportHook.call(method, botToken, params) ?: [:]) as Map<String, Object>
         }
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-        HttpRequest request = HttpRequest.newBuilder(URI.create("${API_BASE}/${method}"))
-                .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
-                .header("Authorization", "Bearer ${botToken}")
-                .POST(HttpRequest.BodyPublishers.ofString(formEncode(params)))
-                .build()
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        HttpResponse<String> response = NotificationHttp.post("${API_BASE}/${method}".toString(), API_HOST,
+                "application/x-www-form-urlencoded; charset=utf-8", formEncode(params), 15,
+                [Authorization: "Bearer ${botToken}".toString()])
         return [
                 statusCode: response.statusCode(),
                 body      : response.body(),

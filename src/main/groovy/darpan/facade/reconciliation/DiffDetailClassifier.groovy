@@ -78,20 +78,16 @@ class DiffDetailClassifier {
     }
 
     private static String resolveMissingBucket(Map record, String file1Label, String file2Label) {
-        // The verify passes' side first (S99-063): the compare's own diffType, then a label the two sides don't share.
-        // Two sides of one system share a label (NetSuite vs NetSuite), so a label match alone would read every row as
-        // missing from side 1 (gorjana R12, DAR-BE-120).
-        String side = DiffDocumentStreamSupport.missingSide(record, file1Label, file2Label)
-        if (side == DiffDocumentStreamSupport.FILE_1) return 'file-1'
-        if (side == DiffDocumentStreamSupport.FILE_2) return 'file-2'
-
-        // Display fallback where missingSide declines to guess (shared or blank labels, no missingIn): the page still
-        // places the row; the first matching label wins.
         String missingToken = normalizeToken(record.get('missingIn'))
         String file1Token = normalizeToken(file1Label)
         String file2Token = normalizeToken(file2Label)
         String typeToken = normalizeToken(resolveDiffType(record))
         String presentToken = normalizeToken(record.get('presentIn'))
+
+        // The compare's own side, first: two sides of one system share a label (NetSuite vs NetSuite), so a label
+        // match alone would read every row as missing from side 1 (gorjana R12, DAR-BE-120).
+        if (typeToken == 'missing_in_file_1') return 'file-1'
+        if (typeToken == 'missing_in_file_2') return 'file-2'
         if (missingToken && missingToken == file1Token) return 'file-1'
         if (missingToken && missingToken == file2Token) return 'file-2'
         if (file1Token && typeToken.contains("missing_in_${file1Token}".toString())) return 'file-1'

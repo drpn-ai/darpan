@@ -5,15 +5,11 @@ import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.net.URI
 import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.sql.Timestamp
-import java.time.Duration
 
 /**
  * The Slack app install (OAuth v2) flow: minting the CSRF state, redeeming it, and exchanging the
@@ -335,13 +331,8 @@ class SlackOAuthSupport {
     private static Map<String, Object> postForm(String clientId, String clientSecret, String code, String redirectUri) {
         String form = SlackApiClient.formEncode([client_id: clientId, client_secret: clientSecret, code: code,
                                                  redirect_uri: redirectUri] as Map<String, Object>)
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-        HttpRequest request = HttpRequest.newBuilder(URI.create(ACCESS_URL))
-                .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(form))
-                .build()
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        HttpResponse<String> response = NotificationHttp.post(ACCESS_URL, SlackApiClient.API_HOST,
+                "application/x-www-form-urlencoded", form, 15)
         Object parsed = new JsonSlurper().parseText(response.body() ?: "{}")
         return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
     }

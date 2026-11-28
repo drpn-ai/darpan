@@ -65,54 +65,6 @@ class DiffDetailClassifierTests {
         assertEquals("file-1", DiffDetailClassifier.resolveDiffBucket([diffType: "MISSING_IN_System_A"], F1, F2))
     }
 
-    /**
-     * S99-063: the run page's bucket and the verify passes' side (DiffDocumentStreamSupport.missingSide) are one reading
-     * wherever missingSide names a side; the classifier only adds a display fallback where missingSide declines to guess.
-     */
-    @Test
-    void theBucketAgreesWithTheVerifyPassesSideWheneverThatSideIsKnown() {
-        List<Map> rows = [
-                [diffType: "MISSING_IN_FILE_1"], [diffType: "MISSING_IN_FILE_2", missingIn: F1],
-                [missingIn: F1], [missingIn: F2], [missingIn: F2, presentIn: F2],
-                [type: "missing_in_system_a", missingIn: "elsewhere"], [type: "missing_in_system_b", missingIn: "elsewhere"],
-                // the type names side 1 exactly while missingIn names side 2: the type's label wins, as in missingSide
-                [type: "missing_in_system_a", missingIn: F2],
-        ]
-        rows.each { Map row ->
-            String side = DiffDocumentStreamSupport.missingSide(row, F1, F2)
-            assertEquals(side == DiffDocumentStreamSupport.FILE_1 ? "file-1" : "file-2",
-                    DiffDetailClassifier.resolveDiffBucket(row, F1, F2), row.toString())
-        }
-    }
-
-    /** S99-063: one label the start of the other ("OMS" / "OMS API"): a missing_in_oms_api type is side 2, not side 1. */
-    @Test
-    void aTypeNamingTheLongerLabelIsThatSideEvenWhenTheOtherLabelIsItsPrefix() {
-        Map row = [type: "missing_in_oms_api", missingIn: "somewhere"]
-        assertEquals(DiffDocumentStreamSupport.FILE_2, DiffDocumentStreamSupport.missingSide(row, "OMS", "OMS API"))
-        assertEquals("file-2", DiffDetailClassifier.resolveDiffBucket(row, "OMS", "OMS API"))
-    }
-
-    /** S99-063: where missingSide gives no side, the run page still places the row for display, as it always did. */
-    @Test
-    void theDisplayFallbackStillPlacesRowsTheVerifyPassesLeaveUnsided() {
-        String shared = "NetSuite SuiteQL"
-        // two sides share a label: missingIn and a label type read as side 1, presentIn as the other side
-        assertNull(DiffDocumentStreamSupport.missingSide([missingIn: shared], shared, shared))
-        assertEquals("file-1", DiffDetailClassifier.resolveDiffBucket([missingIn: shared], shared, shared))
-        assertEquals("file-1", DiffDetailClassifier.resolveDiffBucket([type: "missing_in_netsuite_suiteql"], shared, shared))
-        assertEquals("file-2", DiffDetailClassifier.resolveDiffBucket([presentIn: shared], shared, shared))
-        // no missingIn: a type naming a label inside a longer token, or presentIn alone
-        assertNull(DiffDocumentStreamSupport.missingSide([type: "missing_in_system_b_records"], F1, F2))
-        assertEquals("file-2", DiffDetailClassifier.resolveDiffBucket([type: "missing_in_system_b_records"], F1, F2))
-        assertEquals("file-1", DiffDetailClassifier.resolveDiffBucket([presentIn: F2], F1, F2))
-        // one label blank: missingIn still matches the other
-        assertNull(DiffDocumentStreamSupport.missingSide([missingIn: F2], "", F2))
-        assertEquals("file-2", DiffDetailClassifier.resolveDiffBucket([missingIn: F2], "", F2))
-        // nothing matches: the rule bucket
-        assertEquals("rule", DiffDetailClassifier.resolveDiffBucket([missingIn: "elsewhere"], F1, F2))
-    }
-
     @Test
     void nonMissingRecordsAreRuleBucket() {
         assertFalse(DiffDetailClassifier.isMissingDiffRecord([diffType: "VALUE_MISMATCH"]))

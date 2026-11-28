@@ -131,7 +131,6 @@ class ReconciliationSavedRunSupport {
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
-    static final String SHOPIFY_ORDER_IDS_LOOKUP_SERVICE = "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
 
     static List<Map<String, Object>> normalizeRuleEntries(Object rawRules) {
         if (!(rawRules instanceof Collection)) return []

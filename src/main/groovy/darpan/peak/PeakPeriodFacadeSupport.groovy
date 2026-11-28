@@ -25,6 +25,16 @@ class PeakPeriodFacadeSupport {
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)
     private static final String WHY = "peak period facade reads the active tenant's automations and audits: explicit companyUserGroupId condition applied"
 
+    private static final String MONTH = /(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/
+    /**
+     * OC190 (Aditi 2026-11-28): a date in a period's name. A month with a day either way round ("Nov 30", "30 November"),
+     * a numeric date ("11/30", "12/24/26", "2026-11-30") or a four-digit year. A month alone ("May sale") is a name.
+     */
+    private static final java.util.regex.Pattern DATE_IN_NAME = java.util.regex.Pattern.compile(
+            /\b${MONTH}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+${MONTH}\b/ +
+                    /|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b(?:19|20)\d{2}\b/,
+            java.util.regex.Pattern.CASE_INSENSITIVE)
+
     /** Days of a period scanned for held runs: enough to see every distinct local fire time of a daily-or-slower schedule. */
     private static final int HELD_RUN_SCAN_DAYS = 7
     /** Hard stop on fires examined per automation, for a schedule that fires every minute. */
@@ -33,7 +43,9 @@ class PeakPeriodFacadeSupport {
     /** Error sentences for a period about to be saved; empty when valid. otherActivePeriods: the tenant's other active periods. */
     static List<String> validatePeriod(Map period, List<Map> otherActivePeriods) {
         List<String> errors = []
-        if (!normalize(period?.get("periodName"))) errors << "Name is required."
+        String name = normalize(period?.get("periodName"))
+        if (!name) errors << "Name is required."
+        else if (DATE_IN_NAME.matcher(name).find()) errors << "Leave the date out of the name: the period carries its dates."
         LocalDate from = PeakPeriodSupport.toLocalDate(period?.get("fromDate"))
         LocalDate thru = PeakPeriodSupport.toLocalDate(period?.get("thruDate"))
         boolean datesOk = from != null && thru != null

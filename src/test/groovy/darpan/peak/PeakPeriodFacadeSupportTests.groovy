@@ -61,6 +61,27 @@ class PeakPeriodFacadeSupportTests {
                 PeakPeriodFacadeSupport.validatePeriod([periodName: 'X', fromDate: null, thruDate: LocalDate.of(2026, 12, 3)], []))
     }
 
+    /**
+     * DAR-OPS-029 S17b OC190 (Aditi 2026-11-28, "Enforce it"). A period is named for its event; its dates live in the
+     * period, and the name rides into client chat posts, so a date in the name is refused.
+     */
+    @Test
+    void aNameWithADateIsRefused() {
+        ['Cyber Monday Nov 30', 'PEAK Nov 27', 'Sale Nov 24-26', 'Christmas Dec. 24', 'November 30 sale', '30 Nov sale',
+         'Sale 11/30', 'Sale 2026-11-30', 'Black Friday 2026', 'Holiday 12/24/26'].each { String name ->
+            assertEquals(['Leave the date out of the name: the period carries its dates.'],
+                    PeakPeriodFacadeSupport.validatePeriod(period(name, '2026-11-30', '2026-11-30'), []), name)
+        }
+    }
+
+    @Test
+    void anEventNameIsAccepted() {
+        ['Cyber Monday', 'Christmas', 'Black Friday', 'Boxing Day', 'Q4 peak', 'May sale', 'March madness', 'BFCM', 'Top 100 drop',
+         'Decorations sale', 'Novelty week'].each { String name ->
+            assertEquals([], PeakPeriodFacadeSupport.validatePeriod(period(name, '2026-11-30', '2026-11-30'), []), name)
+        }
+    }
+
     @Test
     void halfPeakHoursRefused() {
         assertEquals(['Set both peak-hour times, or neither.'],

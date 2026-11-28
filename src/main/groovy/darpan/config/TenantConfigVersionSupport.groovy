@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.common.Digests
 import darpan.admin.transfer.ConfigTransferExporter
 import darpan.admin.transfer.TransferSpecs
 import darpan.facade.common.TenantScopedFinder
@@ -7,8 +8,6 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileDynamic
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 
 /**
  * DAR-BE-160 phase A. A tenant's audit config kept as versions in the database (darpan.config.TenantConfigVersion).
@@ -45,8 +44,7 @@ class TenantConfigVersionSupport {
     static String contentHash(Map pack) {
         Map content = new LinkedHashMap(pack ?: [:])
         content.remove("source")
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(JsonOutput.toJson(canonical(content)).getBytes(StandardCharsets.UTF_8))
-        return digest.collect { String.format("%02x", it) }.join()
+        return Digests.sha256Hex(JsonOutput.toJson(canonical(content)))
     }
 
     static Object canonical(Object value) {

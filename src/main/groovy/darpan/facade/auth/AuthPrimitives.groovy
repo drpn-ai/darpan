@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.common.Digests
 import darpan.common.MessageScope
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
@@ -7,8 +8,6 @@ import org.apache.commons.validator.routines.InetAddressValidator
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
@@ -33,11 +32,11 @@ class AuthPrimitives {
 
     /** SHA-256, hex. Enough for a value with 80 or more random bits: nothing to guess, so no slow hash is needed. */
     static String sha256Hex(String value) {
-        return sha256Hex(value.getBytes(StandardCharsets.UTF_8))
+        return Digests.sha256Hex(value)
     }
 
     static String sha256Hex(byte[] value) {
-        return MessageDigest.getInstance("SHA-256").digest(value).encodeHex().toString()
+        return Digests.sha256Hex(value)
     }
 
     static String b64url(byte[] bytes) {

@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.common.ThrowableSupport
 import groovy.transform.CompileDynamic
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -94,7 +95,7 @@ class TenantConfigPendingSupport {
             }
             return [tenant: tenantId, outcome: result.created ? "VERSIONED" : "UNCHANGED", versionId: result.version?.id]
         } catch (Throwable t) {
-            String why = rootMessage(t)
+            String why = ThrowableSupport.rootMessage(t)
             logger.warn("Tenant ${tenantId}: no config version kept: ${why}")
             ec.message.clearErrors()
             try {
@@ -110,11 +111,5 @@ class TenantConfigPendingSupport {
             }
             return [tenant: tenantId, outcome: "FAILED", error: why]
         }
-    }
-
-    private static String rootMessage(Throwable t) {
-        Throwable cause = t
-        while (cause.cause != null && cause.cause != cause) cause = cause.cause
-        return (cause.message ?: t.message ?: t.class.simpleName).trim()
     }
 }

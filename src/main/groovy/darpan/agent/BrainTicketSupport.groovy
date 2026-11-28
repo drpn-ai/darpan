@@ -1,10 +1,9 @@
 package darpan.agent
 
+import darpan.common.Digests
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 
 /** DAR-BE-159. Small pieces the brain change ticket services share: the allowed values, the idempotency hash, redacted JSON. */
 class BrainTicketSupport {
@@ -26,7 +25,7 @@ class BrainTicketSupport {
     static final int LONG = 60000
 
     static String sha256(String text) {
-        return MessageDigest.getInstance("SHA-256").digest((text ?: "").getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+        return Digests.sha256Hex(text)
     }
 
     /** The idempotency key: sha256 of the normalised, trimmed text. */

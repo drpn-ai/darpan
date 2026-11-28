@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.common.Digests
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import groovy.json.JsonOutput
@@ -7,10 +8,8 @@ import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.sql.Timestamp
 
 /**
@@ -56,7 +55,7 @@ class AuditSharedReadSupport {
     /** The share key: SHA-256 of the parts (tenant, system, connection, extract service, window, start), in order. */
     static String key(List<Object> parts) {
         String text = parts.collect { it instanceof java.util.Date ? ((java.util.Date) it).time.toString() : (it?.toString() ?: "") }.join("\u0001")
-        return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+        return Digests.sha256Hex(text)
     }
 
     /**

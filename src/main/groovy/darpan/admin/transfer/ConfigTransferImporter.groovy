@@ -1,5 +1,6 @@
 package darpan.admin.transfer
 
+import darpan.common.Digests
 import darpan.admin.AdminAuditSupport
 import darpan.audit.AuditSchedule
 import darpan.facade.common.SharedConfigAccessSupport
@@ -12,9 +13,7 @@ import groovy.json.JsonOutput
 import groovy.transform.CompileDynamic
 
 import javax.crypto.SecretKey
-import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
-import java.security.MessageDigest
 import java.sql.Timestamp
 
 import reconciliation.rule.RuleEngineSupport
@@ -70,7 +69,7 @@ class ConfigTransferImporter {
         Map hashed = [tenant: targetTenantId, bundle: bundle, connectionMap: connectionMap ?: [:], plan: plan]
         if (handoffFingerprint) hashed.handoffFingerprint = handoffFingerprint
         String json = JsonOutput.toJson(sorted(hashed))
-        return MessageDigest.getInstance("SHA-256").digest(json.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+        return Digests.sha256Hex(json)
     }
 
     /**

@@ -1,5 +1,7 @@
 package darpan.agent.pipeline
 
+import darpan.common.ThrowableSupport
+import darpan.common.Digests
 import darpan.agent.AgentCallMarker
 import darpan.config.TenantConfigVersionSupport
 import darpan.facade.common.TenantAccessSupport
@@ -7,8 +9,6 @@ import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 
 /**
  * DAR-BE-159. An agent proposal from draft to live config, with no model in the loop: create (the agent's only write: a
@@ -209,7 +209,7 @@ class AuditChangePlanner {
                 }
             }
         } catch (Throwable t) {
-            refused = refused ?: rootMessage(t)
+            refused = refused ?: ThrowableSupport.rootMessage(t)
         }
         if (ec.message.hasError()) refused = refused ?: ec.message.errorsString?.trim()
         ec.message.clearErrors()
@@ -447,8 +447,8 @@ class AuditChangePlanner {
     /** sha256 of the proposal id, the merged state as JSON with sorted keys, and the sha256 of the current state's JSON. */
     static String planHash(String proposalId, Map merged, Map current) {
         String text = proposalId + "\n" + JsonOutput.toJson(TenantConfigVersionSupport.canonical(merged)) + "\n" +
-                sha256(JsonOutput.toJson(TenantConfigVersionSupport.canonical(current)))
-        return sha256(text)
+                Digests.sha256Hex(JsonOutput.toJson(TenantConfigVersionSupport.canonical(current)))
+        return Digests.sha256Hex(text)
     }
 
     /** An agent proposal merges its validated R18 after; a revert restores the lever it carries. */
@@ -478,7 +478,7 @@ class AuditChangePlanner {
             if (ec.message.hasError()) return backtestFailed(ec.message.errors[0] as String) + shown
             return tested == null ? null : tested + shown
         } catch (Exception e) {
-            return backtestFailed(rootMessage(e) ?: e.class.simpleName) + shown
+            return backtestFailed(ThrowableSupport.rootMessage(e) ?: e.class.simpleName) + shown
         } finally {
             ec.message.clearErrors()
             prior.each { ec.message.addError(it) }
@@ -551,13 +551,4 @@ class AuditChangePlanner {
         return v instanceof Map ? (Map) v : [list: v]
     }
 
-    private static String sha256(String text) {
-        return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)).collect { String.format("%02x", it) }.join()
-    }
-
-    private static String rootMessage(Throwable t) {
-        Throwable cause = t
-        while (cause.cause != null && cause.cause != cause) cause = cause.cause
-        return (cause.message ?: t.message ?: t.class.simpleName).trim()
-    }
 }

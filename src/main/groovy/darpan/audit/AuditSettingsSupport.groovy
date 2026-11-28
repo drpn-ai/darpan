@@ -44,7 +44,6 @@ class AuditSettingsSupport {
     static final String DEFAULT_TIME = "06:00"
     private static final String WHY = "audit settings, active tenant: explicit companyUserGroupId condition applied"
 
-    /** The audit by its code in this tenant, or null. */
     /** The tenant's audit by its code, or by its id when no audit has that code (an agent holds the id it was given). */
     static Map auditOf(def ec, String tenantId, String auditCode) {
         String key = normalize(auditCode)
@@ -257,35 +256,82 @@ class AuditSettingsSupport {
 
     /** NO_BUCKET: a node whose path names two buckets, which no row can match (ConclusionTreeSupport.matches reads each). */
     private static final String NO_BUCKET = "-"
+    /** A repeated key's partner rows, DUPLICATE_IN_FILE_y_PAIRED. */
+    private static final String PAIRED_SUFFIX = "_PAIRED"
 
     /**
      * DAR-BE-353. A run's cause nodes: [conclusion, outcome, bucket], the bucket the one its path names (its own, else its
      * nearest ancestor's; blank: any row; NO_BUCKET when the path names two). Unexplained and blank conclusions are dropped.
      */
     private static List<Map> nodesOf(List<Map> rules) {
+        return chainsOf(rules).collect { Map chain ->
+            Set<String> buckets = chain.buckets as Set<String>
+            [conclusion: chain.conclusion, outcome: chain.outcome,
+             bucket: buckets.size() > 1 ? NO_BUCKET : buckets ? buckets.first() : null]
+        } as List<Map>
+    }
+
+    /**
+     * Each concluding node of one tree (Unexplained and blank conclusions dropped) with the appliesToBucket values on its
+     * chain to the root: [conclusion, outcome, buckets]. A cycle ends the walk.
+     */
+    private static List<Map> chainsOf(List<Map> rules) {
         Map<Integer, Map> bySeq = rules.findAll { it.sequenceNum != null }.collectEntries { [((it.sequenceNum as int)): it] }
         return rules.findResults { Map rule ->
             String conclusion = normalize(rule.conclusionEnumId)
             if (!conclusion || conclusion == "UNEXPLAINED") return null
-            Set<String> buckets = [] as Set
+            Set<String> buckets = new LinkedHashSet<>()
             Set<Integer> seen = [] as Set
             for (Map n = rule; n != null && seen.add(n.sequenceNum as Integer);
                  n = normalize(n.parentSequenceNum) ? bySeq[n.parentSequenceNum as int] : null) {
                 if (normalize(n.appliesToBucket)) buckets.add(normalize(n.appliesToBucket))
             }
-            return [conclusion: conclusion, outcome: normalize(rule.outcome),
-                    bucket: buckets.size() > 1 ? NO_BUCKET : buckets ? buckets.first() : null]
+            return [conclusion: conclusion, outcome: normalize(rule.outcome), buckets: buckets]
         } as List<Map>
+    }
+
+    /** A cause chain that names no bucket: it applies to every row. */
+    static final String ANY_BUCKET = "*"
+
+    /**
+     * DAR-OPS-029 D11 (OC53). The buckets a run's cause tree targets: for each concluding node (Unexplained skipped), every
+     * appliesToBucket on its chain to the root, or ANY_BUCKET when the chain names none. A chain naming two buckets
+     * (reaches' NO_BUCKET) adds each. Empty for a run with no tree. One reading of the tree for findingsFrom and the settings
+     * page; read per compare scope, since a node's parent is in its own tree.
+     */
+    static Set<String> targetedBuckets(def ec, String tenantId, String savedRunId) {
+        if (!tenantId || !normalize(savedRunId)) return [] as Set<String>
+        List<String> scopeIds = rows(ec, "darpan.rule.RuleSetCompareScope", tenantId).condition("ruleSetId", normalize(savedRunId))
+                .list()*.compareScopeId.collect { it as String }
+        if (!scopeIds) return [] as Set<String>
+        Map<String, List<Map>> byScope = rows(ec, "darpan.rule.RuleSetConclusionRule", tenantId)
+                .condition("compareScopeId", EntityCondition.IN, scopeIds).orderBy("sequenceNum").list()*.getMap()
+                .groupBy { it.compareScopeId as String }
+        Set<String> out = new LinkedHashSet<>()
+        byScope.values().each { List<Map> tree -> out.addAll(targetedBucketsFrom(tree)) }
+        return out
+    }
+
+    /** targetedBuckets over one tree's RuleSetConclusionRule rows, without the reads. */
+    static Set<String> targetedBucketsFrom(List<Map> rules) {
+        Set<String> out = new LinkedHashSet<>()
+        chainsOf(rules ?: []).each { Map chain ->
+            Set<String> buckets = chain.buckets as Set<String>
+            if (buckets) out.addAll(buckets) else out.add(ANY_BUCKET)
+        }
+        return out
     }
 
     /**
      * DAR-BE-353. Whether a statement link's rows can conclude in a node's bucket. A link that names no row type reports every
-     * row; a single-sided run's rows all conclude in FINDING (RunConclusionSupport), whatever their type; a two-sided run's row
-     * type maps to its bucket exactly as the run concludes it (RunConclusionSupport.bucketOf).
+     * row but a repeated key's partner rows (DAR-OPS-029 S12, OC14: only a link naming DUPLICATE_IN_FILE_y_PAIRED reports
+     * them, as findingsFrom records); a single-sided run's rows all conclude in FINDING (RunConclusionSupport), whatever their
+     * type; a two-sided run's row type maps to its bucket exactly as the run concludes it (RunConclusionSupport.bucketOf).
      */
     static boolean reaches(String linkDiffTypes, String bucket) {
         if (bucket == NO_BUCKET) return false
         List<String> types = (linkDiffTypes ?: "").split(",")*.trim().findAll { it }
+        if (!types && bucket?.endsWith(PAIRED_SUFFIX)) return false
         if (!bucket || !types || bucket == "FINDING") return true
         return types.any { String type -> RunConclusionSupport.bucketOf([diffType: type], null, null) == bucket }
     }
@@ -598,7 +644,7 @@ class AuditSettingsSupport {
     }
 
     /** "0 30 6 * * ?" for 06:30: the Quartz form the automation scheduler reads. */
-    static String cronOf(String time) {
+    private static String cronOf(String time) {
         List<String> hm = (time ?: DEFAULT_TIME).split(":") as List<String>
         return "0 ${hm[1] as int} ${hm[0] as int} * * ?".toString()
     }

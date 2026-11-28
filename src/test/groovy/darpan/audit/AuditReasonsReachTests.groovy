@@ -61,6 +61,47 @@ class AuditReasonsReachTests {
         assertEquals(SHARED_TREE*.conclusionEnumId, codes(out.R1))
     }
 
+    // DAR-OPS-029 S12 (OC14 release gate, Aditi D5/D7): a repeated key's partner row (DUPLICATE_IN_FILE_y_PAIRED) is a row
+    // type a check can name. Only a link that names it reports it: a link that names no row type predates partner rows and
+    // keeps reporting what it did (findingsFrom, S11), so its reasons leave the partner buckets out too.
+    private static final List<Map> PAIRED_TREE = [
+            rule(10, "REPEATED_IN_OMS", "DUPLICATE_IN_FILE_1"),
+            rule(20, "PARTNER_OF_REPEAT", "DUPLICATE_IN_FILE_2_PAIRED"),
+            rule(30, "ANY_ROW", null),
+    ]
+
+    @Test
+    void "a check can name a repeated key's partner rows"() {
+        assert AuditCheckAuthoringSupport.DIFF_TYPES.containsAll(["DUPLICATE_IN_FILE_1_PAIRED", "DUPLICATE_IN_FILE_2_PAIRED"])
+        Map out = reasons([R6: [check("RS1", "DUPLICATE_IN_FILE_2_PAIRED")]], [RS1: PAIRED_TREE])
+        assertEquals(["PARTNER_OF_REPEAT", "ANY_ROW"], codes(out.R6))
+    }
+
+    @Test
+    void "a link that names no row type does not reach the partner buckets"() {
+        Map out = reasons([R1: [check("RS1", null)]], [RS1: PAIRED_TREE])
+        assertEquals(["REPEATED_IN_OMS", "ANY_ROW"], codes(out.R1))
+    }
+
+    // D11 (OC53): the buckets a run's tree targets, the one reading findingsFrom (S11) and the settings page share.
+    @Test
+    void "a tree targets each bucket its concluding chains name"() {
+        assertEquals(["MISSING_FROM_FILE_2", "RULE"] as Set, AuditSettingsSupport.targetedBucketsFrom(SHARED_TREE))
+    }
+
+    @Test
+    void "a chain naming no bucket targets every bucket, a two-bucket chain targets both, Unexplained none"() {
+        List<Map> tree = [rule(10, "UNEXPLAINED", "RULE"), rule(20, "ANY_ROW", null),
+                          rule(30, null, "MISSING_FROM_FILE_1"), rule(40, "BOTH", "RULE", 30)]
+        assertEquals(["*", "RULE", "MISSING_FROM_FILE_1"] as Set, AuditSettingsSupport.targetedBucketsFrom(tree))
+    }
+
+    @Test
+    void "a run with no tree targets nothing"() {
+        assertEquals([] as Set, AuditSettingsSupport.targetedBucketsFrom([]))
+        assertEquals([] as Set, AuditSettingsSupport.targetedBucketsFrom(null))
+    }
+
     @Test
     void "a node with no bucket anywhere on its path is reached by every row"() {
         Map out = reasons([R2: [check("RS1", "MISSING_IN_FILE_2")], R5: [check("RS1", "FIELD_MISMATCH")]],

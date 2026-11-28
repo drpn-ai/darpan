@@ -24,9 +24,13 @@ import static darpan.common.ValueSupport.normalize
  */
 class AuditCheckAuthoringSupport {
 
-    /** The diff row types the ledger records (AuditAutomationSupport.findingsFrom). */
+    /**
+     * The diff row types the ledger records (AuditAutomationSupport.findingsFrom). DUPLICATE_IN_FILE_y_PAIRED (Aditi D5/D7) is
+     * the side-y partner record of a key repeated on the other side; only a link that names it reports it.
+     */
     static final List<String> DIFF_TYPES = ["MISSING_IN_FILE_1", "MISSING_IN_FILE_2", "FIELD_MISMATCH", "FINDING",
-                                            "DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2"].asImmutable()
+                                            "DUPLICATE_IN_FILE_1", "DUPLICATE_IN_FILE_2",
+                                            "DUPLICATE_IN_FILE_1_PAIRED", "DUPLICATE_IN_FILE_2_PAIRED"].asImmutable()
     /** Root systems a fix is made in (AuditCheck.fixWhereEnumId). */
     static final List<String> FIX_WHERE = ["OMS", "NETSUITE", "SHOPIFY"].asImmutable()
     static final String CODE_PATTERN = /[a-z0-9]+(-[a-z0-9]+)*/

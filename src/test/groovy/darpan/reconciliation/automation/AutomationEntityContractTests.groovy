@@ -188,12 +188,16 @@ class AutomationEntityContractTests {
         // AutomationFacadeSupport and ReconciliationSavedRunSupport are now routed through
         // TenantScopedFinder.findGlobalUnscoped — there are no bare ec.entity.find(...)
         // calls for these entities any more. Verify findGlobalUnscoped is present for both.
-        String automationSource = readSource("src/main/groovy/darpan/facade/reconciliation/AutomationFacadeSupport.groovy")
+        // DAR-OPS-029 S19 split AutomationFacadeSupport into Save/Sync/Row/SourceOptions; the read lives in
+        // AutomationSaveSupport.validateApiSource now, so the check covers the whole family.
+        String automationSource = ["AutomationFacadeSupport", "AutomationSaveSupport", "AutomationSyncSupport",
+                                   "AutomationRowSupport", "AutomationSourceOptionsSupport"]
+                .collect { readSource("src/main/groovy/darpan/facade/reconciliation/${it}.groovy".toString()) }.join("\n")
         assertTrue(automationSource.contains("findGlobalUnscoped") && automationSource.contains("\"moqui.service.message.SystemMessageRemote\""),
-                "AutomationFacadeSupport should route SystemMessageRemote reads through TenantScopedFinder.findGlobalUnscoped")
+                "the automation facade should route SystemMessageRemote reads through TenantScopedFinder.findGlobalUnscoped")
         // Confirm no bare ec.entity.find("moqui.service.message.SystemMessageRemote") remains.
         assertFalse(automationSource.contains("ec.entity.find(\"moqui.service.message.SystemMessageRemote\")"),
-                "AutomationFacadeSupport should not have bare ec.entity.find(SystemMessageRemote) after P0#4 step 5 migration")
+                "the automation facade should not have bare ec.entity.find(SystemMessageRemote) after P0#4 step 5 migration")
 
         String savedRunSource = readSource("src/main/groovy/darpan/facade/reconciliation/ReconciliationSavedRunSupport.groovy")
         // [P0#4 step 5] RECONCILIATION_MAPPING_MEMBER migrated to findGlobalUnscoped; no bare calls remain.

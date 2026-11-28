@@ -338,11 +338,8 @@ class AutomationSaveSupport {
             return
         }
         try {
-            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                    runScopeEnumId      : SftpAutomationSupport.SFTP_SCOPE_TENANT,
-                    runTenantUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                    allowAdminSftp      : false,
-            ], "${source.fileSide} source")
+            SftpAutomationSupport.requireSftpServerAccess(ec, server,
+                    [runTenantUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec)], "${source.fileSide} source")
         } catch (IllegalArgumentException e) {
             ec.message.addError(e.message)
         }

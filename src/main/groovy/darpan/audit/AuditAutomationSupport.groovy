@@ -19,7 +19,6 @@ import java.time.ZoneId
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
-import static darpan.common.ValueSupport.zoneOrUtc
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorDetail
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorMessage
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeText
@@ -136,7 +135,7 @@ class AuditAutomationSupport {
      */
     static List<Map<String, Object>> resolveWindows(def ec, def automation, Map audit, Timestamp scheduledFireTime,
                                                    Map explicit = null) {
-        ZoneId zone = zoneOf(automation)
+        ZoneId zone = zoneOf(ec, automation)
         LocalDate reportDay = scheduledFireTime.toInstant().atZone(zone).toLocalDate()
         // DAR-BE-122: reads build on the checks' last complete read; a full read only when asked (auditFullRead).
         List<String> checkIds = explicit?.auditFullRead == true || explicit?.auditVerifyKeys ? null :
@@ -361,7 +360,7 @@ class AuditAutomationSupport {
         if (oms1 == oms2) return [] as Set
         // Only the other side holds it: OMS is FILE_1, so the row is missing in FILE_1, and the reverse.
         String otherSideOnly = oms1 ? "MISSING_IN_FILE_1" : "MISSING_IN_FILE_2"
-        ZoneId zone = zoneOf(automation)
+        ZoneId zone = zoneOf(ec, automation)
         Timestamp judgedFrom = AuditRecentReadSupport.judgedFrom(recent)
         String dateField = normalize(check.otherSideDateField)
         Set<String> keys = new LinkedHashSet<>()
@@ -1058,8 +1057,9 @@ class AuditAutomationSupport {
         return f.isFile() ? f.readLines("UTF-8")*.trim().findAll { it } : []
     }
 
-    private static ZoneId zoneOf(def automation) {
-        return zoneOrUtc(readField(automation, "windowTimeZone"))
+    /** S99-020: the automation's zone, else its tenant's (AutomationWindows.automationZone), so audit days and windows agree. */
+    private static ZoneId zoneOf(def ec, def automation) {
+        return darpan.reconciliation.automation.AutomationWindows.automationZone(ec, automation)
     }
 
     private static def tenantRows(def ec, String entityName, String tenantId) {

@@ -23,11 +23,31 @@ class GraphQlDocumentCheckTests {
         return doc.toString()
     }
 
+    /**
+     * The doubling done through inline fragments and nested spreads only, with no field until the leaf. With a leaf that
+     * spreads a fragment the document never defines, no field is ever selected, so a cap on fields alone never fires.
+     */
+    static String inlineDoubling(int levels, String leaf) {
+        StringBuilder doc = new StringBuilder("query Q { orders { ...F1 } }\n")
+        for (int i = 1; i < levels; i++) {
+            doc.append("fragment F${i} on Order { ... on Order { ...F${i + 1} } ... on Order { ...F${i + 1} } }\n")
+        }
+        doc.append("fragment F${levels} on Order { ${leaf} }\n")
+        return doc.toString()
+    }
+
+    @Test
+    void aSpreadOfAFragmentTheDocumentDoesNotDefineIsRefused() {
+        Map report = GraphQlDocumentCheck.fieldPaths(inlineDoubling(16, "...Missing"))
+        assertTrue(((List) report.errors).any { it.toString().contains("Missing") && it.toString().contains("does not define") },
+                report.errors.toString())
+    }
+
     @Test
     void aDocumentThatExpandsPastTheCapIsRefused() {
         Map report = GraphQlDocumentCheck.fieldPaths(doubling(15))
-        assertTrue(((List) report.errors).any { it.toString().contains("more than 10000 fields") }, report.errors.toString())
-        assertTrue(((List) report.fields).size() <= 10_001, "the walk stopped at the cap: ${((List) report.fields).size()}")
+        assertTrue(((List) report.errors).any { it.toString().contains("more than 10000 selections") }, report.errors.toString())
+        assertTrue(((List) report.fields).size() <= GraphQlDocumentCheck.MAX_FIELD_PATHS, "the walk stopped at the cap: ${((List) report.fields).size()}")
     }
 
     @Test
@@ -37,7 +57,21 @@ class GraphQlDocumentCheckTests {
         String attack = doubling(30)
         assertTrue(attack.length() < 4000, "a few kilobytes: ${attack.length()}")
         Map report = GraphQlDocumentCheck.fieldPaths(attack)
-        assertEquals(["The query selects more than ${GraphQlDocumentCheck.MAX_FIELD_PATHS} fields.".toString()], report.errors)
+        assertEquals(["The query expands to more than ${GraphQlDocumentCheck.MAX_FIELD_PATHS} selections.".toString()], report.errors)
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void doublingThroughFieldLessSpreadsIsRefusedQuickly() {
+        // OC131' (QA): F1..F59 each spread the next twice and add no field; F60 spreads F1, skipped as already on the path.
+        // One field in all, about 2^60 steps: a budget on fields alone never fired, and the walk pinned a thread.
+        StringBuilder doc = new StringBuilder("query Q { orders { id ...F1 } }\n")
+        for (int i = 1; i < 60; i++) doc.append("fragment F${i} on Order { ...F${i + 1} ...F${i + 1} }\n")
+        doc.append("fragment F60 on Order { ...F1 }\n")
+        assertEquals(["The query expands to more than ${GraphQlDocumentCheck.MAX_FIELD_PATHS} selections.".toString()],
+                GraphQlDocumentCheck.fieldPaths(doc.toString()).errors)
+        assertEquals(["The query expands to more than ${GraphQlDocumentCheck.MAX_FIELD_PATHS} selections.".toString()],
+                GraphQlDocumentCheck.fieldPaths(inlineDoubling(40, "id")).errors, "through inline fragments too")
     }
 
     @Test

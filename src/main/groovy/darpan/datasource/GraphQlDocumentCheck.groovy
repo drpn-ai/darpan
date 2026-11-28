@@ -27,9 +27,11 @@ class GraphQlDocumentCheck {
     static final Set<String> REFUSED_FIELDS = ["__schema", "__type"].asImmutable() as Set<String>
 
     /**
-     * OC131 (DAR-OPS-029 S15a, security). The most field paths fieldPaths reports. A fragment is walked once per path, so a
-     * short document whose fragments each spread the next one twice expands to 2^levels paths and could run the shared JVM
-     * out of memory; the walk stops here and the document is refused, so a policing caller fails closed.
+     * OC131/OC131' (DAR-OPS-029 S15a, security). The most selections fieldPaths visits. A fragment is walked once per path, so
+     * a short document whose fragments each spread the next one twice expands to 2^levels selections: with fields that ran the
+     * shared JVM out of memory, and through field-less spreads it pinned a thread for good. Every step of the walk (a field,
+     * an inline fragment, a spread, a skipped spread) counts against this one budget; past it the document is refused, so a
+     * policing caller fails closed.
      */
     static final int MAX_FIELD_PATHS = 10_000
 
@@ -101,15 +103,18 @@ class GraphQlDocumentCheck {
         List<OperationDefinition> ops = doc.getDefinitionsOfType(OperationDefinition)
         List<Map> fields = []
         boolean complete = true
+        int[] steps = [0] as int[]
+        String[] undefined = [null] as String[]
         for (OperationDefinition op : ops) {
             // A $variable's default is what the server uses when no value is sent, so it is reported with the argument.
             Map<String, Map> defaults = (op.variableDefinitions ?: []).collectEntries { VariableDefinition v ->
                 [(v.name): v.defaultValue == null ? null : valueReport(v.defaultValue)]
             }
-            if (!walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields, defaults)) { complete = false; break }
+            if (!walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields, defaults, steps, undefined)) { complete = false; break }
         }
         List<String> errors = []
-        if (!complete) errors << "The query selects more than ${MAX_FIELD_PATHS} fields.".toString()
+        if (undefined[0] != null) errors << "The query spreads fragment ${undefined[0]}, which it does not define.".toString()
+        else if (!complete) errors << "The query expands to more than ${MAX_FIELD_PATHS} selections.".toString()
         if (doc.definitions.size() != ops.size() + fragments.size()) errors << "The document holds something other than operations and fragments."
         return [errors: errors, operations: ops.collect { it.operation.name().toLowerCase() }, fields: fields]
     }
@@ -132,27 +137,32 @@ class GraphQlDocumentCheck {
                 v instanceof NullValue ? [kind: "null"] : [kind: "other"]
     }
 
-    /** Adds each field's path to `fields`; false as soon as MAX_FIELD_PATHS is reached, so the walk stops early. */
+    /**
+     * Adds each field's path to `fields`. Every selection visited spends one step of the shared budget (steps[0]); false as soon
+     * as it runs out, or at a spread of a fragment the document does not define (named in undefined[0]), so the walk stops early.
+     */
     private static boolean walkPaths(SelectionSet set, Map<String, FragmentDefinition> fragments, List<String> prefix,
-            Set<String> fragmentsOnPath, List<Map> fields, Map<String, Map> defaults) {
+            Set<String> fragmentsOnPath, List<Map> fields, Map<String, Map> defaults, int[] steps, String[] undefined) {
         for (Selection s : (set?.selections ?: [])) {
+            if (++steps[0] > MAX_FIELD_PATHS) return false
             if (s instanceof Field) {
-                if (fields.size() >= MAX_FIELD_PATHS) return false
                 Field f = (Field) s
                 List<String> path = prefix + [f.name]
                 fields << [path: path, arguments: argumentsOf(f, defaults)]
-                if (!walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields, defaults)) return false
+                if (!walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields, defaults, steps, undefined)) return false
             } else if (s instanceof InlineFragment) {
                 InlineFragment inline = (InlineFragment) s
                 String type = inline.typeCondition?.name
-                if (!walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, fields, defaults)) return false
+                if (!walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath,
+                        fields, defaults, steps, undefined)) return false
             } else if (s instanceof FragmentSpread) {
                 String name = ((FragmentSpread) s).name
                 FragmentDefinition fragment = fragments.get(name)
+                if (fragment == null) { undefined[0] = name; return false }
                 // Once per path, so a fragment that spreads itself cannot loop; a fragment reused elsewhere is walked again there.
-                if (fragment == null || fragmentsOnPath.contains(name)) continue
+                if (fragmentsOnPath.contains(name)) continue
                 if (!walkPaths(fragment.selectionSet, fragments, prefix + ["on:${fragment.typeCondition?.name}".toString()],
-                        fragmentsOnPath + [name] as Set<String>, fields, defaults)) return false
+                        fragmentsOnPath + [name] as Set<String>, fields, defaults, steps, undefined)) return false
             }
         }
         return true

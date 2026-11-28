@@ -749,8 +749,9 @@ class AuthFacadeSupportTests {
         FinderStub loginKeys = new FinderStub(deleteAllResult: 3)
         FinderStub cliSessions = new FinderStub()
         FinderStub deviceCodes = new FinderStub()
+        FinderStub accounts = new FinderStub(oneResult: [userId: "EX_USER", username: "avnindra.sharma", disabled: "N"])
         EntityFacadeStub entity = new EntityFacadeStub(finders: [
-                "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "EX_USER", username: "avnindra.sharma", disabled: "N"]),
+                "moqui.security.UserAccount": accounts,
                 "moqui.security.UserLoginKey": loginKeys,
                 "darpan.auth.CliSession": cliSessions,
                 "darpan.auth.CliDeviceCode": deviceCodes,
@@ -765,7 +766,7 @@ class AuthFacadeSupportTests {
         assertEquals([], result.errors)
         assertEquals("EX_USER", service.callTo("org.moqui.impl.UserServices.update#Password").parametersMap.userId)
         assertEquals("temp-pass", service.callTo("org.moqui.impl.UserServices.update#Password").parametersMap.oldPassword)
-        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes)
+        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes, accounts)
     }
 
     /** OC39: a password change whose sign-out fails must fail, so its transaction rolls the new password back. Before,
@@ -794,15 +795,17 @@ class AuthFacadeSupportTests {
         FinderStub loginKeys = new FinderStub(deleteAllResult: 2)
         FinderStub cliSessions = new FinderStub()
         FinderStub deviceCodes = new FinderStub()
+        FinderStub accounts = new FinderStub(oneResult: [userId: "EX_USER", username: "test.user"])
         UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
         def ec = executionContext(user: user, entity: new EntityFacadeStub(finders: [
-                "moqui.security.UserLoginKey": loginKeys, "darpan.auth.CliSession": cliSessions, "darpan.auth.CliDeviceCode": deviceCodes]))
+                "moqui.security.UserLoginKey": loginKeys, "darpan.auth.CliSession": cliSessions, "darpan.auth.CliDeviceCode": deviceCodes,
+                "moqui.security.UserAccount": accounts]))
 
         Map<String, Object> result = AuthFacadeSupport.logoutAllSessions(ec)
 
         assertEquals(2, result.allSessionsRevoked)
         assertTrue(result.authTokenRevoked as boolean)
-        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes)
+        assertEndsEverySignIn("EX_USER", loginKeys, cliSessions, deviceCodes, accounts)
 
         UserStub failingUser = new UserStub(userId: "EX_USER", username: "test.user")
         def failing = executionContext(user: failingUser, entity: new EntityFacadeStub(finders: [
@@ -810,8 +813,13 @@ class AuthFacadeSupportTests {
         assertThrows(IllegalStateException) { AuthFacadeSupport.logoutAllSessions(failing) }
     }
 
-    /** Every key of the person deleted, every live CLI session revoked, every approved and uncollected CLI sign-in denied. */
-    private static void assertEndsEverySignIn(String userId, FinderStub loginKeys, FinderStub cliSessions, FinderStub deviceCodes) {
+    /** OC86 first: the person's sessionsEndedDate moves to now, so every web session older than it, holding no live key,
+     *  ends on its next request (AuthSessionSupport.enforceWebSignInLifetime); then every key of the person deleted, every
+     *  live CLI session revoked, every approved and uncollected CLI sign-in denied. */
+    private static void assertEndsEverySignIn(String userId, FinderStub loginKeys, FinderStub cliSessions, FinderStub deviceCodes,
+                                              FinderStub accounts) {
+        assertEquals(userId, accounts.conditions.userId)
+        assertNotNull(accounts.updatedWith?.sessionsEndedDate, "the person's sessionsEndedDate moves, so their other web sessions end")
         assertEquals([userId: userId], loginKeys.conditions)
         assertEquals([userId: userId, revokedDate: null], cliSessions.conditions)
         assertNotNull(cliSessions.updatedWith?.revokedDate, "live CLI sessions are revoked")

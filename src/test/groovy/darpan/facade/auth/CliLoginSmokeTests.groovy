@@ -13,6 +13,7 @@ import org.junit.jupiter.api.TestInstance
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.moqui.impl.context.ExecutionContextFactoryImpl
+import org.moqui.util.ContextStack
 import org.moqui.util.MNode
 import darpan.facade.common.RpcMethodFence
 import org.moqui.context.ArtifactAuthorizationException
@@ -453,7 +454,7 @@ class CliLoginSmokeTests {
     }
 
     @Test
-    @DisplayName("OC39: a password change, an expired-password change, a reset and sign-out-everywhere each deny an approved, uncollected CLI sign-in and revoke live CLI sessions")
+    @DisplayName("OC39/OC86: a password change, an expired-password change, a reset and sign-out-everywhere each deny an approved, uncollected CLI sign-in, revoke live CLI sessions, and end every web session, for good")
     void everySignOutDeniesAnApprovedUncollectedCliSignIn() {
         Closure originalSendResetCode = PasswordResetSupport.sendResetCode
         Closure originalSendEmail = PasswordResetSupport.sendEmail
@@ -476,12 +477,17 @@ class CliLoginSmokeTests {
             endings.each { String ending, Closure<Map> end ->
                 round++
                 String current = "Oc39-start-${round}-Aa1!".toString()
+                String next = "Oc39-next-${round}-Bb2!".toString()
                 setPassword(APPROVER_ID, current)
                 String liveKey = signInByCli(APPROVER_USERNAME)
+                // OC86: two web sign-ins of the person, the tab that will do it and another browser, both from before it.
+                String webTab = webKey(APPROVER_USERNAME)
+                String otherBrowser = webKey(APPROVER_USERNAME)
+                long webSessionsStarted = System.currentTimeMillis() - 60_000L
                 Map started = anon("start#CliLogin", [hostLabel: HOST]).out
                 assertEquals([], signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
 
-                Map ended = end(current, "Oc39-next-${round}-Bb2!".toString())
+                Map ended = end(current, next)
                 assertEquals([], ended.errors, "${ending}: ${ended}")
 
                 Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode])
@@ -492,6 +498,20 @@ class CliLoginSmokeTests {
                 assertNotNull(liveSession.revokedDate, "${ending}: the live CLI session is revoked")
                 assertEquals(0L, ec.entity.find("moqui.security.UserLoginKey").condition("userId", APPROVER_ID).useCache(false).disableAuthz().count(),
                         "${ending}: no key of the person survives")
+
+                // OC86: every web session ends on its next request, the tab that did it too (Aditi 15:12, "Sign in again
+                // everywhere"), and the person's sessionsEndedDate is what ends them: a deleted key alone decides nothing.
+                assertTrue(webSignInEnds(webTab, webSessionsStarted), "${ending}: the tab that did it is signed out on its next request")
+                assertTrue(webSignInEnds(otherBrowser, webSessionsStarted), "${ending}: the person's other browser is signed out too")
+                Timestamp stamp = account(APPROVER_ID).sessionsEndedDate as Timestamp
+                assertNotNull(stamp, "${ending}: sessionsEndedDate moved")
+                // Signing in again clears hasLoggedOut (MoquiShiroRealm), the framework's only other eviction; the stamp stays.
+                Map again = anonAuth("login#Session", [username: APPROVER_USERNAME, password: ending == "logout#AllSessions" ? current : next])
+                assertTrue(again.out.authenticated as boolean, "${ending}: signing in again: ${again}")
+                assertEquals(stamp, account(APPROVER_ID).sessionsEndedDate, "${ending}: a new sign-in does not move the stamp")
+                assertEquals("N", account(APPROVER_ID).hasLoggedOut)
+                assertTrue(webSignInEnds(otherBrowser, webSessionsStarted), "${ending}: the old browser stays signed out after a new sign-in")
+                assertFalse(webSignInEnds(again.out.authToken as String, System.currentTimeMillis()), "${ending}: the new sign-in works")
             }
         } finally {
             PasswordResetSupport.sendResetCode = originalSendResetCode
@@ -724,6 +744,48 @@ class CliLoginSmokeTests {
         List<String> errors = new ArrayList<>(ec.message.errors)
         ec.message.clearAll()
         return [out: out, errors: errors]
+    }
+
+    /** A web login key of the person, as login#Session issues one. */
+    private String webKey(String username) {
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
+        String raw = ec.user.getLoginKey(1.0f)
+        ec.user.logoutUser()
+        return raw
+    }
+
+    /** OC86: AuthSessionSupport.enforceWebSignInLifetime on the next request of a web session that started at
+     *  sessionStartedAt and carries raw in its login_key header. The real entity, factory and transaction answer; the web
+     *  request and the signed-in user (with the account as it is now) are stubs. True when the sign-in ended. */
+    private boolean webSignInEnds(String raw, long sessionStartedAt) {
+        def user = new Expando(userId: APPROVER_ID, userAccount: account(APPROVER_ID), nowTimestamp: new Timestamp(System.currentTimeMillis()))
+        user.logoutLocal = { -> user.userId = null }
+        def request = new WebRequestStub(headers: [login_key: raw], session: new WebSessionStub(creationTime: sessionStartedAt))
+        def webEc = new Expando(web: new Expando(request: request, secureRequestParameters: [:]), user: user, entity: ec.entity,
+                factory: ec.factory, transaction: ec.transaction, context: new ContextStack())
+        return AuthSessionSupport.enforceWebSignInLifetime(webEc)
+    }
+
+    static class WebRequestStub {
+        Map<String, String> headers = [:]
+        Map<String, Object> attributes = [:]
+        WebSessionStub session
+        String getHeader(String name) { headers[name] }
+        Object getCookies() { null }
+        Object getAttribute(String name) { attributes[name] }
+        void setAttribute(String name, Object value) { attributes[name] = value }
+        WebSessionStub getSession(boolean create) { session?.invalidated ? null : session }
+    }
+
+    static class WebSessionStub {
+        long creationTime
+        Map<String, Object> attributes = [:]
+        boolean invalidated = false
+        long getCreationTime() { creationTime }
+        Object getAttribute(String name) { attributes[name] }
+        void setAttribute(String name, Object value) { attributes[name] = value }
+        void invalidate() { invalidated = true }
     }
 
     private void setPassword(String userId, String password) {

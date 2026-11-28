@@ -286,16 +286,28 @@ class AuthSessionSupport {
     }
 
     /**
-     * OC39 (DAR-OPS-029). Ends every sign-in the person has, in the caller's transaction: deletes every login key (web and
-     * CLI), revokes every live CLI session, and denies every CLI sign-in they approved that its CLI has not collected yet,
-     * so the next poll#CliLogin answers DENIED instead of minting a key. Nothing is caught: a failure fails the caller,
-     * whose transaction then rolls back the password change, reset or two-factor change that asked for it, rather than
-     * reporting it done while a sign-in lives on. Used by change#OwnPassword, change#ExpiredPassword, complete#PasswordReset,
-     * logout#AllSessions and TwoFactorSupport.endSessions. Returns how many login keys it deleted.
+     * OC39 (DAR-OPS-029). Ends every sign-in the person has, in the caller's transaction. OC86 first: the person's
+     * sessionsEndedDate moves to now (never back), so every web session older than it that holds no live key ends on its
+     * next request (enforceWebSignInLifetime), the caller's own tab too (Aditi 2026-11-28: "Sign in again everywhere").
+     * A deleted key alone decides nothing there, and hasLoggedOut, the framework's other eviction, is cleared by the
+     * person's next sign-in. Then: every login key (web and CLI) deleted, every live CLI session revoked, and every CLI
+     * sign-in they approved that its CLI has not collected yet denied, so the next poll#CliLogin answers DENIED instead of
+     * minting a key. Nothing is caught: a failure fails the caller, whose transaction then rolls back the password change,
+     * reset or two-factor change that asked for it, rather than reporting it done while a sign-in lives on. Used by
+     * change#OwnPassword, change#ExpiredPassword, complete#PasswordReset, logout#AllSessions and TwoFactorSupport.endSessions.
+     * Returns how many login keys it deleted.
      */
     static int endEverySignIn(def ec, String userId) {
         if (!userId) throw new IllegalArgumentException("endEverySignIn needs a userId")
         Timestamp endedAt = ec.user.nowTimestamp
+        def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                        "self-scoped auth: when the person's sign-ins were ended")
+                .condition("userId", userId).useCache(false).one()
+        Timestamp previous = account?.sessionsEndedDate as Timestamp
+        if (account != null && (previous == null || previous.before(endedAt))) {
+            TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount", "self-scoped auth: stamp when the person's sign-ins were ended")
+                    .condition("userId", userId).updateAll([sessionsEndedDate: endedAt])
+        }
         def deleted = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
                         "self-scoped auth: end every login key of the person")
                 .condition("userId", userId).deleteAll()

@@ -238,18 +238,44 @@ class RunObservabilityPipelineIntegrationTest {
                 "pre-validated request must not create ANY run row")
         assertEquals(stepRowsBefore, ec.entity.find(RunObservability.RUN_STEP_ENTITY).disableAuthz().useCache(false).count(),
                 "pre-validated request must not create ANY step row")
+
+        // OC58: a saved run that does not exist is refused before beginRun too.
+        Map<String, Object> missing = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([savedRunId: "OBS_MISSING_RUN", file1Name: "orders-1.csv", file1Text: "order_id\nA100\n",
+                             file2Name: "orders-2.csv", file2Text: "order_id\nA200\n", hasHeader: true])
+                .disableAuthz()
+                .call()
+        assertEquals(false, missing.ok)
+        ec.message.clearErrors()
+        assertEquals(runRowsBefore, ec.entity.find(RunObservability.RUN_RESULT_ENTITY).disableAuthz().useCache(false).count(),
+                "a missing saved run mints no run row")
     }
 
     @Test
     void validationFailureStillEndsRunTerminal() {
+        // A real saved run that fails AFTER beginRun (its second upload is missing). A missing saved run fails before any
+        // row exists since OC58 (a bad request mints no run row), so it cannot stand in for this any more.
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([
+                        runName           : "Obs Validation Failure",
+                        file1SystemEnumId : "OMS",
+                        file2SystemEnumId : "SHOPIFY",
+                        file1CompareColumn: "order_id",
+                        file2CompareColumn: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = createResult.savedRun.savedRunId as String
+
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
                 .parameters([
-                        savedRunId: "OBS_MISSING_RUN",
+                        savedRunId: savedRunId,
                         file1Name : "orders-1.csv",
                         file1Text : "order_id\nA100\n",
-                        file2Name : "orders-2.csv",
-                        file2Text : "order_id\nA200\n",
                         hasHeader : true,
                 ])
                 .disableAuthz()
@@ -259,7 +285,7 @@ class RunObservabilityPipelineIntegrationTest {
         ec.message.clearErrors()
 
         List runs = ec.entity.find(RunObservability.RUN_RESULT_ENTITY)
-                .condition("savedRunId", "OBS_MISSING_RUN")
+                .condition("savedRunId", savedRunId)
                 .disableAuthz()
                 .useCache(false)
                 .list() as List

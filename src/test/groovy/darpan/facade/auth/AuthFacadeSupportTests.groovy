@@ -165,7 +165,7 @@ class AuthFacadeSupportTests {
                 passwordBase64: "N",
                 timeZone: "Asia/Kolkata"
         )
-        def ec = executionContext(message: message, user: user, ecfi: ecfi)
+        def ec = executionContext(message: message, user: user, ecfi: ecfi, entity: accountRow(user.userAccount))
 
         Map<String, Object> result = AuthFacadeSupport.verifyOwnPassword(ec, "old-password")
 
@@ -189,7 +189,8 @@ class AuthFacadeSupportTests {
         UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
         user.userAccount = new Expando(username: "test.user", currentPassword: "hashed-password", passwordSalt: "salt",
                 passwordHashType: "SHA-256", passwordBase64: "N", timeZone: "Asia/Kolkata")
-        def ec = executionContext(message: message, user: user, service: service, ecfi: new EcfiStub(credentialsMatch: false))
+        def ec = executionContext(message: message, user: user, service: service, ecfi: new EcfiStub(credentialsMatch: false),
+                entity: accountRow(user.userAccount))
 
         assertFalse(AuthPrimitives.countFailedLogin(ec, "EX_USER"), "an uncounted guess must be reported")
         assertFalse(AuthFacadeSupport.verifyOwnPassword(ec, "wrong-password").passwordVerified as boolean)
@@ -221,7 +222,7 @@ class AuthFacadeSupportTests {
                 passwordBase64: "N",
                 timeZone: "Asia/Kolkata"
         )
-        def ec = executionContext(message: message, user: user, ecfi: new EcfiStub(credentialsMatch: false))
+        def ec = executionContext(message: message, user: user, ecfi: new EcfiStub(credentialsMatch: false), entity: accountRow(user.userAccount))
 
         Map<String, Object> result = AuthFacadeSupport.verifyOwnPassword(ec, "wrong-password")
 
@@ -1259,6 +1260,11 @@ class AuthFacadeSupportTests {
         String getSimpleHash(String input, String salt, Object hashType, boolean base64) {
             return "hash:${input}"
         }
+    }
+
+    /** OC207: ownPasswordMatches reads the person's account fresh (and again after the hash) for its lockout. */
+    private static EntityFacadeStub accountRow(def account) {
+        return new EntityFacadeStub(finders: ["moqui.security.UserAccount": new FinderStub(oneResult: account)])
     }
 
     static class EntityFacadeStub {

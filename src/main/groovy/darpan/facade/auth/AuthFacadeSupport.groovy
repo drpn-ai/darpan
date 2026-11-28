@@ -475,18 +475,38 @@ class AuthFacadeSupport {
      * and before change#OwnPassword, save#RecoveryEmail and a first two-factor setup). A wrong one is a failed login,
      * counted here once for every caller (review M5) in its own transaction, so the framework's lockout throttles password
      * guessing from a signed-in session (a CLI key included) as it does at sign-in.
+     *
+     * OC207: the lockout binds here too. A live session outlives the lockout its wrong guesses cause (the framework refuses
+     * only a NEW sign-in), so a locked account answers no, even to its right password, counted like the realm counts a
+     * guess at a disabled account. The account is read fresh, not the request's copy, and read again after the hash: a
+     * burst of parallel guesses that locked it while the hash ran refuses the right one that lands after them. The read
+     * takes no lock: a setup that follows can count a wrong code in a transaction of its own on the same row
+     * (TwoFactorRecords.lockPerson's rule), and committed counts are all a lock would add.
      */
     static boolean ownPasswordMatches(def ec, String currentPassword) {
-        def userAccount = ec.user.userAccount ?: ec.entity.find("moqui.security.UserAccount").condition("userId", ec.user.userId).one()
+        String userId = normalize(ec.user.userId)
+        def userAccount = userId ? ownAccountNow(ec, userId) : null
         String usernameValue = normalize(userAccount?.username) ?: normalize(ec.user.username)
         if (!usernameValue || !userAccount?.currentPassword || !currentPassword) return false
+        if (!CliAuthSupport.canSignIn(ec, userAccount)) {
+            AuthPrimitives.countFailedLogin(ec, userId)
+            return false
+        }
         def token = new UsernamePasswordToken(usernameValue, currentPassword)
         def salt = userAccount.passwordSalt ? new SimpleByteSource((String) userAccount.passwordSalt) : null
         def info = new SimpleAuthenticationInfo(usernameValue, userAccount.currentPassword, salt, "moquiRealm")
         boolean matched = ec.ecfi.getCredentialsMatcher(userAccount.passwordHashType, "Y".equals(userAccount.passwordBase64?.toString()))
                 .doCredentialsMatch(token, info)
-        if (!matched) AuthPrimitives.countFailedLogin(ec, normalize(ec.user.userId))
-        return matched
+        if (!matched) {
+            AuthPrimitives.countFailedLogin(ec, userId)
+            return false
+        }
+        return CliAuthSupport.canSignIn(ec, ownAccountNow(ec, userId))
+    }
+
+    private static def ownAccountNow(def ec, String userId) {
+        return TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the signed-in person's own account, read fresh for its lockout")
+                .condition("userId", userId).useCache(false).one()
     }
 
     /** logout#AllSessions: every sign-in of the caller ends (AuthSessionSupport.endEverySignIn, failing closed), then this

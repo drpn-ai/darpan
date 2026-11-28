@@ -454,6 +454,55 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("OC207: once wrong current passwords lock the account, a live session's right one is refused too, so change#OwnPassword cannot take the account")
+    void aLockedOutAccountRefusesTheRightCurrentPassword() {
+        String password = "Oc207-start-Aa1!"
+        String next = "Oc207-next-Bb2!"
+        setPassword(APPROVER_ID, password)
+        // One sign-in, kept: the framework refuses a NEW sign-in of a locked account, so the guessing runs from a live session.
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(APPROVER_USERNAME), "could not sign in ${APPROVER_USERNAME}")
+        Closure<Map> inSession = { String verbNoun, Map params -> callService("facade.AuthFacadeServices.${verbNoun}".toString(), params) }
+        int guesses = 0
+        while (account(APPROVER_ID).disabled != "Y" && guesses < 20) {
+            assertFalse(inSession("verify#OwnPassword", [currentPassword: "Wrong-guess-${guesses}!".toString()]).out.passwordVerified as boolean)
+            guesses++
+        }
+        assertEquals("Y", account(APPROVER_ID).disabled, "the wrong guesses lock the account")
+
+        assertFalse(inSession("verify#OwnPassword", [currentPassword: password]).out.passwordVerified as boolean,
+                "a locked account's right password is refused, so guessing on from a live session finds nothing")
+        Map changed = inSession("change#OwnPassword", [currentPassword: password, newPassword: next, newPasswordVerify: next])
+        assertEquals(["Current password is incorrect."], changed.errors, "a locked account's password cannot be changed")
+
+        // Once the lockout is lifted, the old password still matches: the refused change wrote nothing.
+        ec.entity.find("moqui.security.UserAccount").condition("userId", APPROVER_ID).disableAuthz()
+                .updateAll([disabled: "N", disabledDateTime: null, successiveFailedLogins: 0])
+        assertTrue(inSession("verify#OwnPassword", [currentPassword: password]).out.passwordVerified as boolean,
+                "the stored password is still the old one")
+        ec.user.logoutUser()
+    }
+
+    @Test
+    @DisplayName("OC207: a web session ends while its account is locked out, temporarily or for good, and lives once a temporary lockout has run out")
+    void aWebSessionOfALockedOutAccountEnds() {
+        String raw = webKey(APPROVER_USERNAME)
+        long started = System.currentTimeMillis()
+        assertFalse(webSignInEnds(raw, started), "control: an open account keeps its session")
+
+        Closure lock = { Timestamp disabledAt ->
+            ec.entity.find("moqui.security.UserAccount").condition("userId", APPROVER_ID).disableAuthz()
+                    .updateAll([disabled: "Y", disabledDateTime: disabledAt])
+        }
+        lock(new Timestamp(System.currentTimeMillis()))
+        assertTrue(webSignInEnds(raw, started), "a temporary lockout (wrong guesses) ends a live web session")
+        lock(new Timestamp(System.currentTimeMillis() - 24L * 3_600_000L))
+        assertFalse(webSignInEnds(raw, started), "a temporary lockout that has run out ends nothing")
+        lock(null)
+        assertTrue(webSignInEnds(raw, started), "a permanently disabled account keeps no web session")
+    }
+
+    @Test
     @DisplayName("OC39/OC86: a password change, an expired-password change, a reset and sign-out-everywhere each deny an approved, uncollected CLI sign-in, revoke live CLI sessions, and end every web session, for good")
     void everySignOutDeniesAnApprovedUncollectedCliSignIn() {
         Closure originalSendResetCode = PasswordResetSupport.sendResetCode
@@ -763,7 +812,7 @@ class CliLoginSmokeTests {
         user.logoutLocal = { -> user.userId = null }
         def request = new WebRequestStub(headers: [login_key: raw], session: new WebSessionStub(creationTime: sessionStartedAt))
         def webEc = new Expando(web: new Expando(request: request, secureRequestParameters: [:]), user: user, entity: ec.entity,
-                factory: ec.factory, transaction: ec.transaction, context: new ContextStack())
+                factory: ec.factory, ecfi: ec.ecfi, transaction: ec.transaction, context: new ContextStack())
         return AuthSessionSupport.enforceWebSignInLifetime(webEc)
     }
 

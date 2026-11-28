@@ -226,6 +226,11 @@ class AuthSessionSupport {
         // OC79: a person whose two-factor is required now and who has no factor keeps no web sign-in, as a CLI key keeps
         // none (CliAuthSupport.cliSessionProblem): login#Session would answer them with the setup challenge only.
         if (!ended && TwoFactorPolicy.requiredButNotEnrolled(ec, userId)) ended = true
+        // OC207: a locked-out, disabled or terminated account keeps no web sign-in, as a CLI key keeps none
+        // (CliAuthSupport.cliSessionProblem): the framework re-checks a session for hasLoggedOut only, so wrong guesses from
+        // a live session would otherwise lock everyone out but the session making them. A lockout that has run out ends nothing.
+        def account = ec.user.userAccount
+        if (!ended && account != null && !CliAuthSupport.canSignIn(ec, account)) ended = true
         if (ended) endWebSignIn(ec, request)
         return ended
     }

@@ -5,8 +5,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 ## Production Entrypoints
 
 - Component descriptor: `runtime/component/darpan/component.xml`
-- Main app screen (legacy backend screens, super-admin only): `runtime/component/darpan/screen/darpan.xml`
-- Reconciliation route (legacy): `runtime/component/darpan/screen/Reconciliation.xml`
+- App screen root: `runtime/component/darpan/screen/darpan.xml` (two transitions only: the SPA's `csrfToken` bootstrap and the Slack install callback; the legacy server-rendered screens were deleted, DAR-OPS-029 S36a). Email bodies: `runtime/component/darpan/screen/email/`.
 - Webroot before-request hook (JSON-RPC namespace fence): `runtime/component/darpan/MoquiConf.xml`
 - Remote API contract (generated): `runtime/component/darpan/docs/api-contract/methods.txt`, `runtime/component/darpan/docs/api-contract/openapi.json`
 

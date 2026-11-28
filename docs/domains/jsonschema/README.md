@@ -22,7 +22,7 @@ JSON schema authoring, refinement, and validation for reconciliation payloads.
 
 ## Entrypoints
 
-- Legacy backend screen (super-admin only, not extended): `runtime/component/darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml`
+- UI: darpan-ui through `facade.JsonSchemaFacadeServices`; the legacy backend screens were deleted (DAR-OPS-029 S36a).
 - Services: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
 - XML-backed schema CRUD/orchestration: `save#JsonSchema`
 - Facade XML wrapper for darpan-ui text saves: `runtime/component/darpan/service/facade/JsonSchemaFacadeServices.xml`

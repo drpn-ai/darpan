@@ -6,7 +6,7 @@ Production rule-set CRUD, compilation, and execution behavior used by reconcilia
 
 ## Production Entrypoints
 
-- Route: `runtime/component/darpan/screen/Reconciliation/RuleEngine/RuleSets.xml`
+- UI: darpan-ui's rule set editor through `facade.ReconciliationFacadeServices` (save#RuleSetRun regenerates field comparisons server-side); the legacy Rule Engine screens were deleted (DAR-OPS-029 S36a).
 - Services: `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
 - Groovy helpers: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleConditionParser.groovy`
 

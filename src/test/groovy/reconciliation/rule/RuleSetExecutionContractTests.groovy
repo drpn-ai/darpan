@@ -70,21 +70,6 @@ class RuleSetExecutionContractTests {
         assertTrue(serviceText.contains('name="create#darpan.rule.Rule"'))
     }
 
-    @Test
-    void legacyRuleSetTestScreenParsesJsonBeforeGenericExecution() {
-        Path screenXml = componentRoot().resolve("screen/Reconciliation/RuleEngine/RuleSetDetail.xml")
-        def screen = new XmlParser(false, false).parse(screenXml.toFile())
-        List<String> serviceNames = screen.depthFirst()
-                .findAll { it.name() == "service-call" }
-                .collect { it.@name as String }
-
-        assertTrue(serviceNames.contains("reconciliation.ReconciliationRuleEngineServices.execute#RuleSet"))
-
-        String screenText = Files.readString(screenXml)
-        assertTrue(screenText.contains("new groovy.json.JsonSlurper().parseText(rawJsonData)"))
-        assertTrue(screenText.contains("Invalid test data JSON"))
-    }
-
     private static Path componentRoot() {
         Path cwd = Paths.get("").toAbsolutePath().normalize()
         List<Path> candidates = [

@@ -54,13 +54,9 @@
         <default-response type="none"/>
     </transition>
 
-    <subscreens default-item="Reconciliation">
-        <subscreens-item name="Reconciliation" menu-title="Reconciliation" location="component://darpan/screen/Reconciliation.xml"/>
-        <subscreens-item name="Settings" menu-title="Settings" location="component://darpan/screen/Settings.xml"/>
-        <subscreens-item name="Migrations" menu-title="Migrations"
-                location="component://darpan/screen/Migrations.xml"/>
-    </subscreens>
-    <widgets>
-        <subscreens-panel id="darpan-app" type="popup"/>
-    </widgets>
+    <!-- DAR-OPS-029 S36a (Aditi 2026-11-28, "delete all of it"): the legacy server-rendered UI that hung here (Reconciliation,
+         Settings, Migrations) is gone. It was super-admin-only, linked from nowhere, and its transitions called domain
+         services directly, bypassing the facade's tenant checks; every one of its jobs is done through the facade (the
+         app, the admin app, darpan-admin). This screen now carries only the two transitions above. -->
+    <widgets/>
 </screen>

@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test
 import org.moqui.context.ExecutionContext
 import org.moqui.impl.context.ArtifactExecutionFacadeImpl
 import org.moqui.impl.context.ExecutionContextImpl
-import org.moqui.screen.ScreenTest
 
 import java.nio.file.Path
 import java.sql.Timestamp
@@ -30,6 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * the isSuperAdmin() pre-actions content gate are in sync. DARPAN_ADMIN previously passed the URL
  * check but was then content-denied — misleading and not a real grant. Only DARPAN_SUPER_ADMIN
  * (and framework ADMIN via DARPAN_APP_ADMIN) now have URL-level access.</p>
+ *
+ * <p>DAR-OPS-029 S36a (Aditi, 2026-11-28): the legacy UI itself is deleted. The seed still guards any screen under
+ * component://darpan/screen, so the authz checks now ask about the surviving root, darpan.xml, and a structural guard
+ * keeps that root to its two transitions, with no screen hung under it again unnoticed.</p>
  */
 @SharedMoqui
 class ScreenUiAuthzTests {
@@ -38,7 +41,7 @@ class ScreenUiAuthzTests {
     // Moqui resolves screen authz by the screen's component location; "AT_XML_SCREEN:AUTHZA_VIEW:<name>"
     // is the framework's resource-access string form (ArtifactExecutionFacadeImpl.isPermitted).
     private static final String SCREEN_RESOURCE =
-            "AT_XML_SCREEN:AUTHZA_VIEW:component://darpan/screen/Reconciliation.xml"
+            "AT_XML_SCREEN:AUTHZA_VIEW:component://darpan/screen/darpan.xml"
 
     private static final String REGULAR_USER_ID      = "AUTHZ_TEST_REGULAR"
     private static final String APP_ADMIN_USER_ID    = "AUTHZ_TEST_APP_ADMIN"
@@ -118,49 +121,19 @@ class ScreenUiAuthzTests {
     }
 
     /**
-     * Render-path leak test (Task 9, Important #1).
-     *
-     * <p>Asserts that rendering the Reconciliation screen as a non-super-admin via Moqui's
-     * {@code ScreenTest} harness is refused and does NOT leak any {@code component://} path in the output.
-     * ScreenTest renders on its own thread through a {@code WebFacadeStub}, with authz ON. The webroot
-     * always-actions pass pushes the target screen (the GenericReconciliation/Main default) with an authz
-     * check, so URL-authz (no DARPAN_SCREEN_UI grant for DARPAN_USER) throws ArtifactAuthorizationException
-     * before the isSuperAdmin() pre-actions guard runs; the render produces no output at all.</p>
-     *
-     * <p><strong>HTTP 403 status assertion limitation:</strong> the guard's 403 status and body are never
-     * reached in this harness (URL-authz refuses first), and the servlet's own 403 for an authz refusal is
-     * outside ScreenTest. Therefore the 403 STATUS cannot be unit-tested here; it is verified via live HTTP
-     * (browser / curl against a running dev stack).
-     * This test covers only the render-path leak: no {@code component://} path must appear in
-     * the harness output for a non-super-admin user.</p>
+     * DAR-OPS-029 S36a: the darpan screen root carries only the SPA's CSRF bootstrap and the Slack install callback, and no
+     * subscreen. A screen added under it again would be reachable at /apps/darpan by a super admin and must be a deliberate
+     * change (with its own authz review), not a quiet one; the deleted legacy trees must stay deleted.
      */
     @Test
-    void nonSuperAdminRenderLeaksNoComponentPath() {
-        // Switch to a regular DARPAN_USER (no super-admin privilege).
-        ec.artifactExecution.disableAuthz()
-        try {
-            loginAs(REGULAR_USER_ID)
-        } finally {
-            ec.artifactExecution.enableAuthz()
+    void theScreenRootCarriesOnlyItsTwoTransitionsAndNoSubscreen() {
+        Path screenDir = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/screen")
+        def root = new groovy.xml.XmlParser(false, false).parse(screenDir.resolve("darpan.xml").toFile())
+        assertEquals(["csrfToken", "slackOauthCallback"], root.transition.collect { it.@name }.sort())
+        assertTrue(root.subscreens.isEmpty(), "darpan.xml has subscreens again: ${root.subscreens}")
+        ["Reconciliation", "Reconciliation.xml", "Settings", "Settings.xml", "Migrations.xml"].each { String gone ->
+            assertFalse(screenDir.resolve(gone).toFile().exists(), "legacy screen ${gone} is back")
         }
-
-        // Render the Reconciliation screen via the ScreenTest harness (WebFacadeStub, authz ON).
-        // URL-authz refuses the target screen; the HTTP 403 STATUS is not assertable here; see Javadoc above.
-        ScreenTest screenTest = ec.screen.makeTest().baseScreenPath("apps/darpan/Reconciliation")
-        ScreenTest.ScreenTestRender str = screenTest.render("", [:], "get")
-        String output = str.output ?: ""
-
-        // The refusal fired, and it is the screen authz (not an unrelated render error or an empty page).
-        assertTrue(str.errorMessages.any { m ->
-                    m.toString().contains("ArtifactAuthorizationException") &&
-                            m.toString().contains("is not authorized for View on Screen component://darpan/screen/Reconciliation/") },
-                "a non-super-admin render must be refused by screen authz; errors were: ${str.errorMessages}")
-        assertEquals("", output, "a refused render must produce no output")
-
-        // Primary assertion: no component:// paths must appear in the rendered output.
-        // A component:// leak would disclose internal filesystem structure to the caller.
-        assertFalse(output.contains("component://"),
-                "Rendered output for a non-super-admin must NOT contain any component:// path. Output was: ${output.take(500)}")
     }
 
     /** Logs in by userId (the realm's case-insensitive username lookup matches userId.toLowerCase()) and proves it took. */

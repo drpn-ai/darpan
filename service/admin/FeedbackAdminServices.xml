@@ -17,46 +17,51 @@
         </in-parameters>
         <out-parameters><parameter name="feedback" type="List"/></out-parameters>
         <actions>
+            <set field="feedback" from="[]"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <entity-find entity-name="darpan.audit.AuditFindingFeedback" list="rows">
-                <econdition field-name="answeredStamp" operator="is-null" ignore="!unansweredOnly"/>
+            <!-- Unanswered first, newest first within each: two reads of at most rowCap rows, never the whole table. -->
+            <set field="rowCap" from="Math.max(1, (limit ?: 50) as int)"/>
+            <entity-find entity-name="darpan.audit.AuditFindingFeedback" list="rows" limit="rowCap">
+                <econdition field-name="answeredStamp" operator="is-null"/>
                 <order-by field-name="-sentStamp"/>
                 <order-by field-name="-feedbackId"/>
             </entity-find>
-            <script><![CDATA[
-                // Unanswered first, newest first within each (the find is already newest first; the sort is stable).
-                List ordered = rows.sort(false) { a, b -> (a.answeredStamp != null ? 1 : 0) <=> (b.answeredStamp != null ? 1 : 0) }
-                int max = Math.max(1, (limit ?: 50) as int)
-                if (ordered.size() > max) ordered = ordered.subList(0, max)
-                long now = ec.user.nowTimestamp.time
-                Map tenantNames = [:]
-                Map userNames = [:]
-                Map statementCodes = [:]
-                ordered.each { r ->
-                    String t = r.companyUserGroupId
-                    if (!tenantNames.containsKey(t)) {
-                        def g = ec.entity.find("moqui.security.UserGroup").condition("userGroupId", t).useCache(false).one()
-                        tenantNames[t] = g?.description ?: t
-                    }
-                    String u = r.sentByUserId
-                    if (!userNames.containsKey(u)) {
-                        def a = ec.entity.find("moqui.security.UserAccount").condition("userId", u).useCache(false).one()
-                        userNames[u] = a?.userFullName ?: a?.username ?: u
-                    }
-                    String sid = r.statementId
-                    if (!statementCodes.containsKey(sid)) {
-                        def s = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", sid).useCache(false).one()
-                        statementCodes[sid] = s?.statementCode ?: sid
-                    }
-                }
-                feedback = ordered.collect { r ->
-                    [feedbackId: r.feedbackId, tenant: [id: r.companyUserGroupId, name: tenantNames[r.companyUserGroupId]],
-                     statement: statementCodes[r.statementId], cause: r.conclusionCode, record: r.recordKey, note: r.note,
-                     sentBy: userNames[r.sentByUserId], sentAt: ((java.sql.Timestamp) r.sentStamp).toInstant().toString(),
-                     ageDays: Math.max(0L, (now - ((java.sql.Timestamp) r.sentStamp).time).intdiv(86400000L)),
-                     answer: r.answer, answeredAt: r.answeredStamp != null ? ((java.sql.Timestamp) r.answeredStamp).toInstant().toString() : null]
-                }
-            ]]></script>
+            <if condition="!unansweredOnly &amp;&amp; rows.size() &lt; rowCap">
+                <entity-find entity-name="darpan.audit.AuditFindingFeedback" list="answeredRows" limit="rowCap - rows.size()">
+                    <econdition field-name="answeredStamp" operator="is-not-null"/>
+                    <order-by field-name="-sentStamp"/>
+                    <order-by field-name="-feedbackId"/>
+                </entity-find>
+                <set field="rows" from="rows + answeredRows"/>
+            </if>
+            <!-- Each tenant, sender and statement is read once. -->
+            <set field="nowMillis" from="ec.user.nowTimestamp.time"/>
+            <set field="tenantNames" from="[:]"/>
+            <set field="userNames" from="[:]"/>
+            <set field="statementCodes" from="[:]"/>
+            <iterate list="rows" entry="r">
+                <if condition="!tenantNames.containsKey(r.companyUserGroupId)">
+                    <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup" cache="false">
+                        <field-map field-name="userGroupId" from="r.companyUserGroupId"/></entity-find-one>
+                    <set field="ignorePut" from="tenantNames.put(r.companyUserGroupId, tenantGroup?.description ?: r.companyUserGroupId)"/>
+                </if>
+                <if condition="!userNames.containsKey(r.sentByUserId)">
+                    <entity-find-one entity-name="moqui.security.UserAccount" value-field="sender" cache="false">
+                        <field-map field-name="userId" from="r.sentByUserId"/></entity-find-one>
+                    <set field="ignorePut" from="userNames.put(r.sentByUserId, sender?.userFullName ?: sender?.username ?: r.sentByUserId)"/>
+                </if>
+                <if condition="!statementCodes.containsKey(r.statementId)">
+                    <entity-find-one entity-name="darpan.audit.AuditStatement" value-field="statement" cache="false">
+                        <field-map field-name="statementId" from="r.statementId"/></entity-find-one>
+                    <set field="ignorePut" from="statementCodes.put(r.statementId, statement?.statementCode ?: r.statementId)"/>
+                </if>
+                <set field="ignoreAdd" from="feedback.add([feedbackId: r.feedbackId,
+                        tenant: [id: r.companyUserGroupId, name: tenantNames.get(r.companyUserGroupId)],
+                        statement: statementCodes.get(r.statementId), cause: r.conclusionCode, record: r.recordKey, note: r.note,
+                        sentBy: userNames.get(r.sentByUserId), sentAt: r.sentStamp.toInstant().toString(),
+                        ageDays: Math.max(0L, (nowMillis - r.sentStamp.time).intdiv(86400000L)),
+                        answer: r.answer, answeredAt: r.answeredStamp?.toInstant()?.toString()])"/>
+            </iterate>
         </actions>
     </service>
 

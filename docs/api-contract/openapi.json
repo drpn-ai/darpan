@@ -10845,7 +10845,7 @@
                     },
                     "emailAddress": {
                         "type": "string",
-                        "description": "Contact email; must be unique when provided."
+                        "description": "Contact email, required and unique: password\n                reset sends its code here (standing rule: every user creation saves an email)."
                     },
                     "tempPassword": {
                         "type": "string",
@@ -10854,6 +10854,7 @@
                 },
                 "required": [
                     "username",
+                    "emailAddress",
                     "tempPassword"
                 ],
                 "description": "Create a user with a temporary password (change forced at first login) and\n            DARPAN_USER group membership. The temporary password is kept encrypted for the user's tenant welcome\n            emails (DAR-BE-325, darpan.admin.TempPasswordKeeper) until they set their own or the keep period ends."
@@ -10942,7 +10943,7 @@
                 "required": [
                     "userId"
                 ],
-                "description": "Disable a user and revoke their live login keys. Self-disable is refused."
+                "description": "Disable a user and end every sign-in they have: browser sessions, login keys, CLI sessions and a CLI\n            sign-in they approved that their CLI has not collected yet. Self-disable is refused."
             },
             "DisableUserAccountResult": {
                 "type": "object",
@@ -11505,7 +11506,7 @@
                     "userId",
                     "tempPassword"
                 ],
-                "description": "Set a temporary password for a user (change forced at next login) and revoke\n            their live login keys. The temporary password is kept encrypted for their tenant welcome emails\n            (DAR-BE-325), replacing an earlier one."
+                "description": "Set a temporary password for a user (change forced at next login) and end every sign-in they have\n            (browser sessions, login keys, CLI sessions, a CLI sign-in approved but not yet collected), as a password\n            change does. The temporary password is kept encrypted for their tenant welcome emails (DAR-BE-325), replacing\n            an earlier one."
             },
             "ResetPasswordResult": {
                 "type": "object",

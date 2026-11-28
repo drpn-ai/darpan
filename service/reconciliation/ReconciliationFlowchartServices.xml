@@ -10,6 +10,8 @@
          walker's five. -->
     <service verb="run" noun="FlowchartQuestion" type="script" transaction="ignore" allow-remote="false" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy">
+        <description>Internal: runs one flowchart question through the Run button's own script, with the walker's key-file
+            inputs (absolute server paths) and row links. Never remote.</description>
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
             <parameter name="file1Name"/>

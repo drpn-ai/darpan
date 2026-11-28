@@ -29,8 +29,7 @@ class LifecycleRuleSupport {
         String fieldId = normalize(params.fieldId)
         String fieldLabel = normalize(params.fieldLabel) ?: fieldId
         String value = normalize(params.value)
-        if (!fieldId || !FIELD_ID.matcher(fieldId).matches()) { ec.message.addError("'${fieldId}' is not a field a rule can use."); return [:] }
-        if (!value) { ec.message.addError("Choose a value."); return [:] }
+        if (refusedFieldOrValue(ec, fieldId, value, "a rule")) return [:]
         // The filter stores its values comma-separated, so a comma would split one value into two.
         if (value.contains(",")) { ec.message.addError("A value with a comma cannot be used in a rule yet."); return [:] }
         Map start = startOf(ec, normalize(params.reconciliationId))
@@ -92,8 +91,7 @@ class LifecycleRuleSupport {
         String reconciliationId = normalize(params.reconciliationId)
         String stage = normalize(params.stageRecordType), fieldId = normalize(params.fieldId), value = normalize(params.value)
         String fieldLabel = normalize(params.fieldLabel) ?: fieldId
-        if (!fieldId || !FIELD_ID.matcher(fieldId).matches()) { ec.message.addError("'${fieldId}' is not a field an exception can use."); return [:] }
-        if (!value) { ec.message.addError("Choose a value."); return [:] }
+        if (refusedFieldOrValue(ec, fieldId, value, "an exception")) return [:]
         if (value.contains(",") || value.contains("'")) { ec.message.addError("A value with a comma or a quote cannot be used yet."); return [:] }
         if (startOf(ec, reconciliationId) == null) return [:]
         // A tree built before excused records had their own place is rebuilt first, in the same order, so the records
@@ -180,12 +178,24 @@ class LifecycleRuleSupport {
 
     static def queryForRule(def ec, String ruleSetId) { return queryOf(ec, ruleSetId) }
 
-    private static def queryOf(def ec, String ruleSetId) {
+    private static def queryOf(def ec, String ruleSetId) { return firstSourceOf(ec, ruleSetId).query }
+
+    /** A rule's compare scope, its FILE_1 source and that source's SuiteQL query: [scope, source, query], each null past a gap. */
+    private static Map firstSourceOf(def ec, String ruleSetId) {
         def scope = ruleSetId ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
                 .condition("ruleSetId", ruleSetId).useCache(false).list()?.find() : null
         def source = scope ? TenantScopedFinder.findTenantScopedChildren(ec, "darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareScope",
                 "compareScopeId", scope.get("compareScopeId"), "compareScopeId")?.condition("fileSide", "FILE_1")?.useCache(false)?.one() : null
-        return source ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, LifecycleSupport.QUERY, "nsSuiteQlSourceQueryId", source.get("sourceConfigId")) : null
+        def query = source ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, LifecycleSupport.QUERY, "nsSuiteQlSourceQueryId",
+                source.get("sourceConfigId")) : null
+        return [scope: scope, source: source, query: query]
+    }
+
+    /** True, with the refusal, when a field id could not reach SuiteQL as a plain identifier or no value was chosen. */
+    private static boolean refusedFieldOrValue(def ec, String fieldId, String value, String what) {
+        if (!fieldId || !FIELD_ID.matcher(fieldId).matches()) { ec.message.addError("'${fieldId}' is not a field ${what} can use."); return true }
+        if (!value) { ec.message.addError("Choose a value."); return true }
+        return false
     }
 
     /** For get#Reconciliation on a lifecycle built from stages: its rules, and what its start reads (for the dropdowns). */
@@ -203,7 +213,7 @@ class LifecycleRuleSupport {
                             recordLabel   : LifecycleStageCompiler.RECORD_TYPES[recordType]?.plural ?: recordType]]
     }
 
-    static List<Map> listRules(def ec, Map start) {
+    private static List<Map> listRules(def ec, Map start) {
         return filtersOf(ec, start).findAll { it.get("operator") == "EXCLUDE_IN" }.collectMany { def f ->
             valuesOf(f).collect { String v ->
                 [fieldId   : f.get("fieldExpression"), fieldLabel: f.get("fieldLabel") ?: f.get("fieldExpression"),
@@ -237,16 +247,11 @@ class LifecycleRuleSupport {
         }
         Map startQ = RunFlowchartSupport.loadQuestions(ec, reconciliationId)
                 .find { it.questionRole == RunFlowchartTree.ROLE_START && it.isActive != "N" }
-        def scope = startQ ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
-                .condition("ruleSetId", startQ.ruleSetId).useCache(false).list()?.find() : null
-        def source = scope ? TenantScopedFinder.findTenantScopedChildren(ec, "darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareScope",
-                "compareScopeId", scope.get("compareScopeId"), "compareScopeId")?.condition("fileSide", "FILE_1")?.useCache(false)?.one() : null
-        def query = source ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, LifecycleSupport.QUERY, "nsSuiteQlSourceQueryId",
-                source.get("sourceConfigId")) : null
-        if (query == null) {
+        Map chain = firstSourceOf(ec, startQ?.ruleSetId as String)
+        if (chain.query == null) {
             if (!quiet) ec.message.addError("This lifecycle's start could not be found.")
             return null
         }
-        return [reconciliation: reconciliation, scope: scope, source: source, query: query]
+        return [reconciliation: reconciliation] + chain
     }
 }

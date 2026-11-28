@@ -131,10 +131,10 @@ class LifecycleStageCompiler {
     }
 
     /** "Fulfillment not expected": the place a person's exceptions name in their own words on the board. */
-    static String excusedName(List<Map<String, String>> s, int k) { return "${s[k].name} not expected".toString() }
+    private static String excusedName(List<Map<String, String>> s, int k) { return "${s[k].name} not expected".toString() }
 
     /** DAR-BE-238. "Fulfillment not expected, done": excused at that stage, and reached every stage after it. */
-    static String excusedDoneName(List<Map<String, String>> s, int k) { return "${excusedName(s, k)}, done".toString() }
+    private static String excusedDoneName(List<Map<String, String>> s, int k) { return "${excusedName(s, k)}, done".toString() }
 
     private static String completeName(List<Map<String, String>> s) {
         List<String> p = s.collect { it.past.toLowerCase() }

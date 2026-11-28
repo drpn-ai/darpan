@@ -93,4 +93,30 @@ class QuestionOutcomeSupportTests {
         assertNull(r.unaskedFile)
         assertEquals(0L, r.unaskedCount)
     }
+
+    /**
+     * DAR-OPS-029 S08, lens E1 (conservation): a child is asked about its parent's branch, and every key of that branch
+     * ends in exactly one of yes, no and unasked: nothing dropped, nothing counted twice. A finding about a key outside
+     * the branch (K9, K8) never enters it.
+     */
+    @Test
+    void everyKeyOfTheParentsBranchEndsInExactlyOneOfYesNoOrUnasked() {
+        List<String> branch = ["K1", "K2", "K3", "K4", "K5"]
+        Map compare = split(scopeMode: "COMPARE", inputKeysFile: keys("branchC", branch), file1KeysFile: keys("f1C", ["K1", "K2", "K3"]),
+                resultDocument: doc("dC", ['{"type":"MISSING_IN_FILE_2","id":"K2"}', '{"type":"MISSING_IN_FILE_1","id":"K9"}']))
+        assertConserved(branch, compare)
+
+        Map evaluate = split(scopeMode: "EVALUATE", inputKeysFile: keys("branchE", branch),
+                resultDocument: doc("dE", ['{"type":"FINDING","id":"K4"}', '{"type":"FINDING","id":"K8"}']))
+        assertConserved(branch, evaluate)
+        assertEquals(0L, evaluate.unaskedCount)
+    }
+
+    private static void assertConserved(List<String> branch, Map r) {
+        Set<String> yes = QuestionKeyFiles.read(r.yesFile as File), no = QuestionKeyFiles.read(r.noFile as File)
+        Set<String> unasked = r.unaskedFile ? QuestionKeyFiles.read(r.unaskedFile as File) : ([] as Set)
+        assertEquals(branch as Set, yes + no + unasked, "every branch key lands somewhere")
+        assertEquals(branch.size(), yes.size() + no.size() + unasked.size(), "and in one place only")
+        assertEquals(branch.size() as long, (r.yesCount as long) + (r.noCount as long) + (r.unaskedCount as long), "the counts add up")
+    }
 }

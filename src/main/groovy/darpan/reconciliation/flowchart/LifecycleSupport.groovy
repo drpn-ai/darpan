@@ -4,6 +4,7 @@ import darpan.facade.common.FacadeSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.conclusion.ConclusionCatalogSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
@@ -69,10 +70,9 @@ class LifecycleSupport {
         }
 
         def now = ec.user.nowTimestamp
-        Set<String> takenNames = (TenantScopedFinder.findTenantScoped(ec, RunFlowchartSupport.RECONCILIATION).useCache(false).list() ?: [])
-                .findAll { it.get("isArchived") != "Y" }.collect { it.get("reconciliationName") as String } as Set<String>
         String name = NetSuiteCheckImportSupport.uniqueName(
-                normalize(params.reconciliationName) ?: LifecycleStageCompiler.lifecycleName(startType), takenNames)
+                normalize(params.reconciliationName) ?: LifecycleStageCompiler.lifecycleName(startType),
+                NetSuiteCheckImportSupport.takenRunNames(ec))
         def run = ec.entity.makeValue(RunFlowchartSupport.RECONCILIATION)
         run.setSequencedIdPrimary()
         run.setAll([reconciliationName: name, companyUserGroupId: tenantId, defaultTimeWindow: "3d",
@@ -186,10 +186,8 @@ class LifecycleSupport {
     static Map saveStages(def ec, Map params) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
         String reconciliationId = normalize(params.reconciliationId)
-        def run = RunFlowchartSupport.findReconciliation(ec, reconciliationId)
-        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
-            ec.message.addError("Stages belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
-        }
+        def run = stagesLifecycle(ec, reconciliationId, "Stages")
+        if (run == null) return [:]
         List<String> stages = ((params.stageRecordTypes ?: []) as List).collect { normalize(it) }.findAll { it }
         List<Map> questions = RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
         Map start = questions.find { it.questionRole == RunFlowchartTree.ROLE_START }
@@ -252,10 +250,8 @@ class LifecycleSupport {
     static Map saveFinding(def ec, Map params) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
         String reconciliationId = normalize(params.reconciliationId)
-        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
-        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
-            ec.message.addError("Findings belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
-        }
+        def run = stagesLifecycle(ec, reconciliationId, "Findings")
+        if (run == null) return [:]
         String stage = normalize(params.stageRecordType), fieldId = normalize(params.fieldId)?.toLowerCase(), value = normalize(params.value)
         String op = (normalize(params.op) ?: "IN").toUpperCase()
         String fieldLabel = normalize(params.fieldLabel) ?: fieldId, valueLabel = normalize(params.valueLabel) ?: value
@@ -344,10 +340,8 @@ class LifecycleSupport {
     static Map saveConclusions(def ec, Map params) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
         String reconciliationId = normalize(params.reconciliationId)
-        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
-        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
-            ec.message.addError("Conclusions belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
-        }
+        def run = stagesLifecycle(ec, reconciliationId, "Conclusions")
+        if (run == null) return [:]
         Set<String> places = placeQuestions(ec, reconciliationId)*.noOutcomeLabel as Set<String>
 
         List<Map> rules = []
@@ -355,7 +349,7 @@ class LifecycleSupport {
             Map c = (Map) o
             String enumId = normalize(c.conclusionEnumId)
             // DAR-UI-064: a shared code, or the tenant's own; another tenant's code reads as not a conclusion.
-            def conclusion = darpan.reconciliation.conclusion.ConclusionCatalogSupport.visibleConclusion(ec, enumId)
+            def conclusion = ConclusionCatalogSupport.visibleConclusion(ec, enumId)
             if (conclusion == null) {
                 ec.message.addError("'${enumId}' is not a conclusion."); return [:]
             }
@@ -400,7 +394,7 @@ class LifecycleSupport {
      * there in the lifecycle's order (the sequence keeps that order, so the first that holds still wins). Run whenever the
      * places change: a stage rebuild makes new questions, a written finding adds one.
      */
-    static void applyConclusions(def ec, String reconciliationId) {
+    private static void applyConclusions(def ec, String reconciliationId) {
         def run = RunFlowchartSupport.findReconciliation(ec, reconciliationId)
         if (run == null) return
         List<Map> rules = conclusionRulesOf(run)
@@ -484,7 +478,7 @@ class LifecycleSupport {
     }
 
     /** A record's key for a detail, from its name: "HC Order Id" -> hcOrderId (keys are identifiers). */
-    static String detailKey(String label) {
+    private static String detailKey(String label) {
         List<String> words = (label ?: "").split(/[^A-Za-z0-9]+/).findAll { it } as List<String>
         String key = words.withIndex().collect { String w, int i -> i == 0 ? w.toLowerCase() : w.substring(0, 1).toUpperCase() + w.substring(1).toLowerCase() }.join("")
         return key && Character.isLetter(key.charAt(0)) ? key : "field${key}".toString()
@@ -508,10 +502,8 @@ class LifecycleSupport {
     static Map saveDetails(def ec, Map params) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
         String reconciliationId = normalize(params.reconciliationId)
-        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
-        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
-            ec.message.addError("Details belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
-        }
+        def run = stagesLifecycle(ec, reconciliationId, "Details")
+        if (run == null) return [:]
         List<Map> details = ((params.details ?: []) as List).collect { Object o ->
             Map d = (Map) o
             String fieldId = normalize(d.fieldId)?.toLowerCase()
@@ -613,6 +605,16 @@ class LifecycleSupport {
             }
         }
         return out
+    }
+
+    /** A lifecycle built from stages, or null with the refusal "<what> belong to a lifecycle built from stages". */
+    private static def stagesLifecycle(def ec, String reconciliationId, String what) {
+        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
+        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
+            ec.message.addError("${what} belong to a lifecycle built from stages; '${reconciliationId}' is not one.")
+            return null
+        }
+        return run
     }
 
     private static String uniqueRuleName(def ec, String base) {

@@ -54,8 +54,7 @@ class NetSuiteCheckImportSupport {
         Map<List, List<Map>> groups = checks.groupBy { Map c -> c.signature as List }
         boolean manyAccounts = groups.keySet().collect { it[0] }.unique().size() > 1
         Map<List, Map> startsBySignature = importedStarts(ec, activeQuestions)
-        Set<String> takenNames = (TenantScopedFinder.findTenantScoped(ec, RunFlowchartSupport.RECONCILIATION).useCache(false).list() ?: [])
-                .findAll { it.get("isArchived") != "Y" }.collect { it.get("reconciliationName") as String } as Set<String>
+        Set<String> takenNames = takenRunNames(ec)
 
         List<Map> runs = []
         int imported = 0
@@ -145,6 +144,12 @@ class NetSuiteCheckImportSupport {
                     reconciliationName: run.get("reconciliationName"), startQuestionId: start.get("reconciliationRunId")])
         }
         return found
+    }
+
+    /** The names of the tenant's runs that are not archived: a new run's name must be none of them. */
+    static Set<String> takenRunNames(def ec) {
+        return (TenantScopedFinder.findTenantScoped(ec, RunFlowchartSupport.RECONCILIATION).useCache(false).list() ?: [])
+                .findAll { it.get("isArchived") != "Y" }.collect { it.get("reconciliationName") as String } as Set<String>
     }
 
     static String uniqueName(String base, Set<String> taken) {

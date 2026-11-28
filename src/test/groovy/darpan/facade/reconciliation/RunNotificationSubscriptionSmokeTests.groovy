@@ -258,11 +258,11 @@ class RunNotificationSubscriptionSmokeTests {
 
     @Test
     void failedInteractiveRunPostsOneCardToDarpanAndNoErrorToClients() {
-        // DAR-BE-362, end to end through the facade: a saved run that fails after its run row exists (here: the saved run
-        // is missing) posts Darpan one FAILED card carrying the error; its subscriber gets the neutral line and never the error.
-        String chatSpaceId = seedDefaultChatSpace("Missing run space")
-        Map outcome = runAndWatch("BE362_MISSING_RUN", chatSpaceId, [
-                file1Name: "orders-1.csv", file1Text: "order_id\nA100\n", file2Name: "orders-2.csv", file2Text: "order_id\nA200\n"])
+        // DAR-BE-362, end to end through the facade: a saved run that fails after its run row exists (here: one file of two)
+        // posts Darpan one FAILED card carrying the error; its subscriber gets the neutral line and never the error.
+        String chatSpaceId = seedDefaultChatSpace("Failed after its row space")
+        String savedRunId = createCsvRun("BE362 failed run")
+        Map outcome = runAndWatch(savedRunId, chatSpaceId, [file1Name: "orders-1.csv", file1Text: "order_id\nA100\n"])
         String rawError = outcome.rawError
         assertNotNull(rawError, "the run must report its error to the person who ran it")
 
@@ -273,15 +273,28 @@ class RunNotificationSubscriptionSmokeTests {
         assertEquals(false, card.scheduled)
         assertEquals(TENANT_ID, card.tenantId)
         assertTrue(card.errorFirstLine.toString().contains(rawError), "the card carries the error: ${card.errorFirstLine}")
-        assertEquals("savedRun:BE362_MISSING_RUN", card.subjectKey)
-        // no saved run exists to name, so the line names its id, as before
-        assertEquals([[text: "BE362_MISSING_RUN did not finish. Darpan has been alerted and is working on a fix."]], outcome.deliveries)
+        assertEquals("savedRun:${savedRunId}".toString(), card.subjectKey)
+        assertEquals([[text: "BE362 failed run did not finish. Darpan has been alerted and is working on a fix."]], outcome.deliveries)
         assertFalse(outcome.deliveries.toString().contains(rawError), "the subscriber never sees the error")
 
         def run = outcome.run
         assertEquals("AUT_STAT_FAILED", run.statusEnumId)
         assertNotNull(run.notifiedDate, "the failed run is claimed, so nothing notifies it twice")
         assertEquals(0L, countSubscriptions(run.reconciliationRunResultId as String))
+    }
+
+    @Test
+    void aMissingSavedRunCardsDarpanAndTellsNoOne() {
+        // OC58 (S18): run#SavedRunDiff resolves the saved run before it mints a run row, so a missing saved run has no row and
+        // no subscriber to tell. Darpan still gets one FAILED card, named by the id that was asked for.
+        Map outcome = runAndWatch("BE362_MISSING_RUN", null, [
+                file1Name: "orders-1.csv", file1Text: "order_id\nA100\n", file2Name: "orders-2.csv", file2Text: "order_id\nA200\n"])
+        assertNotNull(outcome.rawError, "the run must report its error to the person who ran it")
+        assertEquals(1, outcome.cards.size(), "one card for Darpan")
+        assertEquals("FAILED", outcome.cards[0].kind)
+        assertEquals("savedRun:BE362_MISSING_RUN", outcome.cards[0].subjectKey)
+        assertTrue(outcome.deliveries.isEmpty(), "no run row, no one to tell: ${outcome.deliveries}")
+        assertNull(outcome.run, "a missing saved run mints no run row")
     }
 
     @Test
@@ -579,7 +592,8 @@ class RunNotificationSubscriptionSmokeTests {
         AutomationExecutionSupport.errorCardPoster = { def postEc, Map event ->
             cards << event
             def run = findRunOf(savedRunId)
-            ec.transaction.runUseOrBegin(30, "test subscription", {
+            // A run that failed before its row existed (OC58) has nothing to subscribe to.
+            if (run != null && chatSpaceId) ec.transaction.runUseOrBegin(30, "test subscription", {
                 ec.entity.makeValue("darpan.reconciliation.ReconciliationRunNotifySubscription").setAll([
                         reconciliationRunResultId: run.reconciliationRunResultId, userId: ec.user.userId,
                         chatSpaceId: chatSpaceId, subscribedDate: ec.user.nowTimestamp]).create()

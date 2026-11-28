@@ -138,6 +138,8 @@ class DiffDocumentStreamSupport {
                                   String auditNote) {
         JsonSlurper slurper = new JsonSlurper()
         File tempFile = new File(diffFile.getParentFile(), diffFile.getName() + tmpSuffix)
+        // OC56: what the read saw, so a cut-off document is refused rather than rewritten as a whole, smaller one.
+        DiffRowScan scan = new DiffRowScan()
         diffFile.withReader("UTF-8") { Reader reader ->
             BufferedReader lines = new BufferedReader(reader)
             tempFile.withWriter("UTF-8") { Writer writer ->
@@ -154,9 +156,13 @@ class DiffDocumentStreamSupport {
                             writer << SUMMARY_PREFIX + JsonOutput.toJson(summaryLessRemovedMissing(slurper, line,
                                     removedCount, removedMissingInFile1, removedMissingInFile2)) + ",\n"
                         } else if (line.startsWith(DIFFERENCES_HEADER)) {
+                            scan.headerFound = true
                             inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
                             if (inRows) writer << DIFFERENCES_HEADER
-                            else writer << line << "\n"
+                            else {
+                                scan.closed = true
+                                writer << line << "\n"
+                            }
                         } else if (line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
                             writer << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(
                                     appendedWarnings(slurper, line, auditNote)) + ",\n"
@@ -165,12 +171,15 @@ class DiffDocumentStreamSupport {
                         }
                         continue
                     }
+                    String trimmed = line.trim()
                     String rowJson = stripRowLine(line)
                     if (rowJson == null) {
+                        scan.closed = trimmed == "]" || trimmed == "}"
                         writer << "]\n}"
                         documentClosed = true
                         continue
                     }
+                    scan.rows++
                     boolean lastRow = line.endsWith("]")
                     boolean removeRow = false
                     if (rowJson.contains("\"missingIn\"")) {
@@ -185,12 +194,18 @@ class DiffDocumentStreamSupport {
                         firstRowWritten = true
                     }
                     if (lastRow) {
+                        scan.closed = true
                         writer << "]\n}"
                         documentClosed = true
                         inRows = false
                     }
                 }
             }
+        }
+        // A row that does not parse is kept as it was (it is never one this pass removes), so only a cut is refused here.
+        if (!scan.headerFound || !scan.closed) {
+            tempFile.delete()
+            throw new IllegalStateException("Not rewritten: ${scan.problem()}".toString())
         }
         replaceFile(tempFile, diffFile)
     }
@@ -269,17 +284,25 @@ class DiffDocumentStreamSupport {
     }
 
     /**
-     * Rewrites the document row by row. {@code transformRow} returns the row to write, or null to drop
-     * it; a row that does not parse is written through untouched. {@code transformSummary} runs once
-     * AFTER every row, so a summary can report on the rows it precedes: rows go to a sibling file
-     * first, then the document is assembled header + rows and moved over the original.
+     * Rewrites the document row by row. {@code transformRow} returns the row to write, or null to drop it.
+     * {@code transformSummary} runs once AFTER every row, so a summary can report on the rows it precedes, and so does
+     * {@code transformWarnings} when given (OC71): it gets the document's top-level processingWarnings and returns the list
+     * to write; without it that line is written back as it was. Rows go to a sibling file first, then the document is
+     * assembled header + rows and moved over the original.
+     *
+     * <p>OC56: a document cut before its differences section, cut part-way through its rows, or holding a row that does not
+     * parse is refused (IllegalStateException, in DiffRowScan.problem() words) and left exactly as it was. Rewriting it would
+     * close the section after the rows it has and every later reader would see a whole, smaller result.</p>
      */
-    static void rewriteDocument(File diffFile, String tmpSuffix, Closure<Map> transformRow, Closure<Map> transformSummary) {
+    static void rewriteDocument(File diffFile, String tmpSuffix, Closure<Map> transformRow, Closure<Map> transformSummary,
+                                Closure<List> transformWarnings = null) {
         JsonSlurper slurper = new JsonSlurper()
         File rowsFile = new File(diffFile.getParentFile(), "${diffFile.getName()}.${tmpSuffix}.rows")
         File outFile = new File(diffFile.getParentFile(), "${diffFile.getName()}.${tmpSuffix}")
         List<String> headerLines = []
         Map summary = null
+        List warnings = null
+        DiffRowScan scan = new DiffRowScan()
         try {
             rowsFile.withWriter("UTF-8") { Writer rows ->
                 diffFile.withReader("UTF-8") { Reader reader ->
@@ -295,40 +318,57 @@ class DiffDocumentStreamSupport {
                                 Object fragment = headerFragment(slurper, line, SUMMARY_PREFIX)
                                 summary = fragment instanceof Map ? (Map) fragment : [:]
                                 headerLines << SUMMARY_PREFIX
+                            } else if (transformWarnings != null && line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
+                                Object fragment = headerFragment(slurper, line, PROCESSING_WARNINGS_PREFIX)
+                                warnings = fragment instanceof List ? new ArrayList((List) fragment) : []
+                                headerLines << PROCESSING_WARNINGS_PREFIX
                             } else if (line.startsWith(DIFFERENCES_HEADER)) {
+                                scan.headerFound = true
                                 inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                                if (!inRows) rowsDone = true
+                                if (!inRows) {
+                                    rowsDone = true
+                                    scan.closed = true
+                                }
                             } else if (line.trim() != "{") {
                                 headerLines << line
                             }
                             continue
                         }
+                        String trimmed = line.trim()
                         String rowJson = stripRowLine(line)
                         if (rowJson == null) {
                             rowsDone = true
+                            scan.closed = trimmed == "]" || trimmed == "}"
                             continue
                         }
-                        boolean lastRow = line.trim().endsWith("]")
+                        boolean lastRow = trimmed.endsWith("]")
                         Map row = parseRowQuietly(slurper, rowJson)
-                        String out = rowJson
-                        if (row != null) {
+                        if (row == null) {
+                            scan.unparsed++
+                        } else {
+                            scan.rows++
                             Map transformed = transformRow.call(row)
-                            out = transformed == null ? null : JsonOutput.toJson(transformed)
+                            if (transformed != null) {
+                                if (firstRowWritten) rows << ","
+                                rows << "\n" << JsonOutput.toJson(transformed)
+                                firstRowWritten = true
+                            }
                         }
-                        if (out != null) {
-                            if (firstRowWritten) rows << ","
-                            rows << "\n" << out
-                            firstRowWritten = true
+                        if (lastRow) {
+                            rowsDone = true
+                            scan.closed = true
                         }
-                        if (lastRow) rowsDone = true
                     }
                 }
             }
+            if (!scan.complete) throw new IllegalStateException("Not rewritten: ${scan.problem()}".toString())
             Map newSummary = transformSummary.call(summary ?: [:])
+            List newWarnings = transformWarnings != null ? transformWarnings.call(warnings ?: []) : null
             outFile.withWriter("UTF-8") { Writer w ->
                 w << "{\n"
                 headerLines.each { String h ->
                     if (h == SUMMARY_PREFIX) w << SUMMARY_PREFIX + JsonOutput.toJson(newSummary) + ",\n"
+                    else if (h == PROCESSING_WARNINGS_PREFIX) w << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(newWarnings ?: []) + ",\n"
                     else w << h << "\n"
                 }
                 w << DIFFERENCES_HEADER

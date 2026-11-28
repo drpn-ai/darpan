@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -69,6 +70,26 @@ class DiffDocumentStreamSupportTests {
                 { Map r -> r.primaryId == "2" ? null : r }, { Map s -> s })
         assertEquals(["1", "3"], parse(f).differences*.primaryId)
         assertEquals([f.name] as Set, tempDir.list() as Set)
+    }
+
+    // OC71 (S03a wires it): the rewrite can change the document's top-level processingWarnings once every row is seen, so a
+    // warning the conclude pass withdraws from the run's counts leaves the document too. Without the closure the line is
+    // written back byte for byte.
+    @Test
+    void rewriteCanReplaceTheProcessingWarningsAfterEveryRow() {
+        File f = writeDiffDocument([row("1"), row("2")])
+        int seen = 0
+        DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> seen++; return r }, { Map s -> s },
+                { List warnings -> warnings.findAll { it != "compare warning" } + ["rows seen: ${seen}".toString()] })
+        assertEquals(["rows seen: 2"], parse(f).processingWarnings)
+    }
+
+    @Test
+    void withoutAWarningsClosureTheWarningsLineIsKept() {
+        File f = writeDiffDocument([row("1")])
+        String warningsLine = f.readLines("UTF-8").find { it.startsWith("\"processingWarnings\":") }
+        DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s })
+        assertEquals(warningsLine, f.readLines("UTF-8").find { it.startsWith("\"processingWarnings\":") })
     }
 
     @Test
@@ -162,5 +183,77 @@ class DiffDocumentStreamSupportTests {
         assertTrue(scan.closed)
         assertFalse(scan.complete)
         assertTrue(scan.problem().contains("1 row"), scan.problem())
+    }
+    // OC56: a rewrite must never turn a cut-off result file into a valid, smaller one. It refuses, and the file is left
+    // exactly as it was, with no temp files behind.
+    private File cutBeforeDifferences() {
+        File f = writeDiffDocument([row("1"), row("2")])
+        String text = f.getText("UTF-8")
+        f.text = text.substring(0, text.indexOf("\"differences\""))
+        return f
+    }
+
+    private File cutMidRows() {
+        File f = writeDiffDocument([row("1"), row("2"), row("3")])
+        String text = f.getText("UTF-8")
+        f.text = text.substring(0, text.indexOf("\"primaryId\":\"3\""))
+        return f
+    }
+
+    private void assertRefusedUntouched(File f, String expectedWords, Closure rewrite) {
+        String before = f.getText("UTF-8")
+        IllegalStateException refused = assertThrows(IllegalStateException) { rewrite.call() }
+        assertTrue(refused.message.contains(expectedWords), refused.message)
+        assertEquals(before, f.getText("UTF-8"), "the original must be left untouched")
+        assertEquals([f.name] as Set, tempDir.list() as Set, "no temp files left behind")
+    }
+
+    @Test
+    void rewriteDocumentRefusesAFileWithNoDifferencesSection() {
+        File f = cutBeforeDifferences()
+        assertRefusedUntouched(f, "no differences section") {
+            DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s })
+        }
+    }
+
+    @Test
+    void rewriteDocumentRefusesAFileCutMidRows() {
+        File f = cutMidRows()
+        assertRefusedUntouched(f, "ends before") {
+            DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s })
+        }
+    }
+
+    @Test
+    void rewriteDocumentRefusesARowThatDoesNotParse() {
+        File f = writeDiffDocument([row("1"), row("2"), row("3")])
+        f.text = f.getText("UTF-8").replace(JsonOutput.toJson(row("2")), "{\"primaryId\":\"2\",broken")
+        assertRefusedUntouched(f, "could not be read") {
+            DiffDocumentStreamSupport.rewriteDocument(f, "conclude-tmp", { Map r -> r }, { Map s -> s })
+        }
+    }
+
+    @Test
+    void removeMissingRowsRefusesAFileWithNoDifferencesSection() {
+        File f = cutBeforeDifferences()
+        assertRefusedUntouched(f, "no differences section") {
+            DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
+        }
+    }
+
+    @Test
+    void removeMissingRowsRefusesAFileCutMidRows() {
+        File f = cutMidRows()
+        assertRefusedUntouched(f, "ends before") {
+            DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
+        }
+    }
+
+    @Test
+    void removeMissingRowsStillRemovesFromAWholeFile() {
+        File f = writeDiffDocument([row("1"), row("2")])
+        DiffDocumentStreamSupport.removeMissingRows(f, ".verify-tmp", ["ns": ["1"] as Set], 1, 0, 1, null)
+        assertEquals(["2"], parse(f).differences*.primaryId)
+        assertEquals([f.name] as Set, tempDir.list() as Set)
     }
 }

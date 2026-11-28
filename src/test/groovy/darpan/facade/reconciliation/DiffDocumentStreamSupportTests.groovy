@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -101,7 +102,65 @@ class DiffDocumentStreamSupportTests {
     @Test
     void forEachRowOnAnEmptyDocumentVisitsNothing() {
         List seen = []
-        DiffDocumentStreamSupport.forEachRow(writeDiffDocument([])) { Map r -> seen << r }
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(writeDiffDocument([])) { Map r -> seen << r }
         assertEquals([], seen)
+        // An empty differences section is a real, complete answer: nothing differs.
+        assertTrue(scan.complete, scan.toString())
+        assertEquals(0, scan.rows)
+    }
+
+    @Test
+    void aWholeDocumentScansComplete() {
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(writeDiffDocument([row("1"), row("2")])) { Map r -> }
+        assertEquals(2, scan.rows)
+        assertEquals(0, scan.unparsed)
+        assertTrue(scan.headerFound)
+        assertTrue(scan.closed)
+        assertTrue(scan.complete)
+        assertEquals(null, scan.problem())
+    }
+
+    // OC47 (S11): a file cut off before its "differences" header used to yield zero rows silently, so an audit read
+    // "0 findings" and closed findings that were still true.
+    @Test
+    void aDocumentCutBeforeItsDifferencesHeaderIsNotComplete() {
+        File f = writeDiffDocument([row("1"), row("2")])
+        f.text = f.getText("UTF-8").substring(0, f.getText("UTF-8").indexOf("\"differences\""))
+        List seen = []
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(f) { Map r -> seen << r }
+        assertEquals([], seen)
+        assertFalse(scan.headerFound)
+        assertFalse(scan.complete)
+        assertTrue(scan.problem().contains("no differences section"), scan.problem())
+    }
+
+    @Test
+    void aDocumentCutPartWayThroughItsRowsIsNotComplete() {
+        File f = writeDiffDocument([row("1"), row("2"), row("3")])
+        String text = f.getText("UTF-8")
+        // Keep rows 1 and 2 whole; the file ends mid-way through row 3.
+        int third = text.indexOf("\"primaryId\":\"3\"")
+        f.text = text.substring(0, third)
+        List<String> seen = []
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(f) { Map r -> seen << (String) r.primaryId }
+        assertEquals(["1", "2"], seen)
+        assertTrue(scan.headerFound)
+        assertFalse(scan.closed)
+        assertFalse(scan.complete)
+        assertTrue(scan.problem().contains("ends before"), scan.problem())
+    }
+
+    @Test
+    void aRowThatDoesNotParseIsCountedNotDropped() {
+        File f = writeDiffDocument([row("1"), row("2"), row("3")])
+        f.text = f.getText("UTF-8").replace(JsonOutput.toJson(row("2")), "{\"primaryId\":\"2\",broken")
+        List<String> seen = []
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(f) { Map r -> seen << (String) r.primaryId }
+        assertEquals(["1", "3"], seen)
+        assertEquals(2, scan.rows)
+        assertEquals(1, scan.unparsed)
+        assertTrue(scan.closed)
+        assertFalse(scan.complete)
+        assertTrue(scan.problem().contains("1 row"), scan.problem())
     }
 }

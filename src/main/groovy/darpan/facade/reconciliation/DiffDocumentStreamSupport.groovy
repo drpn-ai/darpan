@@ -195,9 +195,40 @@ class DiffDocumentStreamSupport {
         replaceFile(tempFile, diffFile)
     }
 
-    /** Visits every parseable row, read-only. */
-    static void forEachRow(File diffFile, Closure visit) {
+    /**
+     * What one read of the differences section saw (OC47). A reader that counts, concludes or closes findings from the
+     * rows must check {@link #isComplete}: a file cut before its "differences" header, cut part-way through its rows, or
+     * holding a row that does not parse yields fewer rows than the run found, and fewer rows must never read as fewer
+     * findings.
+     */
+    static class DiffRowScan {
+        /** Rows visited. */
+        int rows
+        /** Row lines that did not parse; they were not visited. */
+        int unparsed
+        /** The document has a "differences" section. */
+        boolean headerFound
+        /** The section ended where the writer ends it (its last row's "]", or "[]"), not at the end of the file. */
+        boolean closed
+
+        boolean isComplete() { return headerFound && closed && unparsed == 0 }
+
+        /** Why the rows are not the whole answer, in words for an error; null when complete. */
+        String problem() {
+            if (!headerFound) return "The result file has no differences section (cut off or unreadable)."
+            if (!closed) return "The result file ends before its differences section does (cut off after ${rows} rows).".toString()
+            if (unparsed > 0) return "${unparsed} row${unparsed == 1 ? '' : 's'} of the result file could not be read.".toString()
+            return null
+        }
+
+        @Override
+        String toString() { return "DiffRowScan(rows=${rows}, unparsed=${unparsed}, headerFound=${headerFound}, closed=${closed})".toString() }
+    }
+
+    /** Visits every parseable row, read-only, and says what it saw. */
+    static DiffRowScan forEachRow(File diffFile, Closure visit) {
         JsonSlurper slurper = new JsonSlurper()
+        DiffRowScan scan = new DiffRowScan()
         diffFile.withReader("UTF-8") { Reader reader ->
             BufferedReader lines = new BufferedReader(reader)
             String line
@@ -205,18 +236,36 @@ class DiffDocumentStreamSupport {
             while ((line = lines.readLine()) != null) {
                 if (!inRows) {
                     if (line.startsWith(DIFFERENCES_HEADER)) {
-                        if (line.startsWith(DIFFERENCES_HEADER + "]")) return
+                        scan.headerFound = true
+                        if (line.startsWith(DIFFERENCES_HEADER + "]")) {
+                            scan.closed = true
+                            return
+                        }
                         inRows = true
                     }
                     continue
                 }
+                String trimmed = line.trim()
                 String rowJson = stripRowLine(line)
-                if (rowJson == null) return
+                if (rowJson == null) {
+                    // "]" or "}" ends the section as the writer does; a blank line mid-rows is not the writer's.
+                    scan.closed = trimmed == "]" || trimmed == "}"
+                    return
+                }
                 Map row = parseRowQuietly(slurper, rowJson)
-                if (row != null) visit.call(row)
-                if (line.trim().endsWith("]")) return
+                if (row == null) {
+                    scan.unparsed++
+                } else {
+                    scan.rows++
+                    visit.call(row)
+                }
+                if (trimmed.endsWith("]")) {
+                    scan.closed = true
+                    return
+                }
             }
         }
+        return scan
     }
 
     /**

@@ -131,11 +131,15 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals(null, link(row.checkId, "${MINE}_R4").conclusionCodes)
         assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
                 .condition("sequenceNum", 10L).disableAuthz().one().outcome)
-        assertTrue(((List) (((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)
-                .find { it.savedRunId == "TCHK_RS1" }.conclusions).findAll { it.code != "UNEXPLAINED" }.every { it.expected == true })
+        List<Map> named = ((List) (((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)
+                .find { it.savedRunId == "TCHK_RS1" }.conclusions).findAll { it.code != "UNEXPLAINED" }
+        assertFalse(named.isEmpty(), "the run names a cause")
+        assertTrue(named.every { it.expected == true }, "${named}")
         // Saving without expectedCodes (an older editor) leaves the run's causes as they are; an empty list clears them.
         assertFalse(facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open", label: "Credit memos left open",
                 savedRunId: "TCHK_RS1"], statements: [[id: "R4", diffTypes: ["FINDING"]]]]).hadError as boolean)
+        assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
+                .condition("sequenceNum", 10L).disableAuthz().one().outcome, "no expectedCodes kept the run's cause")
         assertEquals(["CONC_TCHK_OPEN"], ((Map) facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open",
                 label: "Credit memos left open", savedRunId: "TCHK_RS1", expectedCodes: ["CONC_TCHK_OPEN"]],
                 statements: [[id: "R4", diffTypes: ["FINDING"]]]]).savedCheck).expectedCodes)

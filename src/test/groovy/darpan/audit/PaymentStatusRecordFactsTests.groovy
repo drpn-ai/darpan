@@ -60,8 +60,10 @@ class PaymentStatusRecordFactsTests {
         assertEquals("Fully Applied, Not Deposited", facts.paymentStatus)
     }
 
+    // What this proves: a record that carries no payment field has none (null, not ""). The record type is not consulted:
+    // an item or line shows none only because its read carries no payment field (S99: a domain owner may want it gated).
     @Test
-    void anItemOrALineHasNoPaymentStatusOfItsOwn() {
+    void aRecordWithNoPaymentFieldHasNoPaymentStatus() {
         assertNull(AuditReportAssembler.recordFacts([sku: "A1", omsOrderStatusId: "ORDER_COMPLETED"], "orderItem").paymentStatus)
     }
 }

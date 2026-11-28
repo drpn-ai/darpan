@@ -84,8 +84,8 @@ class LifecycleSaveSmokeTests {
         Map excusedDone = excusedTrack[1]
         Map skip = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Billed, never shipped" }
         Map stop = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Never shipped, never billed" }
-        assertEquals(["Sales orders", "Fulfillment", "Invoice", "Invoice", "Invoice", "Invoice"], [start, ship, bill, done, skip, stop]*.runName)
         assertTrue([bill, done, skip, stop].every { it != null }, "every place is one question's findings")
+        assertEquals(["Sales orders", "Fulfillment", "Invoice", "Invoice", "Invoice", "Invoice"], [start, ship, bill, done, skip, stop]*.runName)
         assertEquals(9, (qs*.ruleSetId as Set).size(), "every question has its own rule")
         // A question's records are what it finds, so its rule is named after them: that name heads the records page.
         String name = out.reconciliationName as String
@@ -144,6 +144,10 @@ class LifecycleSaveSmokeTests {
         Set<String> owned = (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: out.reconciliationId])
                 .questions as List<Map>)*.ruleSetId as Set<String>
         List listed = call("facade.ReconciliationFacadeServices.list#SavedRuns", [pageIndex: 0, pageSize: 200]).savedRuns as List
+        // The list must have been read: an error or no answer would pass the check below vacuously.
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue(listed != null, "list#SavedRuns answered no list")
+        assertFalse(owned.isEmpty(), "the lifecycle owns rules")
         assertTrue(listed*.savedRunId.intersect(owned).isEmpty(), "owned rules leaked into the run list")
     }
 

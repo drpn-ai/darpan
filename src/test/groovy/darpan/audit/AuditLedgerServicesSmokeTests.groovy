@@ -320,10 +320,15 @@ class AuditLedgerServicesSmokeTests {
         ec.message.clearErrors()
         assertEquals(0L, countByKey("FOREIGN-1"))
 
+        // Its own key (the class's rule): GORJANA's open finding FOREIGN-2 survives KREWE's close.
+        record(CHECK, "2026-10-07", [finding("R4", "FOREIGN-2")])
+        String foreignId = ec.entity.find("darpan.audit.AuditFinding").condition("recordKey", "FOREIGN-2").useCache(false).one().findingId
         ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: KREWE, checkId: CHECK,
-                reportDate: Date.valueOf("2026-10-08"), checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: ["LIFE-1"]]).call()
+                reportDate: Date.valueOf("2026-10-08"), checkStatusEnumId: "AUDCS_RAN", examinedRecordKeys: ["FOREIGN-2"]]).call()
         assertTrue(ec.message.hasError(), "KREWE must not close GORJANA's findings")
+        assertTrue(ec.message.errorsString.contains("does not belong"), ec.message.errorsString)
         ec.message.clearErrors()
+        assertEquals("AUDFS_OPEN", row(foreignId).stateEnumId, "GORJANA's finding is still open")
     }
 
     @Test

@@ -154,9 +154,9 @@
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
                 <field-map field-name="enumId" from="audits[0].periodEnumId"/></entity-find-one>
             <set field="windowThruDate" from="reportDate"/>
-            <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditReportAssembler.periodStart(reportDate.toLocalDate(), periodEnum?.enumCode))"/>
-            <set field="period" from="darpan.audit.AuditReportAssembler.periodOf(reportDate.toLocalDate(), periodEnum?.enumCode)"/>
-            <set field="run" from="darpan.audit.AuditReportAssembler.auditRun(ec, audits[0].getMap(), reportDate.toLocalDate())"/>
+            <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditPeriods.periodStart(reportDate.toLocalDate(), periodEnum?.enumCode))"/>
+            <set field="period" from="darpan.audit.AuditPeriods.periodOf(reportDate.toLocalDate(), periodEnum?.enumCode)"/>
+            <set field="run" from="darpan.audit.AuditPeriods.auditRun(ec, audits[0].getMap(), reportDate.toLocalDate())"/>
             <set field="runs" from="[[period: run.period, windowFromDate: java.sql.Date.valueOf(run.from), windowThruDate: java.sql.Date.valueOf(run.thru)]]"/>
         </actions>
     </service>

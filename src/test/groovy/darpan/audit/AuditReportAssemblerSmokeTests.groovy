@@ -552,11 +552,11 @@ class AuditReportAssemblerSmokeTests {
 
     @Test
     void aQuarterStartsOnItsFirstMonth() {
-        assertEquals(LocalDate.of(2026, 10, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 11, 14), "quarter"))
-        assertEquals(LocalDate.of(2026, 1, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 3, 31), "quarter"))
-        assertEquals(LocalDate.of(2026, 4, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 4, 1), "quarter"))
-        assertEquals("2026-Q4", AuditReportAssembler.periodOf(LocalDate.of(2026, 11, 14), "quarter"))
-        assertEquals("2026-Q1", AuditReportAssembler.periodOf(LocalDate.of(2026, 3, 31), "quarter"))
+        assertEquals(LocalDate.of(2026, 10, 1), AuditPeriods.periodStart(LocalDate.of(2026, 11, 14), "quarter"))
+        assertEquals(LocalDate.of(2026, 1, 1), AuditPeriods.periodStart(LocalDate.of(2026, 3, 31), "quarter"))
+        assertEquals(LocalDate.of(2026, 4, 1), AuditPeriods.periodStart(LocalDate.of(2026, 4, 1), "quarter"))
+        assertEquals("2026-Q4", AuditPeriods.periodOf(LocalDate.of(2026, 11, 14), "quarter"))
+        assertEquals("2026-Q1", AuditPeriods.periodOf(LocalDate.of(2026, 3, 31), "quarter"))
     }
 
     @Test

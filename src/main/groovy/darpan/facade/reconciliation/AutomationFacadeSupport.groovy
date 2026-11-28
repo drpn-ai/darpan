@@ -194,16 +194,23 @@ class AutomationFacadeSupport {
         return seedFromRuleSet(ec, compareScopeId, fileSide)
     }
 
-    /** Rule set rows for this automation's compare scope and side; empty when it has no compareScopeId. */
+    /** Rule set rows for this compare scope and side, for the session's active tenant (the save and sync paths). */
     protected static List<Map<String, Object>> seedFromRuleSet(def ec, String rawCompareScopeId, String fileSide) {
+        return seedFromRuleSet(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), rawCompareScopeId, fileSide)
+    }
+
+    /**
+     * Rule set rows for this compare scope and side, read for the tenant NAMED, whatever the session's active tenant. An
+     * audit check's automation is built under the agent pipeline's tenant (S12 A1): a session-scoped read there found no
+     * rows and the automation ran unfiltered, with no error. Empty without a tenant, a scope or a side.
+     */
+    static List<Map<String, Object>> seedFromRuleSet(def ec, String tenantId, String rawCompareScopeId, String fileSide) {
+        String tenant = normalize(tenantId)
         String compareScopeId = normalize(rawCompareScopeId)
-        if (!compareScopeId || !fileSide) return []
-        // Same entity, same directly-tenant-owned read pattern as
-        // ReconciliationSavedRunSupport.resolveExtractExcludeFilters (P0 #4 — bare disableAuthz is
-        // CI-banned by DisableAuthzRatchetTest). Session-scoped by design: this is the save#Automation
-        // path, where the caller's active tenant is exactly the tenant the compareScopeId belongs to.
-        // Do NOT reuse this for a cross-tenant sweep.
-        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceFilter")
+        if (!tenant || !compareScopeId || !fileSide) return []
+        List rows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSourceFilter",
+                        "rule-set source filters for an automation: explicit companyUserGroupId condition applied")
+                .condition("companyUserGroupId", tenant)
                 .condition("compareScopeId", compareScopeId)
                 .condition("fileSide", fileSide)
                 .orderBy("sequenceNum")

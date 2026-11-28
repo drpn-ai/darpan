@@ -1303,6 +1303,34 @@ class AutomationFacadeSmokeTests {
         }
     }
 
+    /**
+     * S12 A1: an audit check's automation is built under the agent pipeline's tenant, not always the check's. The run's
+     * filters are read for the tenant named, never the session's, or the automation runs unfiltered with no error.
+     */
+    @Test
+    void seedFromRuleSetReadsTheNamedTenantsFiltersWhateverTheSessionTenant() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Seed Tenant")
+        String automationId = automation.automationId as String
+        String scopeId = automation.compareScopeId as String
+        try {
+            assertNotNull(scopeId)
+            ec.service.sync().name("create#darpan.rule.RuleSetCompareSourceFilter")
+                    .parameters([compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1, fieldExpression: "status",
+                                 operator: "EXCLUDE_IN", filterValues: "CANCELLED", companyUserGroupId: KREWE]).disableAuthz().call()
+            ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
+
+            assertEquals(["CANCELLED"], AutomationFacadeSupport.seedFromRuleSet(ec, KREWE, scopeId, "FILE_1")*.filterValues,
+                    "the named tenant's filters, though the session is on another tenant")
+            assertEquals([], AutomationFacadeSupport.seedFromRuleSet(ec, GORJANA, scopeId, "FILE_1"),
+                    "another tenant's filters never leak")
+            assertEquals([], AutomationFacadeSupport.seedFromRuleSet(ec, null, scopeId, "FILE_1"), "no tenant, no rows")
+        } finally {
+            ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
+            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", scopeId).disableAuthz().deleteAll()
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
     @Test
     void saveAutomationRefusesToRepointAnExistingAutomationAtADifferentRun() {
         Map<String, Object> first = createSyncFixtureAutomation("Sync Repoint Target")

@@ -65,7 +65,7 @@ class StreakFactSupport {
         row.set("awardKey", awardKey)
         row.set("automationId", automationId)
         row.set("earnedSlotDate", earnedSlotDate)
-        row.set("usedDate", new Timestamp(System.currentTimeMillis()))
+        row.set("usedDate", ec.user.nowTimestamp)
         row.create()
         return factId
     }

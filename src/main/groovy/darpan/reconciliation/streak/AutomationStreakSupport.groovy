@@ -133,7 +133,7 @@ class AutomationStreakSupport {
                     .findAll { (it.lastEarnedSlotDate as Timestamp) == slotDate }
                     .max { ladderDays(it.badgeKey as String) })
             if (badge != null) {
-                int times = toInt(badge.timesEarned)
+                int times = AutomationStreakFold.toInt(badge.timesEarned)
                 facts.badgeLine = StreakMilestoneVoice.badgeLine(badge.badgeKey as String, times)
                 // The GIF is for the first earn only (DAR-BE-108).
                 if (times == 1) facts.badgeGifKey = badge.badgeKey
@@ -198,7 +198,7 @@ class AutomationStreakSupport {
                      badges          : badgeRows.findAll { it.automationId == automationId }.collect { def badge ->
                          Map ladder = StreakMilestoneVoice.badge(badge.badgeKey as String)
                          [badgeKey: badge.badgeKey, title: ladder?.title, days: ladder?.days,
-                          timesEarned: toInt(badge.timesEarned), firstEarnedDate: badge.firstEarnedDate,
+                          timesEarned: AutomationStreakFold.toInt(badge.timesEarned), firstEarnedDate: badge.firstEarnedDate,
                           lastEarnedDate: badge.lastEarnedDate]
                      }.sort { it.days }]
         }
@@ -343,7 +343,7 @@ class AutomationStreakSupport {
                 "flowchart streak count — explicit companyUserGroupId condition applied")
                 .condition("reconciliationExecutionId", walk).condition("companyUserGroupId", tenant)
                 .useCache(false).list() ?: []
-        return questions.sum(0L) { toInt(it.noCount) as long } as Long
+        return questions.sum(0L) { AutomationStreakFold.toInt(it.noCount) as long } as Long
     }
 
     private static boolean allSurvivedBlackFriday(def ec, String tenant, String foldedId, Map foldedState, int year) {
@@ -392,7 +392,7 @@ class AutomationStreakSupport {
                 AutomationRuntimeSupport.runInTransaction(ec, "Error stamping the quest post") { ->
                     def stored = TenantScopedFinder.findGlobalUnscoped(ec, QUEST, "quest post stamp — keyed by its tenant")
                             .condition("companyUserGroupId", tenant).condition("questKey", quest.questKey).useCache(false).one()
-                    stored?.set("notifiedDate", new Timestamp(System.currentTimeMillis()))
+                    stored?.set("notifiedDate", ec.user.nowTimestamp)
                     stored?.update()
                     return null
                 }
@@ -438,14 +438,14 @@ class AutomationStreakSupport {
     // ---- schedule ---------------------------------------------------------------------------------------------------
 
     /** The same resolver the scanner fires with: the first fire strictly after an instant, or null. */
-    static Closure<Instant> nextFireAfter(def automation) {
+    private static Closure<Instant> nextFireAfter(def automation) {
         return { Instant after ->
             Timestamp base = toTimestamp(after)
             return AutomationExecutionSupport.resolveNextScheduledFireTime(automation, base, base)?.toInstant()
         }
     }
 
-    static ZoneId zoneOf(def automation) {
+    private static ZoneId zoneOf(def automation) {
         String zone = automation?.windowTimeZone?.toString()?.trim()
         try {
             return zone ? ZoneId.of(zone) : ZoneId.of("UTC")
@@ -462,11 +462,5 @@ class AutomationStreakSupport {
         if (value == null) return null
         if (value instanceof Timestamp) return (Timestamp) value
         return new Timestamp(((Instant) value).toEpochMilli())
-    }
-
-    private static int toInt(Object value) {
-        if (value instanceof Number) return ((Number) value).intValue()
-        String text = value?.toString()?.trim()
-        return (text && text.isInteger()) ? text.toInteger() : 0
     }
 }

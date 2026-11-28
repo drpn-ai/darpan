@@ -228,13 +228,14 @@ class AutomationStreakFold {
         return instant.atZone(zone).toLocalDate()
     }
 
-    private static long toLong(Object value) {
+    /** A stored count as a long: a number, or digits as text; anything else is 0. The streak package's one copy. */
+    static long toLong(Object value) {
         if (value instanceof Number) return ((Number) value).longValue()
         String text = value?.toString()?.trim()
         return (text && text.isLong()) ? text.toLong() : 0L
     }
 
-    private static int toInt(Object value) {
+    static int toInt(Object value) {
         return (int) toLong(value)
     }
 }

@@ -44,7 +44,7 @@ class StreakAwards {
         StreakMilestoneVoice.BADGE_LADDER.each { Map badge ->
             if (days < (badge.days as Integer)) return
             Map record = earned?.get(badge.key)
-            int times = toInt(record?.timesEarned)
+            int times = AutomationStreakFold.toInt(record?.timesEarned)
             if (times == 0) {
                 out << [key: badge.key, timesEarned: 1]
             } else if (badge.reEarnable && record.lastEarnedStreakStartDate != streakStart) {
@@ -57,7 +57,7 @@ class StreakAwards {
     /** Records one slot checked: per window the larger side, summed over the slot's windows. */
     static long slotRecords(Map slot) {
         return ((slot?.executions ?: []) as List<Map>).sum(0L) { Map execution ->
-            Math.max(toLong(execution.file1RecordCount), toLong(execution.file2RecordCount))
+            Math.max(AutomationStreakFold.toLong(execution.file1RecordCount), AutomationStreakFold.toLong(execution.file2RecordCount))
         } as long
     }
 
@@ -90,15 +90,5 @@ class StreakAwards {
         if (start == null || reached == null) return false
         List<LocalDate> weekend = blackFridayWeekend(year)
         return !start.atZone(zone).toLocalDate().isAfter(weekend[0]) && !reached.atZone(zone).toLocalDate().isBefore(weekend[1])
-    }
-
-    private static long toLong(Object value) {
-        if (value instanceof Number) return ((Number) value).longValue()
-        String text = value?.toString()?.trim()
-        return (text && text.isLong()) ? text.toLong() : 0L
-    }
-
-    private static int toInt(Object value) {
-        return (int) toLong(value)
     }
 }

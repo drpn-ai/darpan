@@ -24,8 +24,8 @@ def maxUploadBytes = (__maxUploadBytesProp && __maxUploadBytesProp.isLong()) ?
         Long.parseLong(__maxUploadBytesProp) : __MAX_UPLOAD_BYTES_DEFAULT
 
 def saveFileItem = { fileItem, targetRef ->
-    long incomingSize = 0L
-    try { incomingSize = (fileItem?.getSize() ?: 0L) as long } catch (Exception ignored) { incomingSize = 0L }
+    // A size that cannot be read is an error, never a skipped cap (DAR-OPS-029 S02).
+    long incomingSize = (fileItem.getSize() ?: 0L) as long
     if (incomingSize > maxUploadBytes) {
         throw new IllegalArgumentException("Uploaded reconciliation file exceeds the ${maxUploadBytes >> 20} MB limit.")
     }
@@ -262,10 +262,16 @@ if (ruleSetIdValue) {
         onlyInFile2Count = reconcileResult.missingInFile1Count
         validationErrors = (reconcileResult.validationErrors ?: []) as List
         processingWarnings = (reconcileResult.processingWarnings ?: []) as List
+        // DAR-OPS-029 S02 (OC20): the rule stage's own counts reach the caller as out-parameters (script bindings, not
+        // typed locals, or Moqui never returns them). Without them run#SavedRunDiff read null and called an upload run
+        // with only value mismatches CLEAN.
+        ruleDifferenceCount = reconcileResult.ruleDifferenceCount
+        ruleDifferenceFields = (reconcileResult.ruleDifferenceFields ?: []) as List
+        duplicateDifferenceCount = reconcileResult.duplicateDifferenceCount
         // Audit 2026-06-11 #4: a rule build/eval failure does not throw (it is caught and returned as
         // an error flag), so without this the run would persist as SUCCEEDED despite the ruleset not
         // fully evaluating. Record the run as FAILED so the status and completion alert reflect it.
-        boolean ruleExecutionFailed = reconcileResult.ruleExecutionFailed == true
+        ruleExecutionFailed = reconcileResult.ruleExecutionFailed == true
 
         Map outputMetadata = [
             timestamp                : ReconciliationServices.formatMetadataTimestamp(ec.user.nowTimestamp),
@@ -291,7 +297,9 @@ if (ruleSetIdValue) {
             onlyInFile1Count           : onlyInFile1Count,
             onlyInFile2Count           : onlyInFile2Count,
             missingObjectDifferenceCount: reconcileResult.missingObjectDifferenceCount,
-            ruleDifferenceCount        : reconcileResult.ruleDifferenceCount
+            ruleDifferenceCount        : reconcileResult.ruleDifferenceCount,
+            // DAR-OPS-029 S02: records under a repeated key, counted in totalDifferences (DAR-BE-165, OC14).
+            duplicateDifferenceCount   : reconcileResult.duplicateDifferenceCount
         ]
         Map outputInfo = ReconciliationServices.writeDiffDatasetOutput(
             ec,

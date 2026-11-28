@@ -51,7 +51,7 @@
                 <description>Whether CSV files have headers</description>
             </parameter>
 
-            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkMaster" default-value="local[*]"><description>Ignored: the server's spark.master property decides (a caller must not redirect a tenant's data to another cluster).</description></parameter>
             <parameter name="sparkAppName" default-value="GenericReconciliation"/>
             <!-- DAR-UI-048: flowchart-only, internal; passed through to reconcile#RuleSetCompareScope. -->
             <parameter name="file1IncludeIdsLocation"/>
@@ -87,6 +87,11 @@
             </parameter>
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
+            <!-- DAR-OPS-029 S02 (OC20): the rule stage's counts, as reconcile#RuleSetCompareScope gives them (RuleSet path only). -->
+            <parameter name="ruleDifferenceCount" type="Long"><description>Value differences raised by the rule set's rules.</description></parameter>
+            <parameter name="ruleDifferenceFields" type="List"><description>Rule differences per rule, busiest first (RuleDiffSupport.fieldTally).</description></parameter>
+            <parameter name="duplicateDifferenceCount" type="Long"><description>Records under a key repeated on either side, counted in differenceCount (DAR-BE-165).</description></parameter>
+            <parameter name="ruleExecutionFailed" type="Boolean"><description>True when the rules did not fully evaluate: the run is FAILED, never zero differences.</description></parameter>
         </out-parameters>
     </service>
 

@@ -542,6 +542,39 @@ class TenantAccessSupportTests {
         assertEquals("Europe/London", sessionInfo.timeZone)
     }
 
+    /**
+     * OC70 (S19 QA). For windows and dates, a tenant with no zone reads as UTC, as the scheduler does (tenantTimeZoneFor). It
+     * used to fall back to the signed-in user's zone, then l10n, so two users of one tenant got different windows for the
+     * same dates. What a person SEES is unchanged (Aditi 14:38: display follows the user's preferred timezone).
+     */
+    @Test
+    void aTenantWithNoZoneComputesWindowsInUtcButShowsTimesInTheUsersZone() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                l10n: new Expando(timeZone: "Europe/Paris"),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"             : companyFinder,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): new FinderStub(oneResult: null),
+                ])
+        )
+
+        assertEquals("UTC", TenantAccessSupport.resolveActiveTenantTimeZone(ec))
+        assertEquals(TenantAccessSupport.tenantTimeZoneFor(ec, "KREWE").id, TenantAccessSupport.resolveActiveTenantTimeZone(ec))
+        assertEquals("Asia/Kolkata", TenantAccessSupport.resolveActiveTenantDisplayTimeZone(ec))
+        assertEquals("Asia/Kolkata", TenantAccessSupport.readActiveTenantSettings(ec).timeZone)
+    }
+
+    @Test
+    void aStoredZoneThatIsNotAZoneIsUtcLikeTheScheduler() {
+        assertEquals("UTC", TenantAccessSupport.resolveTenantSettingsTimeZone([timeZone: "Mars/Olympus"]))
+        assertEquals("Europe/London", TenantAccessSupport.resolveTenantSettingsTimeZone([timeZone: " Europe/London "]))
+    }
+
     @Test
     void buildSessionInfoExposesRawUserAndTenantTimeZones() {
         FinderStub companyFinder = new FinderStub(listResult: [

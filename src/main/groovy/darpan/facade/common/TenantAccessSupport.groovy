@@ -439,7 +439,7 @@ class TenantAccessSupport {
             username      : ec?.user?.username,
             displayName   : resolveDisplayName(ec),
             locale        : ec?.l10n?.locale?.toLanguageTag(),
-            timeZone      : resolveActiveTenantTimeZone(ec),
+            timeZone      : resolveActiveTenantDisplayTimeZone(ec),
             userTimeZone  : normalizeTimeZoneId(ec?.user?.userAccount?.timeZone),
             tenantTimeZone: resolveRawTenantTimeZone(ec),
             lastLoginDate : resolveLastLoginDate(ec),
@@ -572,10 +572,24 @@ class TenantAccessSupport {
         return buildTenantSettingsResponse(ec, findTenantSettingsForTenant(ec, tenantId), tenantId, tenantSettingsMap)
     }
 
+    /**
+     * OC70. The zone every window and date is computed in for the active tenant (run windows, dateFrom/dateTo, dataset and
+     * audit days, extract windows): the tenant's zone, else UTC, as the scheduler reads it ({@link #tenantTimeZoneFor}).
+     * Never the signed-in user's zone, so every user of one tenant gets the same days. For showing times, use
+     * {@link #resolveActiveTenantDisplayTimeZone}.
+     */
     static String resolveActiveTenantTimeZone(def ec) {
         String tenantId = currentActiveTenantUserGroupId(ec)
         def tenantSettings = tenantId ? findTenantSettingsForTenant(ec, tenantId) : null
-        return resolveTenantSettingsTimeZone(tenantSettings, ec)
+        return resolveTenantSettingsTimeZone(tenantSettings)
+    }
+
+    /** The zone times are SHOWN in (session info, tenant settings): the tenant's zone, else the user's, else l10n, else
+     *  UTC. Display only; never compute a window in it (that is {@link #resolveActiveTenantTimeZone}). */
+    static String resolveActiveTenantDisplayTimeZone(def ec) {
+        String tenantId = currentActiveTenantUserGroupId(ec)
+        def tenantSettings = tenantId ? findTenantSettingsForTenant(ec, tenantId) : null
+        return resolveDisplayTimeZone(tenantSettings, ec)
     }
 
     static String resolveRawTenantTimeZone(def ec) {
@@ -595,7 +609,15 @@ class TenantAccessSupport {
         }
     }
 
-    protected static String resolveTenantSettingsTimeZone(def tenantSettings, def ec) {
+    /** OC70, windows and dates: the tenant's zone, else UTC; a stored id that is not a zone reads as UTC, as the scheduler. */
+    protected static String resolveTenantSettingsTimeZone(def tenantSettings) {
+        String zone = normalizeTimeZoneId(tenantSettings?.timeZone)
+        return zone && validateTimeZone(zone) == null ? zone : DEFAULT_TIME_ZONE
+    }
+
+    /** Display: the tenant's zone, else the signed-in user's, else l10n, else UTC (unchanged by OC70; the per-user
+     *  preferred timezone decides what a person sees). */
+    protected static String resolveDisplayTimeZone(def tenantSettings, def ec) {
         return normalizeTimeZoneId(tenantSettings?.timeZone) ?:
                 normalizeTimeZoneId(ec?.user?.userAccount?.timeZone) ?:
                 normalizeTimeZoneId(ec?.l10n?.timeZone) ?:
@@ -662,7 +684,7 @@ class TenantAccessSupport {
         return [
                 companyUserGroupId: resolvedTenantId,
                 companyLabel      : resolveTenantLabelForUserGroupId(ec, resolvedTenantId),
-                timeZone          : resolveTenantSettingsTimeZone(tenantSettings ?: fallbackSettings, ec),
+                timeZone          : resolveDisplayTimeZone(tenantSettings ?: fallbackSettings, ec),
                 streaksChatSpaceId: resolveStreaksChatSpaceId(ec, tenantSettings ?: fallbackSettings, resolvedTenantId),
                 createdByUserId   : normalize(tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId),
                 createdDate       : tenantSettings?.createdDate ?: fallbackSettings?.createdDate,

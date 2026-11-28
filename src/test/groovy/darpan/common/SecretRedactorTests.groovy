@@ -17,10 +17,13 @@ class SecretRedactorTests {
 
     @Test
     void aKeyValueSecretKeepsItsShape() {
-        assertEquals("NetSuite 401 for apiToken=***, retry", masked("NetSuite 401 for apiToken=sk_live_secret, retry"))
+        assertEquals("NetSuite 401 for apiToken=*** retry", masked("NetSuite 401 for apiToken=sk_live_secret, retry"),
+                "a bare value runs to whitespace: the comma after it goes too, over-masking is the safe side")
         assertEquals("password=*** token=***", masked("password=hunter2 token=abc.def"))
-        assertEquals("access_token=***", masked("access_token=abc&x=1"), "a bare value runs to a space, comma or ')': over-masking is the safe side")
+        assertEquals("access_token=***", masked("access_token=abc&x=1"))
         assertEquals("password=*** (retry)", masked("password=p&ss}w0rd (retry)"))
+        assertEquals("password=*** next", masked("password=ab,cd next"), "a comma in a secret stays masked (the migration ledger's old rule)")
+        assertEquals("secret=***", masked("secret=x)y"))
     }
 
     @Test
@@ -50,7 +53,7 @@ class SecretRedactorTests {
     void secretsUnderOtherNamesAndShapesAreMasked() {
         assertEquals('{"access_token":"***","refresh_token":"***","client_secret":"***"}',
                 masked('{"access_token":"shpat_x","refresh_token":"r1","client_secret":"cs"}'))
-        assertEquals('body: {\\"apiToken\\":***,\\"x\\":1}', masked('body: {\\"apiToken\\":\\"sk_live\\",\\"x\\":1}'),
+        assertEquals('body: {\\"apiToken\\":***', masked('body: {\\"apiToken\\":\\"sk_live\\",\\"x\\":1}'),
                 "JSON quoted inside a string")
         assertEquals("password => ***", masked("password => hunter2"))
         assertEquals("x-api-key: ***", masked("x-api-key: k1"))

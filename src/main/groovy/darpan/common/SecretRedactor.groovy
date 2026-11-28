@@ -18,7 +18,8 @@ import java.util.regex.Pattern
  *   <li>the value of a password, privateKey, apiToken, apiKey/api_key/api-key, clientSecret, secret, token, webhook or webhookUrl
  *       key, bare, quoted or backslash-quoted (JSON inside a string), with any prefix (access_token, client_secret, x-api-key),
  *       after =, : or => on the same line: a quoted value up to its closing quote on that line (escapes allowed, at most 512
- *       characters), a quote that does not close on its line up to the line's end, a bare value up to a space, comma or ")";</li>
+ *       characters), a quote that does not close on its line up to the line's end, a bare value up to whitespace (a comma or
+ *       ")" in a secret stays masked; the old migration-ledger rule, kept so no path masks less);</li>
  *   <li>a Bearer token.</li>
  * </ul>
  * <p>Never past a line end (but for PEM), so a stack trace's other lines stay readable. A key that only ends in a secret word
@@ -34,7 +35,7 @@ final class SecretRedactor {
     private static final Pattern URL_USERINFO = ~/(?i)(\b[a-z][a-z0-9+.-]*:\/\/[^\/\s:@]+:)[^@\s\/]+@/
     private static final Pattern URL_SECRET_PARAM = ~/(?i)([?&](?:key|token|sig|signature|access_token)=)[^&\s"'#]+/
     private static final Pattern SECRET_VALUE =
-            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|[^,\s)]+)/
+            ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token|webhookUrl|webhook)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|\S+)/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     private SecretRedactor() {}

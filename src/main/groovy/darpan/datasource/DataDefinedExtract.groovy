@@ -9,7 +9,6 @@ import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 
-import java.sql.Timestamp
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -183,7 +182,7 @@ class DataDefinedExtract {
     }
 
     /** Everything checked before any call: [errors] or the connector, definition, config record and run request. */
-    static Map prepare(def ec, Map context) {
+    private static Map prepare(def ec, Map context) {
         String systemEnumId = context.get("systemEnumId")?.toString()?.trim()
         if (!systemEnumId) return [errors: ["A data-defined extract needs the systemEnumId it reads."]]
         Map connector = SourceSystemConnectorSupport.resolve(ec, systemEnumId)
@@ -345,7 +344,7 @@ class DataDefinedExtract {
         return metadata
     }
 
-    static List<String> warningsOf(Map definition, Map counts) {
+    private static List<String> warningsOf(Map definition, Map counts) {
         return ((List<Map>) (definition.warnings ?: [])).findAll { ((counts?.get(it.count) ?: 0) as long) > 0 }
                 .collect { Map w -> w.text.toString().replace("{n}", counts.get(w.count).toString()) }
     }
@@ -365,7 +364,7 @@ class DataDefinedExtract {
         }
     }
 
-    static Long windowMillis(Object raw, String label, List<String> errors) {
+    private static Long windowMillis(Object raw, String label, List<String> errors) {
         if (raw instanceof Number) return ((Number) raw).longValue()
         if (raw instanceof Date) return ((Date) raw).time
         if (raw instanceof Instant) return ((Instant) raw).toEpochMilli()
@@ -378,7 +377,8 @@ class DataDefinedExtract {
         List<Closure<Long>> parsers = [
                 { String v -> Instant.parse(v).toEpochMilli() },
                 { String v -> OffsetDateTime.parse(v).toInstant().toEpochMilli() },
-                { String v -> Timestamp.valueOf(v).time },
+                // "yyyy-MM-dd HH:mm:ss[.f]" as UTC, like the ISO form: Timestamp.valueOf read it in the JVM's zone.
+                { String v -> LocalDateTime.parse(v.replaceFirst(' ', 'T')).toInstant(ZoneOffset.UTC).toEpochMilli() },
                 { String v -> LocalDateTime.parse(v).toInstant(ZoneOffset.UTC).toEpochMilli() },
                 { String v -> LocalDate.parse(v).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli() },
         ]
@@ -387,7 +387,7 @@ class DataDefinedExtract {
         return null
     }
 
-    static String safeFileName(Object raw, String fallback) {
+    private static String safeFileName(Object raw, String fallback) {
         String name = raw?.toString()?.trim()
         name = name ? name.tokenize("/\\").last() : fallback
         name = name.replaceAll(/[^A-Za-z0-9._-]/, "_").replaceAll(/^\.+/, "")

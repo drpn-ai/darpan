@@ -597,18 +597,10 @@ class DataSourceRunner {
 
     private static void number(Map step, List<Map> input) {
         List<String> partitionBy = (List<String>) (step.partitionBy ?: [])
-        List<Map> orderBy = ((List) (step.orderBy ?: [])).collect { it instanceof Map ? (Map) it : [path: it] }
         Map<String, List<Map>> groups = new LinkedHashMap<>()
         (input ?: []).each { Map r -> groups.computeIfAbsent(keyOf(partitionBy.collect { JsonPathValues.value(r, it) }), { [] }).add(r) }
         groups.values().each { List<Map> group ->
-            List<Map> sorted = group.sort(false) { Map a, Map b ->
-                for (Map o : orderBy) {
-                    Object x = JsonPathValues.value(a, (String) o.path), y = JsonPathValues.value(b, (String) o.path)
-                    int c = o.as == "TEXT" ? ((x?.toString() ?: "") <=> (y?.toString() ?: "")) : compare(x, y)
-                    if (c != 0) return c
-                }
-                return 0
-            }
+            List<Map> sorted = sortedBy(group, (List) (step.orderBy ?: []))
             // One read-only list per partition, shared by its records: a copy each would be the partition's size squared.
             List<Object> collected = step.collect ? java.util.Collections.unmodifiableList(
                     sorted.collect { JsonPathValues.value(it, (String) ((Map) step.collect).field) }) : null

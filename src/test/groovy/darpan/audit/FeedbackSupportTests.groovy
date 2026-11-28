@@ -202,7 +202,7 @@ class FeedbackSupportTests {
         assertEquals(14, listed.shownDays)
         assertEquals(["Same 3PL again", "The 3PL ships these a day late"], (listed.notes as List<Map>)*.note, "newest first")
         assertEquals(["M202/01", "M201/01"], (listed.notes as List<Map>)*.record)
-        assertEquals(2, ((AuditReportAssembler.assembleFinding(ec, MINE, f).finding as Map).feedback as Map).recentCount)
+        assertEquals(2, ((AuditFindingDocument.assembleFinding(ec, MINE, f).finding as Map).feedback as Map).recentCount)
     }
 
     @Test
@@ -262,7 +262,7 @@ class FeedbackSupportTests {
             assertFalse(listed.hadError as boolean, listed.errorText as String)
             List<String> notes = (listed.notes as List<Map>)*.note
             assertTrue(notes.containsAll(["Tree said unexplained", "No cause at all"]), "one group from ${f}: ${notes}".toString())
-            int count = ((AuditReportAssembler.assembleFinding(ec, MINE, f).finding as Map).feedback as Map).recentCount as int
+            int count = ((AuditFindingDocument.assembleFinding(ec, MINE, f).finding as Map).feedback as Map).recentCount as int
             assertEquals(notes.size(), count, "the badge counts the same group")
         }
         assertNull(FeedbackSupport.conclusionCode(ec, "UNEXPLAINED"))

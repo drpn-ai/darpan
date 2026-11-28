@@ -1,6 +1,8 @@
 package darpan.agent.pipeline
 
 import darpan.audit.AuditPriority
+import darpan.audit.AuditCheckAutomation
+import darpan.audit.AuditSchedule
 import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -168,10 +170,10 @@ class AuditChangeLevers {
         if (audit == null) { ec.message.addError("Audit '${target.auditId}' was not found.".toString()); return null }
         Map state = [kind: kind, target: target, audit: audit.auditCode]
         if (kind == "AUDIT_SETTINGS") {
-            Map s = AuditSettingsSupport.scheduleOf(ec, audit)
+            Map s = AuditSchedule.scheduleOf(ec, audit)
             state.schedule = [active: s.active, time: s.time, timeZone: s.timeZone]
             state.automations = AuditSettingsSupport.automationsOfAudit(ec, tenantId, audit).collect { Map a ->
-                [id: a.automationId, time: AuditSettingsSupport.timeOf(a.scheduleExpr as String), timeZone: a.windowTimeZone,
+                [id: a.automationId, time: AuditSchedule.timeOf(a.scheduleExpr as String), timeZone: a.windowTimeZone,
                  active: a.isActive == "Y"] as Map
             }.sort { Map a -> a.id as String }
         } else {
@@ -691,7 +693,7 @@ class AuditChangeLevers {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         Map audit = tenantId ? AuditSettingsSupport.auditOf(ec, tenantId, auditCode) : null
         if (audit == null) { ec.message.addError("Audit '${auditCode}' was not found.".toString()); return }
-        AuditSettingsSupport.ensureAutomations(ec, tenantId, audit)
+        AuditCheckAutomation.ensureAutomations(ec, tenantId, audit)
     }
 
     /** Removes the check and its links, and pauses its automation unless another check still runs through it. */

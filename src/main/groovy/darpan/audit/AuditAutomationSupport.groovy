@@ -195,10 +195,10 @@ class AuditAutomationSupport {
         String periodCode = AuditReportAssembler.enumCodes(ec).get(audit.periodEnumId as String)
         List<Map> periods = []
         for (LocalDate day = from; day <= thru; ) {
-            String period = AuditReportAssembler.periodOf(day, periodCode)
-            Map w = AuditReportAssembler.periodWindow(ec, audit, period, reportDay)
+            String period = AuditPeriods.periodOf(day, periodCode)
+            Map w = AuditPeriods.periodWindow(ec, audit, period, reportDay)
             if (w == null || !w.recordable) {
-                throw new IllegalStateException("${period} has ended; pick days from ${AuditReportAssembler.recordableFrom(reportDay, periodCode)}.")
+                throw new IllegalStateException("${period} has ended; pick days from ${AuditPeriods.recordableFrom(reportDay, periodCode)}.")
             }
             LocalDate last = [thru, w.end as LocalDate].min()
             periods << [period: w.period, from: day, thru: last]
@@ -843,7 +843,7 @@ class AuditAutomationSupport {
                 type?.startsWith("DUPLICATE_IN_FILE_1") ? ["FILE_1"] :
                 type?.startsWith("DUPLICATE_IN_FILE_2") ? ["FILE_2"] : ["FILE_1", "FILE_2"]
         String dataSide = type == "MISSING_IN_FILE_1" || type?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1"
-        String key = AuditReportAssembler.displayKey(row.id as String)
+        String key = AuditRecordFacts.displayKey(row.id as String)
         boolean typed = normalize(check.file1RecordType) || normalize(check.file2RecordType)
         List<Map> own = []
         List<Map> related = []
@@ -928,7 +928,7 @@ class AuditAutomationSupport {
                 Map record = entry.record instanceof Map ? (Map) entry.record : [:]
                 String key = normalize(entry.key)
                 if (key && key == row.id) return
-                String id = key ? AuditReportAssembler.displayKey(key) : (normalize(record.itemName) ?: normalize(record.itemType) ?: "line")
+                String id = key ? AuditRecordFacts.displayKey(key) : (normalize(record.itemName) ?: normalize(record.itemType) ?: "line")
                 Map line = byLine.get(id)
                 if (line != null) { line.recordData.units = ((line.recordData.units ?: 1) as int) + 1; return }
                 byLine.put(id, [systemEnumId: systemEnumId, recordType: ORDER_LINE, recordId: id, internalId: null,
@@ -1007,12 +1007,12 @@ class AuditAutomationSupport {
     static String headline(Map check, Map row, List<Map> records = []) {
         Map<String, String> values = [:]
         (records ?: []).each { Map r -> values.putIfAbsent(r.recordType as String, r.recordId as String) }
-        values.putAll([recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
+        values.putAll([recordKey: AuditRecordFacts.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
                        conclusion: normalize(row.conclusionLabel), file1Value: AuditAutomationSupport.valueText(check, row.file1Value),
                        file2Value: AuditAutomationSupport.valueText(check, row.file2Value)])
-        String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String, values)
+        String filled = AuditFindingDocument.fillTemplate(check.headlineTemplate as String, values)
         String text = filled ?: AuditAutomationSupport.mismatchHeadline(values, records) ?:
-                "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
+                "${AuditRecordFacts.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")
         return text.length() > 120 ? text.take(119).trim() + "…" : text
     }

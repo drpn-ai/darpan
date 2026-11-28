@@ -179,13 +179,13 @@ class AuditAutomationSmokeTests {
             }
             assertTrue(before.message.contains("2026-10-20"), before.message)
 
-            assertEquals("2026-10-20", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 10, 22), LA))
-            assertEquals("2026-10-20", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
+            assertEquals("2026-10-20", AuditPlay.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 10, 22), LA))
+            assertEquals("2026-10-20", AuditPlay.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
                     "DAR-BE-178: the month just ended is playable, but never before go-live")
         } finally {
             ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", TENANT).deleteAll()
         }
-        assertEquals("2026-10-01", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
+        assertEquals("2026-10-01", AuditPlay.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
                 "DAR-BE-178: on Nov 2 a monthly audit plays from October 1")
     }
 

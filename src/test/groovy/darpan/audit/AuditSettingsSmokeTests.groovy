@@ -510,7 +510,7 @@ class AuditSettingsSmokeTests {
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
-        AuditSettingsSupport.ensureAutomations(ec, MINE, AuditSettingsSupport.auditOf(ec, MINE, "own-schedule"))
+        AuditCheckAutomation.ensureAutomations(ec, MINE, AuditSettingsSupport.auditOf(ec, MINE, "own-schedule"))
         String made = checkRow("TSET_OS").automationId as String
         def automation = row("darpan.reconciliation.ReconciliationAutomation", "automationId", made)
         assertEquals(["0 15 5 * * ?", "America/Chicago", "Y"], ["scheduleExpr", "windowTimeZone", "isActive"].collect { automation.get(it) },

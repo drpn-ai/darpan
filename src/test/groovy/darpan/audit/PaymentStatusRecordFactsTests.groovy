@@ -14,21 +14,21 @@ class PaymentStatusRecordFactsTests {
 
     @Test
     void shopifySplitsFinancialFromFulfillment() {
-        Map facts = AuditReportAssembler.recordFacts([name: "#GOR1", displayFinancialStatus: "PARTIALLY_REFUNDED",
+        Map facts = AuditRecordFacts.recordFacts([name: "#GOR1", displayFinancialStatus: "PARTIALLY_REFUNDED",
                 displayFulfillmentStatus: "FULFILLED"], "order")
         assertEquals(["Fulfilled", "Partially refunded"], [facts.status, facts.paymentStatus])
     }
 
     @Test
     void aShopifyRecordWithOnlyAFinancialStatusHasNoStatusButItsPayment() {
-        Map facts = AuditReportAssembler.recordFacts([displayFinancialStatus: "PAID"], "order")
+        Map facts = AuditRecordFacts.recordFacts([displayFinancialStatus: "PAID"], "order")
         assertEquals([null, "Paid"], [facts.status, facts.paymentStatus])
     }
 
     @Test
     void aHotWaxOrderReadsItsPaymentPreferencesOnceEach() {
         // A tender taken and given back is two rows (DAR-BE-151); each status is said once, in read order.
-        Map facts = AuditReportAssembler.recordFacts([statusId: "ORDER_COMPLETED", paymentPreferences: [
+        Map facts = AuditRecordFacts.recordFacts([statusId: "ORDER_COMPLETED", paymentPreferences: [
                 [paymentMethodTypeId: "EXT_SHOPIFY", statusId: "PAYMENT_SETTLED", maxAmount: 80],
                 [paymentMethodTypeId: "EXT_SHOPIFY", statusId: "PAYMENT_REFUNDED", maxAmount: 20],
                 [paymentMethodTypeId: "GIFT_CARD", statusId: "PAYMENT_SETTLED", maxAmount: 10]]], "order")
@@ -37,23 +37,23 @@ class PaymentStatusRecordFactsTests {
 
     @Test
     void aHotWaxOrderWithNoPaymentSaysSo() {
-        assertEquals("No payment", AuditReportAssembler.recordFacts([statusId: "ORDER_APPROVED", hasPaymentPreference: "N"], "order").paymentStatus)
+        assertEquals("No payment", AuditRecordFacts.recordFacts([statusId: "ORDER_APPROVED", hasPaymentPreference: "N"], "order").paymentStatus)
     }
 
     @Test
     void aHotWaxReturnIsRefundedWhenItsCreditIsAboveZero() {
-        assertEquals("Refunded", AuditReportAssembler.recordFacts([statusId: "RETURN_COMPLETED", returnCredit: "60"], "return").paymentStatus)
-        assertEquals("Not refunded", AuditReportAssembler.recordFacts([statusId: "RETURN_COMPLETED", returnCredit: "0"], "return").paymentStatus)
+        assertEquals("Refunded", AuditRecordFacts.recordFacts([statusId: "RETURN_COMPLETED", returnCredit: "60"], "return").paymentStatus)
+        assertEquals("Not refunded", AuditRecordFacts.recordFacts([statusId: "RETURN_COMPLETED", returnCredit: "0"], "return").paymentStatus)
     }
 
     @Test
     void aHotWaxReturnReadWithoutCreditsSaysNothing() {
-        assertNull(AuditReportAssembler.recordFacts([statusId: "RETURN_COMPLETED", returnTotal: "60"], "return").paymentStatus)
+        assertNull(AuditRecordFacts.recordFacts([statusId: "RETURN_COMPLETED", returnTotal: "60"], "return").paymentStatus)
     }
 
     @Test
     void aNetSuiteOrderReadsItsDepositsStatuses() {
-        Map facts = AuditReportAssembler.recordFacts([tranId: "SO1", deposits: [
+        Map facts = AuditRecordFacts.recordFacts([tranId: "SO1", deposits: [
                 [tranId: "CD1", amount: 50, status: "Customer Deposit : Fully Applied"],
                 [tranId: "CD2", amount: 10, status: "Customer Deposit : Not Deposited"],
                 [tranId: "CD3", amount: 5, status: "Customer Deposit : Fully Applied"]]], "salesOrderLine")
@@ -64,6 +64,6 @@ class PaymentStatusRecordFactsTests {
     // an item or line shows none only because its read carries no payment field (S99: a domain owner may want it gated).
     @Test
     void aRecordWithNoPaymentFieldHasNoPaymentStatus() {
-        assertNull(AuditReportAssembler.recordFacts([sku: "A1", omsOrderStatusId: "ORDER_COMPLETED"], "orderItem").paymentStatus)
+        assertNull(AuditRecordFacts.recordFacts([sku: "A1", omsOrderStatusId: "ORDER_COMPLETED"], "orderItem").paymentStatus)
     }
 }

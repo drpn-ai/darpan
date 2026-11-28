@@ -4,7 +4,7 @@ import darpan.admin.transfer.ConfigTransferExporter
 import darpan.admin.transfer.ConfigTransferImporter
 import darpan.admin.transfer.SecretHandoff
 import darpan.config.TenantConfigRestoreSupport
-import darpan.audit.AuditSettingsSupport
+import darpan.audit.AuditCheckAutomation
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import darpan.reconciliation.support.SharedMoqui
@@ -1459,7 +1459,7 @@ class ConfigTransferSmokeTests {
                     assertNotEquals(idMap["AUTOMATION:XFER_AUTO_DAILY"], check.automationId)
                 }
 
-                List made = AuditSettingsSupport.ensureAutomations(ec, DST, [auditId: idMap["AUDIT:XFER_AUDIT"], auditCode: "month-close",
+                List made = AuditCheckAutomation.ensureAutomations(ec, DST, [auditId: idMap["AUDIT:XFER_AUDIT"], auditCode: "month-close",
                         auditName: "Month close"])
                 assertEquals([], made, "the audit schedule reuses the imported automation")
                 assertEquals(2L, ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", DST)

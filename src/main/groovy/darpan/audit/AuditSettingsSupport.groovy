@@ -14,7 +14,6 @@ import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import org.moqui.entity.EntityCondition
 
-import java.sql.Date
 import java.sql.Timestamp
 import java.time.LocalDate
 import java.time.ZoneId
@@ -59,19 +58,19 @@ class AuditSettingsSupport {
         List<Map> checks = checksByStatement.values().flatten().unique { it.checkId } as List<Map>
         List<Map> automations = automationsOf(ec, tenantId, checks)
         Map<String, String> runNames = runNames(ec, tenantId, checks*.savedRunId.findAll { it }.unique() as List<String>)
-        Map schedule = scheduleOf(ec, audit)
+        Map schedule = AuditSchedule.scheduleOf(ec, audit)
         ZoneId zone = ZoneId.of(tenantZone(ec))
         Map levels = AuditReportAssembler.priorityLevels(ec, tenantId, statements)
         Map<String, List<Map>> reasons = reasonsOf(ec, tenantId, checksByStatement, (Map<String, Map<String, String>>) levels.overrides)
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
-                playableFrom: playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
+                playableFrom: AuditPlay.playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
                 // DAR-BE-328: the instant today's peak hours end, only while now is inside them; play notes it.
                 peakHoursUntil: AutomationExecutionSupport.peakHoursEndNow(ec, tenantId, ec.user.nowTimestamp)?.toString(),
                 schedule  : [active          : schedule.active,
                              time            : schedule.time,
                              timeZone        : schedule.timeZone,
                              // An automation off the audit's schedule (made before DAR-BE-199): saving puts it back on.
-                             mixed           : automations.any { offSchedule(it, schedule) },
+                             mixed           : automations.any { AuditSchedule.offSchedule(it, schedule) },
                              automations     : automations.size(),
                              checksWithoutRun: checks.count { !it.automationId } as int],
                 statements: statements.collect { Map st ->
@@ -118,7 +117,7 @@ class AuditSettingsSupport {
                 ec.message.addError("${reason.description ?: conclusion} closes every finding on ${code}'s checks, so it takes no level.".toString())
             }
         }
-        Map current = scheduleOf(ec, audit)
+        Map current = AuditSchedule.scheduleOf(ec, audit)
         String time = schedule ? normalize(schedule.time) ?: current.time : null
         String zone = schedule ? normalize(schedule.timeZone) ?: current.timeZone : null
         if (time && !(time ==~ /([01]\d|2[0-3]):[0-5]\d/)) ec.message.addError("The time must be HH:mm, got ${time}.")
@@ -161,8 +160,8 @@ class AuditSettingsSupport {
             def row = rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", audit.auditId).list().find()
             row.setAll(stamp); row.update()
             Map stamped = audit + stamp
-            ensureAutomations(ec, tenantId, stamped)   // a new check's automation is made on the schedule just saved
-            applySchedule(ec, tenantId, stamped, now)
+            AuditCheckAutomation.ensureAutomations(ec, tenantId, stamped)   // a new check's automation is made on the schedule just saved
+            AuditSchedule.applySchedule(ec, tenantId, stamped, now)
         }
         if (runEmail != null) AuditRunUpdateSupport.saveRunEmail(ec, tenantId, audit.auditId as String, runEmail)
     }
@@ -397,27 +396,4 @@ class AuditSettingsSupport {
         return darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false)
     }
-
-    // DAR-OPS-029 S12: moved by responsibility; these delegates keep the callers (AuditFacadeServices.xml, AuditAutomationSupport,
-    // the agent pipeline, the migrations and tests) working until S99 repoints them.
-    static final String DEFAULT_TIME = AuditSchedule.DEFAULT_TIME
-    static Map scheduleOf(def ec, Map audit) { AuditSchedule.scheduleOf(ec, audit) }
-    static boolean offSchedule(Map automation, Map schedule) { AuditSchedule.offSchedule(automation, schedule) }
-    static void applySchedule(def ec, String tenantId, Map audit, Timestamp now) { AuditSchedule.applySchedule(ec, tenantId, audit, now) }
-    static Map auditOfAutomation(def ec, String tenantId, String automationId) { AuditSchedule.auditOfAutomation(ec, tenantId, automationId) }
-    static String ownScheduleRefusal(def ec, def automation) { AuditSchedule.ownScheduleRefusal(ec, automation) }
-    static String timeOf(String cron) { AuditSchedule.timeOf(cron) }
-    static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) { AuditPlay.playableFrom(ec, tenantId, audit, today, zone) }
-    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead, List<String> checkCodes = null) {
-        AuditPlay.run(ec, tenantId, audit, from, thru, fullRead, checkCodes)
-    }
-    static Map retryCheck(def ec, String tenantId, Map audit, String checkCode, Date reportDate, String period) {
-        AuditPlay.retryCheck(ec, tenantId, audit, checkCode, reportDate, period)
-    }
-    static boolean verifyFinding(def ec, String tenantId, String findingId) { AuditPlay.verifyFinding(ec, tenantId, findingId) }
-    static Map progress(def ec, String tenantId, Map audit, Timestamp now) { AuditProgress.progress(ec, tenantId, audit, now) }
-    static List<Map> steps(def ec, String tenantId, String runResultId, String automationId, String previousRunResultId = null) {
-        AuditProgress.steps(ec, tenantId, runResultId, automationId, previousRunResultId)
-    }
-    static List<String> ensureAutomations(def ec, String tenantId, Map audit) { AuditCheckAutomation.ensureAutomations(ec, tenantId, audit) }
 }

@@ -422,7 +422,7 @@
                     <order-by field-name="automationName"/>
                 </entity-find>
                 <iterate list="automationRows" entry="automationRow">
-                    <set field="dailyTime" from="darpan.audit.AuditSettingsSupport.timeOf(automationRow.scheduleExpr as String)"/>
+                    <set field="dailyTime" from="darpan.audit.AuditSchedule.timeOf(automationRow.scheduleExpr as String)"/>
                     <set field="ignoreRoute" from="routes.add([sourceType: 'AUTOMATION', sourceId: automationRow.automationId, label: automationRow.automationName,
                             when: dailyTime ? 'Daily ' + dailyTime : null, paused: automationRow.isActive == 'N', chatSpaceId: automationRow.chatSpaceId ?: null])"/>
                 </iterate>

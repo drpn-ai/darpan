@@ -7,7 +7,7 @@ package darpan.audit
  * not counted, and the report lists them under the finding that is.
  *
  * An order world is every finding that names the same order, through the ids its stored records already carry
- * (AuditReportAssembler.recordsJson): the HotWax order (an item's order, an order's id), the order's name (#GOR..., and an
+ * (AuditRecordFacts.recordsJson): the HotWax order (an item's order, an order's id), the order's name (#GOR..., and an
  * exchange's EXC-... name, which a return names as its exchange), a HotWax return, a NetSuite sales order (tranId and
  * internal id) and a Shopify order. Ids are typed, so a return id is never taken for an order id with the same digits.
  * No reads: pure, so the report, the by-order list and everything fed by them agree.

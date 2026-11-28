@@ -292,8 +292,8 @@ class AuditRunUpdateSupport {
         if (check == null) return null
         List<Map> evidence = rows(ec, "darpan.audit.AuditFindingCondition", tenantId).condition("findingId", findingId)
                 .orderBy("sequenceNum").list()*.getMap()
-        return AuditReportAssembler.causeFixOf(ec, tenantId, check, finding.conclusionEnumId as String, evidence, [:]) ?:
-                AuditReportAssembler.fillTemplate(check.fixActionTemplate as String, [:])
+        return AuditFindingDocument.causeFixOf(ec, tenantId, check, finding.conclusionEnumId as String, evidence, [:]) ?:
+                AuditFindingDocument.fillTemplate(check.fixActionTemplate as String, [:])
     }
 
     /** mailed: the addresses this run's update already went to, so two digests of one audit never mail one person twice. */
@@ -351,7 +351,7 @@ class AuditRunUpdateSupport {
      * or moved later by a peak period (see {@link #stillOwed}).
      */
     static boolean idle(def ec, String tenantId, Map audit, String finishedAutomationId, Timestamp now) {
-        if (AuditSettingsSupport.progress(ec, tenantId, audit, now).active) return false
+        if (AuditProgress.progress(ec, tenantId, audit, now).active) return false
         def admission = AutomationExecutionSupport.getRunAdmission()
         // DAR-BE-328: the tenant's peak periods and zone are read once for this call, as the scan reads them once a tick.
         Map<String, Object> peakTick = AutomationExecutionSupport.newPeakTick(now)

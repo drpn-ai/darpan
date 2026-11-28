@@ -14,7 +14,7 @@ class OrderLinesRecordFactsTests {
 
     @Test
     void aShopifyOrderSaysEachLinesSkuQuantityAndFulfilment() {
-        Map facts = AuditReportAssembler.recordFacts([name: "#9281CAN", displayFulfillmentStatus: "UNFULFILLED", lineItems: [
+        Map facts = AuditRecordFacts.recordFacts([name: "#9281CAN", displayFulfillmentStatus: "UNFULFILLED", lineItems: [
                 [id: "71", sku: "SKU-A", name: "Anorak", quantity: 2, currentQuantity: 2, unfulfilledQuantity: 2],
                 [id: "72", sku: "SKU-B", name: "Cap", quantity: 3, currentQuantity: 3, unfulfilledQuantity: 1],
                 [id: "73", sku: "SKU-C", name: "Belt", quantity: 1, currentQuantity: 1, unfulfilledQuantity: 0],
@@ -29,7 +29,7 @@ class OrderLinesRecordFactsTests {
 
     @Test
     void aHotWaxOrderSaysEachItemsShopifyLineSkuQuantityAndStatus() {
-        Map facts = AuditReportAssembler.recordFacts([orderName: "#9281CAN", statusId: "ORDER_COMPLETED", orderItems: [
+        Map facts = AuditRecordFacts.recordFacts([orderName: "#9281CAN", statusId: "ORDER_COMPLETED", orderItems: [
                 [orderItemSeqId: "00101", externalId: "71", productId: "P1", sku: "SKU-A", quantity: 2, statusId: "ITEM_COMPLETED"],
                 [orderItemSeqId: "00102", externalId: null, productId: "P2", sku: null, quantity: 1, statusId: "ITEM_CANCELLED"]]], "order")
         assertEquals([[id: "71", sku: "SKU-A", name: null, quantity: 2, status: "Completed"],
@@ -38,7 +38,7 @@ class OrderLinesRecordFactsTests {
 
     @Test
     void aRecordWhoseReadGaveNoLinesHasNone() {
-        assertNull(AuditReportAssembler.recordFacts([name: "#1", displayFulfillmentStatus: "FULFILLED"], "order").lines)
-        assertEquals([], AuditReportAssembler.recordFacts([name: "#1", lineItems: []], "order").lines)
+        assertNull(AuditRecordFacts.recordFacts([name: "#1", displayFulfillmentStatus: "FULFILLED"], "order").lines)
+        assertEquals([], AuditRecordFacts.recordFacts([name: "#1", lineItems: []], "order").lines)
     }
 }

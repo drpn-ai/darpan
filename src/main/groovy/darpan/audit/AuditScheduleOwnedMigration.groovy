@@ -26,10 +26,10 @@ class AuditScheduleOwnedMigration {
             if (!automations) return
             List<Map> running = automations.findAll { it.isActive == "Y" }
             List<Map> pool = running ?: automations
-            String time = mostCommon(pool.collect { AuditSettingsSupport.timeOf(it.scheduleExpr as String) }) ?: AuditSettingsSupport.DEFAULT_TIME
+            String time = mostCommon(pool.collect { AuditSchedule.timeOf(it.scheduleExpr as String) }) ?: AuditSchedule.DEFAULT_TIME
             String zone = mostCommon(pool.collect { normalize(it.windowTimeZone) }) ?: "UTC"
             Map schedule = [time: time, timeZone: zone, active: !running.isEmpty()]
-            List<Map> offIt = automations.findAll { AuditSettingsSupport.offSchedule(it, schedule) }
+            List<Map> offIt = automations.findAll { AuditSchedule.offSchedule(it, schedule) }
             String line = "${tenantId} audit ${audit.auditCode}: ${time} ${zone}, ${running ? 'on' : 'paused'}".toString()
             if (offIt) {
                 line += "; ${offIt.size()} of ${automations.size()} automation(s) off it (${offIt*.automationId.join(', ')}): " +

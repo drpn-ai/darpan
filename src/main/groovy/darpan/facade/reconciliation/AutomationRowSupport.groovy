@@ -1,6 +1,6 @@
 package darpan.facade.reconciliation
 
-import darpan.audit.AuditSettingsSupport
+import darpan.audit.AuditSchedule
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -83,7 +83,7 @@ class AutomationRowSupport {
         String isActive = readString(automation, "isActive") ?: "Y"
         Map<String, Object> chatSpaceSummary = resolveChatSpaceSummary(ec, automation)
         // DAR-BE-199: an audit's automation runs on the audit's schedule, never paused or resumed by itself.
-        Map audit = AuditSettingsSupport.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
+        Map audit = AuditSchedule.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
         Map<String, Object> peak = AutomationExecutionSupport.peakNextRun(ec,
                 peakTick ?: AutomationExecutionSupport.newPeakTick(ec.user.nowTimestamp), automation)
         Map<String, Object> row = [

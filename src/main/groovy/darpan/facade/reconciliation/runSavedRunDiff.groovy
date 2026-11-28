@@ -202,7 +202,7 @@ Map noDataClose = null
 Map noDataSources = null
 // The system key a no-data finding names a side by, as the scheduled path names it.
 def noDataLabel = { Object source ->
-    darpan.audit.AuditReportAssembler.systemKey(darpan.audit.AuditAutomationSupport.rootSystem(normalize(source?.systemEnumId)))
+    darpan.audit.AuditRecordFacts.systemKey(darpan.audit.AuditAutomationSupport.rootSystem(normalize(source?.systemEnumId)))
 }
 // DAR-BE-362: the saved run's name as soon as the run resolves, so a run that fails before a runResult exists is still named
 // on Darpan's card and in its subscribers' line. Read again only when the run failed before resolving.

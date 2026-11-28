@@ -60,7 +60,7 @@
         <actions>
             <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
-            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <set field="runWindow" from="darpan.audit.AuditPeriods.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
             <if condition="runWindow.error">
                 <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
             <set field="period" from="runWindow.period"/>
@@ -351,7 +351,7 @@
             <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"
                     out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
-            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <set field="runWindow" from="darpan.audit.AuditPeriods.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
             <if condition="runWindow.error">
                 <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
             <set field="period" from="runWindow.period"/>
@@ -479,7 +479,7 @@
                     out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="sourceReads" from="sourceReads ?: []"/>
-            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <set field="runWindow" from="darpan.audit.AuditPeriods.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
             <if condition="runWindow.error">
                 <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
             <set field="period" from="runWindow.period"/>
@@ -499,7 +499,7 @@
                     <return error="true" message="Source read status ${sr.statusEnumId} is not an AuditSourceRead status"/></if>
                 <if condition="sr.statusEnumId != 'AUDSR_COMPLETE'">
                     <set field="rootSystemId" from="systemEnum.parentEnumId ?: systemEnum.enumId"/>
-                    <script>badReads.add("The ${darpan.audit.AuditReportAssembler.systemKey(rootSystemId)} read ${sr.statusEnumId == 'AUDSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
+                    <script>badReads.add("The ${darpan.audit.AuditRecordFacts.systemKey(rootSystemId)} read ${sr.statusEnumId == 'AUDSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
                 </if>
             </iterate>
 

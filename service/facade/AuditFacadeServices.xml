@@ -114,7 +114,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
-            <set field="submitted" from="darpan.audit.AuditSettingsSupport.verifyFinding(ec, tenantId, findingId)"/>
+            <set field="submitted" from="darpan.audit.AuditPlay.verifyFinding(ec, tenantId, findingId)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -543,7 +543,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
             <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
-            <set field="progress" from="darpan.audit.AuditSettingsSupport.progress(ec, tenantId, auditRow, ec.user.nowTimestamp)"/>
+            <set field="progress" from="darpan.audit.AuditProgress.progress(ec, tenantId, auditRow, ec.user.nowTimestamp)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -574,7 +574,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
             <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
-            <set field="retryResult" from="darpan.audit.AuditSettingsSupport.retryCheck(ec, tenantId, auditRow, check, darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, date), period)"/>
+            <set field="retryResult" from="darpan.audit.AuditPlay.retryCheck(ec, tenantId, auditRow, check, darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, date), period)"/>
             <if condition="retryResult.error"><return error="true" message="${retryResult.error}"/></if>
             <set field="submitted" from="retryResult.submitted"/>
             <set field="extracts" from="retryResult.extracts"/>
@@ -827,7 +827,7 @@
                 <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
                 <script>
                     try {
-                        runs = darpan.audit.AuditSettingsSupport.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),
+                        runs = darpan.audit.AuditPlay.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),
                                 java.time.LocalDate.parse(thruDate.trim()), fullRead == true, checks as List)
                     } catch (java.time.format.DateTimeParseException e) {
                         ec.message.addError("The days must be YYYY-MM-DD.")

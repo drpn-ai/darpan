@@ -799,25 +799,4 @@ class AuditReportAssembler {
         if (items.size() <= 1) return items.join("")
         return "${items[0..-2].join(', ')} and ${items[-1]}".toString()
     }
-
-    // ---------------------------------------------------------------------------------------------------------
-    // DAR-OPS-029 S10: delegates for callers outside S10 until S99 repoints them to the class that owns each one.
-    // ---------------------------------------------------------------------------------------------------------
-
-    static final Map<String, List<String>> CARD_FIELDS = AuditRecordFacts.CARD_FIELDS
-    static String systemKey(String rootEnumId) { AuditRecordFacts.systemKey(rootEnumId) }
-    static String displayKey(String key) { AuditRecordFacts.displayKey(key) }
-    static Map recordsJson(List<Map> rows, boolean withData = false, ZoneId zone = ZoneId.of("UTC")) { AuditRecordFacts.recordsJson(rows, withData, zone) }
-    static Map recordFacts(Map data, String recordType, ZoneId zone = ZoneId.of("UTC")) { AuditRecordFacts.recordFacts(data, recordType, zone) }
-    static List<LocalDate> periodBounds(String period, String periodCode) { AuditPeriods.periodBounds(period, periodCode) }
-    static String periodOf(LocalDate day, String periodCode) { AuditPeriods.periodOf(day, periodCode) }
-    static Map periodWindow(def ec, Map audit, String period, LocalDate day) { AuditPeriods.periodWindow(ec, audit, period, day) }
-    static LocalDate recordableFrom(LocalDate day, String periodCode) { AuditPeriods.recordableFrom(day, periodCode) }
-    static Map resolveCheckRun(def ec, String tenantId, List auditIds, LocalDate day, String period) { AuditPeriods.resolveCheckRun(ec, tenantId, auditIds, day, period) }
-    static String lineItemId(Map line) { AuditOrderUnits.lineItemId(line) }
-    static List<Map> orderLines(String order, List<Map> lines, List<Map> context) { AuditOrderUnits.orderLines(order, lines, context) }
-    static Map<String, Object> assembleFinding(def ec, String tenantId, String findingId) { AuditFindingDocument.assembleFinding(ec, tenantId, findingId) }
-    static String causeFixOf(def ec, String tenantId, Map check, String conclusionEnumId, List<Map> evidenceChecks, Map<String, String> values,
-                             Map<String, String> recordFields = [:]) { AuditFindingDocument.causeFixOf(ec, tenantId, check, conclusionEnumId, evidenceChecks, values, recordFields) }
-    static String fillTemplate(String template, Map<String, String> values) { AuditFindingDocument.fillTemplate(template, values) }
 }

@@ -238,7 +238,7 @@ class TenantQuerySupport {
                 .useCache(false).list().each { d ->
             def chat = chatDeliveries(ec, d.scriptDeploymentId as String)[0]
             if (chat == null) return
-            String daily = darpan.audit.AuditSettingsSupport.timeOf(d.cronExpression as String)
+            String daily = darpan.audit.AuditSchedule.timeOf(d.cronExpression as String)
             out << [sourceType: "SCRIPT", sourceId: d.scriptDeploymentId, label: queries.find { it.userScriptId == d.userScriptId }?.scriptName ?: d.userScriptId,
                     when: daily ? "Daily " + daily : null, paused: d.isActive != "Y", chatSpaceId: spaceOf(chat)]
         }

@@ -1,7 +1,7 @@
 package darpan.agent
 
 import darpan.audit.AuditAutomationSupport
-import darpan.audit.AuditReportAssembler
+import darpan.audit.AuditRecordFacts
 import darpan.audit.AuditReportGraph
 import darpan.audit.AuditSettingsSupport
 import darpan.conclusion.brain.BrainConclude
@@ -217,7 +217,7 @@ class AgentReadSupport {
 
     /**
      * The run a finding's check reads and the system on each side: [savedRunId, sides: [FILE_1: [system, endpoint], ...]],
-     * system as the finding's records name it (AuditReportAssembler.systemKey: NetSuite, Shopify, OMS), endpoint the side's
+     * system as the finding's records name it (AuditRecordFacts.systemKey: NetSuite, Shopify, OMS), endpoint the side's
      * systemEnumId. An exclusion names its side as FILE_1 or FILE_2, and the finding's records name only systems, so this is
      * what lets the agent pick the side. Null when the finding or its check is not the active tenant's, or the check has
      * no run that resolves.
@@ -264,7 +264,7 @@ class AgentReadSupport {
         Map sides = new TreeMap()
         ((Map) resolved.sourceBySide).each { Object side, Object source ->
             String endpoint = source?.get("systemEnumId") as String
-            sides[side as String] = [system: AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(endpoint)), endpoint: endpoint]
+            sides[side as String] = [system: AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(endpoint)), endpoint: endpoint]
         }
         return [savedRunId: savedRunId, sides: sides]
     }

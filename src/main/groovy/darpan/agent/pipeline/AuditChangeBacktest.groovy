@@ -1,7 +1,7 @@
 package darpan.agent.pipeline
 
 import darpan.audit.AuditAutomationSupport
-import darpan.audit.AuditReportAssembler
+import darpan.audit.AuditPeriods
 import darpan.audit.AuditSettingsSupport
 import darpan.datasource.DataDefinedExtract
 import darpan.facade.common.TenantAccessSupport
@@ -409,7 +409,7 @@ class AuditChangeBacktest {
     private static boolean periodHolds(def finding, Map<String, String> periodKinds, Map basis) {
         LocalDate first = (LocalDate) basis.firstDay, last = (LocalDate) basis.lastDay
         if (first == null || last == null) return false
-        List<LocalDate> bounds = AuditReportAssembler.periodBounds(finding.period as String, periodKinds[finding.statementId as String])
+        List<LocalDate> bounds = AuditPeriods.periodBounds(finding.period as String, periodKinds[finding.statementId as String])
         return bounds != null && !first.isBefore(bounds[0]) && !last.isAfter(bounds[1])
     }
 

@@ -31,7 +31,7 @@ class AuditPlay {
      * nothing before it.
      */
     static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) {
-        LocalDate from = AuditReportAssembler.recordableFrom(today, AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String])
+        LocalDate from = AuditPeriods.recordableFrom(today, AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String])
         Timestamp goLive = AuditAutomationSupport.goLive(ec, tenantId)
         LocalDate goLiveDay = goLive != null ? AuditAutomationSupport.goLiveDay(goLive, zone) : null
         return (from != null && goLiveDay != null && goLiveDay > from ? goLiveDay : from)?.toString()

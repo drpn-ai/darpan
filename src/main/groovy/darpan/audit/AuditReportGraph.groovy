@@ -93,7 +93,7 @@ class AuditReportGraph {
         ZoneId scheduleZone = zoneOr(audit.scheduleTimeZone as String, zone)
         boolean ranToday = auditRanOn(ec, tenantId, auditId, today)
         boolean yesterdayInPeriod = !period?.trim() || AuditPeriods.periodWindow(ec, audit, period.trim(), today.minusDays(1)) != null
-        return Date.valueOf(defaultMorning(now, zone, (audit.scheduleTime as String)?.trim() ?: AuditSettingsSupport.DEFAULT_TIME,
+        return Date.valueOf(defaultMorning(now, zone, (audit.scheduleTime as String)?.trim() ?: AuditSchedule.DEFAULT_TIME,
                 scheduleZone, audit.scheduleActive == "Y", ranToday, yesterdayInPeriod))
     }
 

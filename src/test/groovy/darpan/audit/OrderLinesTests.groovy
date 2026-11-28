@@ -76,7 +76,7 @@ class OrderLinesTests {
                 [system: "NetSuite", record: [id: "Store Credit - Redemption", item: "Store Credit - Redemption", itemType: "Payment",
                                               amount: [amount: "-89.30", currency: null], status: "Open"]],
         ]
-        List<Map> out = AuditReportAssembler.orderLines("M1132010", lines, context)
+        List<Map> out = AuditOrderUnits.orderLines("M1132010", lines, context)
         assertEquals([line: "1", item: "M1132010/01", sku: "203-104-G", status: "Completed", finding: "F-100500",
                       cause: "Not shipped after 24 hours", state: "pending"], out[0])
         assertEquals([line: "2", item: "M1132010/02", sku: "212-120-G", status: "Approved", quantity: 2, setAside: true], out[1],
@@ -87,7 +87,7 @@ class OrderLinesTests {
 
     @Test
     void anOrderLineRecordReadsItsUnitsSetAsideItemAndAmount() {
-        Map facts = AuditReportAssembler.recordFacts([itemType: "Payment", itemName: "Store Credit - Redemption", lineAmount: "-89.3",
+        Map facts = AuditRecordFacts.recordFacts([itemType: "Payment", itemName: "Store Credit - Redemption", lineAmount: "-89.3",
                                                       lineState: "OPEN", presence: "EXCLUDED", units: 1], "orderLine")
         assertEquals("Store Credit - Redemption", facts.item)
         assertEquals("Payment", facts.itemType)

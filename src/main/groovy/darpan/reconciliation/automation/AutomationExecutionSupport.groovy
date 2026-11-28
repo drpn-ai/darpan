@@ -5,7 +5,7 @@ import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.audit.AuditAutomationSupport
 import darpan.config.DarpanSettings
 import darpan.audit.AuditRecheckSupport
-import darpan.audit.AuditReportAssembler
+import darpan.audit.AuditRecordFacts
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.dataset.KeptCopySupport
@@ -841,8 +841,8 @@ class AutomationExecutionSupport {
                             AutomationExecutionSupport.priorKeptCounts(ec, automation, automationExecutionId) : null
                     // A verify reads one side by design: its empty side is its answer, not a failed read.
                     Map<String, String> finding = AutomationNoDataJudge.closeFinding(verifying,
-                            AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId")))),
-                            AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId")))),
+                            AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId")))),
+                            AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId")))),
                             file1Result, file2Result, reconcileResult, evaluateMode, priorKept)
                     // DAR-BE-393: a quiet day compared nothing, so the audit closes no finding on the keys the compare listed
                     if (finding == null && !verifying) AuditAutomationSupport.forgetExaminedKeys(window)

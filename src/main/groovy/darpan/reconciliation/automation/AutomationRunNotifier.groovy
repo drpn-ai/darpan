@@ -1,7 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.audit.AuditAutomationSupport
-import darpan.audit.AuditReportAssembler
+import darpan.audit.AuditRecordFacts
 import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.RunObservability
@@ -237,7 +237,7 @@ class AutomationRunNotifier {
     private static String sideName(def ec, def source) {
         String systemEnumId = normalize(readField(source, "systemEnumId"))
         return TenantNotificationSupport.resolveSystemSourceName(ec, systemEnumId) ?:
-                AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(systemEnumId)) ?: "Side"
+                AuditRecordFacts.systemKey(AuditAutomationSupport.rootSystem(systemEnumId)) ?: "Side"
     }
 
     private static final DateTimeFormatter MONTH_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
@@ -295,7 +295,7 @@ class AutomationRunNotifier {
         try { sources = loadAutomationSources(ec, normalize(readField(automation, "automationId"))) ?: [:] } catch (Throwable ignored) { }
         List<String> labels = [AutomationExecutionSupport.FILE_SIDE_1, AutomationExecutionSupport.FILE_SIDE_2].collect { String side ->
             String system = AuditAutomationSupport.rootSystem(normalize(readField(sources[side], "systemEnumId")))
-            system ? AuditReportAssembler.systemKey(system) : (side == AutomationExecutionSupport.FILE_SIDE_1 ? "Side 1" : "Side 2")
+            system ? AuditRecordFacts.systemKey(system) : (side == AutomationExecutionSupport.FILE_SIDE_1 ? "Side 1" : "Side 2")
         }
         if (labels[0] == labels[1]) labels = [labels[0] + " 1", labels[1] + " 2"]
         Map<String, Object> read = [:]

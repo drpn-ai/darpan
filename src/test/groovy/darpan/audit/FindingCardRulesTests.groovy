@@ -35,7 +35,7 @@ class FindingCardRulesTests {
     /** Rule 2: a field that looks like a status, an amount or a date is placed in CARD_FIELDS before a card can drop it. */
     @Test
     void everyStatusAmountOrDateFieldIsPlaced() {
-        Set<String> placed = AuditReportAssembler.CARD_FIELDS.values().flatten() as Set<String>
+        Set<String> placed = AuditRecordFacts.CARD_FIELDS.values().flatten() as Set<String>
         List<String> unplaced = SAMPLES.collectMany { it.keySet() as List<String> }.unique()
                 .findAll { it ==~ /(?i).*(status|total|amount|price|date|at)(id|set)?$/ }.findAll { !placed.contains(it) }
         assertEquals([], unplaced, "read fields the finding card neither shows nor names in CARD_FIELDS.notOnCard")
@@ -44,7 +44,7 @@ class FindingCardRulesTests {
     /** Rule 2 on R10: HotWax's status, the line's amount and its day come from the NetSuite line's own read. */
     @Test
     void aNetSuiteLineGivesHotWaxsStatusItsAmountAndItsDay() {
-        Map facts = AuditReportAssembler.recordFacts(NETSUITE_LINE, "salesOrderLine")
+        Map facts = AuditRecordFacts.recordFacts(NETSUITE_LINE, "salesOrderLine")
         assertEquals(["Approved", "275.00", "2026-11-07", "Web Channel", "SHIPSI_SM_DAY_DLV"],
                 [facts.hotwaxStatus, (facts.lineTotal as Map)?.amount?.toString(), facts.orderDate, facts.salesChannel, facts.shipMethod])
     }
@@ -52,7 +52,7 @@ class FindingCardRulesTests {
     /** Rule 2 on R13: the Shopify order's status, payment, total and day. */
     @Test
     void aShopifyOrderGivesItsStatusTotalAndDay() {
-        Map facts = AuditReportAssembler.recordFacts(SHOPIFY_ORDER, "order")
+        Map facts = AuditRecordFacts.recordFacts(SHOPIFY_ORDER, "order")
         assertEquals(["Unfulfilled", "Paid", "2026-11-11"], [facts.status, facts.paymentStatus, facts.orderDate])
         assertTrue(facts.orderTotal != null, "a 0.00 total is a total")
     }
@@ -73,7 +73,7 @@ class FindingCardRulesTests {
         Map kept = records.find { it.systemEnumId == "OMS" }
         assertEquals(["order", "M1300001", hotwax], [kept?.recordType, kept?.recordId, kept?.recordData])
         assertEquals(1, records.count { it.systemEnumId == "OMS" }, "kept once")
-        assertEquals("Completed", AuditReportAssembler.recordFacts(kept.recordData as Map, "order").status)
+        assertEquals("Completed", AuditRecordFacts.recordFacts(kept.recordData as Map, "order").status)
         assertEquals([], AuditAutomationSupport.lookedUpRecords([lookedUp: [[systemEnumId: "OMS_GQL", record: [statusId: "X"]]]]),
                 "a record nothing names is left out")
     }
@@ -93,9 +93,9 @@ class FindingCardRulesTests {
     void aLineIsNamedByItsItemNeverItsFindingId() {
         Map r10 = [id: "F-126830", headline: "Line M1230020/01 is open in NetSuite and not at the warehouse in HotWax",
                    records: [NetSuite: [salesOrderLine: [[id: "SO7389324"]]]]]
-        assertEquals("M1230020/01", AuditReportAssembler.lineItemId(r10))
+        assertEquals("M1230020/01", AuditOrderUnits.lineItemId(r10))
         Map withItem = [id: "F-1", headline: "Anything", records: [OMS: [orderItem: [[id: "M1168785/01"]]]]]
-        assertEquals("M1168785/01", AuditReportAssembler.lineItemId(withItem))
-        assertFalse(AuditReportAssembler.lineItemId([id: "F-2", headline: "Order is late"]) == "F-2")
+        assertEquals("M1168785/01", AuditOrderUnits.lineItemId(withItem))
+        assertFalse(AuditOrderUnits.lineItemId([id: "F-2", headline: "Order is late"]) == "F-2")
     }
 }

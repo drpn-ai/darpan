@@ -2783,7 +2783,7 @@
             <!-- DAR-BE-199: an audit's automation keeps the audit's schedule; everything else about it can still be saved. -->
             <if condition="!ec.message.hasError() &amp;&amp; automationRecord != null">
                 <set field="scheduleChanged" from="scheduleExprValue != ((automationRecord.scheduleExpr)?.toString()?.trim()) || windowTimeZoneValue != ((automationRecord.windowTimeZone)?.toString()?.trim() ?: 'UTC') || ((isActive == null || isActive) ? 'Y' : 'N') != (automationRecord.isActive ?: 'Y')"/>
-                <set field="ownScheduleRefusal" from="scheduleChanged ? darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord) : null"/>
+                <set field="ownScheduleRefusal" from="scheduleChanged ? darpan.audit.AuditSchedule.ownScheduleRefusal(ec, automationRecord) : null"/>
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
@@ -3344,7 +3344,7 @@
             </if>
             <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
             <if condition="!ec.message.hasError()">
-                <set field="ownScheduleRefusal" from="darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord)"/>
+                <set field="ownScheduleRefusal" from="darpan.audit.AuditSchedule.ownScheduleRefusal(ec, automationRecord)"/>
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
@@ -3390,7 +3390,7 @@
             </if>
             <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
             <if condition="!ec.message.hasError()">
-                <set field="ownScheduleRefusal" from="darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord)"/>
+                <set field="ownScheduleRefusal" from="darpan.audit.AuditSchedule.ownScheduleRefusal(ec, automationRecord)"/>
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">

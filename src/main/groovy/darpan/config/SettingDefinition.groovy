@@ -28,6 +28,11 @@ class SettingDefinition {
      * key and points there, because that service carries a guard the generic editor cannot (a fresh preview).
      */
     String managedBy
+    /**
+     * "serviceName:parameterName" of a job parameter this setting replaces (DAR-BE-306): the job editor refuses that
+     * parameter and points here, so the job editor cannot become a second home that overrides the setting.
+     */
+    String ownsJobParameter
     /** True for a STRING that is a credential (a webhook URL): listed and shown masked, never in full. */
     Boolean secret
 }

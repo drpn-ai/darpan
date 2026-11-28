@@ -47,6 +47,15 @@ class DarpanSettingsTests {
         DarpanSettings.rowLoader = { -> loads++; byKey.collectEntries { k, v -> [(k): [settingValue: v]] } as Map<String, Map> }
     }
 
+    /** S99-070: a setting that a job parameter would otherwise duplicate names that parameter in the catalog (DAR-BE-306). */
+    @Test void aSettingIsFoundByTheJobParameterItOwns() {
+        String purges = 'reconciliation.ReconciliationGenericServices.'
+        assertEquals('darpan.purge.generatedOutput.days', DarpanSettings.settingOwningJobParameter(purges + 'purge#GeneratedOutputFiles', 'retentionDays'))
+        assertEquals('darpan.purge.extract.days', DarpanSettings.settingOwningJobParameter(purges + 'purge#ExtractFiles', 'retentionDays'))
+        assertNull(DarpanSettings.settingOwningJobParameter(purges + 'purge#GeneratedOutputFiles', 'outputLocation'))
+        assertNull(DarpanSettings.settingOwningJobParameter(null, null))
+    }
+
     @Test void everyCatalogEntryParsesAndItsDefaultIsValid() {
         Map<String, SettingDefinition> cat = DarpanSettings.catalog()
         assertEquals(50, cat.size(), "darpan catalog keys (DAR-BE-396 the error email ignore patterns, DAR-BE-379 the light-run cap, DAR-BE-374 the two ID-index keys, DAR-CLI-008 the two order-lookup limits, DAR-BE-015 added the five errors.* keys, DAR-BE-358 the Unexplained CSV address, DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days, DAR-BE-328 the sync pulse sample retention days, DAR-BE-361 the acknowledge reminder days, feedback shown days and feedback chat webhook; the agent keys live in darpan-agent): ${cat.keySet()}")

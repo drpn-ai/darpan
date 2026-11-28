@@ -108,9 +108,9 @@
             <set field="target" from="org.moqui.util.MClassLoader.getCommonClass(type)"/>
             <set field="isBoolean" from="type in ['Boolean', 'boolean', 'java.lang.Boolean']"/>
             <set field="converted" from="(text &amp;&amp; target != null &amp;&amp; !isBoolean) ? org.moqui.util.ObjectUtilities.basicConvert(text, type) : null"/>
-            <!-- a parameter a setting owns: the job editor must not become a second home that overrides it (DAR-BE-306) -->
-            <set field="settingOwned" from="['reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles:retentionDays': 'darpan.purge.generatedOutput.days',
-                    'reconciliation.ReconciliationGenericServices.purge#ExtractFiles:retentionDays': 'darpan.purge.extract.days'].get(serviceName + ':' + parameterName)"/>
+            <!-- a parameter a setting owns (the catalog's ownsJobParameter): the job editor must not become a second home
+                 that overrides it (DAR-BE-306) -->
+            <set field="settingOwned" from="darpan.config.DarpanSettings.settingOwningJobParameter(serviceName, parameterName)"/>
             <!-- the purge's output folder is fixed too: changing it would redirect a nightly delete with no preview -->
             <set field="fixedHere" from="serviceName == 'reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles' &amp;&amp; parameterName == 'outputLocation'"/>
             <set field="problem" from="sd == null ? ('The service ' + serviceName + ' is not defined.')

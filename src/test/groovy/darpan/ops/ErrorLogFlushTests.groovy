@@ -160,4 +160,26 @@ class ErrorLogFlushTests {
         assertEquals(["caller error"], ec.message.errors)
         assertEquals(1, ErrorLogCapture.INSTANCE.drain().count { it.fingerprint == "darpan.F5 Run # failed" })
     }
+
+    /**
+     * S99-070: purge#ErrorLogEntries deletes the days more than 30 before nowStamp's UTC day and counts them; the 30th day
+     * stays. A nowStamp in 2001 keeps every other test's rows out of the count.
+     */
+    @Test
+    void thePurgeDeletesOnlyDaysMoreThanThirtyBackAndCountsThem() {
+        Map<String, String> days = [PURGE_OLD: "2000-12-31", PURGE_DAY_30: "2001-01-02", PURGE_RECENT: "2001-01-20"]
+        days.each { String fp, String day ->
+            ec.entity.makeValue("darpan.ops.ErrorLogEntry").setAll([fingerprint: fp, logDay: SqlDate.valueOf(day), count: 1]).createOrUpdate()
+        }
+        try {
+            Map out = ec.service.sync().name("ops.OpsServices.purge#ErrorLogEntries")
+                    .parameters([nowStamp: Timestamp.from(Instant.parse("2001-02-01T23:30:00Z"))]).call()
+            assertFalse(ec.message.hasError(), ec.message.errorsString)
+            assertEquals(1, out.purged)
+            assertEquals(["PURGE_DAY_30", "PURGE_RECENT"], ec.entity.find("darpan.ops.ErrorLogEntry")
+                    .condition("fingerprint", org.moqui.entity.EntityCondition.IN, days.keySet()).orderBy("fingerprint").list()*.fingerprint)
+        } finally {
+            ec.entity.find("darpan.ops.ErrorLogEntry").condition("fingerprint", org.moqui.entity.EntityCondition.IN, days.keySet()).deleteAll()
+        }
+    }
 }

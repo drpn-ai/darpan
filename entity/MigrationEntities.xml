@@ -10,7 +10,7 @@
     <!-- that missing memory.                                      -->
     <!-- ========================================================= -->
 
-    <entity entity-name="DarpanMigration" package="darpan.migration" use="configuration" cache="true">
+    <entity entity-name="DarpanMigration" package="darpan.migration" use="configuration" cache="false">
         <description>Registry of one-time data migrations. Seed data: adding a migration is one row.
             Explicit registration rather than a naming-convention scan because the registered
             migrations use several different verbs (migrate#, sweep#, clear#) while sweep# also names a
@@ -41,7 +41,7 @@
         </index>
     </entity>
 
-    <entity entity-name="DarpanMigrationPrereq" package="darpan.migration" use="configuration" cache="true">
+    <entity entity-name="DarpanMigrationPrereq" package="darpan.migration" use="configuration" cache="false">
         <description>Migrations that must have succeeded before this one may run. Verified, never
             sorted on — sequenceNum determines order, these rows determine permission, and keeping
             them separate avoids a topological sort while still failing loudly if the declared order

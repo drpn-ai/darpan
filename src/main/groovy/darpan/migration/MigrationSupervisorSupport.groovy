@@ -157,6 +157,30 @@ class MigrationSupervisorSupport {
             return [migrationId: migrationId, outcome: OUTCOME_DISABLED,
                     detail     : "this migration is parked; re-enable it before running"]
         }
+        return gateThenRun(ec, row, dryRun, force)
+    }
+
+    static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
+        List<Map<String, Object>> results = []
+
+        def registryRows = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
+                .condition("enabled", "Y")
+                .orderBy("sequenceNum")
+                .list()
+
+        registryRows.each { row -> results << gateThenRun(ec, row, dryRun, false) }
+
+        return results
+    }
+
+    /**
+     * The gates every run passes, in order (S99-069: the targeted run and the sweep shared this chain twice): already
+     * applied (skipped by {@code force}), prerequisites unmet (recorded BLOCKED; force never overrides), no preview for a
+     * dry run, then the run itself.
+     */
+    private static Map<String, Object> gateThenRun(def ec, def row, boolean dryRun, boolean force) {
+        String migrationId = row.getString("migrationId")
         if (!force && hasSucceeded(ec, migrationId)) {
             return [migrationId: migrationId, outcome: OUTCOME_ALREADY_APPLIED]
         }
@@ -170,40 +194,6 @@ class MigrationSupervisorSupport {
         }
 
         return runOne(ec, migrationId, row.getString("serviceName"), dryRun)
-    }
-
-    static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
-        List<Map<String, Object>> results = []
-
-        def registryRows = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
-                .useCache(false)
-                .condition("enabled", "Y")
-                .orderBy("sequenceNum")
-                .list()
-
-        registryRows.each { row ->
-            String migrationId = row.getString("migrationId")
-
-            if (hasSucceeded(ec, migrationId)) {
-                results << [migrationId: migrationId, outcome: OUTCOME_ALREADY_APPLIED]
-                return
-            }
-
-            List<String> unmet = unmetPrereqs(ec, migrationId)
-            if (unmet) {
-                results << recordBlocked(ec, migrationId, unmet)
-                return
-            }
-            if (dryRun && row.getString("supportsDryRun") != "Y") {
-                results << [migrationId: migrationId, outcome: OUTCOME_NO_PREVIEW,
-                            detail     : "this migration has no preview mode yet"]
-                return
-            }
-
-            results << runOne(ec, migrationId, row.getString("serviceName"), dryRun)
-        }
-
-        return results
     }
 
     /** Records a BLOCKED attempt and describes it. Shared by the sweep and the targeted run. */

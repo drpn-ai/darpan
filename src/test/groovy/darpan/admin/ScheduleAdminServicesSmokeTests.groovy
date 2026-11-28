@@ -274,6 +274,11 @@ class ScheduleAdminServicesSmokeTests {
                     .parameters([serviceName: service, parameterName: name, value: "x"]).call() }
             assertTrue((out.problem as String)?.contains(why), "${name}: ${out.problem}")
         }
+        Map extract = [:]
+        asSystem { extract = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+                .parameters([serviceName: "reconciliation.ReconciliationGenericServices.purge#ExtractFiles", parameterName: "retentionDays", value: "3"]).call() }
+        assertTrue((extract.problem as String)?.contains("is a setting, not a job parameter. Set it in Settings (darpan.purge.extract.days)"),
+                "the extract purge's period: ${extract.problem}")
     }
 
     @Test

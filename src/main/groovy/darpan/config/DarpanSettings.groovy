@@ -134,6 +134,13 @@ class DarpanSettings {
     // ------------------------------------------------------------------ catalog
 
     /** Every settings-catalog.json on the class path (one per component jar), by key in file order. */
+    /** The key of the setting that owns job parameter {@code parameterName} of {@code serviceName}, or null (S99-070). */
+    static String settingOwningJobParameter(String serviceName, String parameterName) {
+        if (!serviceName || !parameterName) return null
+        String owned = serviceName + ':' + parameterName
+        return catalog().values().find { SettingDefinition d -> d.ownsJobParameter == owned }?.key
+    }
+
     static Map<String, SettingDefinition> catalog() {
         Map<String, SettingDefinition> cached = catalogCache
         if (cached != null) return cached
@@ -206,7 +213,7 @@ class DarpanSettings {
                         min: m.min == null ? null : new BigDecimal(m.min.toString()),
                         max: m.max == null ? null : new BigDecimal(m.max.toString()),
                         maxItems: m.maxItems == null ? null : ((Number) m.maxItems).intValue(),
-                        lessThan: m.lessThan, optional: m.optional == true, managedBy: m.managedBy, secret: m.secret == true)
+                        lessThan: m.lessThan, optional: m.optional == true, managedBy: m.managedBy, ownsJobParameter: m.ownsJobParameter, secret: m.secret == true)
             } catch (Exception e) {
                 warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}: {}", m.key, source, e.toString())
                 continue

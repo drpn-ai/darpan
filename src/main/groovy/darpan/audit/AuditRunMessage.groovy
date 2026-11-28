@@ -106,7 +106,7 @@ class AuditRunMessage {
     }
 
     /**
-     * The one top notice (DAR-BE-015), null when every check ran: the rules wholly not run ("R1 did not run this morning."), the
+     * The one top notice (DAR-BE-015), for Darpan's alerts room only (alertText; F-E6), null when every check ran: the rules wholly not run ("R1 did not run this morning."), the
      * rules partly run ("R2 partly ran this morning."), then the alerted sentence once. Three copy blocks: notrun, partly.notice, alerted.
      */
     static String notRunNotice(Map facts, EmailCopyReader copy) {
@@ -175,7 +175,11 @@ class AuditRunMessage {
         return n > 0 ? copy.text("acknowledged", [count: n]) : null
     }
 
-    /** The email body: header, Open/New/Fixed tiles, act on first, the rules, one section per rule with open findings. */
+    /**
+     * The email body: header, Open/New/Fixed tiles, act on first, the rules, one section per rule with open findings. F-E6 (Aditi
+     * 2026-11-28): the email goes to the tenant's people, so it carries no notice ("Darpan has been alerted…": alertText, the
+     * alerts room); a rule that did not run keeps its neutral row (ruleStatus), so it never reads clean.
+     */
     static String emailHtml(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
         String noCause = copy.text("cause.none")
@@ -219,16 +223,13 @@ class AuditRunMessage {
                     "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">${esc(copy.text('rule.all', [open: r.open, file: csvName(facts, r.id as String)]))}${link}</div></div>"
         }
         String headline = words?.headline ? "<p style=\"${F}font-size:14px;line-height:1.6;color:${SOFT};margin:18px 0 0;\">${esc(words.headline as String)}</p>" : ""
-        String notRun = notRunNotice(facts, copy)
-        String warn = notRun ? "<p style=\"${F}font-size:13px;line-height:1.5;color:${INK};margin:14px 0 0;padding:10px 12px;border:1px solid ${INK};border-radius:8px;\">" +
-                "${esc(notRun)}</p>" : ""
         String actSection = act ? EmailFrame.eyebrow(copy.text("act.heading").toUpperCase(Locale.ROOT), 28) +
                 "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
         String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
                 "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">${esc(copy.text('button'))}</a></div>" : ""
         return """${EmailFrame.open("DARPAN · AUDIT", subject(facts, copy), true)}<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};">${esc(title(facts))}</div>
 <div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts, copy))}</div>
-${headline}${warn}
+${headline}
 <table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>
 ${tile(copy.text("tile.open"), t.open, true)}${tile(copy.text("tile.new"), t.newToday, false)}${tile(copy.text("tile.fixed"), t.fixedToday, false)}</tr></table>${acknowledgedLine(facts, copy) ? "<p style=\"${F}font-size:12px;color:${MUTED};margin:0;line-height:1.6;\">${esc(acknowledgedLine(facts, copy))}</p>" : ""}
 ${actSection}
@@ -240,14 +241,12 @@ ${button}
 ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
     }
 
-    /** The plain-text part: the same content, line by line. */
+    /** The plain-text part: the same content, line by line (no notice; F-E6). */
     static String emailText(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
         String noCause = copy.text("cause.none")
         List<String> lines = [title(facts), subtitle(facts, copy)]
         if (words?.headline) lines += ["", words.headline as String]
-        String notRun = notRunNotice(facts, copy)
-        if (notRun) lines += ["", notRun]
         lines += ["", "${copy.text('tile.open')} ${t.open} · ${copy.text('tile.new')} ${t.newToday} · ${copy.text('tile.fixed')} ${t.fixedToday}".toString()]
         String acknowledged = acknowledgedLine(facts, copy)
         if (acknowledged) lines << acknowledged

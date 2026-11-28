@@ -9,8 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-015. The client's run update says a statement's checks did not run (neutral line, Darpan alerted) or partly
- * ran (that line plus its counts), never "0 open / clean". Pure: facts maps through the seeded copy defaults.
+ * DAR-BE-015. The client's run update says a statement's checks did not run or partly ran (a neutral row, plus its counts),
+ * never "0 open / clean". F-E6 (Aditi 2026-11-28): the notice ("Darpan has been alerted…") goes to Darpan's alerts room only
+ * (alertText), never the client's email or card. Pure: facts maps through the seeded copy defaults.
  */
 class AuditRunMessageTests {
     private static final EmailCopyReader COPY = SeedCopy.reader(AuditRunMessage.TEMPLATE)
@@ -27,8 +28,8 @@ class AuditRunMessageTests {
 
     private static final String ALERTED = "Darpan has been alerted and is working on a fix."
     private static final String NOTICE = "R1 did not run this morning. R2 partly ran this morning. ${ALERTED}"
-    private static final String ROW_NOT_RUN = "Did not run this morning."
-    private static final String ROW_PARTLY = "1 of 5 checks did not run this morning."
+    private static final String ROW_NOT_RUN = "Not checked this morning."
+    private static final String ROW_PARTLY = "1 of 5 checks not checked this morning."
 
     private static int times(String text, String part) { return text.split(java.util.regex.Pattern.quote(part), -1).length - 1 }
 
@@ -37,7 +38,9 @@ class AuditRunMessageTests {
         String text = AuditRunMessage.emailText(facts(), [:], null, COPY)
         assertTrue(text.contains("  R1  Every order is billed: ${ROW_NOT_RUN}\n"), text)
         assertFalse(text.contains("R1  Every order is billed: clean"))
-        assertTrue(text.contains(NOTICE), "the notice names wholly not-run rules, then partly ran ones, then the alerted sentence once: ${text}")
+        assertFalse(text.contains(ALERTED), "F-E6: no notice in the client's email: ${text}")
+        assertTrue(AuditRunMessage.alertText(facts(), null, COPY).contains(NOTICE),
+                "the alerts room's notice names wholly not-run rules, then partly ran ones, then the alerted sentence once")
         assertTrue(text.contains("  R3  Every return is credited: clean"), "a rule that ran shows counts as before")
     }
 
@@ -103,9 +106,10 @@ class AuditRunMessageTests {
     void aPartlyRanRuleIsNeverSaidNotToHaveRun() {
         Map f = facts()
         f.rules[0] = f.rules[0] + [checksNotRun: []]
-        String text = AuditRunMessage.emailText(f, [:], null, COPY)
-        assertTrue(text.contains("R2 partly ran this morning. ${ALERTED}"), text)
-        assertFalse(text.contains("did not run this morning. Darpan"), "no rule wholly not run, so no 'did not run' notice: ${text}")
+        String alert = AuditRunMessage.alertText(f, null, COPY)
+        assertTrue(alert.contains("R2 partly ran this morning. ${ALERTED}"), alert)
+        assertFalse(alert.contains("did not run this morning. Darpan"), "no rule wholly not run, so no 'did not run' notice: ${alert}")
+        assertTrue(AuditRunMessage.emailText(f, [:], null, COPY).contains(ROW_PARTLY), "the email keeps R2's neutral row")
         assertEquals(0, times(AuditRunMessage.card(f, [:], null, COPY).toString(), ALERTED), "DAR-BE-378: never in the client's card")
     }
 
@@ -113,18 +117,24 @@ class AuditRunMessageTests {
     void onlyWhollyNotRunRulesGetTheDidNotRunNotice() {
         Map f = facts()
         f.rules[1] = f.rules[1] + [checksNotRun: []]
-        String html = AuditRunMessage.emailHtml(f, [:], null, COPY)
-        assertTrue(html.contains("R1 did not run this morning. ${ALERTED}"), html)
-        assertFalse(html.contains("partly ran"), html)
-        assertEquals(1, times(html, ALERTED))
+        String alert = AuditRunMessage.alertText(f, null, COPY)
+        assertTrue(alert.contains("R1 did not run this morning. ${ALERTED}"), alert)
+        assertFalse(alert.contains("partly ran"), alert)
+        assertEquals(1, times(alert, ALERTED))
     }
 
+    // F-E6 (Aditi 2026-11-28): the alerted sentence reaches the alerts room once and the client nowhere; the email keeps a
+    // neutral row for each rule that did not or partly ran, so neither reads clean.
     @Test
-    void theAlertedSentenceIsInTheNoticeOnceInEmailHtmlAndTextNeverTheCard() {
-        assertEquals(1, times(AuditRunMessage.emailText(facts(), [:], null, COPY), ALERTED))
+    void theAlertedSentenceGoesOnlyToTheAlertsRoomAndTheEmailKeepsTheNeutralRows() {
+        String text = AuditRunMessage.emailText(facts(), [:], null, COPY)
         String html = AuditRunMessage.emailHtml(facts(), [:], null, COPY)
-        assertEquals(1, times(html, ALERTED))
-        assertTrue(html.contains(NOTICE) && html.contains(ROW_NOT_RUN) && html.contains(ROW_PARTLY) && html.contains("3 open"))
+        assertEquals(0, times(text, ALERTED), text)
+        assertEquals(0, times(html, ALERTED))
+        assertFalse(html.contains(NOTICE) || text.contains(NOTICE))
+        assertTrue(html.contains(ROW_NOT_RUN) && html.contains(ROW_PARTLY) && html.contains("3 open"))
+        assertTrue(text.contains(ROW_NOT_RUN) && text.contains(ROW_PARTLY))
+        assertEquals(1, times(AuditRunMessage.alertText(facts(), null, COPY), ALERTED))
         // DAR-BE-378: what did not run goes to Darpan's alerts room (alertText), never the client's chat card
         String card = AuditRunMessage.card(facts(), [:], null, COPY).toString()
         assertEquals(0, times(card, ALERTED), card)

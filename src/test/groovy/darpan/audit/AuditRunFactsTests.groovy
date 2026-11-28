@@ -166,7 +166,10 @@ class AuditRunFactsTests {
         List<String> hues = (html =~ /#[0-9a-fA-F]{6}\b/).collect { it as String }.findAll { String c -> c[1..2] != c[3..4] || c[3..4] != c[5..6] }
         assertTrue(hues.isEmpty(), "the email wears the app's monochrome light theme, greys only: ${hues.unique()}".toString())
         assertTrue(html.contains("'IBM Plex Mono'"), "the app's typeface")
-        assertTrue(html.contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."))
+        // F-E6: the notice goes to the alerts room only; the email keeps R9's neutral row.
+        assertFalse(html.contains("Darpan has been alerted"), "no notice in the client's email")
+        assertTrue(html.contains("Not checked this morning."), "R9 never reads clean: its neutral row (F-E6)")
+        assertTrue(AuditRunMessage.alertText(facts, BASE, COPY).contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."))
 
         String written = AuditRunMessage.emailHtml(facts, [headline: "Mostly payments.", fixes: [("R10|" + RMA): "Credit each return."]], BASE, COPY)
         assertTrue(written.contains(">Credit each return.</div>"), "the writer's sentence wins")

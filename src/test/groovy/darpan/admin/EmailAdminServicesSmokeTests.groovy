@@ -309,7 +309,7 @@ class EmailAdminServicesSmokeTests {
         Map out = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["act.heading": "Do these first"]])).result
         assertTrue((out.html as String).contains("DO THESE FIRST") && (out.text as String).contains("Do these first"), out.text)
         assertFalse((out.html as String).contains("ACT ON FIRST"))
-        assertTrue((out.html as String).contains("Gorjana · Month close") && (out.html as String).contains("did not run this morning"))
+        assertTrue((out.html as String).contains("Gorjana · Month close") && (out.html as String).contains("Not checked this morning"))
         Map dig = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_DIGEST", blocks: ["list.oldest": "Stuck longest"]])).result
         assertTrue((dig.text as String).contains("Stuck longest") && !(dig.text as String).contains("Oldest open"), dig.text)
         assertTrue((svc("update#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: [button: "Open https://evil.example"]])

@@ -40,11 +40,15 @@ class TenantConfigAutomationSmokeTests {
     private static final String MORNING = "0 0 6 * * ?"
 
     private ExecutionContext ec
+    /** S99-211 F32: the pending marks the saves sent, recorded instead of sent async (no sleeping for a thread). */
+    private final List<Map> marks = Collections.synchronizedList([])
 
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "tenant-config-automation")
+        // After the boot: the shared harness's StaticResets would put the async default back.
+        TenantConfigChangeTracker.dispatch = { def ecf, Map params -> marks << new LinkedHashMap(params) }
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/SourceSystemConnectorSeedData.xml")
@@ -59,6 +63,7 @@ class TenantConfigAutomationSmokeTests {
 
     @AfterAll
     void cleanup() {
+        TenantConfigChangeTracker.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -66,7 +71,6 @@ class TenantConfigAutomationSmokeTests {
     @BeforeEach
     void reset() {
         ec.message.clearErrors()
-        sleep(500)   // lets any async pending mark from the last test land
         asSystem {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find(FILTER).condition("companyUserGroupId", MINE).deleteAll()
@@ -81,8 +85,8 @@ class TenantConfigAutomationSmokeTests {
             upsert(FILTER, [automationId: AUTO_ID, fileSide: "FILE_1", sequenceNum: 1L, companyUserGroupId: MINE,
                     fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["Closed"]'])
         }
-        sleep(1000)   // the fixture writes mark KREWE pending (async); let those land, then clear them
         asSystem { ec.entity.find(PENDING).deleteAll() }
+        marks.clear()   // the fixture's own writes marked KREWE: recorded, never sent
     }
 
     @Test
@@ -117,11 +121,16 @@ class TenantConfigAutomationSmokeTests {
                         nextScheduledFireTime: Timestamp.valueOf("2026-11-01 13:00:00")]).update()
             }
         }
-        sleep(1500)
+        assertEquals([], marks, "pausing or firing sends no pending mark")
         assertNull(asSystem { ec.entity.find(PENDING).condition("companyUserGroupId", MINE).one() }, "no version is owed")
         Map again = call("snapshot#TenantConfig")
         assertFalse(again.created as boolean)
         assertEquals(first.id, again.version.id)
+        // Positive control: a real config change on the same automation does send one, so the empty list above is meaningful.
+        inTransaction {
+            asSystem { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().set("filterValues", '["Closed","Void"]').update() }
+        }
+        assertEquals([MINE], marks*.tenantId, "a filter edit marks its tenant once the save commits")
     }
 
     @Test

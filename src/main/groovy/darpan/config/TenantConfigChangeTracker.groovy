@@ -25,6 +25,18 @@ class TenantConfigChangeTracker {
     static final String SYNC_NAME = "darpan.config.TenantConfigChanges"
     static final String NOTE_SERVICE = "config.TenantConfigServices.note#TenantConfigChange"
 
+    /** Marks a tenant pending in its own thread and transaction: the note service, called async. */
+    static final Closure DEFAULT_DISPATCH = { def ecf, Map params -> ecf.getService().async().name(NOTE_SERVICE).parameters(params).call() }
+    /**
+     * How a mark is sent (S99-211 F32). A test swaps in a closure that records the marks, so it can drain them or assert
+     * that none was sent, instead of sleeping for an async thread; resetForTests puts the async call back.
+     */
+    static Closure dispatch = DEFAULT_DISPATCH
+
+    static void resetForTests() {
+        dispatch = DEFAULT_DISPATCH
+    }
+
     /**
      * Where a row finds its tenant when it has no companyUserGroupId (or an old row left it empty): [parent entity, the
      * parent's primary key, which the child carries under the same name].
@@ -72,7 +84,7 @@ class TenantConfigChangeTracker {
             String userId = ec.user.userId
             if (!ec.transaction.isTransactionInPlace()) {
                 // No transaction to wait for: the write is already done.
-                ec.factory.getService().async().name(NOTE_SERVICE).parameters([tenantId: tenantId, userId: userId]).call()
+                dispatch.call(ec.factory, [tenantId: tenantId, userId: userId])
                 return
             }
             Changes changes = (Changes) ec.transaction.getActiveSynchronization(SYNC_NAME)
@@ -150,7 +162,7 @@ class TenantConfigChangeTracker {
             synchronized (this) { marks = new LinkedHashMap<String, String>(lastUserByTenant) }
             marks.each { String tenantId, String userId ->
                 try {
-                    ecf.getService().async().name(NOTE_SERVICE).parameters([tenantId: tenantId, userId: userId]).call()
+                    dispatch.call(ecf, [tenantId: tenantId, userId: userId])
                 } catch (Throwable t) {
                     logger.warn("Could not mark tenant ${tenantId}'s config pending after a commit", t)
                 }

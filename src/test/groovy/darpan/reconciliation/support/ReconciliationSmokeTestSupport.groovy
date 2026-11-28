@@ -1,5 +1,6 @@
 package darpan.reconciliation.support
 
+import darpan.dataset.KeptCopyStore
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonOutput
 import reconciliation.rule.FieldComparisonRuleLogicGenerator
@@ -80,12 +81,9 @@ class ReconciliationSmokeTestSupport {
         System.setProperty("bitronix.tm.journal.disk.logPart2Filename", txLogPath.resolve("btm2.tlog").toString())
         System.setProperty("bitronix.tm.serverId", "test-${safeTestToken}".toString().take(45))
 
-        // MACH P0 #5 — several smoke fixtures seed TENANT rulesets with hand-written raw DRL as a
-        // shortcut (real tenants use regenerated FIELD_COMPARISON rules). RuleEngineSupport now fails
-        // closed on tenant raw DRL by default; opt these execution-mechanics tests into the raw-DRL
-        // path. forkEvery=1 scopes this to the smoke JVM, so the default-OFF gate stays pinned by
-        // reconciliation.rule.RuleEngineSupportCompileGateTests running in its own JVM.
-        System.setProperty("darpan.rules.allowRawDrl", "true")
+        // DAR-OPS-029 S99-205b: darpan.rules.allowRawDrl stays OFF, as in production. Every fixture seeds the rules a tenant
+        // can author (generated field comparisons, seedGeneratedFieldComparison), so each smoke run goes through OC6's real
+        // compile gate; the deliberately broken rule fails at that gate.
 
         if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
             Moqui.destroyActiveExecutionContextFactory()
@@ -239,11 +237,31 @@ class ReconciliationSmokeTestSupport {
             }
             sharedClassEc = ec
             sharedClassEcOwner = sharedClassStack.peekFirst()?.name
-            System.setProperty("darpan.rules.allowRawDrl", "true")
             System.setProperty("darpan.data.manager.location", "runtime://tmp/test-data-manager/${safeTestToken}".toString())
             StaticResets.resetAll()
+            assertCleanSharedStart(ec, sharedClassEcOwner ?: safeTestToken)
             return ec
         }
+    }
+
+    /**
+     * DAR-OPS-029 S99-211 (F34). Every shared class starts clean, checked at its own entry: the previous class's rows and
+     * entity-cache rows are gone, the static seam is at its default, and its async work landed before the reset.
+     * SharedMoquiHarnessSmokeTests dirties each of these on purpose; checking at every class's entry, not only in the
+     * probe's partner, proves the reset whichever class follows the probe in its fork.
+     */
+    private static void assertCleanSharedStart(ExecutionContext ec, String who) {
+        List<String> dirt = []
+        if (SharedMoquiHarnessSmokeTests.asyncStarted.get() != SharedMoquiHarnessSmokeTests.asyncWritten.get()) {
+            dirt << "the previous class's async work had not landed"
+        }
+        if (ec.entity.find("moqui.basic.Enumeration").useCache(false).count() != 0L) dirt << "Enumeration rows survived"
+        if (ec.entity.find("darpan.config.DarpanSetting").useCache(false).count() != 0L) dirt << "DarpanSetting rows survived"
+        if (ec.entity.find("moqui.basic.Enumeration").condition("enumId", SharedMoquiHarnessSmokeTests.PROBE_ENUM_ID).useCache(true).one() != null) {
+            dirt << "a stale entity-cache row survived"
+        }
+        if (KeptCopyStore.lineWrittenHook != null) dirt << "KeptCopyStore.lineWrittenHook was not reset"
+        if (dirt) throw new IllegalStateException("${who} started on a dirty shared Moqui: ${dirt.join('; ')}".toString())
     }
 
     private static ExecutionContext resetSharedMoqui(String previousClass) {

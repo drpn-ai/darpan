@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull
 
 /**
  * DAR-OPS-026: the other half of SharedMoquiHarnessSmokeTests (same checks; whichever runs second proves the reset).
+ * Forks may split the pair, so every shared class's entry also checks the probe's dirt is gone
+ * (ReconciliationSmokeTestSupport.assertCleanSharedStart, S99-211 F34): any class that follows a probe proves it.
  * Its @BeforeAll/@AfterAll come from an unmarked base class: shared mode must hold anyway (the harness reads the
  * running class from JUnit, and keys cleanup on the ec, not on the caller).
  */

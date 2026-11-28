@@ -9,10 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * Audit 2026-06-11 #1 durable fix — proves the server-side FieldComparisonRuleLogicGenerator produces
- * BYTE-IDENTICAL ruleLogic to the real darpan-ui generator, for fixtures captured from the UI itself
- * (src/test/resources/reconciliation/rule/rulelogic-goldens.json). If the UI generator changes, these
- * goldens must be re-captured and this test will catch the drift.
+ * Audit 2026-06-11 #1 durable fix — pins the server-side FieldComparisonRuleLogicGenerator's output, byte for byte,
+ * to goldens captured once from the darpan-ui generator (src/test/resources/reconciliation/rule/rulelogic-goldens.json).
+ * What this proves is that the SERVER's output has not drifted from that capture. It does not watch the UI: no
+ * darpan-ui test reads these goldens, so a UI generator change is not caught here (S99-211 F31). That is safe because
+ * the server is the authority: the facade regenerates every saved FIELD_COMPARISON rule's ruleLogic from its
+ * expression, and the compile gate (OC6) runs only generator output, so the UI's own string never runs.
  */
 class FieldComparisonRuleLogicGeneratorTests {
 

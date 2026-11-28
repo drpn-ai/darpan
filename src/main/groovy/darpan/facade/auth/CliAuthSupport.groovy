@@ -247,7 +247,7 @@ class CliAuthSupport {
     }
 
     /** ec.context's shared map: one per ExecutionContext, kept across pushContext(). Null for a stub context. */
-    private static Map sharedMap(def ec) {
+    static Map sharedMap(def ec) {
         def context = ec?.context
         return context instanceof ContextStack ? ((ContextStack) context).getSharedMap() : null
     }

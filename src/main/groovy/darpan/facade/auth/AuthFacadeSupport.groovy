@@ -51,9 +51,13 @@ class AuthFacadeSupport {
             PASSWORD_CHANGE_REQUIRED_MARKER,
             PASSWORD_EXPIRED_MARKER,
             "is not in allowed list",
-            // OC208b: the realm refused after the password matched (the account locked while it was hashed).
-            "[DISHASH]",
     ]
+
+    /** OC208b: MoquiShiroRealm.REFUSED_AFTER_PASSWORD_MATCHED (the fork's constant, spelled here so an older framework
+     *  still compiles): set on ec.context's shared map when the realm refused AFTER the password matched (the account
+     *  locked while it was hashed). That refusal reads exactly like a lockout found before the hash, so only this flag
+     *  says the hash was already spent. */
+    static final String REFUSED_AFTER_PASSWORD_MATCHED = "moqui.login.refusedAfterPasswordMatched"
 
     /** Decoy credential for the check below: a fixed salt and a well-formed SHA-256 hex digest that is not
      *  the hash of anything anyone knows. Neither is a secret and neither is ever stored or compared against
@@ -90,6 +94,7 @@ class AuthFacadeSupport {
         boolean loggedIn = false
         String passwordChangeReason = null
         if (!ec.message.hasError()) {
+            CliAuthSupport.sharedMap(ec)?.remove(REFUSED_AFTER_PASSWORD_MATCHED)
             loggedIn = ec.user.loginUser(usernameValue, passwordValue)
             if (!loggedIn) {
                 passwordChangeReason = resolvePasswordChangeReason(ec)
@@ -252,9 +257,8 @@ class AuthFacadeSupport {
      *  pin the deterministic half of this — that both paths spend exactly one hash. */
     private static void burnSkippedPasswordHash(def ec, List<String> refusals, String usernameValue,
                                                 String passwordValue) {
-        boolean hashAlreadySpent = refusals.any { String refusal ->
-            POST_PASSWORD_REFUSAL_MARKERS.any { marker -> refusal?.contains(marker) }
-        }
+        boolean hashAlreadySpent = CliAuthSupport.sharedMap(ec)?.get(REFUSED_AFTER_PASSWORD_MATCHED) == Boolean.TRUE ||
+                refusals.any { String refusal -> POST_PASSWORD_REFUSAL_MARKERS.any { marker -> refusal?.contains(marker) } }
         if (hashAlreadySpent) return
         spendDecoyHash(ec, usernameValue, passwordValue)
     }

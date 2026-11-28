@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test
 import java.sql.Timestamp
 import java.util.Locale
 
+import org.moqui.util.ContextStack
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
@@ -962,14 +964,23 @@ class AuthFacadeSupportTests {
     }
 
     /** OC208b: a refusal the realm raises AFTER the password matched (the account locked while it was hashed) spent the
-     *  hash already. A decoy on top would make the right-but-refused password the one slow reply in a burst. */
+     *  hash already. It reads exactly like a lockout found before the hash (no client may tell them apart); the realm's
+     *  shared-map flag is what says so. A decoy on top would make the right-but-refused password the one slow reply. */
     @Test
     void loginSessionDoesNotSpendADecoyWhenTheAccountLockedWhileItsPasswordWasChecked() {
-        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
-        UserStub user = new UserStub(loginUserResult: false, loginFailureError:
-                "Authenticate failed for user avnindra.sharma because the account locked while its password was checked [DISHASH].")
-        AuthFacadeSupport.loginSession(executionContext(user: user, ecfi: ecfi), "avnindra.sharma", "right-password")
-        assertEquals(0, ecfi.credentialChecks.size(), "the realm already spent the hash")
+        String lockedText = "Authenticate failed for user avnindra.sharma because account is disabled and will not be re-enabled until 2026-11-28 23:10:00.0 [DISTMP]."
+        ContextStack context = new ContextStack()
+        context.getSharedMap().put(AuthFacadeSupport.REFUSED_AFTER_PASSWORD_MATCHED, Boolean.TRUE) // a stale flag: cleared first
+        EcfiStub before = new EcfiStub(credentialsMatch: false)
+        UserStub beforeHash = new UserStub(loginUserResult: false, loginFailureError: lockedText)
+        AuthFacadeSupport.loginSession(executionContext(user: beforeHash, ecfi: before, context: context), "avnindra.sharma", "a-guess")
+        assertEquals(1, before.credentialChecks.size(), "a lockout found before the hash spends the decoy (the flag left by an earlier attempt is cleared)")
+
+        EcfiStub after = new EcfiStub(credentialsMatch: false)
+        UserStub afterMatch = new UserStub(loginUserResult: false, loginFailureError: lockedText,
+                onLoginRefused: { context.getSharedMap().put(AuthFacadeSupport.REFUSED_AFTER_PASSWORD_MATCHED, Boolean.TRUE) })
+        AuthFacadeSupport.loginSession(executionContext(user: afterMatch, ecfi: after, context: context), "avnindra.sharma", "right-password")
+        assertEquals(0, after.credentialChecks.size(), "the realm already spent the hash on the right password")
     }
 
     /** OC207b: a current password that matched while a burst locked the account answers no, and counts like a wrong one,
@@ -1047,7 +1058,8 @@ class AuthFacadeSupportTests {
                 ecfi: overrides.ecfi ?: new EcfiStub(credentialsMatch: true),
                 entity: entity,
                 service: overrides.service ?: new ServiceFacadeStub(message: message),
-                l10n: new Expando(locale: Locale.forLanguageTag("en-US"), timeZone: "Asia/Kolkata")
+                l10n: new Expando(locale: Locale.forLanguageTag("en-US"), timeZone: "Asia/Kolkata"),
+                context: overrides.context
         )
     }
 
@@ -1127,6 +1139,8 @@ class AuthFacadeSupportTests {
          *  loginUser itself returns a bare false for every rejection reason, so this is the only channel
          *  that carries which one. */
         String loginFailureError
+        /** OC208b: what the realm does on the way to the refusal (sets REFUSED_AFTER_PASSWORD_MATCHED). */
+        Closure onLoginRefused
         boolean loginUserResult = false
         boolean loggedOut = false
         boolean loggedOutLocally = false
@@ -1144,6 +1158,7 @@ class AuthFacadeSupportTests {
                 userId = userId ?: "EX_USER"
                 username = username ?: loginUsername
             } else if (loginFailureError) {
+                onLoginRefused?.call()
                 message?.addError(loginFailureError)
             }
             return loginUserResult

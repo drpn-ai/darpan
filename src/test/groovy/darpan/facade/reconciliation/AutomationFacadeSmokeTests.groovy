@@ -1331,6 +1331,53 @@ class AutomationFacadeSmokeTests {
         }
     }
 
+    /**
+     * OC44 (S22 2b8fceb4 + S19): an automation saved without a zone takes the TENANT's zone (the standing rule: an
+     * automation's zone is the tenant's), and its first fire is computed in that same zone, as the scanner will read it.
+     * Called below save#Automation, which now resolves the zone itself, so this pins the Groovy half on its own.
+     */
+    @Test
+    void anAutomationSavedWithoutAZoneTakesTheTenantsZoneAndFiresInIt() {
+        Map<String, Object> fixture = createSyncFixtureAutomation("Zone Default")
+        String automationId = fixture.automationId as String
+        def setting = ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", KREWE).disableAuthz().useCache(false).one()
+        String originalZone = setting?.timeZone as String
+        try {
+            if (setting == null) {
+                ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.auth.TenantSetting", [companyUserGroupId: KREWE, timeZone: "Asia/Kolkata"])
+            } else {
+                setting.set("timeZone", "Asia/Kolkata"); setting.update()
+            }
+            Map<String, Object> prepared = AutomationSaveSupport.prepareAutomationSave(ec, [
+                    automationName          : "Zone Default Copy",
+                    inputModeEnumId         : "AUT_IN_API_RANGE",
+                    savedRunId              : fixture.savedRunId,
+                    savedRunType            : "ruleset",
+                    scheduleExpr            : "0 0 2 * * ?",
+                    relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                    relativeWindowCount     : 1,
+                    sourceEntries           : [
+                            [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS_GQL",
+                             fileTypeEnumId: "DftCsv", systemMessageRemoteId: "OMS_REMOTE"],
+                            [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY",
+                             fileTypeEnumId: "DftCsv", systemMessageRemoteId: "SHOPIFY_REMOTE"],
+                    ],
+            ])
+            assertTrue((Boolean) prepared.ok, prepared.errors?.toString())
+            Map fields = (Map) prepared.automationFields
+            assertEquals("Asia/Kolkata", fields.windowTimeZone, "the tenant's zone, not UTC")
+            Timestamp nextFire = fields.nextScheduledFireTime as Timestamp
+            assertEquals(AutomationExecutionSupport.resolveNextScheduledFireTime(
+                    [scheduleExpr: "0 0 2 * * ?", windowTimeZone: "Asia/Kolkata"], null, ec.user.nowTimestamp), nextFire,
+                    "the first fire is 02:00 in the tenant's zone, as the scanner computes it")
+        } finally {
+            ec.message.clearErrors()
+            def restore = ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", KREWE).disableAuthz().useCache(false).one()
+            if (setting == null) restore?.delete() else { restore.set("timeZone", originalZone); restore.update() }
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
     @Test
     void saveAutomationRefusesToRepointAnExistingAutomationAtADifferentRun() {
         Map<String, Object> first = createSyncFixtureAutomation("Sync Repoint Target")

@@ -64,6 +64,9 @@ class AutomationSaveSupport {
         Map<String, Object> automationFields = null
         if (!ec.message.hasError()) {
             Timestamp now = nowTimestamp(ec)
+            // OC44: the automation's zone is the tenant's. save#Automation sends the zone it resolved (the one sent, an
+            // edit's own, else the tenant's); a caller that sends none gets the tenant's here too, never UTC by default.
+            String windowTimeZone = normalize(input.windowTimeZone) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
             automationFields = [
                     automationName        : automationName,
                     description           : input.description,
@@ -76,7 +79,7 @@ class AutomationSaveSupport {
                     compareScopeId        : savedRunResolution.compareScopeId,
                     scheduleExpr          : scheduleExpr,
                     nextScheduledFireTime : toTimestamp(input.nextScheduledFireTime) ?:
-                            resolveNextFireTime(input, now),
+                            resolveNextFireTime(input + [windowTimeZone: windowTimeZone], now),
                     lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
                     relativeWindowTypeEnumId: input.relativeWindowTypeEnumId,
                     relativeWindowCount   : input.relativeWindowCount,
@@ -84,7 +87,7 @@ class AutomationSaveSupport {
                     customWindowEndDate   : toTimestamp(input.customWindowEndDate),
                     maxWindowDays         : input.maxWindowDays,
                     splitWindowDays       : input.splitWindowDays,
-                    windowTimeZone        : input.windowTimeZone ?: "UTC",
+                    windowTimeZone        : windowTimeZone,
                     safeConfigJson        : input.safeConfigJson,
                     chatSpaceId           : chatSpaceId,
                     isActive              : input.isActive == false ? "N" : "Y",
@@ -465,11 +468,11 @@ class AutomationSaveSupport {
     protected static Timestamp resolveNextFireTime(Map input, Timestamp now) {
         String scheduleExpr = normalize(input.scheduleExpr)
         if (!scheduleExpr) return null
-        // Audit H15.3: the next fire is computed in the zone being saved, the same one the scanner reads
-        // off the row; save#Automation always passes it.
+        // Audit H15.3: the next fire is computed in the zone being saved (prepareAutomationSave passes the resolved
+        // one), through the scanner's own resolver, so save and scanner agree by construction.
         Map automationMap = [
                 scheduleExpr          : scheduleExpr,
-                windowTimeZone        : normalize(input.windowTimeZone) ?: "UTC",
+                windowTimeZone        : normalize(input.windowTimeZone),
                 lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
         ]
         return AutomationExecutionSupport.resolveNextScheduledFireTime(automationMap, automationMap.lastScheduledFireTime as Timestamp, now)

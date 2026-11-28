@@ -120,9 +120,10 @@ class SlackOAuthSupport {
     /**
      * Redeems a state token exactly once and returns the tenant it was minted for.
      *
-     * <p>The consume is an atomic conditional update (WHERE consumedDate IS NULL) rather than a
-     * read-then-write, for the same reason the notification claim is: a double-clicked callback can
-     * pass a read-only check twice, and only one caller may win.</p>
+     * <p>The row is read FOR UPDATE inside a transaction (the caller's, else its own) and then checked and stamped, so a
+     * second callback waits on the first one's lock and then reads consumedDate as set: a double-clicked callback has one
+     * winner (OC130). Moqui's updateAll, used before, read the row without a lock and updated it by primary key, so two
+     * callbacks arriving together could both redeem it.</p>
      *
      * @return {@code [ok, companyUserGroupId, initiatedByUserId, reason]}
      */
@@ -130,29 +131,29 @@ class SlackOAuthSupport {
         String stateToken = ((rawStateToken)?.toString()?.trim())
         if (!stateToken) return [ok: false, reason: "MISSING_STATE"]
 
-        def stateRow = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SlackOAuthState",
-                        "oauth state redemption keyed by an unguessable single-use token — the token IS the authorization")
-                ?.condition("stateToken", stateToken)
-                ?.useCache(false)?.one()
-        if (stateRow == null) return [ok: false, reason: "UNKNOWN_STATE"]
+        return (Map<String, Object>) ec.transaction.runUseOrBegin(60, "Slack OAuth state redemption", {
+            def stateRow = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SlackOAuthState",
+                            "oauth state redemption keyed by an unguessable single-use token, read for update — the token IS the authorization")
+                    ?.condition("stateToken", stateToken)
+                    ?.useCache(false)
+                    ?.forUpdate(true)
+                    ?.one()
+            if (stateRow == null) return [ok: false, reason: "UNKNOWN_STATE"]
 
-        def expiresDate = stateRow.expiresDate
-        if (expiresDate != null && ((Timestamp) expiresDate).before((Timestamp) ec.user.nowTimestamp)) {
-            return [ok: false, reason: "EXPIRED_STATE"]
-        }
+            def expiresDate = stateRow.expiresDate
+            if (expiresDate != null && ((Timestamp) expiresDate).before((Timestamp) ec.user.nowTimestamp)) {
+                return [ok: false, reason: "EXPIRED_STATE"]
+            }
+            if (stateRow.consumedDate != null) return [ok: false, reason: "STATE_ALREADY_USED"]
+            stateRow.set("consumedDate", ec.user.nowTimestamp)
+            stateRow.update()
 
-        long claimed = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SlackOAuthState",
-                        "atomic single-use state claim — conditional update where consumedDate is null")
-                ?.condition("stateToken", stateToken)
-                ?.condition("consumedDate", null)
-                ?.updateAll([consumedDate: ec.user.nowTimestamp]) ?: 0
-        if (claimed == 0) return [ok: false, reason: "STATE_ALREADY_USED"]
-
-        return [
-                ok                : true,
-                companyUserGroupId: ((stateRow.companyUserGroupId)?.toString()?.trim()),
-                initiatedByUserId : ((stateRow.initiatedByUserId)?.toString()?.trim()),
-        ]
+            return [
+                    ok                : true,
+                    companyUserGroupId: ((stateRow.companyUserGroupId)?.toString()?.trim()),
+                    initiatedByUserId : ((stateRow.initiatedByUserId)?.toString()?.trim()),
+            ]
+        })
     }
 
     /** The URL to send the admin to. Scope list and state are what Slack shows on its consent screen. */

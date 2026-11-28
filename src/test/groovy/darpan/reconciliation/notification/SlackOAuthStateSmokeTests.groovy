@@ -71,6 +71,54 @@ class SlackOAuthStateSmokeTests {
         assertEquals("STATE_ALREADY_USED", second.reason)
     }
 
+    /**
+     * DAR-OPS-029 S09b: single-use under concurrency too. Two callbacks redeeming one state, each in its own transaction,
+     * can win only once between them. consumeState claimed with updateAll, which reads the row without a lock and
+     * updates it by primary key, so the second redeemer read consumedDate as still empty past the first one's
+     * uncommitted stamp, waited on the row, then stamped it again, and both were let through.
+     */
+    @Test
+    void twoCallbacksRedeemingOneStateWinOnlyOnce() {
+        String stateToken = SlackOAuthSupport.mintState(ec, TEN_A, "USER_SLK")
+        java.util.concurrent.CountDownLatch firstRedeemed = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch releaseFirst = new java.util.concurrent.CountDownLatch(1)
+        List<Boolean> wins = Collections.synchronizedList([])
+        List<Throwable> failures = Collections.synchronizedList([])
+        Closure redeemer = { boolean holdOpen ->
+            ExecutionContext tec = ec.factory.getExecutionContext()
+            try {
+                tec.artifactExecution.disableAuthz()
+                boolean began = tec.transaction.begin(60)
+                try {
+                    wins << (SlackOAuthSupport.consumeState(tec, stateToken).ok == true)
+                    if (holdOpen) {
+                        firstRedeemed.countDown()
+                        // Held open so the second callback meets this redemption uncommitted, as a double-click does.
+                        releaseFirst.await(30, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                } finally {
+                    tec.transaction.commit(began)
+                }
+            } catch (Throwable t) {
+                failures << t
+            } finally {
+                tec.destroy()
+            }
+        }
+        Thread first = Thread.start { redeemer.call(true) }
+        assertTrue(firstRedeemed.await(30, java.util.concurrent.TimeUnit.SECONDS), "the first redemption must land")
+        Thread second = Thread.start { redeemer.call(false) }
+        // Give the second callback time to reach the row while the first is uncommitted; the outcome must not depend on it.
+        second.join(500L)
+        releaseFirst.countDown()
+        first.join(30_000L)
+        second.join(30_000L)
+
+        assertTrue(failures.isEmpty(), "no redemption may throw: ${failures*.toString()}")
+        assertEquals(2, wins.size(), "both callbacks answered: ${wins}")
+        assertEquals(1, wins.count { it }, "exactly one callback redeems the state: ${wins}")
+    }
+
     @Test
     void anUnknownStateIsRefused() {
         Map<String, Object> outcome = SlackOAuthSupport.consumeState(ec, "not-a-state-we-minted")

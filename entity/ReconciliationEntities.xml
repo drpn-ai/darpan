@@ -90,12 +90,6 @@
         <relationship type="one" related="darpan.rule.RuleSet">
             <key-map field-name="ruleSetId"/>
         </relationship>
-        <relationship type="many" related="darpan.reconciliation.RunDataDocument" short-alias="dataDocuments">
-            <key-map field-name="reconciliationRunId"/>
-        </relationship>
-        <relationship type="many" related="darpan.reconciliation.RunSystemInstance" short-alias="systemInstances">
-            <key-map field-name="reconciliationRunId"/>
-        </relationship>
         <relationship type="one" title="Parent" related="darpan.reconciliation.ReconciliationRun">
             <key-map field-name="parentReconciliationRunId" related-field-name="reconciliationRunId"/>
         </relationship>
@@ -891,36 +885,6 @@
         </relationship>
     </entity>
 
-    <entity entity-name="RunDataDocument" package="darpan.reconciliation" use="configuration">
-        <description>Associates DataDocuments with a reconciliation run.</description>
-        <field name="reconciliationRunId" type="id" is-pk="true"/>
-        <field name="dataDocumentId" type="id" is-pk="true"/>
-        <field name="filterExpression" type="text-long"/>
-        <field name="aggregation" type="text-medium"/>
-        <field name="isRequired" type="text-indicator"/>
-
-        <relationship type="one" related="darpan.reconciliation.ReconciliationRun">
-            <key-map field-name="reconciliationRunId"/>
-        </relationship>
-        <relationship type="one" related="moqui.entity.document.DataDocument">
-            <key-map field-name="dataDocumentId"/>
-        </relationship>
-    </entity>
-
-    <entity entity-name="RunSystemInstance" package="darpan.reconciliation" use="configuration">
-        <description>Associates systems with a reconciliation run.</description>
-        <field name="reconciliationRunId" type="id" is-pk="true"/>
-        <field name="systemMessageRemoteId" type="id" is-pk="true"/>
-        <field name="role" type="text-short"/>
-
-        <relationship type="one" related="darpan.reconciliation.ReconciliationRun">
-            <key-map field-name="reconciliationRunId"/>
-        </relationship>
-        <relationship type="one" related="moqui.service.message.SystemMessageRemote">
-            <key-map field-name="systemMessageRemoteId"/>
-        </relationship>
-    </entity>
-
     <entity entity-name="SftpServer" package="darpan.reconciliation" use="configuration">
         <description>Simple SFTP server configuration for Reconciliation automation.</description>
         <field name="sftpServerId" type="id" is-pk="true"/>
@@ -1291,9 +1255,9 @@
         </relationship>
     </entity>
 
-    <!-- Source connector registry (DAR-292 / DAR-293): makes per-source-system dispatch data-driven
-         (config over code) so onboarding a source system becomes a data row, not core-Groovy edits.
-         Phase 1 adds the entity + resolver only; no dispatch path reads it yet. use="configuration"
+    <!-- Source connector registry (DAR-292 / DAR-293): per-source-system dispatch is data-driven
+         (config over code), so onboarding a source system is a data row, not core-Groovy edits; both run
+         paths dispatch through it (SourceSystemConnectorSupport). use="configuration"
          => platform config (global, NOT tenant-scoped); the tenant-scoped config/source lookups a
          caller performs off the resolved row still go through TenantScopedFinder. No Enumeration FK is
          declared on systemEnumId on purpose: this registry is the catalog of known source systems and

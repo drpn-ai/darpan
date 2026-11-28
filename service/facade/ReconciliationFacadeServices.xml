@@ -203,9 +203,6 @@
             <if condition="!file1SystemEnumIdValue">
                 <message error="true">file1SystemEnumId is required</message>
             </if>
-            <if condition="!isSingleSidedRun &amp;&amp; !file2SystemEnumIdValue">
-                <message error="true">file2SystemEnumId is required</message>
-            </if>
             <if condition="!file1PrimaryIdExpressionValue &amp;&amp; file1PrimaryIdExpressionsValue.isEmpty()">
                 <message error="true">file1PrimaryIdExpression is required</message>
             </if>
@@ -1171,30 +1168,30 @@
 
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="ignoreRuleSetName" from="ruleSet.set('ruleSetName', runNameValue)"/>
-                <set field="ignoreRuleSetDescription" from="ruleSet.set('description', descriptionValue)"/>
-                <set field="ignoreRuleSetUpdatedDate" from="ruleSet.set('lastUpdatedDate', nowTs)"/>
-                <set field="ignoreRuleSetUpdate" from="ruleSet.update()"/>
+                <set field="ruleSet.ruleSetName" from="runNameValue"/>
+                <set field="ruleSet.description" from="descriptionValue"/>
+                <set field="ruleSet.lastUpdatedDate" from="nowTs"/>
+                <entity-update value-field="ruleSet"/>
 
-                <set field="ignoreCompareScopeDescription" from="compareScope.set('description', descriptionValue ?: 'Compare scope for ' + runNameValue)"/>
-                <set field="ignoreCompareScopeUpdatedDate" from="compareScope.set('lastUpdatedDate', nowTs)"/>
-                <set field="ignoreCompareScopeUpdate" from="compareScope.update()"/>
+                <set field="compareScope.description" from="descriptionValue ?: 'Compare scope for ' + runNameValue"/>
+                <set field="compareScope.lastUpdatedDate" from="nowTs"/>
+                <entity-update value-field="compareScope"/>
 
-                <set field="ignoreFile1System" from="file1Source.set('systemEnumId', file1SystemEnumIdValue)"/>
-                <set field="ignoreFile1SourceType" from="file1Source.set('sourceTypeEnumId', file1SourceTypeEnumIdValue)"/>
-                <set field="ignoreFile1SystemRemote" from="file1Source.set('systemMessageRemoteId', file1SystemMessageRemoteIdValue)"/>
-                <set field="ignoreFile1NsRestlet" from="file1Source.set('nsRestletConfigId', file1NsRestletConfigIdValue)"/>
-                <set field="ignoreFile1SourceConfigId" from="file1Source.set('sourceConfigId', file1UsesConnectorSource ? file1SourceConfigIdValue : null)"/>
-                <set field="ignoreFile1SourceConfigType" from="file1Source.set('sourceConfigType', file1UsesConnectorSource ? file1SourceConfigTypeValue : null)"/>
-                <set field="ignoreFile1FileType" from="file1Source.set('fileTypeEnumId', file1FileTypeEnumIdValue)"/>
-                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1UsesConnectorSource ? null : file1SchemaFileNameValue)"/>
-                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1UsesConnectorSource ? null : file1RecordRootExpressionValue)"/>
-                <set field="ignoreFile1PrimaryId" from="file1Source.set('primaryIdExpression', resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]))"/>
+                <set field="file1Source.systemEnumId" from="file1SystemEnumIdValue"/>
+                <set field="file1Source.sourceTypeEnumId" from="file1SourceTypeEnumIdValue"/>
+                <set field="file1Source.systemMessageRemoteId" from="file1SystemMessageRemoteIdValue"/>
+                <set field="file1Source.nsRestletConfigId" from="file1NsRestletConfigIdValue"/>
+                <set field="file1Source.sourceConfigId" from="file1UsesConnectorSource ? file1SourceConfigIdValue : null"/>
+                <set field="file1Source.sourceConfigType" from="file1UsesConnectorSource ? file1SourceConfigTypeValue : null"/>
+                <set field="file1Source.fileTypeEnumId" from="file1FileTypeEnumIdValue"/>
+                <set field="file1Source.schemaFileName" from="file1UsesConnectorSource ? null : file1SchemaFileNameValue"/>
+                <set field="file1Source.recordRootExpression" from="file1UsesConnectorSource ? null : file1RecordRootExpressionValue"/>
+                <set field="file1Source.primaryIdExpression" from="resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0])"/>
                 <if condition="file1ExtractOptions != null">
-                    <set field="ignoreFile1Options" from="file1Source.set('extractParametersJson', file1ExtractParametersJsonValue)"/>
+                    <set field="file1Source.extractParametersJson" from="file1ExtractParametersJsonValue"/>
                 </if>
-                <set field="ignoreFile1UpdatedDate" from="file1Source.set('lastUpdatedDate', nowTs)"/>
-                <set field="ignoreFile1Update" from="file1Source.update()"/>
+                <set field="file1Source.lastUpdatedDate" from="nowTs"/>
+                <entity-update value-field="file1Source"/>
 
                 <!-- Composite key rows are never in-place-editable (PK includes sequenceNum), so on
                      every save delete any existing FILE_1 key-field rows and recreate them when the
@@ -1252,21 +1249,21 @@
                 </if>
 
                 <if condition="!oneSystem">
-                    <set field="ignoreFile2System" from="file2Source.set('systemEnumId', file2SystemEnumIdValue)"/>
-                    <set field="ignoreFile2SourceType" from="file2Source.set('sourceTypeEnumId', file2SourceTypeEnumIdValue)"/>
-                    <set field="ignoreFile2SystemRemote" from="file2Source.set('systemMessageRemoteId', file2SystemMessageRemoteIdValue)"/>
-                    <set field="ignoreFile2NsRestlet" from="file2Source.set('nsRestletConfigId', file2NsRestletConfigIdValue)"/>
-                    <set field="ignoreFile2SourceConfigId" from="file2Source.set('sourceConfigId', file2UsesConnectorSource ? file2SourceConfigIdValue : null)"/>
-                    <set field="ignoreFile2SourceConfigType" from="file2Source.set('sourceConfigType', file2UsesConnectorSource ? file2SourceConfigTypeValue : null)"/>
-                    <set field="ignoreFile2FileType" from="file2Source.set('fileTypeEnumId', file2FileTypeEnumIdValue)"/>
-                    <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2UsesConnectorSource ? null : file2SchemaFileNameValue)"/>
-                    <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2UsesConnectorSource ? null : file2RecordRootExpressionValue)"/>
-                    <set field="ignoreFile2PrimaryId" from="file2Source.set('primaryIdExpression', resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]))"/>
+                    <set field="file2Source.systemEnumId" from="file2SystemEnumIdValue"/>
+                    <set field="file2Source.sourceTypeEnumId" from="file2SourceTypeEnumIdValue"/>
+                    <set field="file2Source.systemMessageRemoteId" from="file2SystemMessageRemoteIdValue"/>
+                    <set field="file2Source.nsRestletConfigId" from="file2NsRestletConfigIdValue"/>
+                    <set field="file2Source.sourceConfigId" from="file2UsesConnectorSource ? file2SourceConfigIdValue : null"/>
+                    <set field="file2Source.sourceConfigType" from="file2UsesConnectorSource ? file2SourceConfigTypeValue : null"/>
+                    <set field="file2Source.fileTypeEnumId" from="file2FileTypeEnumIdValue"/>
+                    <set field="file2Source.schemaFileName" from="file2UsesConnectorSource ? null : file2SchemaFileNameValue"/>
+                    <set field="file2Source.recordRootExpression" from="file2UsesConnectorSource ? null : file2RecordRootExpressionValue"/>
+                    <set field="file2Source.primaryIdExpression" from="resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0])"/>
                     <if condition="file2ExtractOptions != null">
-                        <set field="ignoreFile2Options" from="file2Source.set('extractParametersJson', file2ExtractParametersJsonValue)"/>
+                        <set field="file2Source.extractParametersJson" from="file2ExtractParametersJsonValue"/>
                     </if>
-                    <set field="ignoreFile2UpdatedDate" from="file2Source.set('lastUpdatedDate', nowTs)"/>
-                    <set field="ignoreFile2Update" from="file2Source.update()"/>
+                    <set field="file2Source.lastUpdatedDate" from="nowTs"/>
+                    <entity-update value-field="file2Source"/>
 
                     <!-- See the FILE_1 key-field delete/recreate comment above. -->
                     <!-- DAR-BE-076: children of the (tenant-gated) compare scope, not a plain entity-find. The key
@@ -1537,9 +1534,9 @@
                     <set field="ignoreMappingUpdate" from="mapping.update()"/>
                 </if>
                 <if condition="ruleSet != null">
-                    <set field="ignoreRuleSetName" from="ruleSet.set('ruleSetName', runNameValue)"/>
-                    <set field="ignoreRuleSetUpdatedDate" from="ruleSet.set('lastUpdatedDate', nowTs)"/>
-                    <set field="ignoreRuleSetUpdate" from="ruleSet.update()"/>
+                    <set field="ruleSet.ruleSetName" from="runNameValue"/>
+                    <set field="ruleSet.lastUpdatedDate" from="nowTs"/>
+                    <entity-update value-field="ruleSet"/>
                     <set field="ignoreRuleSetCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, savedRunIdValue)"/>
                 </if>
                 <set field="savedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunIdValue)"/>
@@ -2302,7 +2299,7 @@
                             <else>
                                 <!-- Plan 2 final review I1: a soft delete. Every question that ever ran has result rows
                                      pointing at it (FK RECRES_RUN), and those past results must stay readable. -->
-                                <set field="ignoreInactive" from="question.set('isActive', 'N')"/>
+                                <set field="question.isActive" from="'N'"/>
                                 <entity-update value-field="question"/>
                             </else>
                         </if>
@@ -2916,7 +2913,7 @@
             </if>
             <!-- DAR-BE-199: an audit's automation keeps the audit's schedule; everything else about it can still be saved. -->
             <if condition="!ec.message.hasError() &amp;&amp; automationRecord != null">
-                <set field="scheduleChanged" from="scheduleExprValue != ((automationRecord.scheduleExpr)?.toString()?.trim()) || ((windowTimeZone)?.toString()?.trim() ?: 'UTC') != ((automationRecord.windowTimeZone)?.toString()?.trim() ?: 'UTC') || ((isActive == null || isActive) ? 'Y' : 'N') != (automationRecord.isActive ?: 'Y')"/>
+                <set field="scheduleChanged" from="scheduleExprValue != ((automationRecord.scheduleExpr)?.toString()?.trim()) || windowTimeZoneValue != ((automationRecord.windowTimeZone)?.toString()?.trim() ?: 'UTC') || ((isActive == null || isActive) ? 'Y' : 'N') != (automationRecord.isActive ?: 'Y')"/>
                 <set field="ownScheduleRefusal" from="scheduleChanged ? darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord) : null"/>
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
@@ -2927,9 +2924,8 @@
                  leaves the snapshot derived from the old run, which is an incoherent automation with
                  no repair path. The edit form no longer offers the choice; this stops /rpc/json from
                  offering it either. Use sync#Automation to pull the run's current config instead. -->
-            <if condition="!ec.message.hasError() &amp;&amp; ((automationId)?.toString()?.trim()) &amp;&amp; ((savedRunId)?.toString()?.trim())">
-                <set field="existingAutomationForRunGuard" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', ((automationId)?.toString()?.trim())).disableAuthz().useCache(false).one()"/>
-                <if condition="existingAutomationForRunGuard &amp;&amp; ((existingAutomationForRunGuard.savedRunId)?.toString()?.trim()) &amp;&amp; ((existingAutomationForRunGuard.savedRunId)?.toString()?.trim()) != ((savedRunId)?.toString()?.trim())">
+            <if condition="!ec.message.hasError() &amp;&amp; automationRecord != null &amp;&amp; savedRunIdValue">
+                <if condition="((automationRecord.savedRunId)?.toString()?.trim()) &amp;&amp; ((automationRecord.savedRunId)?.toString()?.trim()) != savedRunIdValue">
                     <message error="true">An automation's saved run cannot be changed. Create a new automation for a different run.</message>
                 </if>
             </if>
@@ -2965,31 +2961,11 @@
                 <set field="sourceEntries" from="prepareAutomationResult.sourceEntries ?: []"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; automationRecord">
-                <set field="ignoreSetName" from="automationRecord.set('automationName', automationFields.automationName)"/>
-                <set field="ignoreSetDescription" from="automationRecord.set('description', automationFields.description)"/>
-                <set field="ignoreSetInputMode" from="automationRecord.set('inputModeEnumId', automationFields.inputModeEnumId)"/>
-                <set field="ignoreSetSavedRun" from="automationRecord.set('savedRunId', automationFields.savedRunId)"/>
-                <set field="ignoreSetSavedRunType" from="automationRecord.set('savedRunType', automationFields.savedRunType)"/>
-                <set field="ignoreSetReconciliationRun" from="automationRecord.set('reconciliationRunId', automationFields.reconciliationRunId)"/>
-                <set field="ignoreSetMapping" from="automationRecord.set('reconciliationMappingId', automationFields.reconciliationMappingId)"/>
-                <set field="ignoreSetRuleSet" from="automationRecord.set('ruleSetId', automationFields.ruleSetId)"/>
-                <set field="ignoreSetCompareScope" from="automationRecord.set('compareScopeId', automationFields.compareScopeId)"/>
-                <set field="ignoreSetSchedule" from="automationRecord.set('scheduleExpr', automationFields.scheduleExpr)"/>
-                <set field="ignoreSetNextFire" from="automationRecord.set('nextScheduledFireTime', automationFields.nextScheduledFireTime)"/>
-                <set field="ignoreSetLastFire" from="automationRecord.set('lastScheduledFireTime', automationFields.lastScheduledFireTime)"/>
-                <set field="ignoreSetRelWindow" from="automationRecord.set('relativeWindowTypeEnumId', automationFields.relativeWindowTypeEnumId)"/>
-                <set field="ignoreSetRelCount" from="automationRecord.set('relativeWindowCount', automationFields.relativeWindowCount)"/>
-                <set field="ignoreSetCustomStart" from="automationRecord.set('customWindowStartDate', automationFields.customWindowStartDate)"/>
-                <set field="ignoreSetCustomEnd" from="automationRecord.set('customWindowEndDate', automationFields.customWindowEndDate)"/>
-                <set field="ignoreSetMaxWindow" from="automationRecord.set('maxWindowDays', automationFields.maxWindowDays)"/>
-                <set field="ignoreSetSplitWindow" from="automationRecord.set('splitWindowDays', automationFields.splitWindowDays)"/>
-                <set field="ignoreSetTimeZone" from="automationRecord.set('windowTimeZone', automationFields.windowTimeZone)"/>
-                <set field="ignoreSetSafeConfig" from="automationRecord.set('safeConfigJson', automationFields.safeConfigJson)"/>
-                <set field="ignoreSetChatSpace" from="automationRecord.set('chatSpaceId', automationFields.chatSpaceId)"/>
                 <set field="pausedNow" from="automationRecord.isActive != 'N' &amp;&amp; automationFields.isActive == 'N'"/>
-                <set field="ignoreSetIsActive" from="automationRecord.set('isActive', automationFields.isActive)"/>
-                <set field="ignoreSetUpdatedDate" from="automationRecord.set('lastUpdatedDate', automationFields.lastUpdatedDate)"/>
-                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <!-- automationFields holds exactly the columns a save writes (prepareAutomationSave); the create path below uses
+                     the same map. set-if-empty: a null in the map clears the column (no chat space clears it). -->
+                <entity-set value-field="automationRecord" map="automationFields" include="nonpk" set-if-empty="true"/>
+                <entity-update value-field="automationRecord"/>
                 <!-- DAR-BE-107: a pause carries the streak, however the automation was paused. -->
                 <if condition="pausedNow">
                     <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
@@ -3228,9 +3204,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="ruleSetRecord.set('isArchived', 'Y')"/>
-                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="ruleSetRecord.isArchived" from="'Y'"/>
+                <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="ruleSetRecord"/>
                 <set field="isArchived" from="true"/>
                 <message>Archived run ${savedRunIdValue}.</message>
             </if>
@@ -3272,9 +3248,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="ruleSetRecord.set('isArchived', 'N')"/>
-                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="ruleSetRecord.isArchived" from="'N'"/>
+                <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="ruleSetRecord"/>
                 <set field="isArchived" from="false"/>
                 <message>Restored run ${savedRunIdValue}.</message>
             </if>
@@ -3321,9 +3297,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="ruleSetRecord.set('isActive', 'N')"/>
-                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="ruleSetRecord.isActive" from="'N'"/>
+                <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="ruleSetRecord"/>
                 <set field="isActive" from="false"/>
                 <message>Disabled run ${savedRunIdValue}.</message>
             </if>
@@ -3370,9 +3346,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="ruleSetRecord.set('isActive', 'Y')"/>
-                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="ruleSetRecord.isActive" from="'Y'"/>
+                <set field="ruleSetRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="ruleSetRecord"/>
                 <set field="isActive" from="true"/>
                 <message>Enabled run ${savedRunIdValue}.</message>
             </if>
@@ -3416,9 +3392,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="automationRecord.set('isArchived', 'Y')"/>
-                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="automationRecord.update()"/>
+                <set field="automationRecord.isArchived" from="'Y'"/>
+                <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="automationRecord"/>
                 <set field="isArchived" from="true"/>
                 <message>Archived automation ${automationIdValue}.</message>
             </if>
@@ -3462,9 +3438,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetFlag" from="automationRecord.set('isArchived', 'N')"/>
-                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreUpdate" from="automationRecord.update()"/>
+                <set field="automationRecord.isArchived" from="'N'"/>
+                <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="automationRecord"/>
                 <set field="isArchived" from="false"/>
                 <message>Restored automation ${automationIdValue}.</message>
             </if>
@@ -3506,9 +3482,9 @@
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetInactive" from="automationRecord.set('isActive', 'N')"/>
-                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <set field="automationRecord.isActive" from="'N'"/>
+                <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="automationRecord"/>
                 <!-- DAR-BE-107: a pause carries the streak. -->
                 <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
@@ -3554,9 +3530,9 @@
                 <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreSetActive" from="automationRecord.set('isActive', 'Y')"/>
-                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
-                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <set field="automationRecord.isActive" from="'Y'"/>
+                <set field="automationRecord.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="automationRecord"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
                 <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
                 <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
@@ -3735,9 +3711,10 @@
         </out-parameters>
         <actions>
             <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change a run.')"/>
-            <if condition="ec.message.hasError()"><return error="true"/></if>
-            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="changes" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.repairConnectorRecordKeys(ec, tenantId, savedRunId?.toString()?.trim(), recordRoot, dryRun == true)"/>
+            <if condition="!ec.message.hasError()">
+                <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <set field="changes" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.repairConnectorRecordKeys(ec, tenantId, savedRunId?.toString()?.trim(), recordRoot, dryRun == true)"/>
+            </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

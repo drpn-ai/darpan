@@ -89,11 +89,15 @@ class AuditCheckAutomation {
                     systemEnumId: source.systemEnumId, fileTypeEnumId: source.fileTypeEnumId, schemaFileName: source.schemaFileName,
                     recordRootExpression: source.recordRootExpression, primaryIdExpression: source.primaryIdExpression,
                     idValueNormalizer: source.idValueNormalizer, createdDate: now, lastUpdatedDate: now,
+                    // A3 (S19): the extract reads safeMetadataJson, not these, but they are sync-drift fields and shared-read keys:
+                    // without them an audit-made automation reports a false drift and does not share a saved one's read.
+                    systemMessageRemoteId: source.systemMessageRemoteId, nsRestletConfigId: source.nsRestletConfigId,
                     safeMetadataJson: metadata ? AutomationRuntimeSupport.safeMetadataJson(metadata) : null]).create()
             // DAR-UI-063 (found in DAR-UI-064's walk): the run's source filters too. An automation reads its OWN filter rows
             // (loadAutomationSourceFilters), so without this copy every run that filters its source (R1 "completed units
             // only", R15 "EXC- orders, not WH") ran unfiltered and raised findings for records it never meant to read.
-            darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet(ec, scope.compareScopeId as String, source.fileSide as String)
+            // A1: the audit's own tenant, not the session's (the agent pipeline makes these under another active tenant).
+            darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet(ec, tenantId, scope.compareScopeId as String, source.fileSide as String)
                     .eachWithIndex { Map filter, int i ->
                         ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSourceFilter").setAll([
                                 automationId: automationId, fileSide: source.fileSide, sequenceNum: i + 1,

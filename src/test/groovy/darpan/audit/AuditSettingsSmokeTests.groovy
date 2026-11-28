@@ -66,8 +66,9 @@ class AuditSettingsSmokeTests {
             statement("R1", 1L, "An order HotWax completed or cancelled does not stay open in NetSuite.")
             statement("R2", 2L, "Every order paid in Shopify has its payment in HotWax.")
             run("TSET_RS1", "EVALUATE", [[side: "FILE_1", system: "NETSUITE_SUITEQL", key: "tranId"]])
+            insert("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "TSET_REMOTE", description: "TSET remote"])
             run("TSET_RS2", "COMPARE", [[side: "FILE_1", system: "SHOPIFY", key: "legacyResourceId"],
-                                        [side: "FILE_2", system: "OMS_GQL", key: "externalId"]])
+                                        [side: "FILE_2", system: "OMS_GQL", key: "externalId", remote: "TSET_REMOTE"]])
             // DAR-UI-064: a run's source filter must reach the automation made for it (it reads its own filter rows).
             insert("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "TSET_RS2_SCOPE", fileSide: "FILE_2", sequenceNum: 1L,
                     fieldExpression: "statusId", operator: "INCLUDE_IN", filterValues: "ORDER_COMPLETED", companyUserGroupId: MINE])
@@ -145,6 +146,8 @@ class AuditSettingsSmokeTests {
         Map<String, Map> params = sources(paid.automationId).collectEntries { [(it.fileSide): new groovy.json.JsonSlurper().parseText(it.safeMetadataJson as String).parameters] }
         assertEquals([FILE_1: [shopifyAuthConfigId: "cfg"], FILE_2: [omsRestSourceConfigId: "cfg"]], params)
         assertEquals([nsSuiteQlSourceQueryId: "cfg"], new groovy.json.JsonSlurper().parseText(sources(open.automationId)[0].safeMetadataJson as String).parameters)
+        // DAR-OPS-029 S12 A3: the side's remote and RESTlet ids too (sync-drift fields and shared-read keys; S19), as save#Automation copies them.
+        assertEquals([null, "TSET_REMOTE"], sources(paid.automationId)*.systemMessageRemoteId)
         List filters = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", paid.automationId)
                 .disableAuthz().useCache(false).list()
         assertEquals([["FILE_2", "statusId", "INCLUDE_IN", "ORDER_COMPLETED"]],
@@ -797,7 +800,8 @@ class AuditSettingsSmokeTests {
         sides.each { Map s ->
             insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "${ruleSetId}_SCOPE".toString(), fileSide: s.side,
                     systemEnumId: s.system, sourceTypeEnumId: "AUT_SRC_API", fileTypeEnumId: "DftJson",
-                    recordRootExpression: "records", primaryIdExpression: s.key, sourceConfigId: "cfg", companyUserGroupId: MINE])
+                    recordRootExpression: "records", primaryIdExpression: s.key, sourceConfigId: "cfg", companyUserGroupId: MINE,
+                    systemMessageRemoteId: s.remote, nsRestletConfigId: s.restlet])
         }
     }
 

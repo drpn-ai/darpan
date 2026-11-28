@@ -258,6 +258,29 @@ class AuthSessionSupportTests {
         assertTrue(response.headers.any { it.value.startsWith("darpan_login_key=;") }, "the stale cookie is cleared")
     }
 
+    @Test
+    void cookieKeyOfAPersonRequiredToUseTwoFactorWithNoFactorDoesNotRestore() {
+        // OC79: two-factor is required for this person since an hour ago and they have no factor. A live persistent-login
+        // cookie must not rebuild their web session (only CLI keys were cut before, CliAuthSupport.cliSessionProblem).
+        long now = System.currentTimeMillis()
+        def user = new UserStub(userId: null, loginUserResult: true)
+        def loginKeyEntity = new Expando(loginKey: "hash:live-key", userId: "EX_USER", fromDate: new Timestamp(now - 60_000L))
+        loginKeyEntity.getTimestamp = { String field -> field == "thruDate" ? new Timestamp(now + 3_600_000L) : null }
+        def entity = new EntityFacadeStub(finders: [
+            "moqui.security.UserLoginKey"   : new FinderStub(oneResult: loginKeyEntity),
+            "moqui.security.UserAccount"    : new FinderStub(oneResult: new Expando(userId: "EX_USER", username: "test.user")),
+            (TwoFactorPolicy.POLICY)        : new FinderStub(rows: [[permissionGroupId: "DARPAN_ADMIN", requiredFromDate: new Timestamp(now - 3_600_000L)]]),
+            "moqui.security.UserGroupMember": new FinderStub(rows: [[userId: "EX_USER", userGroupId: "DARPAN_ADMIN"]]),
+        ])
+        def response = new ResponseStub()
+        def webStub = new Expando(request: new RequestStub(cookies: [new CookieStub(name: "darpan_login_key", value: "live-key")]), response: response)
+        def ec = buildEc(user: user, web: webStub, entity: entity)
+
+        assertFalse(AuthSessionSupport.restoreAuthenticatedSession(ec))
+        assertNull(user.userId, "no session is rebuilt")
+        assertTrue(response.headers.any { it.value.startsWith("darpan_login_key=;") }, "the cookie is cleared")
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -287,6 +310,7 @@ class AuthSessionSupportTests {
         String  userId
         String  username
         boolean loginUserResult = false
+        Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         List<String> calls
 
         /** Called by AuthSessionSupport.restoreAuthenticatedSession when rebuilding the session. */
@@ -348,9 +372,20 @@ class AuthSessionSupportTests {
     static class FinderStub {
         Map<String, Object> conditions = [:]
         Object oneResult
+        /** OC79: rows for list()/count() (the two-factor policy, roles and factors); empty unless a test sets them. */
+        List<Map> rows = []
 
         FinderStub condition(String field, Object value) { conditions[field] = value; this }
+        FinderStub condition(String field, Object operator, Object value) { conditions[field] = value; this }
+        FinderStub conditionDate(String fromField, String thruField, Object moment) { this }
         FinderStub disableAuthz()                        { this }
+        FinderStub useCache(boolean ignored)             { this }
+        List<Map> list() {
+            rows.findAll { Map row ->
+                conditions.every { k, v -> v instanceof Collection ? (row[k]?.toString() in v*.toString()) : row[k]?.toString() == v?.toString() }
+            }
+        }
+        long count() { list().size() }
 
         Object one() {
             // When oneResult is a Map, filter by recorded conditions.

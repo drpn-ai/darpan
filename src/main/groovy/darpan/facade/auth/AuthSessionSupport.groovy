@@ -121,6 +121,11 @@ class AuthSessionSupport {
             clearPersistentLoginCookie(ec)
             return false
         }
+        // OC79: nor one of a person whose two-factor is required now and who has no factor (as enforceWebSignInLifetime).
+        if (TwoFactorPolicy.requiredButNotEnrolled(ec, userLoginKey.userId as String)) {
+            clearPersistentLoginCookie(ec)
+            return false
+        }
 
         // DAR-BE-261: a key past its idle end or sign-in + the absolute lifetime restores nothing. Checked (and the
         // restore counted as activity: the key slides) BEFORE signing in. No user is signed in here (the early return
@@ -218,6 +223,9 @@ class AuthSessionSupport {
             decided = true
         }
         if (!decided && sessionsEnded instanceof Timestamp && sessionCreatedBefore(request, ((Timestamp) sessionsEnded).time)) ended = true
+        // OC79: a person whose two-factor is required now and who has no factor keeps no web sign-in, as a CLI key keeps
+        // none (CliAuthSupport.cliSessionProblem): login#Session would answer them with the setup challenge only.
+        if (!ended && TwoFactorPolicy.requiredButNotEnrolled(ec, userId)) ended = true
         if (ended) endWebSignIn(ec, request)
         return ended
     }
@@ -352,7 +360,7 @@ class AuthSessionSupport {
      * TLS at the LB/ingress and forwards plaintext over the cluster network, so {@code request.isSecure()}
      * alone returns false even when the original client-facing request was https.
      */
-    static boolean isSecureRequest(def ec) {
+    private static boolean isSecureRequest(def ec) {
         def request = ec?.web?.request
         if (request == null) return false
 
@@ -371,7 +379,7 @@ class AuthSessionSupport {
      * {@code Lax} otherwise. Audit fix: the Docker {@code __SAME_SITE_NONE__} sed-replace forced
      * {@code None} unconditionally, which downgraded CSRF protection for same-origin requests.
      */
-    static String resolveCookieSameSite(def ec) {
+    private static String resolveCookieSameSite(def ec) {
         return isCrossSiteRequest(ec) && isSecureRequest(ec) ? COOKIE_SAME_SITE_NONE : COOKIE_SAME_SITE_LAX
     }
 
@@ -381,7 +389,7 @@ class AuthSessionSupport {
      * present on all CORS preflighted requests. Absent Origin → treated as same-site (the most
      * conservative default, which results in SameSite=Lax).
      */
-    static boolean isCrossSiteRequest(def ec) {
+    private static boolean isCrossSiteRequest(def ec) {
         def request = ec?.web?.request
         if (request == null) return false
 

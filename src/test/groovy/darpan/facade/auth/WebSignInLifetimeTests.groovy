@@ -196,6 +196,33 @@ class WebSignInLifetimeTests {
         assertEquals(USER, stubEc.user.userId)
     }
 
+    @Test
+    @DisplayName("OC79: a person whose two-factor is required now, with no factor, is signed out of the web; enrolled, or required later, is left alone")
+    void aRequiredButNotEnrolledWebSignInEnds() {
+        long now = System.currentTimeMillis()
+        Map role = [userId: USER, userGroupId: "DARPAN_ADMIN"]
+        Map requiredNow = [permissionGroupId: "DARPAN_ADMIN", requiredFromDate: new Timestamp(now - HOUR)]
+
+        def entity = new EntityStub(keys: [key(APP_KEY, now - 10 * MINUTE, now + 50 * MINUTE)], policies: [requiredNow], roles: [role])
+        def session = new SessionStub(creationTime: now - 10 * MINUTE)
+        def stubEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: session), entity)
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(stubEc), "required since an hour ago, no factor: the sign-in ends")
+        assertNull(stubEc.user.userId)
+        assertTrue(session.invalidated)
+
+        def enrolled = new EntityStub(keys: [key(APP_KEY, now - 10 * MINUTE, now + 50 * MINUTE)], policies: [requiredNow], roles: [role],
+                factors: [[userId: USER, factorTypeEnumId: "DrpnTfTotp", statusId: "ACTIVE"]])
+        def enrolledEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 10 * MINUTE)), enrolled)
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(enrolledEc), "a factor on: left alone")
+        assertEquals(USER, enrolledEc.user.userId)
+
+        def grace = new EntityStub(keys: [key(APP_KEY, now - 10 * MINUTE, now + 50 * MINUTE)], roles: [role],
+                policies: [[permissionGroupId: "DARPAN_ADMIN", requiredFromDate: new Timestamp(now + 24 * HOUR)]])
+        def graceEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 10 * MINUTE)), grace)
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(graceEc), "required only from tomorrow: left alone")
+        assertEquals(USER, graceEc.user.userId)
+    }
+
     // ---- stubs ----
 
     private static Map key(String raw, long fromMillis, long thruMillis, String userId = USER) {
@@ -220,6 +247,7 @@ class WebSignInLifetimeTests {
     static class UserStub {
         String userId = USER
         Map userAccount = [:]
+        Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         void logoutLocal() { userId = null }
     }
 
@@ -227,11 +255,16 @@ class WebSignInLifetimeTests {
         List<Map> keys = []
         List<Map> cliSessions = []
         List<Map> factors = []
+        /** OC79: TwoFactorPolicy rows and the Darpan-wide roles it reads. */
+        List<Map> policies = []
+        List<Map> roles = []
         int writes = 0
         FinderStub find(String entityName) {
             if (entityName == "moqui.security.UserLoginKey") return new FinderStub(rows: keys, owner: this)
             if (entityName == "darpan.auth.CliSession") return new FinderStub(rows: cliSessions, owner: this)
             if (entityName == "darpan.auth.TwoFactorFactor") return new FinderStub(rows: factors, owner: this)
+            if (entityName == TwoFactorPolicy.POLICY) return new FinderStub(rows: policies, owner: this)
+            if (entityName == "moqui.security.UserGroupMember") return new FinderStub(rows: roles, owner: this)
             return new FinderStub(owner: this)
         }
     }
@@ -243,7 +276,14 @@ class WebSignInLifetimeTests {
         FinderStub disableAuthz() { this }
         FinderStub useCache(boolean ignored) { this }
         FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        private List<Map> matches() { rows.findAll { Map row -> conditions.every { k, v -> row[k]?.toString() == v?.toString() } } }
+        /** The policy's IN conditions: a collection value matches by membership. */
+        FinderStub condition(String field, Object operator, Object value) { conditions[field] = value; this }
+        FinderStub conditionDate(String fromField, String thruField, Object moment) { this }
+        private List<Map> matches() {
+            rows.findAll { Map row ->
+                conditions.every { k, v -> v instanceof Collection ? (row[k]?.toString() in v*.toString()) : row[k]?.toString() == v?.toString() }
+            }
+        }
         long count() { matches().size() }
         Map one() { matches() ? matches()[0] : null }
         List<Map> list() { matches() }

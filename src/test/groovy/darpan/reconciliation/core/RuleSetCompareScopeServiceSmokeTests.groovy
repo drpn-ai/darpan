@@ -463,7 +463,10 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals(3L, result.differenceCount)
         assertEquals(0L, result.matchedPairCount)
         assertTrue(((List) result.validationErrors).isEmpty())
-        assertTrue(((List) result.processingWarnings).isEmpty())
+        // OC72 (DAR-OPS-029 S01a): the empty side is named, so a blind compare never reads as all-missing quietly.
+        List<String> warnings = ((List) result.processingWarnings).collect { it?.toString() }
+        assertEquals(1, warnings.size(), warnings.toString())
+        assertTrue(warnings[0].startsWith("FILE_2 (HotWax) read no records"), warnings[0])
         assertFalse(ec.message.hasError())
 
         List<Map<String, Object>> missingDiffs = collectRows((Dataset) result.missingDiffDf)

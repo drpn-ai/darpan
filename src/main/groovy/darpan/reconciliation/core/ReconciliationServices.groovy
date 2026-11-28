@@ -164,6 +164,11 @@ class ReconciliationServices {
                     FILE_2: ingestFile(ec, spark, file2Location, type2, id2Spec, hasHeader, label2, validationErrors, (String) context.get("file2SchemaFileName"))
             ] as Map<String, Object>
 
+            // OC72: a side that read no records leaves the compare blind; the run says so instead of reading all-missing quietly.
+            for (String side : ["FILE_1", "FILE_2"]) {
+                String empty = emptySideWarning(side, side == "FILE_1" ? label1 : label2, ((Map) ingestBySide.get(side)).dataDf, null)
+                if (empty) processingWarnings.add(empty)
+            }
             // DAR-BE-165, as on the RuleSet path: a key on more than one record of a side is a finding for each of those
             // records and leaves the compare on both sides. The anti-join below used to match it and read clean.
             Map<String, Object> split = RuleSetCompareScopeAdapter.splitDuplicateKeys(ingestBySide)
@@ -225,6 +230,44 @@ class ReconciliationServices {
             // Audit H2.1 / H9.8: persisted frames are released on success and failure alike.
             CompareDatasetSupport.unpersistDatasets(persisted)
         }
+    }
+
+    /**
+     * OC72 (no hollow green). The warning for a compare side that holds no record, or null when it holds one or is not
+     * there at all (an evaluate run's absent second side). A records array that is empty is a true empty window, so the
+     * compare runs; the warning keeps "the other side is all missing" from reading as a finding about the other side.
+     * With the side's Keep summary, the side read records and kept none.
+     *
+     * Untyped on purpose: it is called from service XML, and a typed parameter on that reflective call failed with
+     * "argument type mismatch" on the Keep path (SavedRunsFacadeSmokeTests). The frame only needs isEmpty().
+     */
+    static String emptySideWarning(Object side, Object label, Object sideDataDf, Object keepSummary) {
+        if (sideDataDf == null || !sideDataDf.isEmpty()) return null
+        String who = "${side} (${normalize(label) ?: side})"
+        if (keepSummary instanceof Map) {
+            return "${who} kept no records (${((Map) keepSummary).get('setAsideCount') ?: 0} set aside); every key on the other side reads as missing from it.".toString()
+        }
+        return "${who} read no records; every key on the other side reads as missing from it.".toString()
+    }
+
+    /**
+     * OC72 on the RuleSet path: emptySideWarning for each side of a prepared compare. A side holds no record when neither
+     * its compared nor its duplicate records hold one. A FILE_1 narrowed to a parent question's keys (file1IncludeIdsLocation
+     * set) is skipped: matching none of them has its own warning (RuleSetCompareScopeAdapter.keyMismatchWarning).
+     */
+    static List<String> emptySideWarnings(Object preparedValue, Object file1IncludeIdsLocation) {
+        List<String> warnings = []
+        Map prepared = preparedValue instanceof Map ? (Map) preparedValue : [:]
+        Map keepSummaries = prepared.get("keepSummaryBySide") instanceof Map ? (Map) prepared.get("keepSummaryBySide") : [:]
+        for (String prefix : ["file1", "file2"]) {
+            String side = prefix == "file1" ? "FILE_1" : "FILE_2"
+            if (prefix == "file1" && normalize(file1IncludeIdsLocation)) continue
+            Object duplicates = prepared.get(prefix + "DuplicateDataDf")
+            if (duplicates != null && !duplicates.isEmpty()) continue
+            String warning = emptySideWarning(side, prepared.get(prefix + "Label"), prepared.get(prefix + "DataDf"), keepSummaries.get(prefix))
+            if (warning) warnings.add(warning)
+        }
+        return warnings
     }
 
     /**

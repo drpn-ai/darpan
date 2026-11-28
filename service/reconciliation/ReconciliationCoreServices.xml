@@ -40,8 +40,8 @@
             <parameter name="differenceCount" type="Long"/>
             <parameter name="onlyInFile1Count" type="Long"/>
             <parameter name="onlyInFile2Count" type="Long"/>
-            <parameter name="duplicateDifferenceCount" type="Long"><description>Records under a key repeated on its side (DAR-BE-165): each is a DUPLICATE_IN_FILE_1/2 row, counted in differenceCount, and its key is in neither onlyIn count nor matchedCount.</description></parameter>
-            <parameter name="matchedCount" type="Long"><description>Keys held once on each side and present on both. A record under a key repeated on its own side is a duplicate row; the other side's single record for that key is in no count yet (DAR-OPS-029 OC14 adds its row).</description></parameter>
+            <parameter name="duplicateDifferenceCount" type="Long"><description>Records under a key repeated on either side (DAR-BE-165, OC14): each is a DUPLICATE_IN_FILE_1/2 row (a partner a DUPLICATE_IN_FILE_n_PAIRED row), counted in differenceCount, and its key is in neither onlyIn count nor matchedCount.</description></parameter>
+            <parameter name="matchedCount" type="Long"><description>Keys held once on each side and present on both. A record under a key repeated on either side is a duplicate row (its partner on the other side a DUPLICATE_IN_FILE_n_PAIRED row) and in neither onlyIn count nor this one.</description></parameter>
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
@@ -285,7 +285,8 @@
                 <set field="missingDiffDf" from="missingDiffDfValue"/>
                 <set field="matchedPairDf" from="matchedPairDfValue"/>
                 <set field="validationErrors" from="prepared.validationErrors ?: []"/>
-                <set field="processingWarnings" from="prepared.processingWarnings ?: []"/>
+                <!-- OC72: a side that holds no record is named, so a blind compare never reads as all-missing quietly. -->
+                <set field="processingWarnings" from="(prepared.processingWarnings ?: []) + darpan.reconciliation.core.ReconciliationServices.emptySideWarnings(prepared, file1IncludeIdsLocation)"/>
                 <set field="persistedSources" from="(prepared.persistedSources ?: []) + [missingDiffDfValue, matchedPairDfValue].findAll { it != null }"/>
                 <set field="setAsideBySide" from="prepared.setAsideBySide"/>
                 <set field="keepSummaryBySide" from="prepared.keepSummaryBySide"/>

@@ -98,7 +98,7 @@ class RpcMethodFence {
     }
 
     /** Exactly one of CliMethodAllowlist.CLI_PATHS, segment for segment: no prefix, suffix or render-mode extension. */
-    static boolean isCliPath(List<String> segments) {
+    private static boolean isCliPath(List<String> segments) {
         return CliMethodAllowlist.CLI_PATHS.any { String cliPath -> segmentsOf(cliPath) == segments }
     }
 
@@ -119,7 +119,7 @@ class RpcMethodFence {
 
     /** WebFacadeImpl.getPathInfoList(request), computed here because WebFacadeImpl's class init loads a signing key:
      *  the request URI past the context and servlet path, split on / and each segment URL-decoded, empties dropped. */
-    static List<String> moquiPathList(def request) {
+    private static List<String> moquiPathList(def request) {
         String servletPath = (request.servletPath ?: "") as String
         String contextPath = (request.contextPath ?: "") as String
         int skip = (servletPath.isEmpty() ? 0 : servletPath.split("/").length - 1) +
@@ -154,11 +154,11 @@ class RpcMethodFence {
     }
 
     /** What each fence decision turns on, for one view of the path. */
-    static List<Boolean> fenceVerdicts(List<String> segments) {
+    private static List<Boolean> fenceVerdicts(List<String> segments) {
         return [isJsonRpc(segments), hasPair(segments, "rest", "login")]
     }
 
-    static boolean isDotSegment(String segment) {
+    private static boolean isDotSegment(String segment) {
         return segment == "." || segment == ".."
     }
 
@@ -201,14 +201,14 @@ class RpcMethodFence {
 
     /** Matches on each segment's name before its first dot: Moqui strips a render-mode extension before it
      *  matches a screen or transition (ScreenUrlInfo), so /rest/login.json reaches login. */
-    static boolean hasPair(List<String> segments, String first, String second) {
+    private static boolean hasPair(List<String> segments, String first, String second) {
         for (int i = 0; i < segments.size() - 1; i++) {
             if (nameBeforeDot(segments[i]) == first && nameBeforeDot(segments[i + 1]) == second) return true
         }
         return false
     }
 
-    static String nameBeforeDot(String segment) {
+    private static String nameBeforeDot(String segment) {
         int dot = segment.indexOf('.')
         return dot > 0 ? segment.substring(0, dot) : segment
     }
@@ -218,7 +218,7 @@ class RpcMethodFence {
     }
 
     /** Each segment's name before any ;params, empty segments dropped. */
-    static List<String> cleanSegments(List<String> segments) {
+    private static List<String> cleanSegments(List<String> segments) {
         return (segments ?: []).findAll { String s -> s }.collect { String s ->
             int semi = s.indexOf(';')
             semi >= 0 ? s.substring(0, semi) : s

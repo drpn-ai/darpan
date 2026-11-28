@@ -89,6 +89,24 @@ class RunAdmissionTests {
         assertEquals(["a1", "b1", "a2", "a3"], log)
     }
 
+    /**
+     * DAR-OPS-029 S07a. A tenant whose last waiting run started leaves the waiting map; the next turn must still go to the
+     * tenant after it, not back to the first tenant in the map. Before: a1, b1, a2, c1 (C skipped once A queued again).
+     */
+    @Test
+    void aTenantThatEmptiedItsQueueDoesNotResetTheTurnOrder() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = admission(executor, 1, 1)
+        admission.submit("A", "a1", work("a1"))
+        admission.submit("A", "a2", work("a2"))
+        admission.submit("A", "a3", work("a3"))
+        admission.submit("B", "b1", work("b1"))
+        admission.submit("C", "c1", work("c1"))
+
+        (0..4).each { executor.finish(it) }
+        assertEquals(["a1", "b1", "c1", "a2", "a3"], log)
+    }
+
     @Test
     void underMemoryPressureNewRunsWaitButOneAlwaysRuns() {
         HandExecutor executor = new HandExecutor()

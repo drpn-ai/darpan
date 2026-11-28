@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - one tenant runs at most {@code perTenantCap} of them (maxConcurrentExecutionsPerTenant), so one tenant's audit
  *   leaves room for another tenant's. A tenant's audit is bounded by its own systems' rate limits (HotWax refills
  *   2000 cost/s per endpoint), not by how many of its checks run at once, so the share costs it little;
- * - waiting tenants take turns, first-come within a tenant;
+ * - waiting tenants take turns (the one that started least recently goes next), first-come within a tenant;
  * - while old-generation heap after the last GC is at or above {@code holdAtHeapPercent}, nothing new starts. One
  *   execution always may when none is running, so a stale reading never stops the instance for good;
  * - one tenant keeps at most {@code maxWaitingPerTenant} runs waiting; past that a submission is refused in words.
@@ -50,10 +50,7 @@ class RunAdmission {
     private static final String MAX_WAITING_KEY = "darpan.reconciliation.automation.maxWaitingPerTenant"
     private static final String LIGHT_CAP_KEY = "darpan.reconciliation.automation.maxConcurrentLightRuns"
 
-    static RunAdmission SHARED = new RunAdmission(
-            { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
-            { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
-            { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
+    static RunAdmission SHARED = fromSettings()
 
     private static class Waiting {
         String tenantId
@@ -78,7 +75,13 @@ class RunAdmission {
     /** DAR-BE-379: light runs started and not yet released; never counted in running or runningByTenant. */
     private int lightRunning = 0
     private final Closure<Integer> lightCapSupplier
-    private String lastStarted = null
+    /**
+     * Turn order: the start number of each tenant's latest start (DAR-OPS-029 S07a). The next turn goes to the waiting
+     * tenant that started least recently, so a tenant that empties its queue and queues again does not reset the order. One
+     * entry per tenant ever seen; a JVM holds a few dozen.
+     */
+    private final Map<String, Long> lastStartOf = [:]
+    private long starts = 0
 
     RunAdmission(Closure<Integer> cap, Closure<Integer> perTenantCap, Closure<Integer> holdAtHeapPercent,
                  Closure<Integer> heapPercent, Executor executor, Closure<Integer> maxWaitingPerTenant,
@@ -128,7 +131,7 @@ class RunAdmission {
 
     /**
      * Starts the work now, or keeps it waiting for a slot. Answers submitted (false only when the start was refused),
-     * queued and, when queued, position (1 = next of the instance's waiting runs).
+     * queued and, when queued, position: how many runs wait on the instance, this one included.
      */
     Map<String, Object> submit(String tenantId, String label, Runnable work) {
         Limits l = limits()
@@ -179,7 +182,7 @@ class RunAdmission {
             }
             if (held(l)) return [submitted: false, queued: false, error: "memory is holding new starts"]
             lightRunning++
-            runningByLabel[label] = (runningByLabel[label] ?: 0) + 1
+            holdLabel(label)
             try {
                 executor.execute({ -> runLightThenRelease(label, work) } as Runnable)
                 return [submitted: true, queued: false]
@@ -204,8 +207,14 @@ class RunAdmission {
 
     private void releaseLight(String label) {  // caller holds the lock
         lightRunning = Math.max(0, lightRunning - 1)
-        int labelLeft = (runningByLabel[label] ?: 1) - 1
-        if (labelLeft > 0) runningByLabel[label] = labelLeft
+        releaseLabel(label)
+    }
+
+    private void holdLabel(String label) { runningByLabel[label] = (runningByLabel[label] ?: 0) + 1 }  // caller holds the lock
+
+    private void releaseLabel(String label) {  // caller holds the lock
+        int left = (runningByLabel[label] ?: 1) - 1
+        if (left > 0) runningByLabel[label] = left
         else runningByLabel.remove(label)
     }
 
@@ -235,7 +244,7 @@ class RunAdmission {
             [(t): [running: runningByTenant[t] ?: 0, queued: waiting[t]?.size() ?: 0]]
         }
         return [running      : running, queued: waitingTotal(), cap: l.cap, perTenantCap: l.perTenantCap,
-                holdAtHeapPercent: l.holdAtHeapPercent, maxWaitingPerTenant: l.maxWaiting, heldForMemory: running > 0 && heapAtOrAbove(l), byTenant: byTenant,
+                holdAtHeapPercent: l.holdAtHeapPercent, maxWaitingPerTenant: l.maxWaiting, heldForMemory: held(l), byTenant: byTenant,
                 lightRunning : lightRunning, lightCap: l.lightCap]
     }
 
@@ -249,15 +258,16 @@ class RunAdmission {
         return (runningByLabel[label] ?: 0) > 0 || waiting.values().any { ArrayDeque<Waiting> lane -> lane.any { it.label == label } }
     }
 
+    /** The first waiting run of the tenant under its share that started least recently; ties keep first-waited order. */
     private Waiting nextEligible(Limits l) {
-        List<String> tenants = new ArrayList<String>(waiting.keySet())
-        if (!tenants) return null
-        int after = lastStarted != null ? tenants.indexOf(lastStarted) : -1
-        for (int i = 1; i <= tenants.size(); i++) {
-            String tenant = tenants[(after + i) % tenants.size()]
-            if ((runningByTenant[tenant] ?: 0) < l.perTenantCap) return waiting[tenant].peekFirst()
+        String next = null
+        long nextLastStart = Long.MAX_VALUE
+        for (String tenant : waiting.keySet()) {
+            if ((runningByTenant[tenant] ?: 0) >= l.perTenantCap) continue
+            long lastStart = lastStartOf.containsKey(tenant) ? lastStartOf.get(tenant) : -1L
+            if (lastStart < nextLastStart) { next = tenant; nextLastStart = lastStart }
         }
-        return null
+        return next == null ? null : waiting.get(next).peekFirst()
     }
 
     private void start(Waiting entry) {  // caller holds the lock
@@ -266,8 +276,8 @@ class RunAdmission {
         if (lane.isEmpty()) waiting.remove(entry.tenantId)
         running++
         runningByTenant[entry.tenantId] = (runningByTenant[entry.tenantId] ?: 0) + 1
-        runningByLabel[entry.label] = (runningByLabel[entry.label] ?: 0) + 1
-        lastStarted = entry.tenantId
+        holdLabel(entry.label)
+        lastStartOf.put(entry.tenantId, ++starts)
         try {
             executor.execute({ -> runThenRelease(entry) } as Runnable)
             entry.started = true
@@ -297,17 +307,15 @@ class RunAdmission {
         int left = (runningByTenant[entry.tenantId] ?: 1) - 1
         if (left > 0) runningByTenant[entry.tenantId] = left
         else runningByTenant.remove(entry.tenantId)
-        int labelLeft = (runningByLabel[entry.label] ?: 1) - 1
-        if (labelLeft > 0) runningByLabel[entry.label] = labelLeft
-        else runningByLabel.remove(entry.label)
+        releaseLabel(entry.label)
     }
 
     /** Memory holds new starts only while something is running; with nothing running one start is always allowed. */
     private boolean held(Limits l) { return running > 0 && heapAtOrAbove(l) }
 
+    /** The reader answers null when it cannot tell (SystemLoadReader never throws); null never holds. */
     private boolean heapAtOrAbove(Limits l) {
-        Integer percent
-        try { percent = heapPercent.call() } catch (Throwable ignored) { percent = null }
+        Integer percent = heapPercent.call()
         return percent != null && percent >= l.holdAtHeapPercent
     }
 
@@ -326,14 +334,19 @@ class RunAdmission {
                     return
                 }
             }
-            SHARED = new RunAdmission(
-                    { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
-                    { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
-                    { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
+            SHARED = fromSettings()
             if (AutomationExecutionSupport.getRunAdmission().is(old)) AutomationExecutionSupport.setRunAdmission(SHARED)
         } catch (Throwable t) {
             logger.warn("RunAdmission.resetForTests failed: {}", t.toString())
         }
+    }
+
+    /** The instance's admission: every limit is the live setting. */
+    private static RunAdmission fromSettings() {
+        return new RunAdmission(
+                { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
+                { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
+                { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
     }
 
     private static String tenantKey(String tenantId) { return tenantId ?: "_none" }

@@ -25,6 +25,8 @@ class AutomationRuntimeSupport {
      */
     private static final Pattern SECRET_VALUE =
             ~/(?i)(\\?["']?)([A-Za-z0-9_-]*?)(password|privateKey|apiToken|api[_-]?key|clientSecret|secret|token)\1([ \t]*(?:=>|[:=])[ \t]*)("(?:\\.|[^"\\\r\n]){0,512}"|'(?:\\.|[^'\\\r\n]){0,512}'|["'][^\r\n]*|[^,\s)]+)/
+    /** A PEM block (a private key or certificate spans lines), masked whole before the line-bound rule above runs. */
+    private static final Pattern PEM_BLOCK = ~/-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/
     private static final Pattern BEARER_VALUE = ~/(?i)\b(Bearer)\s+[A-Za-z0-9._~+\/=-]+/
 
     static def loadAutomation(def ec, String automationId) {
@@ -229,7 +231,8 @@ class AutomationRuntimeSupport {
 
     static String sanitizeText(String value) {
         if (value == null) return null
-        String keyed = value.replaceAll(SECRET_VALUE) { String all, String quote, String prefix, String key, String separator, String secret ->
+        String unkeyed = value.replaceAll(PEM_BLOCK, '-----BEGIN $1-----***-----END $1-----')
+        String keyed = unkeyed.replaceAll(SECRET_VALUE) { String all, String quote, String prefix, String key, String separator, String secret ->
             String valueQuote = secret.startsWith('"') || secret.startsWith("'") ? secret.substring(0, 1) : ""
             "${quote}${prefix}${key}${quote}${separator}${valueQuote}***${valueQuote}".toString()
         }

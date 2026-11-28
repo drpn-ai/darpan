@@ -58,6 +58,15 @@ class AutomationRuntimeSupportTests {
         assertEquals("token:\n    at darpan.X", masked("token:\n    at darpan.X"), "a separator never reaches the next line")
     }
 
+    /** A private key spans lines, so the line-bound rule alone would mask only its first line. */
+    @Test
+    void aPemBlockIsMaskedWhole() {
+        String detail = 'privateKey="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1\nq2w3e4r5\n-----END RSA PRIVATE KEY-----"\n    at darpan.X'
+        String out = masked(detail)
+        assertFalse(out.contains("MIIEow") || out.contains("q2w3e4r5"), out)
+        assertEquals('privateKey="***"\n    at darpan.X', out)
+    }
+
     @Test
     void aBearerHeaderIsMasked() {
         assertEquals("Authorization: Bearer ***", masked("Authorization: Bearer eyJhbGciOi.payload.sig"))

@@ -2,6 +2,8 @@ package darpan.facade.common
 
 import groovy.transform.CompileStatic
 
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.function.Function
 
@@ -15,8 +17,10 @@ import java.util.function.Function
  *   2. Scheme must be https. (Allows tests to override via {@code allowInsecure} but
  *      the production helper does NOT accept http.)
  *   3. Host must be present and not an IP literal that resolves to a private,
- *      loopback, link-local, multicast, broadcast, or cloud-metadata range.
- *   4. Optional host allow-list (one or more suffixes) is enforced when provided.
+ *      loopback, link-local, multicast, broadcast, reserved or cloud-metadata range
+ *      (an IPv6 address carrying an IPv4 one, IPv4-compatible or NAT64, is judged by the IPv4 one).
+ *   4. Optional host allow-list is enforced when provided: ".example.com" matches subdomains only,
+ *      "api.example.com" that host or its subdomains, always on a dot boundary.
  *
  * validate() resolves the host once, best effort, when a URL is saved or about to be called. A client that resolves
  * again at connect time can be pointed elsewhere between the two (DNS rebinding), so the connection itself must use
@@ -92,10 +96,7 @@ class OutboundHttpPolicy {
         boolean hasAllowList = hostSuffixAllowList != null && !hostSuffixAllowList.isEmpty()
         boolean allowListMatched = false
         if (hasAllowList) {
-            allowListMatched = hostSuffixAllowList.any { String suffix ->
-                String suf = suffix?.toLowerCase(Locale.ROOT)?.trim()
-                return suf && hostLower.endsWith(suf)
-            }
+            allowListMatched = hostSuffixAllowList.any { String entry -> matchesAllowListEntry(hostLower, entry) }
             if (!allowListMatched) {
                 return ValidationResult.failure("URL host is not in the partner allow-list.")
             }
@@ -114,81 +115,13 @@ class OutboundHttpPolicy {
                 return ValidationResult.failure("URL host literal is non-routable (${literalAddr.hostAddress}): ${reason}")
             }
         } else if (!allowListMatched) {
-            // No allow-list (or no match for one): best-effort DNS resolution. If it succeeds and
-            // resolves to a non-routable address (private/loopback/link-local/multicast/metadata),
-            // BLOCK. If resolution fails (corporate firewall, just-provisioned subdomain, network
-            // partition), ALLOW — the IP-literal check above is the load-bearing SSRF defense; we
-            // refuse to make first-time customer setup impossible because we can't dig their DNS.
-            InetAddress[] resolved = null
-            try {
-                resolved = InetAddress.getAllByName(host)
-            } catch (Exception ignored) {
-                // resolved stays null -> skip
-            }
-            if (resolved != null) {
-                for (InetAddress addr : resolved) {
-                    String reason = describeUnsafeAddress(addr)
-                    if (reason != null) {
-                        return ValidationResult.failure("URL host resolves to a non-routable address (${addr.hostAddress}): ${reason}")
-                    }
-                }
-            }
+            // No allow-list (or no match for one): best-effort DNS resolution. If it resolves to a non-routable address,
+            // BLOCK. If resolution fails (corporate firewall, just-provisioned subdomain, network partition), ALLOW: the
+            // IP-literal check above is the load-bearing check here, and the connection itself goes through resolveVetted.
+            String unsafe = unsafeResolution(host, { InetAddress addr -> describeUnsafeAddress(addr) } as Function<InetAddress, String>)
+            if (unsafe != null) return ValidationResult.failure("URL host resolves to ${unsafe}")
         }
 
-        return ValidationResult.success(trimmed)
-    }
-
-    /**
-     * Validate a bare host (no scheme/port) for a non-HTTP outbound connection such as SFTP.
-     *
-     * Reuses the same SSRF mechanism as {@link #validate}: blocked-hostname list, IP-literal
-     * non-routable-range check via {@link #describeUnsafeAddress}, and best-effort DNS resolution.
-     * Unlike {@link #validate} it does NOT require an https scheme (SFTP hosts are not URLs) and it
-     * rejects control characters / embedded whitespace (which would otherwise reach JSch verbatim).
-     *
-     * A failed DNS lookup is allowed (corporate firewall / just-provisioned host) — the IP-literal and
-     * blocklist checks are the load-bearing defense, matching {@link #validate}'s posture.
-     *
-     * @param rawHost the host the tenant configured (e.g. "sftp.example.com" or "10.0.0.5")
-     * @return ValidationResult with the trimmed host on success.
-     */
-    static ValidationResult validateHost(String rawHost) {
-        if (rawHost == null || rawHost.trim().isEmpty()) {
-            return ValidationResult.failure("Host is required.")
-        }
-        String trimmed = rawHost.trim()
-        // Reject control chars or internal whitespace — a clean hostname/IP never contains them and
-        // they are a classic vector for header/command smuggling into the SSH client.
-        if (trimmed =~ /[\x00-\x1f\x7f\s]/) {
-            return ValidationResult.failure("Host contains illegal whitespace or control characters.")
-        }
-        String hostLower = trimmed.toLowerCase(Locale.ROOT)
-        if (BLOCKED_HOSTNAMES.contains(hostLower)) {
-            return ValidationResult.failure("Host is on the blocklist (cloud-metadata / loopback).")
-        }
-
-        InetAddress literalAddr = parseIpLiteral(trimmed)
-        if (literalAddr != null) {
-            String reason = describeUnsafeAddress(literalAddr)
-            if (reason != null) {
-                return ValidationResult.failure("Host literal is non-routable (${literalAddr.hostAddress}): ${reason}")
-            }
-        } else {
-            InetAddress[] resolved = null
-            try {
-                resolved = InetAddress.getAllByName(trimmed)
-            } catch (Exception ignored) {
-                // resolved stays null -> allow (DNS may be unreachable from the server)
-            }
-            if (resolved != null) {
-                for (InetAddress addr : resolved) {
-                    String reason = describeUnsafeAddress(addr)
-                    if (reason != null) {
-                        return ValidationResult.failure("Host resolves to a non-routable address (${addr.hostAddress}): ${reason}")
-                    }
-                }
-            }
-        }
         return ValidationResult.success(trimmed)
     }
 
@@ -233,32 +166,12 @@ class OutboundHttpPolicy {
                 return ValidationResult.failure("Host literal is non-routable (${literalAddr.hostAddress}): ${reason}")
             }
         } else {
-            // Best-effort DNS: if a hostname resolves to a loopback/link-local/metadata/wildcard target,
-            // BLOCK (it is a disguised SSRF target); if resolution fails (corporate firewall / private
-            // DNS), ALLOW — the literal check is the load-bearing defense, matching validate()'s posture.
-            InetAddress[] resolved = null
-            try {
-                resolved = InetAddress.getAllByName(trimmed)
-            } catch (Exception ignored) {
-                // resolved stays null -> allow (DNS may be unreachable from the server)
-            }
-            if (resolved != null) {
-                for (InetAddress addr : resolved) {
-                    String reason = describeUnsafeSftpAddress(addr)
-                    if (reason != null) {
-                        return ValidationResult.failure("Host resolves to a non-routable address (${addr.hostAddress}): ${reason}")
-                    }
-                }
-            }
+            // Best-effort DNS: a hostname resolving to a loopback/link-local/metadata/wildcard target is BLOCKED (a disguised
+            // SSRF target); a failed resolution (corporate firewall / private DNS) is ALLOWED, matching validate()'s posture.
+            String unsafe = unsafeResolution(trimmed, { InetAddress addr -> describeUnsafeSftpAddress(addr) } as Function<InetAddress, String>)
+            if (unsafe != null) return ValidationResult.failure("Host resolves to ${unsafe}")
         }
         return ValidationResult.success(trimmed)
-    }
-
-    /** Convenience: validate-or-throw for the SFTP host path (use where caller turns into a Moqui error). */
-    static String requireValidSftpHost(String rawHost) {
-        ValidationResult result = validateSftpHost(rawHost)
-        if (!result.ok) throw new IllegalArgumentException(result.error)
-        return result.normalizedUrl
     }
 
     /**
@@ -269,6 +182,8 @@ class OutboundHttpPolicy {
      */
     static String describeUnsafeSftpAddress(InetAddress addr) {
         if (addr == null) return "null address"
+        InetAddress carried = embeddedIpv4(addr)
+        if (carried != null) return describeUnsafeSftpAddress(carried)
         if (addr.isLoopbackAddress()) return "loopback"
         if (addr.isAnyLocalAddress()) return "wildcard"
         if (addr.isLinkLocalAddress()) return "link-local"
@@ -327,16 +242,11 @@ class OutboundHttpPolicy {
         return Arrays.asList(resolved)
     }
 
-    /** Convenience: validate-or-throw IllegalArgumentException (use where caller turns into Moqui error). */
-    static String requireValid(String rawUrl, List<String> hostSuffixAllowList = null) {
-        ValidationResult result = validate(rawUrl, hostSuffixAllowList)
-        if (!result.ok) throw new IllegalArgumentException(result.error)
-        return result.normalizedUrl
-    }
-
     /** Returns null if the address is safe, else a short human-readable reason. */
     static String describeUnsafeAddress(InetAddress addr) {
         if (addr == null) return "null address"
+        InetAddress carried = embeddedIpv4(addr)
+        if (carried != null) return describeUnsafeAddress(carried)
         if (addr.isLoopbackAddress()) return "loopback"
         if (addr.isAnyLocalAddress()) return "wildcard"
         if (addr.isLinkLocalAddress()) return "link-local"
@@ -348,13 +258,56 @@ class OutboundHttpPolicy {
         if (addr.isMulticastAddress()) return "multicast"
         String literal = addr.hostAddress
         if (literal == AWS_METADATA_IP) return "cloud metadata IPv4 169.254.169.254"
-        if (literal.startsWith("100.")) {
-            // 100.64.0.0/10 (carrier-grade NAT, RFC 6598).
-            String[] octets = literal.split("\\.")
-            if (octets.length == 4) {
-                int second = Integer.parseInt(octets[1])
-                if (second >= 64 && second <= 127) return "CGNAT (100.64.0.0/10)"
-            }
+        if (addr instanceof Inet4Address) {
+            byte[] b = addr.getAddress()
+            int first = b[0] & 0xFF
+            int second = b[1] & 0xFF
+            if (first == 0) return "this network (0.0.0.0/8)"
+            if (first >= 240) return "reserved or broadcast (240.0.0.0/4)"
+            if (first == 100 && second >= 64 && second <= 127) return "CGNAT (100.64.0.0/10)"
+            if (first == 198 && (second == 18 || second == 19)) return "benchmarking (198.18.0.0/15)"
+            if (first == 192 && second == 0 && (b[2] & 0xFF) == 0) return "IETF protocol assignments (192.0.0.0/24)"
+        }
+        return null
+    }
+
+    /**
+     * The IPv4 address an IPv6 one carries: IPv4-compatible (::a.b.c.d) or NAT64 (64:ff9b::a.b.c.d). Java maps ::ffff:a.b.c.d
+     * to an Inet4Address itself, but not these, so [::169.254.169.254] or [64:ff9b::a9fe:a9fe] would otherwise pass as public.
+     * Null for any other address (and for :: and ::1, which the wildcard and loopback checks own).
+     */
+    private static InetAddress embeddedIpv4(InetAddress addr) {
+        if (!(addr instanceof Inet6Address)) return null
+        byte[] b = addr.getAddress()
+        boolean compatible = (0..11).every { int i -> b[i] == 0 } && !addr.isAnyLocalAddress() && !addr.isLoopbackAddress()
+        boolean nat64 = (b[0] & 0xFF) == 0x00 && (b[1] & 0xFF) == 0x64 && (b[2] & 0xFF) == 0xFF && (b[3] & 0xFF) == 0x9B &&
+                (4..11).every { int i -> b[i] == 0 }
+        if (!compatible && !nat64) return null
+        return InetAddress.getByAddress([b[12], b[13], b[14], b[15]] as byte[])
+    }
+
+    /** A partner allow-list entry: ".example.com" matches its subdomains, "api.example.com" that host or its subdomains. */
+    private static boolean matchesAllowListEntry(String hostLower, String entry) {
+        String e = entry?.toLowerCase(Locale.ROOT)?.trim()
+        if (!e) return false
+        if (e.startsWith(".")) return hostLower.endsWith(e) && hostLower.length() > e.length()
+        return hostLower == e || hostLower.endsWith("." + e)
+    }
+
+    /**
+     * Best effort: the first resolved address {@code describe} refuses, as "a non-routable address (<ip>): <reason>"; null
+     * when every address passes or the name does not resolve (the caller decides what a failed lookup means).
+     */
+    private static String unsafeResolution(String host, Function<InetAddress, String> describe) {
+        InetAddress[] resolved
+        try {
+            resolved = InetAddress.getAllByName(host)
+        } catch (Exception ignored) {
+            return null
+        }
+        for (InetAddress addr : resolved) {
+            String reason = describe.apply(addr)
+            if (reason != null) return "a non-routable address (${addr.hostAddress}): ${reason}".toString()
         }
         return null
     }

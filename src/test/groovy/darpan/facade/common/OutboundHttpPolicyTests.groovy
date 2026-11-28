@@ -115,6 +115,59 @@ class OutboundHttpPolicyTests {
         assertFalse(r.ok, "LLM URL to RFC1918 must remain blocked")
     }
 
+    // ---- DAR-OPS-029 S26b: a partner allow-list matches on a dot boundary ----------------------------
+
+    @Test
+    void allowListEntryMatchesOnlyItsOwnHostOrSubdomains() {
+        // A bare entry: the host itself or a subdomain, never a different registrable name that merely ends the same way.
+        assertTrue(OutboundHttpPolicy.validate("https://api.anthropic.com/v1", ["api.anthropic.com"]).ok)
+        assertTrue(OutboundHttpPolicy.validate("https://eu.api.anthropic.com/v1", ["api.anthropic.com"]).ok)
+        assertFalse(OutboundHttpPolicy.validate("https://evilapi.anthropic.com/v1", ["api.anthropic.com"]).ok,
+                "evilapi.anthropic.com matched the bare entry api.anthropic.com")
+        assertFalse(OutboundHttpPolicy.validate("https://evilmyshopify.com/admin", ["myshopify.com"]).ok,
+                "evilmyshopify.com (anyone can register it) matched myshopify.com")
+        // A leading-dot entry: subdomains only, as every partner list writes it today.
+        assertTrue(OutboundHttpPolicy.validate("https://krewe.myshopify.com/admin", [".myshopify.com"]).ok)
+        assertFalse(OutboundHttpPolicy.validate("https://evilmyshopify.com/admin", [".myshopify.com"]).ok)
+        assertTrue(OutboundHttpPolicy.validate("https://1234.suitetalk.api.netsuite.com/x", [".suitetalk.api.netsuite.com", ".app.netsuite.com"]).ok)
+    }
+
+    // ---- DAR-OPS-029 S26b: addresses no partner lives at -----------------------------------------------
+
+    static final List<String> NOT_A_PARTNER = [
+            "0.1.2.3",            // 0.0.0.0/8: "this network"; 0.x reaches the host itself on Linux
+            "255.255.255.255",    // limited broadcast
+            "240.0.0.1",          // 240.0.0.0/4 reserved
+            "198.18.0.1",         // 198.18.0.0/15 benchmarking, internal on many networks
+            "192.0.0.192",        // 192.0.0.0/24 IETF protocol assignments
+            "[::169.254.169.254]",  // IPv4-compatible IPv6 carrying the metadata address
+            "[64:ff9b::a9fe:a9fe]", // NAT64 (64:ff9b::/96) carrying 169.254.169.254
+            "[64:ff9b::7f00:1]",    // NAT64 carrying 127.0.0.1
+    ]
+
+    @Test
+    void validateRefusesAddressesNoPartnerLivesAt() {
+        NOT_A_PARTNER.each { String host ->
+            assertFalse(OutboundHttpPolicy.validate("https://${host}/x".toString()).ok, "validate accepted https://${host}/x")
+        }
+        assertTrue(OutboundHttpPolicy.validate("https://[2606:4700:4700::1111]/x").ok, "a public IPv6 literal must still pass")
+        assertTrue(OutboundHttpPolicy.validate("https://1.1.1.1/x").ok, "a public IPv4 literal must still pass")
+    }
+
+    @Test
+    void connectTimeResolutionRefusesTheSameAddresses() {
+        NOT_A_PARTNER.each { String host ->
+            String bare = host.replace("[", "").replace("]", "")
+            def thrown = null
+            try {
+                OutboundHttpPolicy.resolveVetted("partner.example", { String h -> [InetAddress.getByName(bare)] as InetAddress[] } as java.util.function.Function)
+            } catch (UnknownHostException e) {
+                thrown = e
+            }
+            assertNotNull(thrown, "resolveVetted connected to ${bare}")
+        }
+    }
+
     // ---- SFTP-narrow danger classifier ------------------------------------------------------------
 
     @Test

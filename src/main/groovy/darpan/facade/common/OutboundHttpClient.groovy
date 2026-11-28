@@ -84,8 +84,7 @@ class OutboundHttpClient {
      */
     static Map send(HttpClient client, String method, String url, Map headers, String body, int timeoutSeconds) {
         Request request = client.newRequest(url).method(method).timeout(Math.max(1, timeoutSeconds), TimeUnit.SECONDS)
-        request.headers { fields -> (headers ?: [:]).each { k, v -> if (k != null && v != null) fields.put(k as String, v as String) } }
-        if (body != null) request.body(new StringRequestContent("application/json", body, StandardCharsets.UTF_8))
+        withHeadersAndBody(request, headers, body)
         ContentResponse response
         try {
             response = new CompletableResponseListener(request, MAX_RESPONSE_BYTES).send().get()
@@ -94,10 +93,7 @@ class OutboundHttpClient {
             if (cause instanceof IOException) throw (IOException) cause
             throw new IOException(cause.message ?: cause.class.simpleName, cause)
         }
-        Map<String, String> responseHeaders = [:]
-        for (HttpField field : response.headers) {
-            if (!responseHeaders.containsKey(field.name)) responseHeaders.put(field.name, field.value)
-        }
+        Map<String, String> responseHeaders = firstValues(response)
         return [statusCode: response.status, body: response.contentAsString, headers: responseHeaders]
     }
 
@@ -112,8 +108,7 @@ class OutboundHttpClient {
                         Closure<T> consumer) {
         long idle = Math.max(1L, idleTimeoutMillis)
         Request request = client.newRequest(url).method(method).idleTimeout(idle, TimeUnit.MILLISECONDS)
-        request.headers { fields -> (headers ?: [:]).each { k, v -> if (k != null && v != null) fields.put(k as String, v as String) } }
-        if (body != null) request.body(new StringRequestContent("application/json", body, StandardCharsets.UTF_8))
+        withHeadersAndBody(request, headers, body)
         InputStreamResponseListener listener = new InputStreamResponseListener()
         request.send(listener)
         Response response
@@ -128,16 +123,28 @@ class OutboundHttpClient {
             request.abort(e)
             throw new IOException("No answer from ${request.host} within ${client.connectTimeout + idle} ms".toString(), e)
         }
-        Map<String, String> responseHeaders = [:]
-        for (HttpField field : response.headers) {
-            if (!responseHeaders.containsKey(field.name)) responseHeaders.put(field.name, field.value)
-        }
+        Map<String, String> responseHeaders = firstValues(response)
         InputStream input = listener.getInputStream()
         try {
             return consumer.call([statusCode: response.status, headers: responseHeaders, body: input])
         } finally {
             input.close()
         }
+    }
+
+    /** The caller's headers (nulls skipped) and, when there is one, a JSON body. */
+    private static void withHeadersAndBody(Request request, Map headers, String body) {
+        request.headers { fields -> (headers ?: [:]).each { k, v -> if (k != null && v != null) fields.put(k as String, v as String) } }
+        if (body != null) request.body(new StringRequestContent("application/json", body, StandardCharsets.UTF_8))
+    }
+
+    /** The answer's headers, each by its first value. */
+    private static Map<String, String> firstValues(Response response) {
+        Map<String, String> values = [:]
+        for (HttpField field : response.headers) {
+            if (!values.containsKey(field.name)) values.put(field.name, field.value)
+        }
+        return values
     }
 
     /** Jetty's DNS step for a guarded connection: OutboundHttpPolicy.resolveVetted, once per new connection. */

@@ -672,6 +672,8 @@ class AdminServicesSmokeTests {
         assertEquals("Plain", sent[0].params.firstName)
         assertEquals(PLAIN_USERNAME, sent[0].params.username)
         assertEquals("beta lower", sent[0].params.tenantLabel)
+        // OC186: the tenant the welcome serves, so its smile line's spend goes on that tenant's ledger.
+        assertEquals(DELTA, sent[0].params.tenantUserGroupId)
         assertEquals("as an Editor", sent[0].params.rolePhrase)
         assertTrue(sent[0].params.containsKey("appBaseUrl"))
         // No temporary password is kept for this account, so none goes out, and the send keeps its EmailMessage copy.
@@ -840,6 +842,31 @@ class AdminServicesSmokeTests {
         } finally {
             ec.context.pop()
         }
+    }
+
+    /**
+     * OC186 (Aditi 2026-11-28 "Record it"): the welcome's smile line is asked for with the tenant the email serves, so the
+     * writer charges that tenant; a person's own email (a reset code) is asked for with none, and stays log-only.
+     */
+    @Test
+    void theWelcomeAsksForItsSmileWithItsTenantAndAResetCodeWithNone() {
+        List<Map> asked = []
+        darpan.email.EmailSmile.smileWriter = { def e, Map p -> asked << p; [line: null] }
+        // EmailSmile keeps one line per key for the execution context; an earlier render in this class already holds them.
+        ["DARPAN_TENANT_WELCOME", "DARPAN_PASSWORD_RESET_CODE"].each { ec.context.getSharedMap().remove("darpan.email.smile." + it) }
+        try {
+            renderBody("component://darpan/screen/email/TenantWelcome.xml", [firstName: "Rakshit", username: "rakshit.singh",
+                    tenantLabel: "Malbon", tenantUserGroupId: "MALBON", rolePhrase: "as a User", appBaseUrl: "https://app.drpn.ai"])
+            renderBody("component://darpan/screen/email/PasswordResetCode.xml", [firstName: "Rakshit", code: "12345678",
+                    appBaseUrl: "https://app.drpn.ai", companyUserGroupId: "MALBON"])
+        } finally {
+            darpan.email.EmailSmile.resetForTests()
+        }
+        Map welcome = asked.find { it.key == "DARPAN_TENANT_WELCOME" }
+        Map reset = asked.find { it.key == "DARPAN_PASSWORD_RESET_CODE" }
+        assertEquals("MALBON", welcome?.companyUserGroupId, asked.toString())
+        assertNotNull(reset, asked.toString())
+        assertFalse(reset.containsKey("companyUserGroupId"), "a person's own email names no tenant, even with one in context: ${reset}")
     }
 
     @Test

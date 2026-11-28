@@ -50,9 +50,11 @@
     </entity>
 
     <entity entity-name="AgentTurn" package="darpan.agent" cache="never">
-        <description>One model run inside a conversation, with what it cost.</description>
+        <description>One model run, with what it cost: a role run inside a conversation, or (OC186) one request of a one-shot
+            writer (audit run words, audit read review, a tenant's email line), which has no conversation, person or grant.</description>
         <field name="turnId" type="id" is-pk="true"/>
-        <field name="conversationId" type="id" not-null="true"/>
+        <field name="conversationId" type="id"><description>Empty for a writer's request (OC186). Nullable since 3.5.x: a
+            database made before needs the AGENT_TURN_CONVERSATION_NULLABLE migration (Moqui never relaxes a column).</description></field>
         <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
         <field name="role" type="text-short"><description>ROUTER, INVESTIGATOR or AUTHOR.</description></field>
         <field name="model" type="text-short"/>

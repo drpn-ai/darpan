@@ -13,7 +13,7 @@
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
         <set field="copyVars" from="[firstName: firstName, tenantLabel: tenantLabel, rolePhrase: rolePhrase, appBaseUrl: appBaseUrl, username: username]"/>
         <set field="hasPassword" from="tempPassword as boolean"/>
-        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;smile&quot;, copyVars))"/>
+        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;smile&quot;, copyVars), tenantUserGroupId)"/>
         <set field="copyVars" from="copyVars + [smile: smile]"/>
         <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;greeting&quot;, copyVars)"/>
         <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;body&quot;, copyVars)"/>

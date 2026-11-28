@@ -60,6 +60,8 @@ class AdminMembershipSupport {
             firstName   : PasswordResetSupport.firstName(account),
             username    : (String) account.username,
             tenantLabel : (String) (tenantGroup.description ?: tenantGroup.userGroupId),
+            // OC186: the tenant the email serves, so its smile line's model spend goes on that tenant's ledger.
+            tenantUserGroupId: (String) tenantGroup.userGroupId,
             rolePhrase  : ROLE_PHRASES[permissionUserGroupId] ?: "",
             // Null when the instance has no app address configured: the email then says "sign in to Darpan".
             appBaseUrl  : TenantNotificationSupport.resolveAppBaseUrl(ec),

@@ -102,6 +102,14 @@
                 the deleted LLM provider settings wrote, an LLM API key among them (DAR-OPS-029 S27). Nothing reads them. The dry run
                 counts them. Idempotent. Ships disabled (a seed load keeps it so): enable it to run it."/>
 
+    <darpan.migration.DarpanMigration migrationId="AGENT_TURN_CONVERSATION_NULLABLE" componentName="darpan"
+            serviceName="migration.MigrationServices.migrate#AgentTurnConversationNullable"
+            sequenceNum="200" supportsDryRun="Y" enabled="N"
+            description="Let an agent ledger row have no conversation (OC186: a one-shot writer's spend is the tenant's, with no
+                conversation): AgentTurn.conversationId becomes nullable. Schema only, no row changes. Idempotent: a nullable column is
+                left alone. Until it runs, writer spend fails to record and is logged; nothing else changes. Ships disabled (a seed
+                load keeps it so): dry-run it, then enable and run it."/>
+
     <darpan.migration.DarpanMigration migrationId="DARPAN_SETTING_VALUE_WIDE" componentName="darpan"
             serviceName="migration.MigrationServices.migrate#DarpanSettingValueWide"
             sequenceNum="210" supportsDryRun="Y" enabled="N"

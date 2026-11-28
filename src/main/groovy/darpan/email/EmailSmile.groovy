@@ -27,8 +27,18 @@ class EmailSmile {
     private static final List<String> REFUSED = ["http", "www", ".com", ".ai", "@", "click", "link", "reply", "call us",
             "verify", "confirm", "download", "password is", "code is", "urgent", "immediately", "account will"]
 
-    /** The line for this send: the model's when it passes {@link #ok}, else fallback. Never throws. */
-    static String line(def ec, String key, String fallback) {
+    /** OC186 test seam: (ec, params) -> the writer's result; null calls SERVICE. */
+    static Closure<Map> smileWriter = null
+
+    /** Test-only: restores the writer call. */
+    static void resetForTests() { smileWriter = null }
+
+    /**
+     * The line for this send: the model's when it passes {@link #ok}, else fallback. Never throws. tenantId: the tenant the
+     * email serves (the welcome), charged for the writer's request (OC186); null for a person's own email (reset, two-factor,
+     * recovery), whose spend stays in the log only. Only the caller names it; nothing is read from the context.
+     */
+    static String line(def ec, String key, String fallback, String tenantId = null) {
         if (EmailCopy.previewing()) return fallback
         Map<String, Object> shared = ec.context.getSharedMap()
         String memo = MEMO + key
@@ -38,8 +48,10 @@ class EmailSmile {
         // from the caller's and would clear the caller's, so the template's line goes.
         if (ec.message.hasError()) return fallback
         try {
-            if (ec.service.isServiceDefined(SERVICE)) {
-                Map result = AutomationExecutionSupport.dispatchInternalService(ec, SERVICE, [key: key, fallback: fallback])
+            Closure<Map> writer = smileWriter
+            if (writer != null || ec.service.isServiceDefined(SERVICE)) {
+                Map params = [key: key, fallback: fallback] + (tenantId ? [companyUserGroupId: tenantId] : [:])
+                Map result = writer != null ? writer.call(ec, params) : AutomationExecutionSupport.dispatchInternalService(ec, SERVICE, params)
                 if (ec.message.hasError()) {
                     logger.warn("Email smile {}: the writer refused: {}", key, ec.message.errorsString)
                     ec.message.clearErrors()

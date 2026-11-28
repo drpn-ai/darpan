@@ -254,7 +254,9 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
     if (outputFile?.exists() && ReconciliationOutputSupport.sourceFormatForFile(outputFile.name) == "json") {
         try {
             outputDocument = ReconciliationOutputSupport.parseGeneratedOutputText(outputFile.getText("UTF-8"))
-        } catch (Exception ignored) {
+        } catch (Exception parseError) {
+            // The descriptor then carries no counts, and run history reads a missing total as 0: say so in the log.
+            logger.warn("run#SavedRunDiff could not parse its own diff document ${outputFile.name}; its descriptor has no counts: ${parseError.getClass().name}")
             outputDocument = [:]
         }
     }
@@ -460,8 +462,9 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
             diffFile           : resolveOutputFile(serviceResult),
             sides              : [[source: file1Source, extractResult: file1Result, label: file1Label, fileSide: "FILE_1"],
                                   [source: file2Source, extractResult: file2Result, label: file2Label, fileSide: "FILE_2"]],
-            windowStartMillis  : windowStartDate?.time,
-            windowEndMillis    : windowEndDate?.time,
+            // The window the sides were read over (tenant-anchored, or a retry's own), as the scheduled path passes it.
+            windowStartMillis  : windowStartDateValue?.time,
+            windowEndMillis    : windowEndDateValue?.time,
             runOwnerUserGroupId: runOwnerUserGroupId,
             dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
     ])
@@ -549,7 +552,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
             file2Label         : file2Label,
             // May be null for a saved run with no window (e.g. two static files) — the filter
             // degrades to grace-only behaviour then.
-            windowStartMillis  : windowStartDate?.time,
+            windowStartMillis  : windowStartDateValue?.time,
             runOwnerUserGroupId: runOwnerUserGroupId,
             dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
     ])

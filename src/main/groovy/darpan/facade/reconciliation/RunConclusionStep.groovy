@@ -45,6 +45,9 @@ class RunConclusionStep {
         String runResultId = normalize(args.get("runResultId"))
         Map stepCtx = (args.get("stepCtx") ?: [:]) as Map
         def step = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_CONCLUDE) : null
+        // OC107: who the alerts-room card names if this step fails (set once the scope is read).
+        String cardTenantId = normalize(stepCtx.get("companyUserGroupId"))
+        Object cardScopeLabel = null
         try {
             Map<String, String> labels = labelsOf(ec, ruleRows)
             List<Map> rules = scopeRules(ec, compareScopeId, ruleRows)
@@ -64,6 +67,8 @@ class RunConclusionStep {
                 lookupWarnings.add("Lookups not read: ${e.message}".toString())
             }
             String tenantId = normalize(scope?.companyUserGroupId)
+            cardTenantId = tenantId ?: cardTenantId
+            cardScopeLabel = scope?.description
             // DAR-BE-318 (ruling P2-24): a replay hands its own fetcher, which answers only from captured lookups and never
             // calls a system. Every other caller passes none and gets today's live fetchLookup.
             // DAR-BE-318 plan 3a: a live pass keeps what it asked in <run>/lookups; a replay (its own fetcher) writes nothing.
@@ -131,7 +136,61 @@ class RunConclusionStep {
             if (ec?.message?.hasError()) ec.message.clearErrors()
             RunObservability.endStep(ec, step, RunObservability.STATUS_FAILED,
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
+            // OC107: Darpan's alerts room hears of it (once per scope per day), a client never; the run goes on.
+            alertConclusionFailure(ec, compareScopeId, cardTenantId, cardScopeLabel, t)
             return [ran: false, warning: t.message]
+        }
+    }
+
+    /** OC107 test seam: posts one error card; null posts through ErrorChatSupport.postErrorCard. */
+    static Closure errorCardPoster = null
+
+    /** Test-only: restores the card poster and the capture-name clock. */
+    static void resetForTests() {
+        errorCardPoster = null
+        lastCaptureMillis = 0L
+    }
+
+    /** OC107: the card's kind, and its trigger: one trigger for every run path, so a scope has one card slot a day. */
+    static final String CONCLUDE_FAILED_KIND = "CONCLUSIONS_FAILED", CARD_TRIGGER = "conclude"
+
+    /**
+     * DAR-OPS-029 OC107 (errors-warnings-to-alerts-room-only). The alerts-room card for a conclusion step that failed. Its slot
+     * (ErrorChatSupport.postErrorCard's claim) is the tenant, "conclude:<compareScopeId>", the day and the one trigger, so each
+     * scope posts at most one card a day however many runs fail on it. Pure.
+     */
+    static Map conclusionFailureCard(String compareScopeId, String tenantId, String tenantName, Object scopeLabel, String reason,
+                                     java.sql.Timestamp at, String zoneId) {
+        return [tenantId      : tenantId,
+                tenantName    : tenantName ?: tenantId,
+                subjectKey    : "conclude:${compareScopeId}".toString(),
+                automationName: "Conclusions · ${normalize(scopeLabel) ?: compareScopeId}".toString(),
+                kind          : CONCLUDE_FAILED_KIND,
+                errorFirstLine: reason,
+                scheduled     : false,
+                trigger       : CARD_TRIGGER,
+                completedDate : at,
+                zoneId        : zoneId]
+    }
+
+    /** OC107: posts the card for a failed conclusion step. Never throws (the run's outcome stands); no tenant, no card. */
+    static void alertConclusionFailure(def ec, String compareScopeId, String tenantId, Object scopeLabel, Throwable failure) {
+        if (!tenantId) return
+        try {
+            String tenantName = null
+            String zoneId = null
+            try {
+                tenantName = TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId)
+                zoneId = darpan.reconciliation.notification.TenantNotificationSupport.resolveTenantZone(ec, tenantId)?.id
+            } catch (Throwable ignored) {
+                // a card that names the tenant by id, on the server's day, is still the card
+            }
+            Map card = conclusionFailureCard(compareScopeId, tenantId, tenantName, scopeLabel,
+                    normalize(failure?.message) ?: failure?.class?.simpleName, new java.sql.Timestamp(System.currentTimeMillis()), zoneId)
+            Closure poster = errorCardPoster ?: { def postEc, Map event -> darpan.ops.ErrorChatSupport.postErrorCard(postEc, event) }
+            poster.call(ec, card)
+        } catch (Throwable t) {
+            try { ec?.logger?.warn("Conclusion failure card for ${compareScopeId} failed: ${t.getClass().name}") } catch (Throwable ignored) { }
         }
     }
 

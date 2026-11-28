@@ -4,6 +4,7 @@ import darpan.conclusion.brain.BrainAnswerStore
 import darpan.conclusion.brain.BrainConclude
 import darpan.judge.JudgeReplaySupport
 import groovy.json.JsonSlurper
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -432,5 +433,53 @@ class RunConclusionStepTests {
         RunConclusionStep.captureServed(dir2, LOOKUP, [A1: null], [])
         assertEquals([:], replayOf(dir2, LOOKUP, ["A1"]))
         assertEquals(1, captures(new File(tmp, "run2")).size())
+    }
+
+    // ---- OC107: a conclusion step that fails tells Darpan's alerts room, once per scope per day, never a client ----
+
+    @AfterEach
+    void resetSeams() { RunConclusionStep.resetForTests() }
+
+    @Test
+    void aFailedConclusionCardIsOneSlotPerScopePerDay() {
+        java.sql.Timestamp at = java.sql.Timestamp.valueOf("2026-11-28 10:00:00")
+        Map card = RunConclusionStep.conclusionFailureCard("CS_100", "GORJANA", "Gorjana", "Returns scope",
+                "lookup orderInNetsuite timed out", at, "Asia/Kolkata")
+        assertEquals("conclude:CS_100", card.subjectKey, "the slot is the scope's, whichever run path failed")
+        assertEquals(RunConclusionStep.CONCLUDE_FAILED_KIND, card.kind)
+        assertEquals(RunConclusionStep.CARD_TRIGGER, card.trigger, "one trigger, so a manual and a scheduled failure share the day's slot")
+        assertEquals(false, card.scheduled)
+        assertEquals("GORJANA", card.tenantId)
+        assertEquals("Gorjana", card.tenantName)
+        assertEquals("Conclusions · Returns scope", card.automationName)
+        assertEquals("lookup orderInNetsuite timed out", card.errorFirstLine)
+        assertEquals(at, card.completedDate)
+        assertEquals("Asia/Kolkata", card.zoneId)
+    }
+
+    @Test
+    void theAlertGoesThroughThePosterAndNeverThrows() {
+        List<Map> posted = []
+        RunConclusionStep.errorCardPoster = { def ec, Map event -> posted << event }
+        RunConclusionStep.alertConclusionFailure(null, "CS_7", "KREWE", null, new IllegalStateException("boom"))
+        assertEquals(1, posted.size())
+        assertEquals("conclude:CS_7", posted[0].subjectKey)
+        assertEquals("Conclusions · CS_7", posted[0].automationName, "no scope description: the scope id names it")
+        assertEquals("boom", posted[0].errorFirstLine)
+
+        RunConclusionStep.errorCardPoster = { def ec, Map event -> throw new RuntimeException("webhook down") }
+        RunConclusionStep.alertConclusionFailure(null, "CS_7", "KREWE", null, new IllegalStateException("boom"))  // must not throw
+        RunConclusionStep.errorCardPoster = { def ec, Map event -> posted << event }
+        RunConclusionStep.alertConclusionFailure(null, "CS_8", null, null, new IllegalStateException("x"))
+        assertEquals(1, posted.size(), "no tenant, no card: the claim slot needs one")
+    }
+
+    @Test
+    void theStepsCatchTellsTheAlertsRoom() {
+        String code = darpan.reconciliation.support.ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/RunConclusionStep.groovy").toFile().text
+        int failed = code.indexOf("\"Conclusions not drawn: ")
+        int alert = code.indexOf("alertConclusionFailure(ec,", failed)
+        assertTrue(failed > 0 && alert > failed && alert - failed < 600, "runIfConfigured's catch posts the alerts-room card")
     }
 }

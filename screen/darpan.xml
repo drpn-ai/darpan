@@ -33,7 +33,8 @@
          "Cannot run screen transition with actions from non-secure request or with URL parameters"
          before a single line of it executes. The protection is not lost: the single-use, tenant-bound
          `state` token is OAuth's own CSRF defence and is what actually guards this endpoint. -->
-    <transition name="slackOauthCallback" method="get" read-only="true">
+    <!-- DAR-OPS-029 OC217: its URL carries the OAuth code and state; no ArtifactHit row keeps them. -->
+    <transition name="slackOauthCallback" method="get" read-only="true" track-artifact-hit="false">
         <parameter name="code"/>
         <parameter name="state"/>
         <parameter name="error"/>

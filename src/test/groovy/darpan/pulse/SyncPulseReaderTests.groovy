@@ -40,6 +40,9 @@ class SyncPulseReaderTests {
         assertEquals(["1 upstream record(s) skipped: no orderName.",
                       "2 upstream record(s) skipped: no orderDate that reads as a date and time."], read.warnings,
                 "one aggregated warning per kind, not one per record")
+        // DAR-OPS-029 S17a: the keys skipped for their date are still upstream records, so the pulse never reads them as gone
+        assertEquals(["#GOR4", "#GOR5"] as Set, read.undatedKeys)
+        assertEquals(3, read.skippedCount)
     }
 
     @Test

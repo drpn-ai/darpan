@@ -473,9 +473,11 @@ class SyncPulseSupport {
             present.addAll(confirmed)
             Set<String> unasked = keySet(target.unasked as Collection)
             Map sorted = classify(records, present, now, allowance, unasked)
-            Set<String> upstreamKeys = new LinkedHashSet<String>()
+            // OC89: a key skipped for its date is still upstream, so its open order never "left the check"
+            Set<String> upstreamKeys = keySet((up.undatedKeys ?: []) as Collection)
             records.each { Map r -> String k = normalize(r.key); if (k) upstreamKeys << k }
-            Map settled = settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys)
+            Map settled = settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys,
+                    (up.warnings ?: []) as List<String>)
             if (settled.status == OK) {
                 storePresent(ec, pair, rememberPresent(known, returned.findAll { toAsk.contains(it) }, createdByKey, window.from as Instant))
             }
@@ -528,9 +530,12 @@ class SyncPulseSupport {
         }
     }
 
-    /** Opens, touches and closes the pair's orders, writes the OK sample and stamps the pair, in one transaction. */
+    /**
+     * Opens, touches and closes the pair's orders, writes the OK sample and stamps the pair, in one transaction. The
+     * sample's message names the unasked keys and carries the upstream read's warnings (OC89).
+     */
     private static Map settle(def ec, Map pair, Instant now, int allowance, List<Map> open, Map sorted, Set<String> present,
-                              Set<String> unasked, Instant windowFrom, Set<String> upstreamKeys) {
+                              Set<String> unasked, Instant windowFrom, Set<String> upstreamKeys, List<String> readWarnings) {
         Timestamp stamp = Timestamp.from(now)
         Map<String, Map> openByKey = open.collectEntries { Map o -> [(o.recordKey as String): o] }
         List<Map> waiting = sorted.waiting as List<Map>
@@ -558,7 +563,9 @@ class SyncPulseSupport {
                 stillOpen << created
             }
             oldest = oldestOf(waiting, stillOpen, now)
-            String message = (sorted.unaskedCount as int) > 0 ? "${sorted.unaskedCount} keys could not be asked".toString() : null
+            List<String> notes = (sorted.unaskedCount as int) > 0 ? ["${sorted.unaskedCount} keys could not be asked".toString()] : []
+            notes.addAll(readWarnings)
+            String message = notes ? sampleMessage(notes.join(" ")) : null
             sample = writeSample(ec, pair, now, [statusEnumId: OK, allowanceMinutes: allowance, waitingCount: waiting.size(),
                     oldestWaitingMinutes: oldest != null ? ((oldest.ageMinutes as Long).intValue()) : null,
                     pastAllowanceCount: stillOpen.size(), message: message])

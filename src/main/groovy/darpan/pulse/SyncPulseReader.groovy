@@ -76,8 +76,12 @@ class SyncPulseReader {
      * <p>DAR-BE-377: each record is dated and named by the fields the upstream endpoint's connector names
      * (SyncPulseSupport.pulseFieldsOf: orderDate / orderName for HotWax orders, createdAt / name for Shopify orders).</p>
      *
-     * @return [ok, records: [[key, orderName, createdAt (Instant), otherKey]], errors, warnings]; key is the upstream
-     *         side's join key value, otherKey the value the target side is read by (the same value: the check joins on it)
+     * <p>OC89: a read that returned records but could key and date none of them fails. An empty OK would close every
+     * open order in the window as "left the check".</p>
+     *
+     * @return [ok, records: [[key, orderName, createdAt (Instant), otherKey]], undatedKeys, errors, warnings]; key is the
+     *         upstream side's join key value, otherKey the value the target side is read by (the same value: the check
+     *         joins on it); undatedKeys are keys whose records were skipped for their date, which are still upstream
      */
     static Map readUpstream(def ec, Map pair, Map automation, Instant from, Instant thru) {
         return run(ec, pair, automation, "upstream", [records: []]) { Map sides, String location ->
@@ -88,7 +92,9 @@ class SyncPulseReader {
             Map window = [childWindowStartDate: Timestamp.from(from), childWindowEndDate: Timestamp.from(thru)]
             File file = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String, false).file
             Map read = upstreamRecords(file, sides.upstreamKey as String, fields.createdField as String, fields.nameField as String)
-            return [ok: true, records: read.records, errors: [], warnings: read.warnings]
+            if (!read.records && read.skippedCount) throw new IllegalStateException(("The upstream read had ${read.skippedCount} upstream records and none had " +
+                    "a ${sides.upstreamKey} and a ${fields.createdField} that reads as a date and time.").toString())
+            return [ok: true, records: read.records, undatedKeys: read.undatedKeys, errors: [], warnings: read.warnings]
         }
     }
 
@@ -123,23 +129,26 @@ class SyncPulseReader {
      * The records of an upstream extract file: key from keyField, createdAt from createdField, orderName from nameField
      * (none when blank), each key once (the first). A record with no key, or no createdField value that reads as an
      * instant, is skipped, each kind with one warning. No file: none.
+     *
+     * @return [records, undatedKeys: the keys of records skipped for their date, skippedCount, warnings]
      */
     static Map upstreamRecords(File file, String keyField, String createdField, String nameField) {
         List<Map> records = []
         Set<String> seen = new HashSet<String>()
+        Set<String> undatedKeys = new LinkedHashSet<String>()
         int noKey = 0, noDate = 0
         if (file != null && file.exists()) forEachPresentRecord(file) { Map r ->
             String key = normalize(r.get(keyField))
             if (!key) { noKey++; return }
             Instant createdAt = createdAt(r.get(createdField))
-            if (createdAt == null) { noDate++; return }
+            if (createdAt == null) { noDate++; undatedKeys << key; return }
             if (!seen.add(key)) return
             records << [key: key, orderName: nameField ? normalize(r.get(nameField)) : null, createdAt: createdAt, otherKey: key]
         }
         List<String> warnings = []
         if (noKey) warnings << "${noKey} upstream record(s) skipped: no ${keyField}.".toString()
         if (noDate) warnings << "${noDate} upstream record(s) skipped: no ${createdField} that reads as a date and time.".toString()
-        return [records: records, warnings: warnings]
+        return [records: records, undatedKeys: undatedKeys, skippedCount: noKey + noDate, warnings: warnings]
     }
 
     /**

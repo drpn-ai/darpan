@@ -286,6 +286,27 @@ class SyncPulseReaderSmokeTests {
         assertNoPulseFiles()
     }
 
+    /**
+     * DAR-OPS-029 S17a (lens E2, the DAR-BE-386 class): a read that returned records but could date none of them read nothing it
+     * can judge. It fails, so the pulse writes FAILED and changes no order, instead of an empty, all-clear OK.
+     */
+    @Test
+    void anUpstreamReadWhoseEveryRecordIsSkippedFails() {
+        SyncPulseReader.setLiveExtractor({ String service, Map params ->
+            calls << [service: service, params: new LinkedHashMap(params)]
+            List<Map> records = [[orderId: "O1", orderName: "#U1", orderDate: "2026-11-21T07:30:00+0000 UTC"], [orderId: "O2"]]
+            File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
+            new File(dir, "undated.json").setText(JsonOutput.toJson([metadata: [:], records: records]), "UTF-8")
+            return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, "undated.json"), fileName: "undated.json",
+                    recordCount : records.size()]
+        })
+        Map out = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)
+        assertEquals(false, out.ok, out.toString())
+        assertEquals([], out.records)
+        assertTrue(out.errors.any { (it as String).contains("2 upstream records and none had") }, out.errors.toString())
+        assertNoPulseFiles()
+    }
+
     @Test
     void outputFolderRemoved() {
         Map up = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)

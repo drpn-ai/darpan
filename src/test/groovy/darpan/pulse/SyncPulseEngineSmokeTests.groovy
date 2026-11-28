@@ -213,6 +213,30 @@ class SyncPulseEngineSmokeTests {
         assertEquals(0, openOrders().size())
     }
 
+    /**
+     * DAR-OPS-029 S17a (lens E2, the DAR-BE-386 class): an upstream record whose date no longer reads is still upstream. Its open
+     * finding is never closed as "left the check" (no false "caught up" to the client), and the sample says what was skipped.
+     */
+    @Test
+    void anUpstreamRecordWithNoReadableDateNeverLeavesTheCheck() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, openOrders().size())
+
+        String skipped = "1 upstream record(s) skipped: no orderDate that reads as a date and time."
+        SyncPulseSupport.setReaders({ def rec, Map p, Map automation, Instant from, Instant thru ->
+            [ok: true, records: [[key: "#A2", orderName: "#A2", createdAt: T0.plus(Duration.ofMinutes(50)), otherKey: "#A2"]],
+             errors: [], warnings: [skipped], undatedKeys: ["#A1"] as Set]
+        }, null)
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(60)))
+
+        assertEquals("SPS_OK", out.status)
+        assertEquals([], out.dropped*.recordKey, "#A1 is still upstream: it did not leave the check")
+        assertEquals(["#A1"], openOrders()*.recordKey)
+        assertEquals(1, out.pastCount)
+        assertTrue((out.sample.message as String).contains(skipped), out.sample.message as String)
+    }
+
     @Test
     void failedReadWritesFailedSampleAndKeepsOrders() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))

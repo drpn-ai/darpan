@@ -1,6 +1,9 @@
 package darpan.reconciliation.support
 
 import org.junit.jupiter.api.Test
+import org.moqui.entity.EntityCondition
+
+import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
@@ -42,6 +45,77 @@ class FakeEntityFindTests {
     void anEmptyPkValueFindsNothing() {
         assertNull(chatSpaces().condition("chatSpaceId", "").condition("companyUserGroupId", "TENANT_A").one())
         assertNull(chatSpaces().condition("chatSpaceId", null).one())
+    }
+
+    @Test
+    void oneWithNoConditionFindsNothing() {
+        assertNull(new FakeEntityFind(["chatSpaceId"], [ROWS[0]]).one(), "Moqui's one() returns null with no condition")
+    }
+
+    // S99-200: Moqui drops only extra EQUALS conditions; a date or IN condition stays in the where clause.
+    @Test
+    void anOverConstrainedOneStillAppliesNonEqualityConditions() {
+        Timestamp now = new Timestamp(1_000_000L)
+        List<Map> rows = [[id: "M1", tenant: "T1", fromDate: new Timestamp(10L), thruDate: new Timestamp(500L)]]
+        assertNull(new FakeEntityFind(["id"], rows).condition("id", "M1").condition("tenant", "T2")
+                .conditionDate("fromDate", "thruDate", now).one(), "an expired row is not found by PK")
+        assertNull(new FakeEntityFind(["id"], rows).condition("id", "M1").condition("tenant", "IN", ["T2"]).one())
+        assertEquals("M1", new FakeEntityFind(["id"], rows).condition("id", "M1").condition("tenant", "T2").one()?.id)
+    }
+
+    @Test
+    void conditionDateKeepsOpenAndCurrentRows() {
+        Timestamp at = new Timestamp(1000L)
+        List<Map> rows = [
+                [id: "open", fromDate: null, thruDate: null],
+                [id: "current", fromDate: new Timestamp(1000L), thruDate: new Timestamp(2000L)],
+                [id: "future", fromDate: new Timestamp(1001L), thruDate: null],
+                [id: "ended", fromDate: null, thruDate: new Timestamp(1000L)],
+        ]
+        assertEquals(["open", "current"], new FakeEntityFind(["id"], rows).conditionDate("fromDate", "thruDate", at).list()*.id)
+        assertEquals(["a"], new FakeEntityFind(["id"], [[id: "a", validFrom: null, validThru: null]])
+                .conditionDate("validFrom", "validThru", null).list()*.id, "a null moment means now")
+    }
+
+    @Test
+    void threeArgumentConditionsFollowSqlAndRefuseUnknownOperators() {
+        List<Map> rows = [[id: "a", n: 1], [id: "b", n: 2], [id: "c", n: null]]
+        FakeEntityFind f = new FakeEntityFind(["id"], rows)
+        assertEquals(["a", "b"], f.condition("id", "in", ["a", "b", "z"]).list()*.id)
+        assertEquals(["b"], new FakeEntityFind(["id"], rows).condition("n", EntityCondition.ComparisonOperator.GREATER_THAN, 1).list()*.id)
+        assertEquals(["a"], new FakeEntityFind(["id"], rows).condition("n", "not-equals", 2).list()*.id, "a NULL column never compares")
+        assertEquals([], new FakeEntityFind(["id"], rows).condition("id", EntityCondition.IN, []).list(), "IN of nothing matches nothing")
+        assertEquals(["c"], new FakeEntityFind(["id"], rows).condition("n", "equals", null).list()*.id)
+        assertThrows(UnsupportedOperationException) { new FakeEntityFind(["id"], rows).condition("id", "like", "a%") }
+    }
+
+    @Test
+    void listSortsPagesAndCountIgnoresPaging() {
+        List<Map> rows = [[id: "a", n: 2], [id: "b", n: null], [id: "c", n: 1], [id: "d", n: 2]]
+        assertEquals(["d", "a", "c", "b"], new FakeEntityFind(["id"], rows).orderBy(["-n", "-id"]).list()*.id)
+        assertEquals(["b", "c", "a", "d"], new FakeEntityFind(["id"], rows).orderBy("n,id").list()*.id, "NULL sorts lowest")
+        assertEquals(["c", "a"], new FakeEntityFind(["id"], rows).orderBy("n ASC").offset(1).limit(2).list()*.id)
+        assertEquals(4L, new FakeEntityFind(["id"], rows).limit(1).count())
+    }
+
+    @Test
+    void updateAllAndDeleteAllChangeTheSharedRows() {
+        List<Map> rows = [[id: "a", t: "T1"], [id: "b", t: "T2"], [id: "c", t: "T1"]]
+        assertEquals(2L, new FakeEntityFind(["id"], rows).condition("t", "T1").updateAll([t: "T9"]))
+        assertEquals(["T9", "T2", "T9"], rows*.t)
+        assertEquals(1L, new FakeEntityFind(["id"], rows).condition("id", "b").deleteAll())
+        assertEquals(["a", "c"], rows*.id)
+    }
+
+    @Test
+    void theFacadeIssuesAFreshRecordedFinderPerFindAndRefusesUndeclaredTables() {
+        FakeEntityFacade entity = new FakeEntityFacade().table("Chat", ["chatSpaceId"], new ArrayList<Map>(ROWS))
+        assertEquals(1L, entity.find("Chat").condition("companyUserGroupId", "TENANT_A").disableAuthz().count())
+        assertEquals(3L, entity.find("Chat").count(), "the first find's condition does not narrow the second")
+        assertEquals([true, false], entity.issuedFor("Chat")*.authzDisabled)
+        entity.find("Chat").condition("chatSpaceId", "CS_A").deleteAll()
+        assertEquals(2, entity.rows("Chat").size())
+        assertThrows(IllegalStateException) { entity.find("Undeclared") }
     }
 
     @Test

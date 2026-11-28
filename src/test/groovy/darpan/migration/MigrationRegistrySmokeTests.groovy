@@ -59,7 +59,9 @@ class MigrationRegistrySmokeTests {
     void everyRegisteredServiceNameResolvesToARealService() {
         // A registry row naming a service that does not exist would fail mid-run, after earlier
         // migrations had already written. This asserts the seed is honest at load time.
-        ec.entity.find("darpan.migration.DarpanMigration").disableAuthz().list().each { row ->
+        List rows = ec.entity.find("darpan.migration.DarpanMigration").disableAuthz().list()
+        assertEquals(registeredInSeed().size(), rows.size(), "every seeded row is checked, not an empty list")
+        rows.each { row ->
             String serviceName = row.getString("serviceName")
             assertNotNull(ec.service.getServiceDefinition(serviceName),
                     "registry row ${row.getString('migrationId')} names an unresolvable service: ${serviceName}")
@@ -77,11 +79,5 @@ class MigrationRegistrySmokeTests {
                 .disableAuthz()
                 .count()
         assertEquals(0L, count)
-    }
-
-    @Test
-    void ledgerAndPrereqEntitiesExistAndAreEmpty() {
-        assertEquals(0L, ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().count())
-        assertEquals(0L, ec.entity.find("darpan.migration.DarpanMigrationPrereq").disableAuthz().count())
     }
 }

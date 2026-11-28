@@ -92,7 +92,10 @@ class TenantConfigRestoreSmokeTests {
         assertFalse(preview.hadError as boolean, preview.errorText as String)
         Map plan = (Map) preview.plan
         assertEquals([], plan.blocking)
-        assertTrue((plan.lines as List<Map>).every { it.action in ["UNCHANGED", "MAPPED"] }, "nothing to write: ${plan.lines}")
+        // The version holds the tenant's one connection (mapped to itself), the audit, R2 and the one check R2 links;
+        // the unlinked check and the query no run uses are in no version, so they make no line.
+        assertEquals([["NETSUITE_AUTH", "MAPPED"], ["AUDIT", "UNCHANGED"], ["STATEMENT", "UNCHANGED"], ["CHECK", "UNCHANGED"]],
+                (plan.lines as List<Map>).collect { [it.kind, it.action] }, "nothing to write: ${plan.lines}")
         assertEquals([], plan.switchOff)
         assertEquals([], plan.unlink)
         assertEquals([], plan.kept, "a query no run uses was there all along; nothing was added since")
@@ -220,9 +223,13 @@ class TenantConfigRestoreSmokeTests {
                     contentHash: "0" * 64, bundleVersion: 1L, packJson: '{"bundleVersion":1,"audits":[]}', changeSource: "MANUAL",
                     createdDate: ec.user.nowTimestamp]).create()
         }
-        assertTrue(call("preview#TenantConfigRestore", [id: "TCR_OTHERS"]).hadError as boolean)
+        // Foreign reads exactly as missing: the same refusal an id that exists nowhere gets.
+        assertEquals("Config version NO_SUCH was not found.", (call("preview#TenantConfigRestore", [id: "NO_SUCH"]).errorText as String).trim())
+        assertEquals("Config version TCR_OTHERS was not found.", (call("preview#TenantConfigRestore", [id: "TCR_OTHERS"]).errorText as String).trim())
+        assertEquals("Config version NO_SUCH was not found.",
+                (call("restore#TenantConfigVersion", [id: "NO_SUCH", planHash: "0" * 64]).errorText as String).trim())
         Map out = call("restore#TenantConfigVersion", [id: "TCR_OTHERS", planHash: "0" * 64])
-        assertTrue(out.hadError as boolean)
+        assertEquals("Config version TCR_OTHERS was not found.", (out.errorText as String).trim())
         assertFalse(out.restored as boolean)
     }
 
@@ -234,7 +241,8 @@ class TenantConfigRestoreSmokeTests {
         Map preview = call("preview#TenantConfigRestore", [id: v1.id])
         assertFalse(preview.hadError as boolean, preview.errorText as String)
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
-        assertTrue(out.hadError as boolean, "a viewer cannot restore")
+        assertEquals("Your active tenant only has view access, so it cannot restore a config version.", (out.errorText as String).trim(),
+                "a viewer cannot restore")
         assertEquals("Edited.", r2Row().statementText)
     }
 

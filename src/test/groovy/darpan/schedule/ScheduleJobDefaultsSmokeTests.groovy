@@ -25,8 +25,11 @@ import static org.junit.jupiter.api.Assertions.*
 @SharedMoqui
 class ScheduleJobDefaultsSmokeTests {
     private static final String APPLY = "component://darpan/data/zzScheduleJobDefaultsApply.xml"
-    private static final List<String> JOB_SEEDS = ["AuditSeedData", "ReconciliationJobSeedData", "TwoFactorSeedData",
-            "ScriptJobSeedData", "TenantConfigSeedData"].collect { "component://darpan/data/${it}.xml".toString() }
+    /** Every data file that seeds a ServiceJob (seedRowsNeverStateLiveColumns counts them, so a new one cannot slip past). */
+    private static final List<String> JOB_SEEDS = ["AuditSeedData", "OpsSeedData", "ReconciliationJobSeedData", "TwoFactorSeedData",
+            "TenantConfigSeedData"].collect { "component://darpan/data/${it}.xml".toString() }
+    /** The ServiceJob rows those files seed: 1 audit, 2 ops, 9 reconciliation, 1 two-factor, 1 tenant config. */
+    private static final int JOB_COUNT = 14
     private static final String EXTRACTS = "purge_ReconciliationExtractFiles_daily"
     private static final String SCAN = "scan_ReconciliationAutomations_5m"
 
@@ -53,7 +56,7 @@ class ScheduleJobDefaultsSmokeTests {
     @Test
     void freshLoadSchedulesEveryJob() {
         List<EntityValue> jobs = darpanJobs()
-        assertEquals(12, jobs.size(), jobs*.jobName.toString()) // DAR-BE-334 removed scan_TenantScriptDeployments_5m; DAR-BE-374 added maintain_IdIndex_nightly
+        assertEquals(JOB_COUNT, jobs.size(), jobs*.jobName.toString())
         jobs.each { EntityValue j ->
             assertEquals(j.defaultCronExpression, j.cronExpression, j.jobName)
             assertEquals(j.defaultPaused ?: "N", j.paused, j.jobName)
@@ -71,22 +74,25 @@ class ScheduleJobDefaultsSmokeTests {
     @Test
     void anEditSurvivesASeedReload() {
         Timestamp now = new Timestamp(System.currentTimeMillis())
-        asSystem {
-            ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: EXTRACTS, cronExpression: "0 0 4 * * ?", paused: "Y", editedDate: now]).update()
-            ec.entity.makeValue("moqui.service.job.ServiceJobParameter").setAll([jobName: SCAN, parameterName: "limit", parameterValue: "50", editedDate: now]).update()
-        }
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
-        EntityValue job = ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", EXTRACTS).one()
-        assertEquals("0 0 4 * * ?", job.cronExpression)
-        assertEquals("Y", job.paused)
-        assertEquals("50", ec.entity.find("moqui.service.job.ServiceJobParameter").condition("jobName", SCAN).condition("parameterName", "limit").one().parameterValue)
-        // and the shipped default moved on underneath without touching the edit
-        assertEquals("0 15 2 * * ?", job.defaultCronExpression)
-        // leave the jobs unedited for the other tests (a reset: clear the marker, let the defaults apply)
-        asSystem {
-            ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: EXTRACTS, editedDate: null]).update()
-            ec.entity.makeValue("moqui.service.job.ServiceJobParameter").setAll([jobName: SCAN, parameterName: "limit", editedDate: null]).update()
-            ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call()
+        try {
+            asSystem {
+                ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: EXTRACTS, cronExpression: "0 0 4 * * ?", paused: "Y", editedDate: now]).update()
+                ec.entity.makeValue("moqui.service.job.ServiceJobParameter").setAll([jobName: SCAN, parameterName: "limit", parameterValue: "50", editedDate: now]).update()
+            }
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
+            EntityValue job = ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", EXTRACTS).one()
+            assertEquals("0 0 4 * * ?", job.cronExpression)
+            assertEquals("Y", job.paused)
+            assertEquals("50", ec.entity.find("moqui.service.job.ServiceJobParameter").condition("jobName", SCAN).condition("parameterName", "limit").one().parameterValue)
+            // and the shipped default moved on underneath without touching the edit
+            assertEquals("0 15 2 * * ?", job.defaultCronExpression)
+        } finally {
+            // leave the jobs unedited for the other tests (a reset: clear the marker, let the defaults apply)
+            asSystem {
+                ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: EXTRACTS, editedDate: null]).update()
+                ec.entity.makeValue("moqui.service.job.ServiceJobParameter").setAll([jobName: SCAN, parameterName: "limit", editedDate: null]).update()
+                ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call()
+            }
         }
     }
 
@@ -105,15 +111,18 @@ class ScheduleJobDefaultsSmokeTests {
     @Test
     void aChangedDefaultReachesAnUneditedJob() {
         String job = "sweep_RuleChildTenantStamps_hourly"
-        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: job, defaultCronExpression: "0 0 5 * * ?"]).update() }
-        Map out = asSystem { ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call() }
-        assertEquals("0 0 5 * * ?", ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", job).one().cronExpression)
-        assertEquals(1, out.jobsUpdated)
-        assertEquals(0, out.parametersUpdated)
-        // a second call changes nothing
-        assertEquals(0, asSystem { ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call() }.jobsUpdated)
-        // restore the shipped default for later tests
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
+        try {
+            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: job, defaultCronExpression: "0 0 5 * * ?"]).update() }
+            Map out = asSystem { ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call() }
+            assertEquals("0 0 5 * * ?", ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", job).one().cronExpression)
+            assertEquals(1, out.jobsUpdated)
+            assertEquals(0, out.parametersUpdated)
+            // a second call changes nothing
+            assertEquals(0, asSystem { ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call() }.jobsUpdated)
+        } finally {
+            // restore the shipped default for later tests
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/ReconciliationJobSeedData.xml", APPLY)
+        }
         assertEquals("0 15 * * * ?", ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", job).one().cronExpression)
     }
 
@@ -121,16 +130,18 @@ class ScheduleJobDefaultsSmokeTests {
     void seedRowsNeverStateLiveColumns() {
         // allow-list over every loaded type (seed, seed-initial, install, ext*, darpan-seed...); only fixtures are skipped
         int checked = 0
+        int checkedParameters = 0
         dataFiles().each { File f ->
             def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(f)
             if (doc.documentElement.getAttribute("type").endsWith("fixture")) return
             checked += checkAttributes(f, doc, "moqui.service.job.ServiceJob") { String a ->
                 // DAR-BE-340: expireLockTime is a shipped value (no Darpan surface edits it), so a seed states it.
                 a in ["jobName", "description", "serviceName", "minIntervalMinutes", "resumePreviewService", "expireLockTime"] || a.startsWith("default") }
-            checkAttributes(f, doc, "moqui.service.job.ServiceJobParameter") { String a ->
+            checkedParameters += checkAttributes(f, doc, "moqui.service.job.ServiceJobParameter") { String a ->
                 a in ["jobName", "parameterName", "defaultValue"] }
         }
-        assertTrue(checked >= 10, "expected the job seeds to be scanned, saw ${checked}")
+        assertEquals(JOB_COUNT, checked, "every seeded job is scanned, and JOB_SEEDS names every file that seeds one")
+        assertEquals(1, checkedParameters, "the scan limit is the one seeded job parameter")
     }
 
     private static int checkAttributes(File f, def doc, String element, Closure<Boolean> allowed) {

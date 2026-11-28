@@ -151,8 +151,10 @@ class TenantConfigVersionSmokeTests {
                     contentHash: "0" * 64, bundleVersion: 1L, packJson: '{"audits":[]}', changeSource: "MANUAL",
                     createdDate: ec.user.nowTimestamp]).create()
         }
+        assertEquals("Config version NO_SUCH was not found.", (call("get#TenantConfigVersion", [id: "NO_SUCH"]).errorText as String).trim())
         Map got = call("get#TenantConfigVersion", [id: "TCV_OTHERS"])
-        assertTrue(got.hadError as boolean, "another tenant's version is not found")
+        assertEquals("Config version TCV_OTHERS was not found.", (got.errorText as String).trim(),
+                "another tenant's version reads exactly as one that exists nowhere")
         assertNull(got.version)
         Map listed = call("get#TenantConfigVersions")
         assertFalse((listed.versions as List<Map>)*.id.contains("TCV_OTHERS"))
@@ -163,7 +165,8 @@ class TenantConfigVersionSmokeTests {
         call("snapshot#TenantConfig")
         asSystem { setPermission(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID) }
         Map denied = call("snapshot#TenantConfig", [reason: "viewer"])
-        assertTrue(denied.hadError as boolean, "a viewer cannot write a version")
+        assertEquals("Your active tenant only has view access, so it cannot keep a config version.", (denied.errorText as String).trim(),
+                "a viewer cannot write a version")
         Map listed = call("get#TenantConfigVersions")
         assertFalse(listed.hadError as boolean, listed.errorText as String)
         assertEquals(1, (listed.versions as List).size())

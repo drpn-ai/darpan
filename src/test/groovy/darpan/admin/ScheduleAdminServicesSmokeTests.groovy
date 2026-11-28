@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.*
 class ScheduleAdminServicesSmokeTests {
     private static final String APPLY = "component://darpan/data/zzScheduleJobDefaultsApply.xml"
     private static final List<String> JOB_SEEDS = ["AuditSeedData", "ReconciliationJobSeedData", "TwoFactorSeedData",
-            "ScriptJobSeedData", "TenantConfigSeedData"].collect { "component://darpan/data/${it}.xml".toString() }
+            "TenantConfigSeedData"].collect { "component://darpan/data/${it}.xml".toString() }
     private static final String S = "admin.ScheduleAdminServices."
     private static final String EXTRACTS = "purge_ReconciliationExtractFiles_daily"
     private static final String SCAN = "scan_ReconciliationAutomations_5m"
@@ -114,7 +114,7 @@ class ScheduleAdminServicesSmokeTests {
         }
         List<Map> jobs = ok(svc("get#ServiceJobs", [:])).result.jobs
         List<Map> mine = jobs.findAll { it.defaultCronExpression != null }
-        assertEquals(12, mine.size(), mine*.jobName.toString())   // DAR-BE-334 removed scan_TenantScriptDeployments_5m (this count was left at 12); DAR-BE-374 + maintain_IdIndex_nightly
+        assertEquals(12, mine.size(), mine*.jobName.toString())   // the 12 jobs of the four job seeds loaded here (OpsSeedData's two are not loaded)
         mine.each { Map j ->
             assertTrue(j.editable, j.jobName)
             assertFalse(j.edited, j.jobName)
@@ -188,9 +188,14 @@ class ScheduleAdminServicesSmokeTests {
 
     @Test
     void aCronThatBurstsOrNeverRunsOrIsBlankSavesNothing() {
-        ["0 * 3 * * ?", "0 0 0 30 2 ?", "* * * * *", "   ", "0 0 2,3 * * ?"].each { String cron ->
+        ["0 * 3 * * ?"  : "this job may run at most every 360 minutes.",
+         "0 0 0 30 2 ?" : "This cron never runs within 400 days.",
+         "* * * * *"    : "Not a valid Quartz cron",
+         "   "          : "The cron is blank; pause the job instead of clearing its cron.",
+         "0 0 2,3 * * ?": "this job may run at most every 360 minutes."].each { String cron, String reason ->
             Map out = svc("update#ServiceJob", [jobName: EXTRACTS, cronExpression: cron, paused: "Y"])
             assertTrue(out.hasError, "'${cron}' must be refused")
+            assertTrue(out.errors.any { it.contains(reason) }, "'${cron}': expected '${reason}', got ${out.errors}")
         }
         EntityValue row = job(EXTRACTS)
         assertEquals("0 15 2 * * ?", row.cronExpression)
@@ -201,9 +206,15 @@ class ScheduleAdminServicesSmokeTests {
 
     @Test
     void aParameterOffTheServiceOrOfTheWrongTypeOrBlankSavesNothing() {
-        [[bogus: "1"], [limit: "abc"], [limit: ""], [limit: "  "]].each { Map p ->
+        [[[bogus: "1"], "bogus is not a parameter of reconciliation.ReconciliationAutomationServices.scan#DueAutomations; it takes "],
+         [[limit: "abc"], "limit must be Integer; abc is not."],
+         [[limit: ""], "limit is blank; reset it to its default instead."],
+         [[limit: "  "], "limit is blank; reset it to its default instead."]].each { List c ->
+            Map p = (Map) c[0]
+            String reason = (String) c[1]
             Map out = svc("update#ServiceJob", [jobName: SCAN, cronExpression: "0 0/10 * * * ?", parameters: p])
             assertTrue(out.hasError, "${p} must be refused")
+            assertTrue(out.errors.any { it.contains(reason) }, "${p}: expected '${reason}', got ${out.errors}")
         }
         EntityValue row = job(SCAN)
         assertEquals("0 0/5 * * * ?", row.cronExpression, "the cron in the same call is not saved either")
@@ -406,7 +417,13 @@ class ScheduleAdminServicesSmokeTests {
          "update#ServiceJob": [jobName: EXTRACTS, cronExpression: "0 0 4 * * ?"], "reset#ServiceJob": [jobName: EXTRACTS]].each { String method, Map params ->
             [PLAIN, TENANT_ADMIN, DADMIN].each { String who ->
                 Map out = svc(method, params, who)
-                assertTrue(out.authzDenied != null || out.hasError, "${method} must refuse ${who}")
+                // refused by the admin.* artifact fence, or else by the service's own super-admin check: no other error counts
+                assertTrue(out.authzDenied != null || out.errors.contains(AdminAccessSupport.SUPER_ADMIN_REQUIRED_MESSAGE),
+                        "${method} must refuse ${who}: ${out.authzDenied} ${out.errors}")
+                // and nothing is read out on the way
+                assertFalse(out.result?.jobs as boolean, "${method} leaks no job to ${who}: ${out.result?.jobs}")
+                assertNull(out.result?.nextRuns, "${method} leaks no next runs to ${who}")
+                assertNull(out.result?.job, "${method} returns no job to ${who}")
             }
         }
         assertEquals("0 15 2 * * ?", job(EXTRACTS).cronExpression)

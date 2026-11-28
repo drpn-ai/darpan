@@ -175,8 +175,15 @@ class PairFactTypeServiceTests {
 
     @Test
     void anUnknownOrBlankCheckIsRefused() {
-        assertRefused(generate("NOPE", [file1: [], file2: []]), "Check NOPE does not exist")
-        assertNull(generate("NOPE", [file1: [], file2: []]).out?.factTypeId)
+        Map unknown = generate("NOPE", [file1: [], file2: []])
+        assertRefused(unknown, "Check NOPE does not exist")
+        assertNull(unknown.out?.factTypeId)
+        // checkId is a required in-parameter: blank and missing are refused by the service engine before the actions run
+        [null, ""].each { String blank ->
+            Map out = generate(blank, [file1: [], file2: []])
+            assertRefused(out, "Field cannot be empty")
+            assertNull(out.out?.factTypeId, "'${blank}' mints nothing")
+        }
     }
 
     // ---------------------------------------------------------------------------------------

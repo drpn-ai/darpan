@@ -9,8 +9,6 @@ import groovy.transform.CompileDynamic
 @CompileDynamic
 class AuditLogTestSupport {
 
-    static final List<String> CREATE_ONLY = ["darpan.admin.AdminAuditLog", "darpan.admin.DataExportLog"]
-
     static void wipe(def ec, String entityName = "darpan.admin.AdminAuditLog") {
         def ed = ec.entity.getEntityDefinition(entityName)
         String group = ec.entity.getEntityGroupName(entityName)

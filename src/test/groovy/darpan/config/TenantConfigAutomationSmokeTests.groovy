@@ -1,7 +1,6 @@
 package darpan.config
 
 import darpan.reconciliation.support.SharedMoqui
-import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -13,6 +12,9 @@ import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
 import java.sql.Timestamp
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 import static org.junit.jupiter.api.Assertions.*
 
@@ -136,13 +138,19 @@ class TenantConfigAutomationSmokeTests {
         Map line = (preview.plan.lines as List<Map>).find { it.kind == "AUTOMATION" }
         assertEquals("UPDATE", line?.action, "the automation goes back: ${preview.plan.lines}")
 
+        Timestamp restoredFrom = new Timestamp(System.currentTimeMillis())
         Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
         assertTrue(out.restored as boolean, out.errorText as String)
         def automation = asSystem { ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one() }
         assertEquals(MORNING, automation.scheduleExpr)
         assertEquals("Y", automation.isActive, "a restore never pauses or starts an automation")
-        assertNotEquals(Timestamp.valueOf("2026-10-31 16:00:00"), automation.nextScheduledFireTime,
-                "the next firing follows the restored schedule")
+        // The next firing follows the restored schedule: the first 6:00 in the automation's own zone after the restore.
+        Timestamp next = automation.nextScheduledFireTime as Timestamp
+        assertNotNull(next, "the restore sets the next firing")
+        ZonedDateTime nextLocal = next.toInstant().atZone(ZoneId.of("America/Los_Angeles"))
+        assertEquals(LocalTime.of(6, 0), nextLocal.toLocalTime(), "6:00 in Los Angeles, the restored schedule: ${nextLocal}")
+        assertTrue(next.after(restoredFrom) && next.time - restoredFrom.time <= 86_400_000L,
+                "the first 6:00 after the restore, not a later one: ${nextLocal}, restored at ${restoredFrom}")
         assertEquals('["Closed"]', asSystem { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().filterValues })
         assertEquals(v1.hash, out.after.hash, "exactly version 1 again")
     }

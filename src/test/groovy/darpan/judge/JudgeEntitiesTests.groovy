@@ -35,6 +35,7 @@ class JudgeEntitiesTests {
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
     private static final String SERVICES = "judge.JudgeConfigServices"
+    private static final String B_LABEL = "Missing at Gorjana"
 
     private ExecutionContext ec
     private String ruleSetA
@@ -75,6 +76,9 @@ class JudgeEntitiesTests {
         checkB = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
         insert("darpan.audit.AuditCheck", [checkId: checkB, companyUserGroupId: B, checkCode: "C1", label: "B check"])
         insert("darpan.judge.CheckDecision", [checkId: checkB, stageEnumId: "CDS_MUST_HOLD", companyUserGroupId: B, ruleSetId: ruleSetB])
+        // B's own outcome meaning, stored as B: the row A's reads must never see.
+        assertEquals([], call("store#DecisionOutcome", [ruleSetId: ruleSetB, outcomeId: "FOUND", outcomeKindEnumId: "JOK_FINDING",
+                label: B_LABEL]).errors, "fixture: B's outcome")
     }
 
     @AfterAll
@@ -99,7 +103,9 @@ class JudgeEntitiesTests {
         // B's decision outcome FOUND exists, but not for A.
         Map foreign = call("store#DecisionOutcome", [ruleSetId: ruleSetB, outcomeId: "FOUND", outcomeKindEnumId: "JOK_FINDING", label: "x"])
         assertRefused(foreign, "Decision ${ruleSetB} does not list outcome FOUND")
-        assertNull(find("darpan.judge.DecisionOutcome", [ruleSetId: ruleSetB, outcomeId: "FOUND"]))
+        def bRow = find("darpan.judge.DecisionOutcome", [ruleSetId: ruleSetB, outcomeId: "FOUND"])
+        assertEquals([B, "JOK_FINDING", B_LABEL], [bRow?.companyUserGroupId, bRow?.outcomeKindEnumId, bRow?.label],
+                "B's own row is untouched by A's refused write")
         assertRefused(call("store#DecisionOutcome", [ruleSetId: ruleSetA, outcomeId: "FOUND", outcomeKindEnumId: "JOK_BOGUS", label: "x"]),
                 "Outcome kind JOK_BOGUS")
     }
@@ -138,7 +144,12 @@ class JudgeEntitiesTests {
         assertEquals("HotWax Support", found.fixOwner)
         assertEquals("OMS", found.fixWhereEnumId)
         assertEquals("JOK_EXPECTED", (outcomes["${ruleSetA2}|LATE".toString()] as Map).outcomeKindEnumId)
-        assertFalse(outcomes.keySet().any { it.toString().startsWith(ruleSetB) }, "no row of tenant B")
+        assertFalse(outcomes.keySet().any { it.toString().startsWith(ruleSetB) }, "no row of tenant B: ${outcomes.keySet()}")
+        // the control: B's read of its own check does carry that row
+        actAs(EDITOR_USERNAME, B)
+        Map bOwn = call("get#CheckJudgeConfig", [checkId: checkB])
+        assertEquals([], bOwn.errors)
+        assertEquals(B_LABEL, ((bOwn.out.outcomes as Map)["${ruleSetB}|FOUND".toString()] as Map)?.label, "${bOwn.out.outcomes}")
         List sets = r.out.parameterSets as List<Map>
         assertEquals(["P1", "P2"], sets*.parameterSetId)
         assertEquals("Strict", sets[0].label)

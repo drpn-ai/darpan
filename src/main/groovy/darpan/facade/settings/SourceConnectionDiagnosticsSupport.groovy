@@ -161,11 +161,8 @@ class SourceConnectionDiagnosticsSupport {
      * rather than being dropped: a row nobody can classify must not silently read as healthy.
      */
     protected static List<Map<String, Object>> normalizeChecks(Object raw) {
-        if (!(raw instanceof Collection)) return []
         List<Map<String, Object>> out = []
-        ((Collection) raw).each { Object item ->
-            if (!(item instanceof Map)) return
-            Map row = (Map) item
+        mapRows(raw).each { Map row ->
             String key = normalize(row.get("key"))
             String label = normalize(row.get("label"))
             if (!key || !label) return
@@ -184,11 +181,8 @@ class SourceConnectionDiagnosticsSupport {
      * rather-than-fail-the-call posture: an entry missing systemEnumId is dropped, not defaulted.
      */
     protected static List<Map<String, Object>> normalizeEndpoints(Object raw) {
-        if (!(raw instanceof Collection)) return []
         List<Map<String, Object>> out = []
-        ((Collection) raw).each { Object item ->
-            if (!(item instanceof Map)) return
-            Map row = (Map) item
+        mapRows(raw).each { Map row ->
             String systemEnumId = normalize(row.get("systemEnumId"))
             if (!systemEnumId) return
             out.add([
@@ -198,6 +192,11 @@ class SourceConnectionDiagnosticsSupport {
             ] as Map<String, Object>)
         }
         return out
+    }
+
+    /** The Map rows of whatever a probe returned: [] for a non-collection, non-Map items skipped. */
+    private static List<Map> mapRows(Object raw) {
+        return raw instanceof Collection ? ((Collection) raw).findAll { it instanceof Map } as List<Map> : []
     }
 
     private static Map<String, Object> unavailable(long startedAt) {

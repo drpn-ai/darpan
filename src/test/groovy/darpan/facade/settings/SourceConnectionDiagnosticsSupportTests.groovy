@@ -78,4 +78,20 @@ class SourceConnectionDiagnosticsSupportTests {
         assertEquals(SourceConnectionDiagnosticsSupport.STATUS_PASS,
                 SourceConnectionDiagnosticsSupport.check("k", "L", SourceConnectionDiagnosticsSupport.STATUS_PASS).status)
     }
+
+    // Shopify's probe reports per-endpoint enablement; a row without a systemEnumId is dropped, never defaulted, and a missing
+    // label or flag reads as the id and enabled.
+    @Test
+    void endpointsKeepOnlyRowsWithASystemAndDefaultTheRest() {
+        List out = SourceConnectionDiagnosticsSupport.normalizeEndpoints([
+                [systemEnumId: "SHOP_ORDERS", endpointLabel: "Orders", isEnabled: false],
+                [systemEnumId: "SHOP_RETURNS"],
+                [endpointLabel: "no system"],
+                "not a map",
+        ])
+        assertEquals([[systemEnumId: "SHOP_ORDERS", endpointLabel: "Orders", isEnabled: false],
+                      [systemEnumId: "SHOP_RETURNS", endpointLabel: "SHOP_RETURNS", isEnabled: true]], out)
+        assertTrue(SourceConnectionDiagnosticsSupport.normalizeEndpoints(null).isEmpty())
+        assertTrue(SourceConnectionDiagnosticsSupport.normalizeEndpoints([:]).isEmpty())
+    }
 }

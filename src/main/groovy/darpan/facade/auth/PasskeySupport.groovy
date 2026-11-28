@@ -120,7 +120,7 @@ class PasskeySupport {
      */
     private static String rpId(def ec) {
         String configured = normalize(System.getenv("DARPAN_WEBAUTHN_RP_ID")) ?: normalize(System.getProperty("darpan.webauthn.rpId"))
-        if (configured) return configured.toLowerCase()
+        if (configured) return configured.toLowerCase(Locale.ROOT)
         return hostOf(TenantNotificationSupport.resolveAppBaseUrl(ec))
     }
 
@@ -142,7 +142,7 @@ class PasskeySupport {
             if (!value || value == "*") return
             try {
                 URI uri = URI.create(value)
-                String host = uri.host?.toLowerCase()
+                String host = uri.host?.toLowerCase(Locale.ROOT)
                 if (!host || uri.path || uri.query) return
                 if (!(host == rp || host.endsWith("." + rp))) return
                 boolean local = host == "localhost"
@@ -158,7 +158,7 @@ class PasskeySupport {
     private static String hostOf(String url) {
         if (!url) return null
         try {
-            return URI.create(url).host?.toLowerCase()
+            return URI.create(url).host?.toLowerCase(Locale.ROOT)
         } catch (Exception ignored) {
             return null
         }
@@ -167,7 +167,7 @@ class PasskeySupport {
     // ---- reads ----
 
     /** The person's live passkeys: [factor, credential] pairs, oldest first. */
-    static List<Map> activePasskeys(def ec, String userId) {
+    private static List<Map> activePasskeys(def ec, String userId) {
         if (!userId) return []
         return withCredentials(ec, TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "self-scoped auth: the person's live passkeys")
                 .condition("userId", userId).condition("factorTypeEnumId", TwoFactorRecords.TYPE_PASSKEY)
@@ -191,7 +191,7 @@ class PasskeySupport {
         Map<String, Object> credentials = TwoFactorRecords.find(ec, CREDENTIAL, "self-scoped auth: the person's passkey credentials")
                 .condition("factorId", EntityCondition.IN, factors*.factorId).useCache(false).list()
                 .collectEntries { [(it.factorId): it] }
-        return factors.findAll { credentials[it.factorId] != null }.collect { [factor: it, credential: credentials[it.factorId]] }
+        return factors.findAll { credentials.get(it.factorId) != null }.collect { [factor: it, credential: credentials.get(it.factorId)] }
     }
 
     // ---- ceremony options ----
@@ -452,7 +452,7 @@ class PasskeySupport {
      * can compute it. Read once per framework and kept in memory. Created race-safely: the PK is fixed, so a second node
      * creating it at the same moment fails its insert and reads the first one's row.
      */
-    static byte[] decoyKey(def ec) {
+    private static byte[] decoyKey(def ec) {
         Object factory = ec.factory
         Map cached = decoyKeyCache
         if (cached != null && cached.factory.is(factory)) return (byte[]) cached.key
@@ -464,11 +464,6 @@ class PasskeySupport {
             }
             return (byte[]) cached.key
         }
-    }
-
-    /** Tests: forget the in-memory decoy key, so the next begin reads it from the database again. */
-    static void forgetDecoyKey() {
-        decoyKeyCache = null
     }
 
     private static byte[] loadOrCreateDecoyKey(def ec) {
@@ -531,7 +526,7 @@ class PasskeySupport {
 
     /** Who an assertion claims to be: the owner of the live passkey its credential id names (one live owner per credential
      *  id), or null. Not yet verified: verifyAssertion checks the signature against that person's passkeys. */
-    static String firstSignInOwner(def ec, Object assertionJson) {
+    private static String firstSignInOwner(def ec, Object assertionJson) {
         String json = normalize(assertionJson)
         if (!json) return null
         byte[] credentialId
@@ -549,7 +544,7 @@ class PasskeySupport {
      * (MoquiShiroRealm.loginPrePassword): the username, else the username ignoring case, else the email address ignoring
      * case. Null when nothing matches, or more than one account does.
      */
-    static def accountNamed(def ec, String username) {
+    private static def accountNamed(def ec, String username) {
         if (!username) return null
         def exact = TwoFactorRecords.find(ec, ACCOUNT, "pre-auth: the account a typed username names")
                 .condition("username", username).useCache(false).one()

@@ -635,7 +635,7 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
         Closure<List> keyRows = { ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().useCache(false).list() }
 
         ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
-        PasskeySupport.forgetDecoyKey()
+        PasskeySupport.resetForTests()
         List<Map> raced = anonInParallel("facade.AuthFacadeServices.begin#PasskeyFirstSignIn", [[username: username], [username: username]])
         String first = decoy(raced[0])
         assertEquals(first, decoy(raced[1]), "two begins at once agree")
@@ -643,7 +643,7 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
         String stored = keyRows()[0].secretValue
         assertEquals(32, AuthPrimitives.b64urlDecode(stored).length)
 
-        PasskeySupport.forgetDecoyKey()
+        PasskeySupport.resetForTests()
         assertEquals(first, decoy(anon("begin#PasskeyFirstSignIn", [username: username]).out), "re-read from the database: the same decoy")
         assertEquals(1, keyRows().size())
         assertEquals(hmac(AuthPrimitives.b64urlDecode(stored), username), first, "the decoy is the stored key's HMAC")
@@ -655,7 +655,7 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
 
         // Another node stored the key first: this node uses that row, not one of its own.
         ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
-        PasskeySupport.forgetDecoyKey()
+        PasskeySupport.resetForTests()
         String othersKey = AuthPrimitives.newToken()
         ec.entity.makeValue(PasskeySupport.AUTH_SECRET).setAll([secretId: PasskeySupport.DECOY_SECRET_ID, secretValue: othersKey,
                 createdDate: ec.user.nowTimestamp]).create()

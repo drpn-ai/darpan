@@ -75,7 +75,7 @@ class TwoFactorPolicy {
         Set<String> requiringRoles = datedRoles(ec, false).findAll { requiredNow(it.value, now) }.keySet()
         Map<String, Set<String>> roles = requiringRoles ? rolesByUser(ec, userIds, requiringRoles, false) : [:]
         return userIds.collectEntries { String userId ->
-            [(userId): userId in enrolled ? ON : (roles[userId] ? REQUIRED_NOT_SET_UP : OFF)]
+            [(userId): userId in enrolled ? ON : (roles.get(userId) ? REQUIRED_NOT_SET_UP : OFF)]
         }
     }
 
@@ -171,12 +171,13 @@ class TwoFactorPolicy {
             TwoFactorRecords.find(ec, TwoFactorRecords.EVENT, "admin: when each person was last reminded about two-factor")
                     .condition("userId", EntityCondition.IN, chunk).condition("eventType", REMINDER_SENT).useCache(false).list().each {
                 Timestamp at = it.eventDate as Timestamp
-                if (at != null && (lastSent[it.userId as String] == null || at.after(lastSent[it.userId as String]))) lastSent[it.userId as String] = at
+                String person = it.userId as String
+                if (at != null && (lastSent.get(person) == null || at.after(lastSent.get(person)))) lastSent.put(person, at)
             }
             for (String userId in chunk) {
                 if (userId in enrolled) continue
                 Timestamp from = requiredFrom(ec, userId)
-                if (from == null || !reminderDue(from, now, lastSent[userId], daysBefore, repeatDays)) continue
+                if (from == null || !reminderDue(from, now, lastSent.get(userId), daysBefore, repeatDays)) continue
                 def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the person a two-factor reminder goes to")
                         .condition("userId", userId).useCache(false).one()
                 if (!(account?.emailAddress as String)?.trim()) continue
@@ -250,16 +251,16 @@ class TwoFactorPolicy {
             finder("moqui.security.UserGroupMember", "self-scoped auth: Darpan-wide roles for the two-factor policy")
                     .condition("userId", EntityCondition.IN, userIds).condition("userGroupId", EntityCondition.IN, darpanRoles)
                     .conditionDate("fromDate", "thruDate", now).useCache(false).list()
-                    .each { roles[it.userId as String] << (it.userGroupId as String) }
+                    .each { roles.get(it.userId as String).add(it.userGroupId as String) }
         }
         if (TENANT_ADMIN_GROUP_ID in groupIds) {
             finder("darpan.auth.TenantUserPermissionGroupMember", "self-scoped auth: tenant admin in any tenant, for the two-factor policy")
                     .condition("userId", EntityCondition.IN, userIds).condition("permissionUserGroupId", TENANT_ADMIN_GROUP_ID)
                     .conditionDate("fromDate", "thruDate", now).useCache(false).list()
-                    .each { roles[it.userId as String] << TENANT_ADMIN_GROUP_ID }
+                    .each { roles.get(it.userId as String).add(TENANT_ADMIN_GROUP_ID) }
         }
         if (EVERYONE in groupIds) {
-            coveredAmong(ec, userIds, now, perRequest).each { roles[it] << EVERYONE }
+            coveredAmong(ec, userIds, now, perRequest).each { roles.get(it).add(EVERYONE) }
         }
         return roles
     }

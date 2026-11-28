@@ -200,7 +200,7 @@ class TwoFactorSupport {
     /** A recovery code: one-time, refused while codes are locked (the lock lives on the app's row; a person with
      *  passkeys only has no lock: 80-bit codes, 5 per challenge and the failed-login count bound guessing). Returns
      *  [ok, recoveryCodesLeft]. Emails the person. */
-    static Map<String, Object> consumeRecoveryCode(def ec, String userId, Object recoveryCode) {
+    private static Map<String, Object> consumeRecoveryCode(def ec, String userId, Object recoveryCode) {
         if (!TwoFactorRecords.enabled(ec, userId)) return [ok: false]
         def app = activeApp(ec, userId, true)
         if (app?.codesLockedDate != null) {
@@ -530,7 +530,7 @@ class TwoFactorSupport {
 
     /** Upper case, no spaces or dashes: what the person typed, as hashed. Empty when it cannot be a recovery code. */
     static String normalizeRecoveryCode(Object code) {
-        String value = code == null ? "" : code.toString().toUpperCase().replaceAll(/[^A-Z0-9]/, "")
+        String value = code == null ? "" : code.toString().toUpperCase(Locale.ROOT).replaceAll(/[^A-Z0-9]/, "")
         return value.length() == RECOVERY_CODE_LENGTH ? value : ""
     }
 
@@ -542,10 +542,10 @@ class TwoFactorSupport {
 
     /** xxxx-xxxx-xxxx-xxxx, lower case, as shown once. */
     static String formatRecoveryCode(String value) {
-        return value.toLowerCase().toList().collate(4).collect { it.join("") }.join("-")
+        return value.toLowerCase(Locale.ROOT).toList().collate(4).collect { it.join("") }.join("-")
     }
 
-    static String recoveryHash(String value, String salt) {
+    private static String recoveryHash(String value, String salt) {
         return AuthPrimitives.sha256Hex(salt + ":" + value)
     }
 

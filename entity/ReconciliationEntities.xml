@@ -145,7 +145,8 @@
         <field name="file2Name" type="text-medium"/>
         <field name="file2DataManagerPath" type="text-long"/>
         <field name="resultDataManagerPath" type="text-long"/>
-        <field name="statusEnumId" type="id" default="'AUT_STAT_SUCCESS'"/>
+        <!-- DAR-OPS-029 S99-022: no default; every creator states the status (a SUCCESS default was a latent hollow green). -->
+        <field name="statusEnumId" type="id"/>
         <field name="reconciliationType" type="text-short"/>
         <field name="differenceCount" type="number-integer"/>
         <field name="onlyInFile1Count" type="number-integer"/>

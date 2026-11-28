@@ -79,7 +79,6 @@ class AutomationEntityContractTests {
                 "createdDate", "startedDate", "completedDate", "lastUpdatedDate",
         ])
         assertEquals("true", attr(field(runResult, "reconciliationRunResultId"), "is-pk"))
-        assertEquals("'AUT_STAT_SUCCESS'", attr(field(runResult, "statusEnumId"), "default"))
         assertRelationship(runResult, "Status", "moqui.basic.Enumeration", "statusEnumId", "enumId")
 
         assertFields(automation, [
@@ -204,6 +203,18 @@ class AutomationEntityContractTests {
                 "ReconciliationSavedRunSupport should route RECONCILIATION_MAPPING_MEMBER reads through TenantScopedFinder.findGlobalUnscoped")
         assertFalse(savedRunSource.contains("ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER)"),
                 "ReconciliationSavedRunSupport should not have bare ec.entity.find(RECONCILIATION_MAPPING_MEMBER) after P0#4 step 5 migration")
+    }
+
+    /**
+     * DAR-OPS-029 S99-022 (S35 I3): a run result states its status when it is made. A default of AUT_STAT_SUCCESS meant any
+     * creator that forgot the status wrote a green run (a latent hollow green); every creator sets it.
+     */
+    @Test
+    void aRunResultHasNoDefaultStatus() {
+        def runResult = entity(parse("entity/ReconciliationEntities.xml").entity, "ReconciliationRunResult")
+        def status = runResult.field.find { attr(it, "name") == "statusEnumId" }
+        assertNotNull(status)
+        assertEquals(null, attr(status, "default"), "ReconciliationRunResult.statusEnumId must not default (it was 'AUT_STAT_SUCCESS')")
     }
 
     @Test

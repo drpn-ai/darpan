@@ -378,6 +378,9 @@ def persistRunResult = { Map<String, Object> fields ->
             if (entry.value != null) runResultValue.set(entry.key as String, entry.value)
         }
         if (creating) {
+            // S99-022: the run-result status has no default. A row made here (no beginRun row to update) is RUNNING
+            // until its run ends it, or the reaper does; it never reads SUCCESS by default.
+            if (!runResultValue.statusEnumId) runResultValue.statusEnumId = ReconciliationOutputSupport.STATUS_RUNNING
             runResultValue.createdDate = fields.createdDate ?: ec.user.nowTimestamp
             runResultValue.lastUpdatedDate = ec.user.nowTimestamp
             runResultValue.setSequencedIdPrimary()

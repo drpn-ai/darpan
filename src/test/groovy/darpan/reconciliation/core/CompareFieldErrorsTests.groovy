@@ -37,6 +37,16 @@ class CompareFieldErrorsTests {
     }
 
     @Test
+    @org.junit.jupiter.api.Timeout(5)
+    void aCauseChainThatLoopsBackEnds() {
+        // DAR-OPS-029 S01a: A -> B -> A. The old `c.cause == c` check caught only a self-cause, so this spun forever.
+        RuntimeException a = new RuntimeException("Disk full")
+        RuntimeException b = new RuntimeException("wrapped", a)
+        a.initCause(b)
+        assertNull(CompareFieldErrors.plainMessage(a, "HotWax"))
+    }
+
+    @Test
     void anyOtherErrorIsLeftAlone() {
         assertNull(CompareFieldErrors.plainMessage(new RuntimeException("Disk full"), "HotWax"))
     }

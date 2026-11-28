@@ -1,5 +1,8 @@
 package darpan.reconciliation.core
 
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
 /**
  * DAR-BE-073. What one press of Run may read once and share across its questions.
  *
@@ -15,6 +18,7 @@ package darpan.reconciliation.core
  */
 class RunSnapshotScope {
 
+    private static final Logger logger = LoggerFactory.getLogger(RunSnapshotScope.class)
     static final String SWITCH_PROPERTY = "darpan.reconciliation.runSnapshot"
     private static final ThreadLocal<RunSnapshotScope> CURRENT = new ThreadLocal<>()
 
@@ -25,7 +29,7 @@ class RunSnapshotScope {
 
     private RunSnapshotScope(File dir) { this.dir = dir }
 
-    static boolean enabled() {
+    private static boolean enabled() {
         return !"off".equalsIgnoreCase(System.getProperty(SWITCH_PROPERTY)?.trim())
     }
 
@@ -55,7 +59,10 @@ class RunSnapshotScope {
     }
 
     private void close() {
-        closers.each { Closure c -> try { c.call() } catch (Throwable ignored) { } }
+        // A closer that fails leaves a file behind; the walk's answer stands, but the leak is logged, not hidden.
+        closers.each { Closure c ->
+            try { c.call() } catch (Throwable t) { logger.warn("Run snapshot closer failed in {}: {}", dir, t.toString()) }
+        }
         entries.clear()
         if (dir.isDirectory()) dir.deleteDir()
     }

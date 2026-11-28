@@ -14,13 +14,14 @@ class CompareFieldErrors {
 
     /** The plain message for a missing-field failure anywhere in the cause chain; null for any other error. */
     static String plainMessage(Throwable t, String sideLabel) {
-        for (Throwable c = t; c != null; c = c.cause) {
+        // Identity-tracked: a cause chain that loops back (A -> B -> A) would otherwise spin forever.
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>())
+        for (Throwable c = t; c != null && seen.add(c); c = c.cause) {
             String m = c.message ?: ""
             def s = STRUCT.matcher(m)
             if (s.find()) return words(s.group(1), s.group(2), sideLabel)
             def col = COLUMN.matcher(m)
             if (col.find()) return words(col.group(1), col.group(2), sideLabel)
-            if (c.cause == c) break
         }
         return null
     }

@@ -58,6 +58,29 @@ class BrainPackGuardTests {
         assertEquals([] as Set<String>, enabled - concluded, "@mayEnable names causes no rule concludes")
     }
 
+    // DAR-OPS-029 S03b (QA): the ask planner reads a cause's rank from @rank, BestCause from the rank the rule inserts; they
+    // must be one number, and the code inserted must be the code @concludes names.
+    @Test
+    void everyCauseInsertsTheCodeAndRankItsRuleDeclares() {
+        List<String> causes = rules(pack()).findAll { it.contains("@concludes(") }
+        assertTrue(causes.size() >= 20, "${causes.size()}")
+        causes.each { String r ->
+            String name = r.readLines()[0]
+            String code = ((r =~ /@concludes\("([A-Z0-9_]+)"\)/)[0] as List)[1]
+            String rank = ((r =~ /@rank\((\d+)\)/)[0] as List)[1]
+            def inserted = (r =~ /Cause\.(?:fix|expected)\(\s*\$\w+,\s*"([A-Z0-9_]+)",\s*(\d+)/)
+            assertTrue(inserted.find(), name)
+            assertEquals([code, rank], [inserted.group(1), inserted.group(2)], name)
+        }
+    }
+
+    // DAR-OPS-029 S03b OC197 (B7): paymentsComplete gates more causes than partial payment (a voided authorization's
+    // PAY_EXPIRED at 95, POS_UNPAID at 85, ...), so the payments question stays worth asking until a cause at 95 holds.
+    @Test
+    void thePaymentsQuestionCanUnlockEveryCauseItsCompletenessGates() {
+        assertEquals(95, BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])).orderPayments)
+    }
+
     // DAR-BE-229: a tunable number is a GraphParam fact, never a decimal literal in a rule's when-part.
     @Test
     void noRuleWhenPartHoldsADecimalLiteral() {

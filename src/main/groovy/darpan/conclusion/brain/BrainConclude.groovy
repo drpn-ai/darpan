@@ -146,7 +146,11 @@ class BrainConclude {
                 Object value = record.get(e.answeredBy)
                 if (value == null || (value instanceof CharSequence && !value.toString().trim())) return
                 String id = e.subject == "Product" ? productIdOf(kind, f) : kind == "shopifyOrder" ? null : orderIdOf(kind, f)
-                if (id) out.computeIfAbsent(e.name, { [:] }).put(id, [(e.answeredBy): value])
+                if (!id) return
+                // OC195: what travels with the answer (the slot-cap flag), so a cut-off list is never taken as whole.
+                Map answer = [(e.answeredBy): value]
+                (e.carries ?: []).each { String field -> if (record.containsKey(field)) answer.put(field, record.get(field)) }
+                out.computeIfAbsent(e.name, { [:] }).put(id, answer)
             }
         }
         return out

@@ -247,14 +247,22 @@ class RunConclusionSupport {
         // DAR-BE-151: a scope in the brain is concluded by it first; the tree concludes what the brain leaves unexplained.
         Map brain = null
         if (args.brain instanceof Map) {
-            List<Map> findings = []
-            int total = 0
+            // DAR-BE-151: only the rows its statements read count toward the cap; the tree concludes the others. OC198 (DAR-OPS-029
+            // S03b): past the cap the brain takes the first by key, not by row order, so pass 1 reads only the keys.
+            List<String> brainKeys = []
             DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
-                // DAR-BE-151: only the rows its statements read count toward the cap; the tree concludes the others.
+                if (finding(row).bucket in darpan.conclusion.brain.BrainConclude.BUCKETS) brainKeys.add(row.get("primaryId")?.toString() ?: "")
+            }
+            int total = brainKeys.size()
+            Set<String> taken = total > maxBrainFindings ? (brainKeys.sort(false).take(maxBrainFindings) as Set<String>) : null
+            brainKeys = null
+            List<Map> findings = []
+            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
                 Map f = finding(row)
                 if (!(f.bucket in darpan.conclusion.brain.BrainConclude.BUCKETS)) return
-                if (++total > maxBrainFindings) return
-                findings.add(slimFinding(f, row.get("primaryId")?.toString()))
+                String key = row.get("primaryId")?.toString()
+                if (taken != null && !taken.contains(key ?: "")) return
+                findings.add(slimFinding(f, key))
             }
             brain = BrainConclude.run((Map) args.brain + [findings: findings])
             if (total > maxBrainFindings) {

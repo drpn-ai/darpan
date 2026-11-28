@@ -32,7 +32,9 @@ class BrainAskPlannerTests {
         // return has to name first, so the return is worth asking up to 58 too.
         // DAR-BE-204: a Shopify order's HotWax order can unlock up to "payment failed, never paid" (95): always worth asking.
         // DAR-BE-373: an R7 order's items unlock what its products can: up to "Sold on a retired SKU" (66).
-        assertEquals(RANKS + [productNetsuiteId: 66, replacementReturn: 58, returnRma: 55, returnMemo: 55, originalInNetsuite: 58,
+        // DAR-OPS-029 S03b (OC197): an order's payments can unlock every cause their completeness gates, up to a voided
+        // authorization's "payment failed, never paid" (95), not only partial payment (80).
+        assertEquals([orderPayments: 95, productNetsuiteId: 66, replacementReturn: 58, returnRma: 55, returnMemo: 55, originalInNetsuite: 58,
                               omsOrderByShopifyId: 95, orderItems: 66],
                 BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])))
     }

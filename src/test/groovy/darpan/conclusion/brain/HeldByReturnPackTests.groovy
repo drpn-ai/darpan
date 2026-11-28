@@ -78,6 +78,14 @@ class HeldByReturnPackTests {
         assertTrue(asks.every { ((ReplacementReturn) it.subject).returnId == "M244082" && it.forOrder.orderId == "M1167220" })
     }
 
+    // DAR-OPS-029 S03b OC196: a return whose status the answer did not carry is not "still open"; nothing is claimed from it.
+    @Test
+    void aReturnWithNoStatusIsNotStillOpen() {
+        Map fired = fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297)], [M1201553: credit(297)],
+                more([M1201553: ret("M258769", null)]))
+        assertFalse(codes(fired).contains("RET_OPEN"), "${codes(fired)}")
+    }
+
     @Test
     void aReplacementWaitsOnItsOwnOpenReturn() {
         Map fired = fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297)], [M1201553: credit(297)],

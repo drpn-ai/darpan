@@ -173,6 +173,31 @@ class RunConclusionSupportTests {
         }
     }
 
+    // DAR-OPS-029 S03b OC198 (B3): past the cap, which findings the brain takes follows their keys, not the document's row
+    // order: M7 sorts first, so the brain concludes it however the rows were listed.
+    @Test
+    void pastTheCapTheBrainTakesTheSameFindingsInAnyRowOrder() {
+        darpan.conclusion.brain.BrainAnswerStore.clear()
+        int saved = RunConclusionSupport.maxBrainFindings
+        RunConclusionSupport.maxBrainFindings = 1
+        try {
+            Map paid = [orderId: "X", paymentPreferenceSlotsFull: false, paymentPreferences: [
+                    [paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_SETTLED", maxAmount: "10"],
+                    [paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_REFUNDED", maxAmount: "10"]]]
+            File doc = writeDiffDocument([
+                    missingRow("M8${SEP}01", FILE1, FILE2, [omsOrderId: "M8", orderItemSeqId: "01", orderGrandTotal: 50]),
+                    missingRow("M7${SEP}01", FILE1, FILE2, [omsOrderId: "M7", orderItemSeqId: "01", orderGrandTotal: 50])])
+            Map a = args(doc, NEVER_REACHED_RULES) + [brain: [kind: "orderLine", tenantId: "T_CAP_ORDER", labelFor: { String c -> c },
+                    fetchQuestion: { String q, List ids -> ids.collectEntries { [(it): paid] } }]]
+            RunConclusionSupport.concludeRun(a)
+            Map byId = ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it.conclusion.code] }
+            assertEquals("CONC_PARTIAL_PAYMENT_GIVEN_BACK", byId["M7${SEP}01".toString()], "the first key, not the first row")
+            assertEquals("CONC_NEVER_REACHED_NS", byId["M8${SEP}01".toString()])
+        } finally {
+            RunConclusionSupport.maxBrainFindings = saved
+        }
+    }
+
     /**
      * DAR-BE-118 (gorjana R8, F-104609): a return whose order is backordered in NetSuite. Only the findings that reach the
      * rule reading the lookup are asked about, each id once, in one call; a found record names the cause, a miss falls through.

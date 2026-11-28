@@ -65,6 +65,18 @@ class BrainConcludeTests {
         assertEquals(1, out.answeredFromFacts)
     }
 
+    // DAR-OPS-029 S03b OC195 (B4): payments the read's slot cap cut off (paymentPreferenceSlotsFull) are not the order's
+    // payments. The record's answer carries the flag, so the order is never "partial payment given back" from part of its list.
+    @Test
+    void aRecordWhosePaymentsTheReadCutOffIsNotConcludedFromThem() {
+        Map line = r1()
+        Map record = (Map) ((Map) ((Map) line.sides).FILE_1).record
+        record.paymentPreferences = PAYMENTS.M1088731.paymentPreferences
+        record.paymentPreferenceSlotsFull = true
+        Map out = run("orderLine", line, { String q, List ids -> [:] })
+        assertTrue(((Map) out.byKey[KEY])?.code != CODE, "a cut-off list proves nothing: ${out.byKey}")
+    }
+
     // A field the read kept but left empty answers nothing: the question is still asked.
     @Test
     void aKeptButEmptyFieldIsNotAnAnswer() {

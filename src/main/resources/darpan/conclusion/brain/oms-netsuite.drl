@@ -239,8 +239,10 @@ end
 
 // ---- questions: asked only when an answer can still change a cause; the ask planner batches them across findings
 
+// DAR-OPS-029 S03b (OC197): every cause its payments' completeness gates, so the ask is dropped only above all of them.
 rule "Ask for the payments of an order that never reached NetSuite"
-    @reads("OrderNotInNetsuite, Answered") @asks("orderPayments") @mayEnable("CONC_PARTIAL_PAYMENT_GIVEN_BACK")
+    @reads("OrderNotInNetsuite, Answered") @asks("orderPayments")
+    @mayEnable("CONC_PARTIAL_PAYMENT_GIVEN_BACK,PAY_EXPIRED,POS_UNPAID,PAID_NO_TXN,LINE_REMOVED,FX_GAP,HELD_IN_HC,REPL_UNPAID")
 when
     OrderNotInNetsuite( $o : order )
     not Answered( question == "orderPayments", subject == $o )
@@ -373,11 +375,12 @@ then
 end
 
 // DAR-BE-192 pieces: what a held replacement's return lacks. HotWax sends the replacement once its return has a linked memo.
+// A status the answer did not carry says nothing (DAR-OPS-029 S03b, OC196: a null status read as "still open").
 rule "A replacement's own return is still open"
     @reads("OrderNotInNetsuite, ReplacementReturn") @produces("ReplacementWaitsOnItsReturn")
 when
     OrderNotInNetsuite( $o : order )
-    $r : ReplacementReturn( replacement == $o, statusId != "RETURN_COMPLETED" )
+    $r : ReplacementReturn( replacement == $o, statusId != null, statusId != "RETURN_COMPLETED" )
 then
     insertLogical( new ReplacementWaitsOnItsReturn( $o, $r ) );
 end

@@ -24,6 +24,8 @@ import static darpan.conclusion.brain.BrainFactAdapter.RETURN_RMA
  *       order (1), then that order's replacement return (2), then the return's RMA (3).</li>
  *   <li>answeredBy (DAR-BE-227): the record field that already holds the answer when a read kept it (an Order or Product
  *       question only). A finding whose record carries it non-empty is answered from facts and never asked.</li>
+ *   <li>carries (DAR-OPS-029 S03b, OC195): further record fields that travel with an answer from facts, such as the slot-cap
+ *       flag that says a read cut the payment rows short.</li>
  *   <li>defaultLookup: the read taken when the scope names no lookup of the question's name, from the scope's HotWax
  *       config (the FILE_1 source's); null for a question that has none.</li>
  * </ul>
@@ -38,6 +40,7 @@ class BrainQuestionCatalog {
         String freshness
         int depth
         String answeredBy
+        List<String> carries
         /** hotwaxSourceConfigId -> lookup map, or null. */
         Closure<Map> defaultLookup
     }
@@ -53,6 +56,8 @@ class BrainQuestionCatalog {
                     defaultLookup: { String config -> null }),
             new Entry(name: ORDER_PAYMENTS, subject: "Order", batchSize: BATCH, freshness: FRESH_RUN, depth: 2,
                     answeredBy: "paymentPreferences",
+                    // OC195: a read the slots cut short says so; without the flag a cut-off list would read as every payment.
+                    carries: ["paymentPreferenceSlotsFull"],
                     // The order's raw OPP rows by OMS order id.
                     defaultLookup: { String config ->
                         [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: config,

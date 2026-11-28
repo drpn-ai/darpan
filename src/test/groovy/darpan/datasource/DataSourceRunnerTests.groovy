@@ -295,4 +295,37 @@ class DataSourceRunnerTests {
         assertEquals(1L, r.counts.openAtWindowEnd, "A is due after the window's end")
         assertEquals(["B"], kept)
     }
+
+    /** The fixture's first step alone, read by ids under `pattern`. */
+    private static Map byIdsUnder(String pattern) {
+        Map d = firstStepOnly()
+        Map first = (Map) ((List<Map>) d.steps)[0]
+        first.bind = ((Map) first.bind) + [ids: ((Map) ((Map) first.bind).ids) + [idPattern: pattern]]
+        return d
+    }
+
+    /**
+     * OC176 (DAR-OPS-029 S15a). A lookup key comes from a caller (an agent's or a CLI's lookup), and the definition's idPattern
+     * runs on it: a key over 200 characters is refused before the pattern sees it, whatever the pattern accepts.
+     */
+    @Test
+    void anOverLongLookupKeyIsRefusedBeforeThePatternRuns() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException) {
+            new DataSourceRunner(byIdsUnder(".*"), new AcmeLedgerFixture.ScriptedTransport())
+                    .run([mode: "ids", keys: ["A" * 5000], keyField: "invoiceNo"]) { }
+        }
+        assertTrue(e.message.contains("refuses"), e.message)
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 10, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void aKeyThePatternCannotDecideQuicklyIsRefused() {
+        // OC176: (a+)+$ on 40 a's and a b backtracks for longer than the universe; the match is cut off and the key refused.
+        IllegalArgumentException e = assertThrows(IllegalArgumentException) {
+            new DataSourceRunner(byIdsUnder("(a+)+\$"), new AcmeLedgerFixture.ScriptedTransport())
+                    .run([mode: "ids", keys: ["a" * 40 + "b"], keyField: "invoiceNo"]) { }
+        }
+        assertTrue(e.message.contains("refuses"), e.message)
+        assertTrue(DataSourceRunner.matchesWithin(java.util.regex.Pattern.compile("[A-Z0-9]{1,10}"), "A1", 100L), "an ordinary key still matches")
+    }
 }

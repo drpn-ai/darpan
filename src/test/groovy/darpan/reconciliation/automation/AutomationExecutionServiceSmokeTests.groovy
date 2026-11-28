@@ -258,7 +258,7 @@ class AutomationExecutionServiceSmokeTests {
                 tec.artifactExecution.disableAuthz()
                 boolean began = tec.transaction.begin(60)
                 try {
-                    reused << (AutomationExecutionSupport.findOrCreateExecution(tec, automation, fire, window, 1).reused as boolean)
+                    reused << (AutomationRunRecords.findOrCreateExecution(tec, automation, fire, window, 1).reused as boolean)
                     if (holdOpen) {
                         firstClaimed.countDown()
                         releaseFirst.await(30, java.util.concurrent.TimeUnit.SECONDS)

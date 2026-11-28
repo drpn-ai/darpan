@@ -133,7 +133,7 @@ class AutomationExecutionDetachTests {
         // transaction. The test above cannot catch that: it never reaches loadAutomation at all.
         // This one seeds a loadable automation with a companyUserGroupId left blank (so
         // resolveSystemTenantId short-circuits to null without a second entity read — see
-        // AutomationExecutionSupport.resolveSystemTenantId) and an inputModeEnumId that matches
+        // AutomationRunRecords.resolveSystemTenantId) and an inputModeEnumId that matches
         // neither AUT_IN_API_RANGE nor AUT_IN_SFTP_FILES, so executeAutomationForTenant's own
         // fail-fast fires immediately after entering TenantAccessSupport.withSystemTenant. The fake
         // entity facade records a "load" marker into the SAME calls log the transaction facade

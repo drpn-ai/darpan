@@ -59,7 +59,7 @@ class AutomationRunNotifier {
         deliverRunError(ec, runResultId, ERROR_NOTICE_NOT_RUN) { ->
             String kind = RunErrorKinds.of(execution)
             if (kind == null) return null
-            String trigger = AutomationExecutionSupport.triggerOf(execution)
+            String trigger = AutomationRunRecords.triggerOf(execution)
             List<Map> subjects = null
             try {
                 subjects = AuditAutomationSupport.errorSubjects(ec, automation)
@@ -135,7 +135,7 @@ class AutomationRunNotifier {
                     runUrl        : runErrorUrl(ec, [savedRunId: savedRunId, automationName: name, companyUserGroupId: tenantId],
                             [resultDataManagerPath: run.resultDataManagerPath], runResultId),
                     scheduled     : false,
-                    trigger       : AutomationExecutionSupport.TRIGGER_MANUAL,
+                    trigger       : AutomationRunRecords.TRIGGER_MANUAL,
                     completedDate : ec.user.nowTimestamp,
                     // the card's day is the tenant's day (an interactive run has no automation zone)
                     zoneId        : TenantNotificationSupport.resolveTenantZone(ec, tenantId)?.id,
@@ -276,7 +276,7 @@ class AutomationRunNotifier {
                 readCounts    : counts.read,
                 keptCounts    : counts.kept,
                 runUrl        : runErrorUrl(ec, automation, execution, runResultId),
-                scheduled     : trigger == AutomationExecutionSupport.TRIGGER_SCHEDULED,
+                scheduled     : trigger == AutomationRunRecords.TRIGGER_SCHEDULED,
                 trigger       : trigger,
                 scheduledDate : toTimestamp(execution.scheduledDate),
                 completedDate : toTimestamp(execution.completedDate),

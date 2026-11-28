@@ -3000,7 +3000,7 @@ class AutomationExecutionSupportTests {
         def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
                 .find { it.automationId == "AUTO_API" }
 
-        assertEquals("TENANT_A", AutomationExecutionSupport.assertSystemWriteTenant(ec, automation))
+        assertEquals("TENANT_A", AutomationRunRecords.assertSystemWriteTenant(ec, automation))
     }
 
     @Test
@@ -4240,15 +4240,15 @@ class AutomationExecutionSupportTests {
                 companyUserGroupId: "TENANT_A", statusEnumId: AutomationExecutionSupport.STATUS_PENDING, scheduledDate: NOW,
                 childWindowStartDate: window.childWindowStartDate, childWindowEndDate: window.childWindowEndDate, retryCount: 1])
 
-        Map first = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW, window, 1)
-        Map second = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW, window, 1)
+        Map first = AutomationRunRecords.findOrCreateExecution(ec, automation, NOW, window, 1)
+        Map second = AutomationRunRecords.findOrCreateExecution(ec, automation, NOW, window, 1)
 
         assertEquals([true, false], [first.reused, second.reused], "one claimer re-drives the queued window")
         assertEquals([false, true], [first.duplicate, second.duplicate], "the other skips it as a duplicate")
         assertEquals(AutomationExecutionSupport.STATUS_RUNNING,
                 ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find { it.automationExecutionId == "EX_Q" }.statusEnumId)
 
-        Map fresh = AutomationExecutionSupport.findOrCreateExecution(ec, automation, NOW,
+        Map fresh = AutomationRunRecords.findOrCreateExecution(ec, automation, NOW,
                 window + [childWindowStartDate: timestamp("2026-05-01T00:00:00Z"), childWindowEndDate: timestamp("2026-05-02T00:00:00Z")], 2)
         assertEquals(AutomationExecutionSupport.STATUS_RUNNING, readFieldOf(fresh.execution, "statusEnumId"),
                 "a new execution is created claimed by its creator, never left PENDING for another caller to claim")
@@ -4316,7 +4316,7 @@ class AutomationExecutionSupportTests {
     void aZeroSideStoresZeroAndTheSummaryAndRowsAgree() {
         Map<String, Object> compared = [differenceCount: 4L, missingInFile1Count: 0L, missingInFile2Count: 4L, onlyInFile1Count: 9L]
         Map<String, Object> summary = AutomationExecutionSupport.automationDiffSummary(compared)
-        Map<String, Object> row = AutomationExecutionSupport.executionUpdateFields([:], [:], compared)
+        Map<String, Object> row = AutomationRunRecords.executionUpdateFields([:], [:], compared)
         assertEquals(0L, summary.onlyInFile2Count, "a two-sided run with nothing only in side 2 says 0, not nothing")
         assertEquals(0, row.onlyInFile2Count)
         assertEquals([4, 0], [summary.onlyInFile1Count as Integer, summary.onlyInFile2Count as Integer])
@@ -4325,7 +4325,7 @@ class AutomationExecutionSupportTests {
         Map<String, Object> evaluated = [differenceCount: 3L]
         assertFalse(AutomationExecutionSupport.automationDiffSummary(evaluated).containsKey("onlyInFile1Count"),
                 "an evaluate never checked a second side: no only-in count at all")
-        assertFalse(AutomationExecutionSupport.executionUpdateFields([:], [:], evaluated).containsKey("onlyInFile2Count"))
+        assertFalse(AutomationRunRecords.executionUpdateFields([:], [:], evaluated).containsKey("onlyInFile2Count"))
     }
 
     // DAR-OPS-029 OC18 (DAR-BE-362): a verify check's raw error reaches Darpan's alerts room; the run's warnings, which a client's
@@ -4586,15 +4586,15 @@ class AutomationExecutionSupportTests {
 
     @Test
     void whatStartedARunIsReadFromItsInput() {
-        assertEquals("scheduled", AutomationExecutionSupport.runTriggerOf([:]))
-        assertEquals("scheduled", AutomationExecutionSupport.runTriggerOf([runTrigger: "scheduled"]))
-        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([runTrigger: "manual"]))
-        assertEquals("play", AutomationExecutionSupport.runTriggerOf([auditWindowFromDate: java.sql.Date.valueOf("2026-11-01")]))
-        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([auditVerifyKeys: ["#1001"]]), "a verify is asked for by a person")
-        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([replayFromExecutionId: "E1",
+        assertEquals("scheduled", AutomationRunRecords.runTriggerOf([:]))
+        assertEquals("scheduled", AutomationRunRecords.runTriggerOf([runTrigger: "scheduled"]))
+        assertEquals("manual", AutomationRunRecords.runTriggerOf([runTrigger: "manual"]))
+        assertEquals("play", AutomationRunRecords.runTriggerOf([auditWindowFromDate: java.sql.Date.valueOf("2026-11-01")]))
+        assertEquals("manual", AutomationRunRecords.runTriggerOf([auditVerifyKeys: ["#1001"]]), "a verify is asked for by a person")
+        assertEquals("manual", AutomationRunRecords.runTriggerOf([replayFromExecutionId: "E1",
                 auditWindowFromDate: java.sql.Date.valueOf("2026-11-01")]), "a retry from the last read is a person's, not a play")
-        assertEquals("scheduled", AutomationExecutionSupport.triggerOf([triggerType: null]), "a row from before DAR-BE-015 reads as scheduled")
-        assertEquals("play", AutomationExecutionSupport.triggerOf([triggerType: "play"]))
+        assertEquals("scheduled", AutomationRunRecords.triggerOf([triggerType: null]), "a row from before DAR-BE-015 reads as scheduled")
+        assertEquals("play", AutomationRunRecords.triggerOf([triggerType: "play"]))
     }
 
     /** The client-line day claims made through ErrorChatSupport.claimSlot (its claimHook), in order. */

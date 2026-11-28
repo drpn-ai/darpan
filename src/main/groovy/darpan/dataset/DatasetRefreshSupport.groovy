@@ -366,6 +366,7 @@ class DatasetRefreshSupport {
             RecordFileIterator records = new RecordFileIterator(file)
             Iterator<Map> source = onePerCopyId(records, idFields(dataset.idField as String), idCheck)
             Map counts
+            boolean dropped = false
             try {
                 counts = full ?
                         KeptCopyStore.replace(datasetDir, source, dataset.idField as String, dataset.stampField as String,
@@ -374,10 +375,18 @@ class DatasetRefreshSupport {
                         KeptCopyStore.merge(datasetDir, source, dataset.idField as String, dataset.stampField as String,
                                 readThru, readAt, swapAndPrune)
             } catch (IllegalStateException e) {
-                if (e.message?.contains("the swap was refused")) throw new IllegalStateException(LOCK_TAKEN_OVER)
+                if (e.message?.contains("the swap was refused")) {
+                    dropped = !datasetRowExists(ec, datasetId, tenantId)
+                    throw new IllegalStateException(dropped ? "the dataset was dropped while it was read" : LOCK_TAKEN_OVER)
+                }
                 throw e
             } finally {
                 records.close()
+                // DAR-OPS-029 S16a, extends OC92: its row is gone (drop#ConnectionKeptData, a privacy erase), so everything left
+                // in the dataset's folder is this read's own (its raw read file): none of it may outlive the erase
+                if (dropped && datasetDir.exists() && !datasetDir.deleteDir()) {
+                    logger.error("Dataset ${datasetId} was dropped while it was read, and its folder ${datasetDir} could not be deleted")
+                }
             }
             Map manifest = KeptCopyStore.manifest(datasetDir)
             return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount, readFile: file.absolutePath,
@@ -387,6 +396,17 @@ class DatasetRefreshSupport {
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
             return [error: t.message ?: t.toString()]
+        }
+    }
+
+    /** Whether the tenant's Dataset row still exists; true when it cannot be read (nothing is deleted on a doubt). */
+    private static boolean datasetRowExists(def ec, String datasetId, String tenantId) {
+        try {
+            return ec.entity.find("darpan.dataset.Dataset").condition("datasetId", datasetId).condition("companyUserGroupId", tenantId)
+                    .useCache(false).list().find() != null
+        } catch (Throwable t) {
+            logger.warn("Dataset ${datasetId}: could not check whether it still exists", t)
+            return true
         }
     }
 

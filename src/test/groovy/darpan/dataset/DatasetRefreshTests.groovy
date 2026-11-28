@@ -331,6 +331,24 @@ class DatasetRefreshTests {
                 "both records stay in the copy")
     }
 
+    // DAR-OPS-029 S16a, extends OC92 (S42c): a dataset dropped while its refresh read (a privacy erase) leaves nothing of
+    // that read on disk: the refresh finds its row gone at the swap and deletes the dataset's folder, raw read file included.
+    @Test
+    void aRefreshWhoseDatasetWasDroppedMidReadLeavesNothingOnDisk() {
+        String id = dataset("dropped-mid-read")
+        File folder = dir(id)
+        Closure dropping = { String svc, Map p ->
+            Map out = stub([], [order(1, 5, 5)]).call(svc, p)
+            // what drop#ConnectionKeptData does to the rows, while this read is in flight
+            ec.entity.find("darpan.dataset.DatasetRead").condition("datasetId", id).disableAuthz().deleteAll()
+            ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().deleteAll()
+            return out
+        }
+        Map res = refresh(id, dropping)
+        assertFalse(res.errors.isEmpty(), "the read fails: its dataset is gone")
+        assertFalse(folder.exists(), "nothing of the dropped dataset stays on disk: ${folder.list()}")
+    }
+
     /** Review Focus 2: two units of one order share orderId and line, and stay two copy records. */
     @Test
     void twoUnitsOfOneOrderStayTwoCopyRecords() {

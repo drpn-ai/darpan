@@ -357,6 +357,133 @@ class RunVerificationSupport {
         return true
     }
 
+    /** OC18: the check names a verify pass's neutral warning and alerts-room text use. */
+    static final String EXCHANGE_CHECK = "Exchange presence check", RETURNS_CHECK = "Return presence check"
+
+    /**
+     * DAR-OPS-029 OC18/OC121 (DAR-BE-362). A verify check's raw errors (checkErrors, the exception text, plus any ec.message
+     * errors, which this consumes) go to Darpan's alerts room through ReconciliationSavedRunSupport.alertCheckFailure; the run's
+     * processingWarnings, which a client's completion message renders, get only checkIncompleteWarning's neutral line.
+     * {@code alertRun} names the run ([companyUserGroupId, runName, reconciliationRunResultId]). Returns checkErrors (empty:
+     * nothing failed, nothing changed). S99-044: both run paths kept a copy.
+     */
+    static List<String> settleCheckErrors(def ec, Map alertRun, String checkLabel, Map verification, List<String> checkErrors) {
+        List<String> errors = checkErrors != null ? checkErrors : []
+        if (ec?.message?.hasError()) {
+            errors.addAll(((ec.message.getErrors() ?: []) as List).collect { it?.toString() })
+            ec.message.clearErrors()
+        }
+        if (!errors) return errors
+        verification.warnings = ((verification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(checkLabel)]
+        ReconciliationSavedRunSupport.alertCheckFailure(ec, alertRun, checkLabel, errors)
+        return errors
+    }
+
+    /** The pass's prepare arguments, with a {@code diffFile} closure resolved here, inside the caller's guard. */
+    private static Map prepareArgs(Map args) {
+        Map out = new LinkedHashMap(args ?: [:])
+        if (out.get("diffFile") instanceof Closure) out.put("diffFile", ((Closure) out.get("diffFile")).call())
+        return out
+    }
+
+    /**
+     * DAR-OPS-029 S99-044: the exchange-pair pass for a run, observability and all, as {@link #runMissingDiffPass} is: prepare
+     * ({@link #prepareExchangePairPass}), open the STAGE_VERIFY_EXCHANGE step, run, settle the check's errors, fold the
+     * appended rows, close the step. Both orchestrators kept this block. Takes prepareExchangePairPass's arguments (diffFile
+     * may be a closure, resolved inside the guard) plus runResultId, stepCtx, serviceResult and alertRun. Returns whether it
+     * ran. Best-effort: a prepare that throws leaves the run unverified with the neutral warning, never failed (OC121); the
+     * compare has already finished. The pass APPENDS rows the compare never found, so its fold moves counts up.
+     */
+    static boolean runExchangePairPass(Map args) {
+        def ec = args?.get("ec")
+        Map serviceResult = (Map) args?.get("serviceResult")
+        if (serviceResult?.get("ruleExecutionFailed") == true) return false
+        String runResultId = normalize(args?.get("runResultId"))
+        Map stepCtx = (args?.get("stepCtx") ?: [:]) as Map
+        Map alertRun = (args?.get("alertRun") ?: [:]) as Map
+
+        Map prepared
+        try {
+            prepared = prepareExchangePairPass(prepareArgs(args))
+        } catch (Throwable t) {
+            Map unprepared = [appendedCount: 0, warnings: []] as Map
+            settleCheckErrors(ec, alertRun, EXCHANGE_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
+            applyExchangeOutcome(serviceResult, unprepared, null)
+            return false
+        }
+        if (prepared == null) return false
+
+        def exchangeStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
+        Map verification
+        List<String> checkErrors = []
+        try {
+            verification = (Map) ((Closure) prepared.run).call()
+        } catch (Throwable t) {
+            verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0, warnings: [], auditNote: null] as Map
+            checkErrors << (normalize(t.message) ?: t.class.simpleName)
+        }
+        if (settleCheckErrors(ec, alertRun, EXCHANGE_CHECK, verification, checkErrors)) verification.lookupFailed = true
+        applyExchangeOutcome(serviceResult, verification, (String) prepared.omsFileSide)
+        RunObservability.endStep(ec, exchangeStep,
+                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : verification.sweepExchangeCount ?: 0,
+                 // the run's own timeline keeps the raw first error: the app page, never a chat room
+                 errorMessage: verification.lookupFailed ? (checkErrors ? checkErrors.first() :
+                         (verification.warnings ? verification.warnings.first().toString() : null)) : null,
+                 metricsJson : JsonOutput.toJson(exchangePairMetrics(verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+        return true
+    }
+
+    /**
+     * DAR-OPS-029 S99-044: the return-presence pass for a run, observability and all: prepare ({@link #prepareReturnPresencePass}),
+     * open the STAGE_VERIFY_RETURNS step, run, settle, fold, close. Takes prepareReturnPresencePass's arguments (diffFile may be a
+     * closure) plus runResultId, stepCtx and alertRun. Returns whether it ran. The filter REMOVES rows the compare found
+     * (grace/window suppression), so counts move DOWN, which applyVerificationOutcome's clamped subtraction does.
+     */
+    static boolean runReturnPresencePass(Map args) {
+        def ec = args?.get("ec")
+        Map serviceResult = (Map) args?.get("serviceResult")
+        if (serviceResult?.get("ruleExecutionFailed") == true) return false
+        String runResultId = normalize(args?.get("runResultId"))
+        Map stepCtx = (args?.get("stepCtx") ?: [:]) as Map
+        Map alertRun = (args?.get("alertRun") ?: [:]) as Map
+
+        Map prepared
+        try {
+            prepared = prepareReturnPresencePass(prepareArgs(args))
+        } catch (Throwable t) {
+            Map unprepared = [performed: false, rewritten: false, warnings: []] as Map
+            settleCheckErrors(ec, alertRun, RETURNS_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
+            applyVerificationOutcome(serviceResult, unprepared, missingCount(serviceResult, "missingInFile1Count"),
+                    missingCount(serviceResult, "missingInFile2Count"))
+            return false
+        }
+        if (prepared == null) return false
+
+        long missingInFile1 = missingCount(serviceResult, "missingInFile1Count")
+        long missingInFile2 = missingCount(serviceResult, "missingInFile2Count")
+        def returnsStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
+        boolean checkFailed = false
+        Map verification
+        List<String> checkErrors = []
+        try {
+            verification = (Map) ((Closure) prepared.run).call()
+        } catch (Throwable t) {
+            checkFailed = true
+            verification = [performed: false, rewritten: false, removedCount: 0, warnings: []] as Map
+            checkErrors << (normalize(t.message) ?: t.class.simpleName)
+        }
+        settleCheckErrors(ec, alertRun, RETURNS_CHECK, verification, checkErrors)
+        applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+        RunObservability.endStep(ec, returnsStep,
+                checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : (verification.removedCount ?: 0),
+                 // the run's own timeline keeps the raw first error: the app page, never a chat room
+                 errorMessage: checkFailed && checkErrors ? checkErrors.first() : null,
+                 metricsJson : JsonOutput.toJson(returnPresenceMetrics(verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+        return true
+    }
+
     /**
      * Record that a run's differences went unverified, and why — on the timeline AND on the result.
      *

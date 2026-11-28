@@ -1267,10 +1267,10 @@ class AutomationExecutionSupport {
      * counts where an interactive rerun of the same window published corrected ones — the same class
      * of split as the missing-diff pass, on the runs where it matters most.</p>
      *
-     * <p>Every resolution decision lives in {@code RunVerificationSupport.prepareReturnPresencePass},
-     * shared with {@code runSavedRunDiff.groovy}, so the two entry points cannot drift apart again.
-     * What stays here is observability and the count fold, both of which the interactive path also
-     * keeps locally. Returns whether the pass actually ran. Best-effort throughout: nothing here may
+     * <p>Every resolution decision lives in RunVerificationSupport's prepareReturnPresencePass,
+     * shared with {@code runSavedRunDiff.groovy}, so the two entry points cannot drift apart again;
+     * since DAR-OPS-029 S99-044 its step, settle and count fold are there too (runReturnPresencePass).
+     * What stays here is the kill switch and this path's handles. Returns whether the pass actually ran. Best-effort throughout: nothing here may
      * fail a run that has already produced a complete compare.</p>
      */
     protected static boolean verifyReturnPresenceIfEnabled(def ec, def automation, def file1Source, def file2Source,
@@ -1280,75 +1280,33 @@ class AutomationExecutionSupport {
                                                            Map<String, Object> window = null,
                                                            Map<String, Object> executionParams = null) {
         if (!isMissingDiffVerificationEnabled()) return false
-        if (reconcileResult?.get("ruleExecutionFailed") == true) return false
-
         String file1Label = normalize(reconcileResult?.file1Label) ?: "file1"
         String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
-        // The RUN OWNER's tenant, never the session's — the scheduler authenticates as anonymous _NA_.
-        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
-        Closure dispatcher = internalDispatcher(ec)
-        Map<String, Object> runConfigDefaults = runConfigDefaultsOf(executionParams)
-
-        Map prepared
-        try {
-            prepared = RunVerificationSupport.prepareReturnPresencePass([
-                    ec                 : ec,
-                    serviceResult      : reconcileResult,
-                    diffFile           : resolveDiffFile(ec, reconcileResult),
-                    sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
-                                          [source: file2Source, extractResult: file2Result, label: file2Label]],
-                    file1Label         : file1Label,
-                    file2Label         : file2Label,
-                    windowStartMillis  : windowEdgeMillis(window, "Start"),
-                    runOwnerUserGroupId: runOwnerUserGroupId,
-                    dispatcher         : dispatcher,
-                    runConfigDefaults  : runConfigDefaults,
-            ])
-        } catch (Throwable t) {
-            // Preparation reads the connector registry and both source rows. A shape this code cannot
-            // read must degrade to an unverified run with a visible warning, never a failed one — the
-            // compare has already finished (see verifyMissingDiffsIfEnabled's own note on the
-            // EntityException that fell out of every scheduled run when verification defaulted on).
-            Map unprepared = [performed: false, rewritten: false, warnings: []] as Map
-            settleCheckErrors(ec, automation, runResultId, RETURNS_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
-            RunVerificationSupport.applyVerificationOutcome(reconcileResult, unprepared,
-                    RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count"),
-                    RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count"))
-            return false
-        }
-        if (prepared == null) return false
-
-        long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
-        long missingInFile2 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count")
-        def returnsStep = runResultId ?
-                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
-        boolean checkFailed = false
-        Map verification
-        List<String> checkErrors = []
-        try {
-            verification = (Map) ((Closure) prepared.run).call()
-        } catch (Throwable t) {
-            checkFailed = true
-            verification = [performed: false, rewritten: false, removedCount: 0, warnings: []] as Map
-            checkErrors << (normalize(t.message) ?: t.class.simpleName)
-        }
-        settleCheckErrors(ec, automation, runResultId, RETURNS_CHECK, verification, checkErrors)
-        RunVerificationSupport.applyVerificationOutcome(reconcileResult, verification, missingInFile1, missingInFile2)
-        RunObservability.endStep(ec, returnsStep,
-                checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-                [recordCount : (verification.removedCount ?: 0),
-                 // the run's own timeline keeps the raw first error: the app page, never a chat room
-                 errorMessage: checkFailed && checkErrors ? checkErrors.first() : null,
-                 metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
-                         verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
-        return true
+        // DAR-OPS-029 S99-044: the pass, its STAGE_VERIFY_RETURNS step, the settle and the count fold are RunVerificationSupport's,
+        // called identically by runSavedRunDiff. The RUN OWNER's tenant, never the session's (the scheduler authenticates as _NA_).
+        return RunVerificationSupport.runReturnPresencePass([
+                ec                 : ec,
+                runResultId        : runResultId,
+                stepCtx            : stepCtx,
+                serviceResult      : reconcileResult,
+                alertRun           : checkAlertRun(automation, runResultId),
+                diffFile           : { resolveDiffFile(ec, reconcileResult) },
+                sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
+                                      [source: file2Source, extractResult: file2Result, label: file2Label]],
+                file1Label         : file1Label,
+                file2Label         : file2Label,
+                windowStartMillis  : windowEdgeMillis(window, "Start"),
+                runOwnerUserGroupId: normalize(readField(automation, "companyUserGroupId")),
+                dispatcher         : internalDispatcher(ec),
+                runConfigDefaults  : runConfigDefaultsOf(executionParams),
+        ])
     }
 
     /**
      * The exchange-pair pass on the scheduled path: Shopify exchange orders that never reached OMS.
      *
-     * <p>Same prepare/observe/fold shape as {@link #verifyReturnPresenceIfEnabled}, over
-     * {@code RunVerificationSupport.prepareExchangePairPass}. This pass APPENDS rows the compare never
+     * <p>Same shape as {@link #verifyReturnPresenceIfEnabled}, over
+     * {@code RunVerificationSupport.runExchangePairPass}. This pass APPENDS rows the compare never
      * found, so its fold moves counts up rather than down.</p>
      */
     protected static boolean verifyExchangePairsIfEnabled(def ec, def automation, def file1Source, def file2Source,
@@ -1358,82 +1316,31 @@ class AutomationExecutionSupport {
                                                           Map<String, Object> window = null,
                                                           Map<String, Object> executionParams = null) {
         if (!isMissingDiffVerificationEnabled()) return false
-        if (reconcileResult?.get("ruleExecutionFailed") == true) return false
-
         String file1Label = normalize(reconcileResult?.file1Label) ?: "file1"
         String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
-        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
-        Closure dispatcher = internalDispatcher(ec)
-        Map<String, Object> runConfigDefaults = runConfigDefaultsOf(executionParams)
-
-        Map prepared
-        try {
-            prepared = RunVerificationSupport.prepareExchangePairPass([
-                    ec                 : ec,
-                    diffFile           : resolveDiffFile(ec, reconcileResult),
-                    sides              : [[source: file1Source, extractResult: file1Result, label: file1Label,
-                                           fileSide: FILE_SIDE_1],
-                                          [source: file2Source, extractResult: file2Result, label: file2Label,
-                                           fileSide: FILE_SIDE_2]],
-                    windowStartMillis  : windowEdgeMillis(window, "Start"),
-                    windowEndMillis    : windowEdgeMillis(window, "End"),
-                    runOwnerUserGroupId: runOwnerUserGroupId,
-                    dispatcher         : dispatcher,
-                    runConfigDefaults  : runConfigDefaults,
-            ])
-        } catch (Throwable t) {
-            Map unprepared = [appendedCount: 0, warnings: []] as Map
-            settleCheckErrors(ec, automation, runResultId, EXCHANGE_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
-            RunVerificationSupport.applyExchangeOutcome(reconcileResult, unprepared, null)
-            return false
-        }
-        if (prepared == null) return false
-
-        def exchangeStep = runResultId ?
-                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
-        Map verification
-        List<String> checkErrors = []
-        try {
-            verification = (Map) ((Closure) prepared.run).call()
-        } catch (Throwable t) {
-            verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0, warnings: [], auditNote: null] as Map
-            checkErrors << (normalize(t.message) ?: t.class.simpleName)
-        }
-        if (settleCheckErrors(ec, automation, runResultId, EXCHANGE_CHECK, verification, checkErrors)) verification.lookupFailed = true
-        RunVerificationSupport.applyExchangeOutcome(reconcileResult, verification, (String) prepared.omsFileSide)
-        RunObservability.endStep(ec, exchangeStep,
-                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-                [recordCount : verification.sweepExchangeCount ?: 0,
-                 // the run's own timeline keeps the raw first error: the app page, never a chat room
-                 errorMessage: verification.lookupFailed ? (checkErrors ? checkErrors.first() :
-                         (verification.warnings ? verification.warnings.first().toString() : null)) : null,
-                 metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
-                         verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
-        return true
+        // DAR-OPS-029 S99-044: the pass, its STAGE_VERIFY_EXCHANGE step, the settle and the fold are RunVerificationSupport's.
+        return RunVerificationSupport.runExchangePairPass([
+                ec                 : ec,
+                runResultId        : runResultId,
+                stepCtx            : stepCtx,
+                serviceResult      : reconcileResult,
+                alertRun           : checkAlertRun(automation, runResultId),
+                diffFile           : { resolveDiffFile(ec, reconcileResult) },
+                sides              : [[source: file1Source, extractResult: file1Result, label: file1Label, fileSide: FILE_SIDE_1],
+                                      [source: file2Source, extractResult: file2Result, label: file2Label, fileSide: FILE_SIDE_2]],
+                windowStartMillis  : windowEdgeMillis(window, "Start"),
+                windowEndMillis    : windowEdgeMillis(window, "End"),
+                runOwnerUserGroupId: normalize(readField(automation, "companyUserGroupId")),
+                dispatcher         : internalDispatcher(ec),
+                runConfigDefaults  : runConfigDefaultsOf(executionParams),
+        ])
     }
 
-    /** OC18: the check names a verify pass's neutral warning and alerts-room text use, as runSavedRunDiff names them. */
-    static final String EXCHANGE_CHECK = "Exchange presence check", RETURNS_CHECK = "Return presence check"
-
-    /**
-     * DAR-OPS-029 OC18 (DAR-BE-362, errors-warnings-to-alerts-room-only), mirroring runSavedRunDiff (f8953c79). A verify pass's raw
-     * errors (checkErrors, the exception text, plus any ec.message errors, which this consumes) go to Darpan's alerts room through
-     * ReconciliationSavedRunSupport.alertCheckFailure; the run's processingWarnings, which a client's completion message renders,
-     * get only checkIncompleteWarning's neutral line. Returns checkErrors (empty: nothing failed, nothing changed).
-     */
-    protected static List<String> settleCheckErrors(def ec, def automation, String runResultId, String checkLabel, Map verification,
-                                                    List<String> checkErrors) {
-        if (ec?.message?.hasError()) {
-            checkErrors.addAll(((ec.message.getErrors() ?: []) as List).collect { it?.toString() })
-            ec.message.clearErrors()
-        }
-        if (!checkErrors) return checkErrors
-        verification.warnings = ((verification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(checkLabel)]
-        ReconciliationSavedRunSupport.alertCheckFailure(ec, [companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                                                             runName                  : normalize(readField(automation, "automationName")) ?:
-                                                                     normalize(readField(automation, "automationId")),
-                                                             reconciliationRunResultId: runResultId], checkLabel, checkErrors)
-        return checkErrors
+    /** OC18: who a verify check's alerts-room text names on the scheduled path (RunVerificationSupport.settleCheckErrors). */
+    static Map checkAlertRun(def automation, String runResultId) {
+        return [companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                runName                  : normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId")),
+                reconciliationRunResultId: runResultId]
     }
 
     /**

@@ -339,7 +339,11 @@ class ReconciliationSavedRunSupportTests {
                 .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
         assertFalse((code =~ /warnings[^\n]*getErrors\(\)/).find(), "ec.message errors folded into warnings")
         assertFalse((code =~ /warnings[^\n]*\bt\.message\b|check failed: \$\{/).find(), "exception text folded into warnings")
-        assertEquals(4, (code =~ /settleCheckErrors\((?:EXCHANGE|RETURNS)_CHECK,/).size(), "both checks (prepare and run) send their raw errors to Darpan's alerts room")
+        // S99-044: both checks (prepare and run) settle in RunVerificationSupport's shared passes, which send raw errors to the alerts room.
+        String shared = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/RunVerificationSupport.groovy").toFile().text
+        assertEquals(4, (shared =~ /settleCheckErrors\(ec, alertRun, (?:EXCHANGE|RETURNS)_CHECK,/).size(), "both checks (prepare and run) send their raw errors to Darpan's alerts room")
+        assertEquals(2, (code =~ /alertRun\s*:\s*checkAlertRun\(\)/).size(), "the manual path names its run for both checks")
     }
 
     // ─── OC19: a manual run that compared nothing closes as the scheduled path does (DAR-BE-390/393) ──────────────
@@ -421,10 +425,14 @@ class ReconciliationSavedRunSupportTests {
         String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
                 .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
                 .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
-        assertTrue((code =~ /try \{\s*prepared = RunVerificationSupport\.prepareExchangePairPass\(/).find(), "exchange prepare is wrapped")
-        assertTrue((code =~ /try \{\s*prepared = RunVerificationSupport\.prepareReturnPresencePass\(/).find(), "returns prepare is wrapped")
-        assertEquals(4, (code =~ /settleCheckErrors\((?:EXCHANGE|RETURNS)_CHECK,/).size(), "prepare and run of both checks settle their errors")
-        assertEquals(1, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "one place sends raw text to the alerts room")
+        // S99-044: the manual path calls the shared passes, which wrap each prepare and settle every check error in one place.
+        assertTrue(code.contains("RunVerificationSupport.runExchangePairPass(") && code.contains("RunVerificationSupport.runReturnPresencePass("))
+        assertEquals(0, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "the manual path sends no raw text itself")
+        String shared = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/RunVerificationSupport.groovy").toFile().text
+        assertTrue((shared =~ /try \{\s*prepared = prepareExchangePairPass\(/).find(), "exchange prepare is wrapped")
+        assertTrue((shared =~ /try \{\s*prepared = prepareReturnPresencePass\(/).find(), "returns prepare is wrapped")
+        assertEquals(1, (shared =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "one place sends raw text to the alerts room")
     }
 
     /**

@@ -4343,8 +4343,10 @@ class AutomationExecutionSupportTests {
         ec.message.addError("NetSuite answered 401 for account 123")
         try {
             Map verification = [warnings: ["Exchange presence check: 2 exchanges checked"]]
-            List<String> errors = AutomationExecutionSupport.settleCheckErrors(ec, [companyUserGroupId: "TENANT_A", automationName: "Order sync"],
-                    "RR_1", AutomationExecutionSupport.EXCHANGE_CHECK, verification, ["lookup timed out"])
+            // S99-044: the scheduled path names its run (checkAlertRun) and settles through the pass's shared helper.
+            List<String> errors = darpan.facade.reconciliation.RunVerificationSupport.settleCheckErrors(ec,
+                    AutomationExecutionSupport.checkAlertRun([companyUserGroupId: "TENANT_A", automationName: "Order sync"], "RR_1"),
+                    darpan.facade.reconciliation.RunVerificationSupport.EXCHANGE_CHECK, verification, ["lookup timed out"])
 
             assertEquals(["lookup timed out", "NetSuite answered 401 for account 123"], errors)
             assertEquals(["Exchange presence check: 2 exchanges checked",
@@ -4356,8 +4358,8 @@ class AutomationExecutionSupportTests {
                     alerts[0].text)
 
             Map clean = [warnings: ["Return presence check: nothing to grade"]]
-            assertTrue(AutomationExecutionSupport.settleCheckErrors(ec, [companyUserGroupId: "TENANT_A"], "RR_1",
-                    AutomationExecutionSupport.RETURNS_CHECK, clean, []).isEmpty())
+            assertTrue(darpan.facade.reconciliation.RunVerificationSupport.settleCheckErrors(ec, AutomationExecutionSupport.checkAlertRun([companyUserGroupId: "TENANT_A"], "RR_1"),
+                    darpan.facade.reconciliation.RunVerificationSupport.RETURNS_CHECK, clean, []).isEmpty())
             assertEquals(["Return presence check: nothing to grade"], clean.warnings, "a check that finished changes nothing")
             assertEquals(1, alerts.size(), "and alerts no one")
         } finally {

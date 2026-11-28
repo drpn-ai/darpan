@@ -230,27 +230,9 @@ def notifySavedRunFailure = { String reason ->
 }
 
 // OC18: who a verify check's alerts-room text names (the run need not have a runResult yet).
-String EXCHANGE_CHECK = "Exchange presence check"
-String RETURNS_CHECK = "Return presence check"
 def checkAlertRun = { ->
     return [companyUserGroupId: normalize(obsCtx?.companyUserGroupId), runName: savedRunNoticeName(), reconciliationRunResultId: obsRunId]
 }
-// OC18/OC121: settles a verify check's raw errors, plus any ec.message errors (consumed). The run, and so a client's completion
-// message, gets only the neutral line; Darpan's alerts room gets the text. Returns every error (empty: nothing failed). The
-// scheduled path's settleCheckErrors does the same.
-def settleCheckErrors = { String check, Map verification, List<String> errors ->
-    List<String> all = new ArrayList<String>(errors ?: [])
-    if (ec.message.hasError()) {
-        all.addAll((ec.message.getErrors() ?: []).collect { it?.toString() })
-        ec.message.clearErrors()
-    }
-    if (all) {
-        verification.warnings = ((verification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(check)]
-        ReconciliationSavedRunSupport.alertCheckFailure(ec, checkAlertRun(), check, all)
-    }
-    return all
-}
-
 def enumLabel = { String enumId ->
     return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
 }
@@ -517,52 +499,24 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
 def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
                                     Map file1Result, Map file2Result, String file1Label, String file2Label,
                                     String runOwnerUserGroupId ->
-    if (serviceResult.ruleExecutionFailed == true) return
-    // Side identification (by declared capability, not system id), the manifest sidecar, the fenced
-    // OMS pair lookup and the Shopify sweep all live in RunVerificationSupport now, shared with the
-    // scheduled path. The window guard lives there too: presence semantics need one.
-    // OC121: a prepare that throws (the registry, a source row, the sidecar) leaves the run unverified with the neutral warning,
-    // never failed: the compare has already finished. As the scheduled path does.
-    Map prepared
-    try {
-        prepared = RunVerificationSupport.prepareExchangePairPass([
-                ec                 : ec,
-                diffFile           : resolveOutputFile(serviceResult),
-                sides              : [[source: file1Source, extractResult: file1Result, label: file1Label, fileSide: "FILE_1"],
-                                      [source: file2Source, extractResult: file2Result, label: file2Label, fileSide: "FILE_2"]],
-                // The window the sides were read over (tenant-anchored, or a retry's own), as the scheduled path passes it.
-                windowStartMillis  : windowStartDateValue?.time,
-                windowEndMillis    : windowEndDateValue?.time,
-                runOwnerUserGroupId: runOwnerUserGroupId,
-                dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
-        ])
-    } catch (Throwable t) {
-        Map unprepared = [appendedCount: 0, warnings: []] as Map
-        settleCheckErrors(EXCHANGE_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
-        RunVerificationSupport.applyExchangeOutcome(serviceResult, unprepared, null)
-        return
-    }
-    if (prepared == null) return
-
-    def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
-    Map verification
-    List<String> checkErrors = []
-    try {
-        verification = (Map) ((Closure) prepared.run).call()
-    } catch (Throwable t) {
-        verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0, warnings: [], auditNote: null] as Map
-        checkErrors << (normalize(t.message) ?: t.class.simpleName)
-    }
-    checkErrors = settleCheckErrors(EXCHANGE_CHECK, verification, checkErrors)
-    if (checkErrors) verification.lookupFailed = true
-    RunVerificationSupport.applyExchangeOutcome(serviceResult, verification, (String) prepared.omsFileSide)
-    RunObservability.endStep(ec, exchangeStep,
-            verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-            [recordCount : verification.sweepExchangeCount ?: 0,
-             errorMessage: verification.lookupFailed ? (checkErrors ? checkErrors.first() :
-                     (verification.warnings ? verification.warnings.first().toString() : null)) : null,
-             metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
-                     verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+    // S99-044: the pass, its STAGE_VERIFY_EXCHANGE step, the check's settle and the count fold are RunVerificationSupport's,
+    // called identically by the scheduled path; side identification, the manifest sidecar, the fenced OMS pair lookup, the
+    // Shopify sweep and the window guard live there too. What stays here is this script's dispatch seam and handles.
+    RunVerificationSupport.runExchangePairPass([
+            ec                 : ec,
+            runResultId        : obsRunId,
+            stepCtx            : obsCtx,
+            serviceResult      : serviceResult,
+            alertRun           : checkAlertRun(),
+            diffFile           : { resolveOutputFile(serviceResult) },
+            sides              : [[source: file1Source, extractResult: file1Result, label: file1Label, fileSide: "FILE_1"],
+                                  [source: file2Source, extractResult: file2Result, label: file2Label, fileSide: "FILE_2"]],
+            // The window the sides were read over (tenant-anchored, or a retry's own), as the scheduled path passes it.
+            windowStartMillis  : windowStartDateValue?.time,
+            windowEndMillis    : windowEndDateValue?.time,
+            runOwnerUserGroupId: runOwnerUserGroupId,
+            dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+    ])
 }
 
 // The missing-diff pass. Every decision, the STAGE_VERIFY_MISSING step, the count fold and the skip report
@@ -611,62 +565,24 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
 def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
                                           Map file1Result, Map file2Result,
                                           String file1Label, String file2Label, String runOwnerUserGroupId ->
-    if (serviceResult.ruleExecutionFailed == true) return
-    // Side identification, the OMS extract sidecar and the cancelled-order lookup all live in
-    // RunVerificationSupport now, shared with the scheduled path. Keeping them here is what let the
-    // two entry points run different verification for the same run; the only things that stay local
-    // are this script's observability handles and its count fold.
-    // OC121: a prepare that throws leaves the run unverified with the neutral warning, never failed, as the scheduled path does.
-    Map prepared
-    try {
-        prepared = RunVerificationSupport.prepareReturnPresencePass([
-                ec                 : ec,
-                serviceResult      : serviceResult,
-                diffFile           : resolveOutputFile(serviceResult),
-                sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
-                                      [source: file2Source, extractResult: file2Result, label: file2Label]],
-                file1Label         : file1Label,
-                file2Label         : file2Label,
-                // May be null for a saved run with no window (e.g. two static files) — the filter
-                // degrades to grace-only behaviour then.
-                windowStartMillis  : windowStartDateValue?.time,
-                runOwnerUserGroupId: runOwnerUserGroupId,
-                dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
-        ])
-    } catch (Throwable t) {
-        Map unprepared = [performed: false, rewritten: false, warnings: []] as Map
-        settleCheckErrors(RETURNS_CHECK, unprepared, [normalize(t.message) ?: t.class.simpleName])
-        RunVerificationSupport.applyVerificationOutcome(serviceResult, unprepared,
-                RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count"),
-                RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count"))
-        return
-    }
-    if (prepared == null) return
-
-    long missingInFile1 = RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count")
-    long missingInFile2 = RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count")
-    def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
-    Map returnsVerification
-    boolean checkFailed = false
-    List<String> checkErrors = []
-    try {
-        returnsVerification = (Map) ((Closure) prepared.run).call()
-    } catch (Throwable t) {
-        checkFailed = true
-        returnsVerification = [performed: false, rewritten: false, removedCount: 0, warnings: []] as Map
-        checkErrors << (normalize(t.message) ?: t.class.simpleName)
-    }
-    checkErrors = settleCheckErrors(RETURNS_CHECK, returnsVerification, checkErrors)
-    // The filter REMOVES rows from the diff file it already found (grace/window suppression), the
-    // mirror image of the old append — so counts move DOWN here, which is exactly what
-    // applyVerificationOutcome's clamped subtraction does for the missing-diff pass.
-    RunVerificationSupport.applyVerificationOutcome(serviceResult, returnsVerification, missingInFile1, missingInFile2)
-    RunObservability.endStep(ec, returnsStep,
-            checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-            [recordCount : (returnsVerification.removedCount ?: 0),
-             errorMessage: checkFailed && checkErrors ? checkErrors.first() : null,
-             metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
-                     returnsVerification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+    // S99-044: side identification, the OMS extract sidecar, the cancelled-order lookup, the STAGE_VERIFY_RETURNS step, the
+    // check's settle and the count fold are RunVerificationSupport's, shared with the scheduled path.
+    RunVerificationSupport.runReturnPresencePass([
+            ec                 : ec,
+            runResultId        : obsRunId,
+            stepCtx            : obsCtx,
+            serviceResult      : serviceResult,
+            alertRun           : checkAlertRun(),
+            diffFile           : { resolveOutputFile(serviceResult) },
+            sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
+                                  [source: file2Source, extractResult: file2Result, label: file2Label]],
+            file1Label         : file1Label,
+            file2Label         : file2Label,
+            // May be null for a saved run with no window (e.g. two static files): the filter degrades to grace-only then.
+            windowStartMillis  : windowStartDateValue?.time,
+            runOwnerUserGroupId: runOwnerUserGroupId,
+            dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+    ])
 }
 
 try {

@@ -52,9 +52,9 @@ class RunPathParityGateTest {
      * stage added to one orchestrator alone is the drift this gate exists to stop, and a stage added
      * to both is a deliberate contract change that updates this list in the same commit.
      *
-     * <p>STAGE_VERIFY_MISSING is deliberately absent: the missing-diff pass opens its own step inside
-     * {@code RunVerificationSupport}, the shared seam both orchestrators call, so neither orchestrator
-     * file opens it. It belongs to the run's stage vocabulary, not to this set, which only ever
+     * <p>The three VERIFY stages are deliberately absent: each pass (missing-diff, and since DAR-OPS-029 S99-044 return
+     * presence and exchange pairs) opens its own step inside {@code RunVerificationSupport}, the shared seam both
+     * orchestrators call, so neither orchestrator file opens it. It belongs to the run's stage vocabulary, not to this set, which only ever
      * describes what the two orchestrators open directly.</p>
      *
      * <p>The retired STAGE_VERIFY is absent too. The three passes shared it until a run performing
@@ -63,8 +63,7 @@ class RunPathParityGateTest {
      */
     private static final Set<String> CANONICAL_STAGES = [
             "STAGE_RESOLVE", "STAGE_EXTRACT_FILE1", "STAGE_EXTRACT_FILE2",
-            "STAGE_COMPARE", "STAGE_VERIFY_EXCHANGE", "STAGE_VERIFY_RETURNS",
-            "STAGE_WRITE_OUTPUT", "STAGE_NOTIFY",
+            "STAGE_COMPARE", "STAGE_WRITE_OUTPUT", "STAGE_NOTIFY",
     ].toSet()
 
     /**
@@ -84,8 +83,9 @@ class RunPathParityGateTest {
      */
     private static final List<String> SHARED_PASS_SEAMS = [
             "RunVerificationSupport.runMissingDiffPass",
-            "RunVerificationSupport.prepareExchangePairPass",
-            "RunVerificationSupport.prepareReturnPresencePass",
+            // S99-044: each pass's prepare, step, run, settle and fold, as runMissingDiffPass's.
+            "RunVerificationSupport.runExchangePairPass",
+            "RunVerificationSupport.runReturnPresencePass",
             // DAR-UI-044: conclusions are written on the scheduled path too, or an automation's result
             // page silently shows the legacy view while the same run from the UI shows conclusions.
             "RunConclusionStep.runIfConfigured",
@@ -100,6 +100,13 @@ class RunPathParityGateTest {
             "MissingDiffVerificationSupport", "ExchangePairVerificationSupport",
             "ReturnPresenceVerificationSupport",
     ]
+
+    /**
+     * S99-044: the steps inside a shared pass. An orchestrator that calls one directly has rebuilt the pass's step block,
+     * settle and fold beside it, the copy S99-044 deleted.
+     */
+    private static final List<String> PASS_INTERNALS = ["RunVerificationSupport.prepareExchangePairPass",
+            "RunVerificationSupport.prepareReturnPresencePass", "RunVerificationSupport.prepareMissingDiffPass"]
 
     private static final Pattern STAGE_SITE =
             Pattern.compile(/beginStep\([^)]*RunObservability\.(STAGE_\w+)/)
@@ -193,6 +200,9 @@ class RunPathParityGateTest {
     void neitherRunPathCallsAVerificationImplementationDirectly() {
         [MANUAL_PATH, SCHEDULED_PATH].each { String rel ->
             String source = codeOf(rel)
+            PASS_INTERNALS.each { String step ->
+                assertEquals(0, source.count(step), "${rel} calls ${step} directly; call its run...Pass instead")
+            }
             IMPLEMENTATION_CLASSES.each { String impl ->
                 int hits = source.count("${impl}.")
                 assertEquals(0, hits,

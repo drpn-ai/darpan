@@ -1060,7 +1060,9 @@
                 <parameter name="authDescription"/>
                 <parameter name="authType"/>
                 <parameter name="authIsActive"/>
-                <parameter name="headersJson"/>
+                <parameter name="headersJson"><description>OC123: the custom headers, values included, only to those who may save
+                    the endpoint (run access, as save#NsRestletConfig); null for everyone else.</description></parameter>
+                <parameter name="headerNames" type="List"><description>OC123: the custom header names, for everyone.</description></parameter>
                 <parameter name="connectTimeoutSeconds" type="Integer"/>
                 <parameter name="readTimeoutSeconds" type="Integer"/>
                 <parameter name="isActive"/>
@@ -1079,8 +1081,9 @@
             <!-- DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
                  With zero grants this is identical to the previous tenant-only finder. -->
             <set field="nsRestletConfigList" from="darpan.facade.common.SharedConfigAccessSupport.listAccessibleConfigRows(ec, 'SCFG_NS_RESTLET')"/>
+            <set field="withHeaderValues" from="darpan.facade.common.TenantAccessSupport.canRunActiveTenantReconciliation(ec)"/>
             <set field="authById" from="(authConfigList ?: []).collectEntries { item -> [(item.nsAuthConfigId): [description: item.description, authType: item.authType, isActive: item.isActive ?: 'Y']] }"/>
-            <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: item.headersJson, connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y', isShared: item.companyUserGroupId != activeTenantUserGroupId] }"/>
+            <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: withHeaderValues ? item.headersJson : null, headerNames: darpan.facade.settings.SettingsFacadeSupport.headerNamesOf(item.headersJson as String), connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y', isShared: item.companyUserGroupId != activeTenantUserGroupId] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsRestletConfigId, row.description, row.endpointUrl, row.nsAuthConfigId, row.authType].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>

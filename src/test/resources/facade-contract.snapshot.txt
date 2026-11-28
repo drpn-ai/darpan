@@ -4027,6 +4027,7 @@ SERVICE list NsRestletConfigs
     restletConfigs.connectTimeoutSeconds : Integer
     restletConfigs.description : String
     restletConfigs.endpointUrl : String
+    restletConfigs.headerNames : List
     restletConfigs.headersJson : String
     restletConfigs.httpMethod : String
     restletConfigs.isActive : String

@@ -37531,7 +37531,15 @@
                                     "type": "string"
                                 },
                                 "headersJson": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "OC123: the custom headers, values included, only to those who may save\n                    the endpoint (run access, as save#NsRestletConfig); null for everyone else."
+                                },
+                                "headerNames": {
+                                    "type": "array",
+                                    "items": {
+                                        
+                                    },
+                                    "description": "OC123: the custom header names, for everyone."
                                 },
                                 "connectTimeoutSeconds": {
                                     "type": "integer"

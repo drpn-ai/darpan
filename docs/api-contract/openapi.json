@@ -12060,7 +12060,7 @@
                         "description": "Only tickets in this status."
                     }
                 },
-                "description": "The active tenant's tickets, newest first."
+                "description": "The active tenant's tickets, newest first. Editors and admins only (OC161, Aditi 2026-11-28): a ticket\n            holds another person's words from their agent chat."
             },
             "ListBrainChangeTicketsResult": {
                 "type": "object",

@@ -3,6 +3,7 @@ package darpan.facade.reconciliation
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 
+import darpan.reconciliation.support.FakeEntityFacade
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -309,7 +310,7 @@ class ReconciliationOutputSupportTests {
         hotwaxFile.text = "[]"
         def ec = new Expando(
                 resource: new FakeResource(dataManagerRoot),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"        : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -356,7 +357,7 @@ class ReconciliationOutputSupportTests {
         ]
         def ec = new Expando(
                 resource: new FakeResource(),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -390,7 +391,7 @@ class ReconciliationOutputSupportTests {
         ]
         def ec = new Expando(
                 resource: new FakeResource(),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -413,7 +414,7 @@ class ReconciliationOutputSupportTests {
         ]
         def ec = new Expando(
                 resource: new FakeResource(),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -451,7 +452,7 @@ class ReconciliationOutputSupportTests {
         ]
         def ec = new Expando(
                 resource: new FakeResource(dataManagerRoot),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -490,7 +491,7 @@ class ReconciliationOutputSupportTests {
         ]
         def ec = new Expando(
                 resource: new FakeResource(dataManagerRoot),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
                 ])
@@ -519,7 +520,7 @@ class ReconciliationOutputSupportTests {
                 '{"metadata":{"windowStartEpochMillis":1775026800000,"windowEndEpochMillis":1775113200000},"records":[]}'
         def ec = new Expando(
                 resource: new FakeResource(dataManagerRoot),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [],
                 ])
         )
@@ -569,7 +570,7 @@ class ReconciliationOutputSupportTests {
                             key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
                         }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [],
                         "moqui.security.UserGroupAndMember"            : [[
                                 userId         : "editor",
@@ -601,7 +602,7 @@ class ReconciliationOutputSupportTests {
                             key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "OTHER" : null
                         }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [],
                         "moqui.security.UserGroupAndMember"            : [[
                                 userId         : "editor",
@@ -640,7 +641,7 @@ class ReconciliationOutputSupportTests {
                                 key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? activeTenant : null
                             }
                     ),
-                    entity  : new FakeEntity([
+                    entity  : new FakeEntityFacade(tables: [
                             "darpan.reconciliation.ReconciliationRunResult": [],
                             "darpan.rule.RuleSet"                          : [[ruleSetId: "RS_FORGERY_TEST", companyUserGroupId: "GORJANA"]],
                             "moqui.security.UserGroupAndMember"            : [[
@@ -685,7 +686,7 @@ class ReconciliationOutputSupportTests {
                         nowTimestamp : Timestamp.valueOf("2026-11-13 12:00:00"),
                         getPreference: { String key -> key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "ACME" : null }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [],
                         "darpan.rule.RuleSet"                          : [[ruleSetId: "RS_100102", companyUserGroupId: "ACME"]],
                         "moqui.security.UserGroupAndMember"            : [[
@@ -748,7 +749,7 @@ class ReconciliationOutputSupportTests {
                         userId      : null,
                         getPreference: { String key -> null }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [gorjanaResult],
                         "moqui.security.UserGroupAndMember"            : [],
                         "moqui.security.UserGroupMember"               : [],
@@ -795,7 +796,7 @@ class ReconciliationOutputSupportTests {
                             key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
                         }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [gorjanaResult, kreweResult],
                         "moqui.security.UserGroupAndMember"            : [[
                                 userId         : "gorjana-user",
@@ -848,7 +849,7 @@ class ReconciliationOutputSupportTests {
                             key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
                         }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": [failedResult, noDataResult],
                         "moqui.security.UserGroupAndMember"            : [[
                                 userId         : "gorjana-user",
@@ -898,7 +899,7 @@ class ReconciliationOutputSupportTests {
                             key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
                         }
                 ),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         "darpan.reconciliation.ReconciliationRunResult": runResults,
                         "moqui.security.UserGroupAndMember"            : [[
                                 userId         : "gorjana-user",
@@ -977,7 +978,7 @@ class ReconciliationOutputSupportTests {
         def ec = new Expando(
                 resource: new FakeRunsResource(root),
                 user    : new Expando(nowTimestamp: Timestamp.valueOf("2026-11-28 00:00:00")),
-                entity  : new FakeEntity([
+                entity  : new FakeEntityFacade(tables: [
                         // A retry queued against EXEC_OLD: a new execution stamped with the old extract's path.
                         "darpan.reconciliation.ReconciliationAutomationExecution": [
                                 [automationExecutionId: "EXEC_RETRY", statusEnumId: ReconciliationOutputSupport.STATUS_PENDING,
@@ -1043,65 +1044,6 @@ class ReconciliationOutputSupportTests {
 
         File getFile() {
             return file
-        }
-    }
-
-    static class FakeEntity {
-        Map<String, List<Map<String, Object>>> rowsByEntity
-
-        FakeEntity(Map<String, List<Map<String, Object>>> rowsByEntity) {
-            this.rowsByEntity = rowsByEntity
-        }
-
-        FakeFind find(String entityName) {
-            return new FakeFind(rowsByEntity[entityName] ?: [])
-        }
-    }
-
-    static class FakeFind {
-        List<Map<String, Object>> rows
-        List<Map<String, Object>> conditions = []
-
-        FakeFind(List<Map<String, Object>> rows) {
-            this.rows = rows
-        }
-
-        FakeFind condition(String fieldName, Object value) {
-            conditions.add([fieldName: fieldName, value: value])
-            return this
-        }
-
-        FakeFind condition(String fieldName, String operator, Object value) {
-            conditions.add([fieldName: fieldName, operator: operator, value: value])
-            return this
-        }
-
-        FakeFind disableAuthz() {
-            return this
-        }
-
-        FakeFind useCache(boolean ignored) {
-            return this
-        }
-
-        Object one() {
-            return rows.find { Map<String, Object> row ->
-                conditions.every { Map<String, Object> condition ->
-                    condition.operator == "in" ?
-                            ((Collection) condition.value).any { candidate -> candidate?.toString() == row[condition.fieldName as String]?.toString() } :
-                            row[condition.fieldName as String] == condition.value
-                }
-            }
-        }
-
-        List<Map<String, Object>> list() {
-            return rows.findAll { Map<String, Object> row ->
-                conditions.every { Map<String, Object> condition ->
-                    condition.operator == "in" ?
-                            ((Collection) condition.value).any { candidate -> candidate?.toString() == row[condition.fieldName as String]?.toString() } :
-                            row[condition.fieldName as String] == condition.value
-                }
-            }
         }
     }
 }

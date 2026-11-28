@@ -87,6 +87,9 @@ class FakeEntityFindTests {
         assertEquals(["a"], new FakeEntityFind(["id"], rows).condition("n", "not-equals", 2).list()*.id, "a NULL column never compares")
         assertEquals([], new FakeEntityFind(["id"], rows).condition("id", EntityCondition.IN, []).list(), "IN of nothing matches nothing")
         assertEquals(["c"], new FakeEntityFind(["id"], rows).condition("n", "equals", null).list()*.id)
+        String a = "a"
+        assertEquals(["g"], new FakeEntityFind(["id"], [[id: "g", path: "p/${a}"]]).condition("path", "in", ["p/a"]).list()*.id,
+                "a GString row value matches its String text, as a stored column would")
         assertThrows(UnsupportedOperationException) { new FakeEntityFind(["id"], rows).condition("id", "like", "a%") }
     }
 

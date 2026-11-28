@@ -187,7 +187,8 @@ class FakeEntityFind {
                     throw new UnsupportedOperationException("FakeEntityFind models ${op} with a Collection, got ${value?.getClass()}")
                 }
                 Collection values = (Collection) value
-                return op == "in" ? { Object v -> v != null && values.contains(v) } : { Object v -> v != null && !values.contains(v) }
+                // Groovy ==, not contains(): a GString row value equals the String in the list, as the stored text would.
+                return op == "in" ? { Object v -> v != null && values.any { it == v } } : { Object v -> v != null && !values.any { it == v } }
             case "less": return { Object v -> v != null && ((Comparable) v) < value }
             case "greater": return { Object v -> v != null && ((Comparable) v) > value }
             case "less-equals": return { Object v -> v != null && ((Comparable) v) <= value }

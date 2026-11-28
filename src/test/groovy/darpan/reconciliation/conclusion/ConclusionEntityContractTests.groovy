@@ -133,6 +133,21 @@ class ConclusionEntityContractTests {
         assertTrue(long_.isEmpty(), "shared conclusion codes are 12 characters at most: ${long_}")
     }
 
+    /**
+     * DAR-OPS-029 S03b: every cause the brain pack concludes has its label in the seed (core owns the words, DAR-BE-160), or a
+     * new cause reaches prod as its raw code. A release must also carry the new row in its upgrade pack.
+     */
+    @Test
+    void everyCauseTheBrainConcludesIsSeeded() {
+        String drl = ConclusionEntityContractTests.classLoader.getResourceAsStream("darpan/conclusion/brain/oms-netsuite.drl").getText("UTF-8")
+        Set<String> concluded = (drl =~ /@concludes\("([A-Z0-9_]+)"\)/).collect { ((List) it)[1] as String } as Set<String>
+        Set<String> seeded = (read("data/ConclusionCatalogSeedData.xml") =~ /enumId="([A-Z0-9_]+)" enumTypeId="DarpanConclusion"/)
+                .collect { ((List) it)[1] as String } as Set<String>
+        assertTrue(concluded.size() >= 20, "${concluded}")
+        Set<String> unseeded = concluded.findAll { !seeded.contains(it) } as Set<String>
+        assertTrue(unseeded.isEmpty(), "brain causes with no seeded label: ${unseeded}")
+    }
+
     @Test
     void aRuleCanNameItsParentAndAConditionItsQuantifier() {
         String xml = read("entity/RuleEntities.xml")

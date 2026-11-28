@@ -84,6 +84,8 @@ class ReconciliationServicesRuleBatchTests {
         assertEquals(5, calls.sum() as int, "every matched pair went to the rules")
         assertEquals(calls.size(), result.firedRuleCount as int)
         assertEquals((long) calls.size(), result.ruleDifferenceCount as long)
+        // S99-027: declared Long on the service (as is the empty-batch branch's 0L), so the produced count is a Long too.
+        assertTrue(result.ruleDifferenceCount instanceof Long, "ruleDifferenceCount is ${result.ruleDifferenceCount?.getClass()}")
     }
 
     /**

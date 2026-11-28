@@ -167,4 +167,29 @@ class RuleDiffSupportTests {
         assertEquals("SKU mismatch", RuleDiffSupport.twoWayLabel("SKU mismatch", "HotWax", "Shopify"))
         assertEquals("a = b", RuleDiffSupport.twoWayLabel("a = b", null, "Shopify"))
     }
+
+    /**
+     * S99-028: a rule's row is a rule difference, whatever type the rule wrote. A rule that appends a
+     * MISSING_*, DUPLICATE_* or FINDING row straight onto _generatedDiffs would otherwise count in
+     * ruleDifferenceCount while the readers bucket it as missing or duplicate.
+     */
+    @Test
+    void aRuleCanNeverEmitAMissingOrDuplicateRow() {
+        Map fact = [compareScopeId: "SCOPE_1", objectType: "ORDER", primaryId: "SO1"]
+        RuleDiffSupport.addFieldMismatch(fact, "R1", "total = total", "1", "2")
+        ((List) fact._generatedDiffs).addAll([
+                [diffType: "MISSING_IN_FILE_2", primaryId: "SO1", ruleId: "R2"],
+                [diffType: "DUPLICATE_IN_FILE_1_PAIRED", primaryId: "SO1"],
+                [diffType: "FINDING", primaryId: "SO1"],
+                [diffType: "BUSINESS_RULE_DIFF", primaryId: "SO1", ruleId: "R3"],
+        ])
+
+        List<Map> diffs = RuleDiffSupport.extractNormalizedDiffs(fact)
+
+        assertEquals(["FIELD_MISMATCH", "BUSINESS_RULE_DIFF", "BUSINESS_RULE_DIFF", "BUSINESS_RULE_DIFF", "BUSINESS_RULE_DIFF"],
+                diffs*.diffType)
+        assertEquals("R2", diffs[1].ruleId, "a re-typed row keeps the rule that wrote it")
+        assertEquals("SCOPE_1", diffs[1].compareScopeId, "a raw row is normalized from its fact")
+        assertEquals("MISSING_IN_FILE_2", ((List) fact._generatedDiffs)[1].diffType, "the fact's own list is not rewritten")
+    }
 }

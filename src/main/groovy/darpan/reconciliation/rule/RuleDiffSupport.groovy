@@ -200,9 +200,11 @@ class RuleDiffSupport {
 
     static List<Map> extractNormalizedDiffs(Map fact) {
         if (fact == null) return []
-        // Diffs are already normalized at add time (addDiff calls normalizeDiff before storing),
-        // so a second normalization pass here is redundant. Return a snapshot copy instead.
-        return new ArrayList<>(ensureGeneratedDiffList(fact))
+        // addDiff stores normalized rows, but a rule can append to _generatedDiffs directly: such a row is normalized
+        // here, so its type is pinned too (S99-028). A snapshot copy; the fact's own list is left as it is.
+        return ensureGeneratedDiffList(fact).collect { Object row ->
+            row instanceof Map && ((Map) row).get("diffType") in RULE_DIFF_TYPES ? (Map) row : normalizeDiff(fact, row instanceof Map ? (Map) row : null)
+        }
     }
 
     /**
@@ -299,10 +301,17 @@ class RuleDiffSupport {
         return generatedDiffs
     }
 
+    /**
+     * S99-028: the types a rule's row may carry. Anything else (MISSING_*, DUPLICATE_*, FINDING…) becomes a
+     * BUSINESS_RULE_DIFF, so a rule's row is always counted and bucketed as a rule difference.
+     */
+    private static final Set<String> RULE_DIFF_TYPES = Collections.unmodifiableSet(["FIELD_MISMATCH", "BUSINESS_RULE_DIFF"] as Set<String>)
+
     private static Map normalizeDiff(Map fact, Map rawDiff) {
         Map diff = rawDiff instanceof Map ? rawDiff : [:]
+        String diffType = normalize(diff.diffType)
         return [
-                diffType      : normalize(diff.diffType) ?: "BUSINESS_RULE_DIFF",
+                diffType      : diffType in RULE_DIFF_TYPES ? diffType : "BUSINESS_RULE_DIFF",
                 compareScopeId: normalize(diff.compareScopeId) ?: normalize(fact.compareScopeId),
                 objectType    : normalize(diff.objectType) ?: normalize(fact.objectType),
                 primaryId     : normalize(diff.primaryId) ?: normalize(fact.primaryId),

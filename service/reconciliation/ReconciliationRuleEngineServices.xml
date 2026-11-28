@@ -114,64 +114,6 @@
         </actions>
     </service>
 
-    <service verb="save" noun="RuleSet">
-        <description>Create or update RuleSet metadata with normalized IDs and timestamps.</description>
-        <in-parameters>
-            <parameter name="ruleSetId"/>
-            <parameter name="ruleSetName"/>
-            <parameter name="description"/>
-            <parameter name="version" default-value="1.0"/>
-            <parameter name="explosionPath"/>
-            <parameter name="primaryKeyPath"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ruleSetId"/>
-            <parameter name="created" type="Boolean"/>
-            <parameter name="updated" type="Boolean"/>
-        </out-parameters>
-        <actions>
-            <set field="requestedRuleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
-            <set field="ruleSetNameValue" from="((ruleSetName)?.toString()?.trim())"/>
-            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
-            <set field="versionValue" from="((version)?.toString()?.trim()) ?: '1.0'"/>
-            <set field="explosionPathValue" from="((explosionPath)?.toString()?.trim())"/>
-            <set field="primaryKeyPathValue" from="((primaryKeyPath)?.toString()?.trim())"/>
-            <if condition="requestedRuleSetIdValue &amp;&amp; !requestedRuleSetIdValue.matches('[A-Za-z0-9_.:-]+')">
-                <message error="true">ruleSetId contains invalid characters: ${requestedRuleSetIdValue}</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ruleSetId" from="requestedRuleSetIdValue"/>
-                <!-- DAR-OPS-029 S02 (QA): an id that exists answers only for the active tenant's rule set; another tenant's is
-                     refused as missing, never overwritten (the entity filter is skipped under disable-authz). A new rule set
-                     is the active tenant's: unstamped, it could never compile (canAccessTenantRecord refuses it). -->
-                <set field="anyRuleSet" from="ruleSetId ? ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).disableAuthz().useCache(false).one() : null"/>
-                <set field="existingRuleSet" from="anyRuleSet ? darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.rule.RuleSet', 'ruleSetId', ruleSetId) : null"/>
-                <set field="activeTenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-                <if condition="anyRuleSet &amp;&amp; !existingRuleSet">
-                    <message error="true">RuleSet ${ruleSetId} not found</message>
-                </if>
-                <if condition="!anyRuleSet &amp;&amp; !activeTenantId">
-                    <message error="true">An active tenant is required for tenant-scoped data.</message>
-                </if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="created" from="existingRuleSet == null"/>
-                <set field="updated" from="existingRuleSet != null"/>
-                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, companyUserGroupId: existingRuleSet?.companyUserGroupId ?: activeTenantId, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
-                <if condition="created">
-                    <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" out-map="createdRuleSet"/>
-                    <set field="ruleSetId" from="createdRuleSet.ruleSetId"/>
-                </if>
-                <if condition="updated">
-                    <service-call name="store#darpan.rule.RuleSet" in-map="ruleSetValue"/>
-                </if>
-                <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
-                <message>${created ? 'Created' : 'Updated'} RuleSet ${ruleSetId}.</message>
-            </if>
-        </actions>
-    </service>
-
     <service verb="save" noun="Rule">
         <description>Create or update a Rule with validation and cache invalidation.</description>
         <in-parameters>

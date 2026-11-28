@@ -83,7 +83,8 @@ each filter removed. Support: `darpan/reconciliation/source/SourceFilterSupport.
 Rule storage and execution live in `reconciliation.ReconciliationRuleEngineServices`
 (documented contract-by-contract in [rule-engine-services](rule-engine-services.md)):
 
-- `save#RuleSet`, `save#Rule`, `delete#Rule`, `delete#RuleSet` — tenant rule authoring CRUD.
+- `save#Rule`, `delete#Rule`, `delete#RuleSet` — tenant rule authoring CRUD (rule sets are created by
+  the saved-run facade, `create#RuleSetRun`/`save#RuleSetRun`).
 - `compile#RuleSet` — compiles the active `darpan.rule.Rule` rows of a RuleSet into a Drools
   KieBase (DRL), cached until a rule change invalidates it.
 - `execute#RuleSetMatchedPairs` / `execute#RuleSet` — runs the compiled rules.

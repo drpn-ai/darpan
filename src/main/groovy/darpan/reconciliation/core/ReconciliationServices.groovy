@@ -735,7 +735,7 @@ class ReconciliationServices {
 
         return [
                 ruleDiffRows       : ruleDiffRows,
-                ruleDifferenceCount: ruleDiffRows.size(),
+                ruleDifferenceCount: (long) ruleDiffRows.size(),
                 firedRuleCount     : firedRuleCount,
                 processingWarnings : processingWarnings,
                 ruleErrors         : ruleErrors,

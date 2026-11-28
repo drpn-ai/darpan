@@ -9,7 +9,6 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `compile#RuleSet`
   - `execute#RuleSet`
   - `execute#RuleSetMatchedPairs`
-  - `save#RuleSet`
   - `save#Rule`
   - `delete#Rule`
   - `delete#RuleSet`
@@ -27,9 +26,6 @@ This document describes the production RuleSet/Rule service contracts used by re
 - `reconciliation.ReconciliationRuleEngineServices.execute#RuleSetMatchedPairs`
   - Inputs: `ruleSetId`, `dataList` (`List` of matched-pair facts), `returnAllFacts` (default `false`)
   - Outputs: `diffResults`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
-- `reconciliation.ReconciliationRuleEngineServices.save#RuleSet`
-  - Creates or updates RuleSet metadata.
-  - `ruleSetId` is optional; when blank, Moqui entity-auto create generates the primary ID.
 - `reconciliation.ReconciliationRuleEngineServices.save#Rule`
   - Creates or updates a Rule with validation.
   - Requires `ruleSetId`.
@@ -44,13 +40,12 @@ This document describes the production RuleSet/Rule service contracts used by re
 ## Operational behavior
 
 - Cache invalidates on:
-  - `save#RuleSet`
   - `save#Rule`
   - `delete#Rule`
   - `delete#RuleSet`
 - Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD, compile, and execution services share the same Groovy-managed cache entries.
 - `compile#RuleSet`, `execute#RuleSet`, and `execute#RuleSetMatchedPairs` stay XML-backed at the service layer: XML handles parameter/default normalization, empty-input branching, output assignment, and success messages.
-- RuleSet/Rule CRUD keeps ID validation, enabled/boolean coercion, sequence selection, entity store/delete, cache invalidation calls, and optional compile orchestration in XML actions.
+- Rule CRUD (rule sets are created by the saved-run facade) keeps ID validation, enabled/boolean coercion, sequence selection, entity store/delete, cache invalidation calls, and optional compile orchestration in XML actions.
 - `RuleEngineSupport` retains the practical Groovy boundary because it manages generated identifier tokens, DRL generation, KIE container/session lifecycle, tenant-scoped cache entries, fact copying, and matched-pair diff extraction.
 - Rule parsing supports user-friendly condition text (for example: `status is Pending`).
 - Field-comparison rules may store expression JSON with structured `preActions`, currently entries like `{ "fieldSide": "file1", "action": "STRING_TO_INT" }` or `{ "fieldSide": "file2", "action": "STRING_TO_NUMBER" }`, so generated DRL can normalize selected field values before applying the operator.

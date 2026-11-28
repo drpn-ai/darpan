@@ -44,6 +44,18 @@ class MigrationRegistrySmokeTests {
         assertEquals(registeredInSeed(), ids)
     }
 
+    /** DAR-BE-319 / OC142: no seed row states enabled="Y", so a deploy's seed reload never re-enables a migration an
+     *  operator parked; a fresh load starts a row enabled through the entity default. Only "N" (ships parked) is allowed. */
+    @Test
+    void noSeedRowStatesEnabledY() {
+        File seed = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toString(),
+                "runtime/component/darpan/data/MigrationRegistrySeedData.xml")
+        List<String> stated = new XmlSlurper().parse(seed).'**'
+                .findAll { it.name() == "darpan.migration.DarpanMigration" && it.@enabled.text() == "Y" }
+                .collect { it.@migrationId.text() }
+        assertEquals([], stated, "seed rows must not state enabled=\"Y\": ${stated}")
+    }
+
     /** The seed file's DarpanMigration rows by sequenceNum: the list grows with every migration, so it is read, not restated here. */
     static List<String> registeredInSeed() {
         File seed = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toString(),

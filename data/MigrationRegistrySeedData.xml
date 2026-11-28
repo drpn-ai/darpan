@@ -91,14 +91,14 @@
 
     <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTER_COPY" componentName="darpan"
             serviceName="reconciliation.ReconciliationNotificationServices.restore#AutomationSourceFilters"
-            sequenceNum="160" supportsDryRun="Y" enabled="Y"
+            sequenceNum="160" supportsDryRun="Y"
             description="Rebuild each automation's own filter rows from its run's where 3.4.0's AUTOMATION_FILTER_TABLE dropped them
                 (DAR-BE-338: automations run on their own copy again). Sides that have rows are left alone; where the drop never
                 ran nothing is written. Idempotent."/>
 
     <darpan.migration.DarpanMigration migrationId="ACK_NOTE_NULLABLE" componentName="darpan"
             serviceName="audit.AuditLedgerServices.migrate#AcknowledgementNoteNullable"
-            sequenceNum="170" supportsDryRun="Y" enabled="Y"
+            sequenceNum="170" supportsDryRun="Y"
             description="Let an acknowledgement have no note (DAR-UI-152): AuditFindingAcknowledgement.note becomes nullable.
                 Schema only, no row changes. Idempotent: a nullable column is left alone."/>
 

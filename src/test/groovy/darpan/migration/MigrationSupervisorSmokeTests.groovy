@@ -80,6 +80,13 @@ class MigrationSupervisorSmokeTests {
         }
     }
 
+    /** The outcome run#PendingMigrations reports for one migration. */
+    private String sweepOutcomeOf(String migrationId) {
+        Map<String, Object> out = ec.service.sync().name("migration.MigrationServices.run#PendingMigrations")
+                .parameters([:]).disableAuthz().call()
+        return (out.results as List<Map<String, Object>>).find { it.migrationId == migrationId }?.outcome
+    }
+
     @Test
     void aMigrationWithOnlyAFailedRowIsRunAgain() {
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
@@ -89,6 +96,7 @@ class MigrationSupervisorSmokeTests {
 
         assertFalse(MigrationSupervisorSupport.hasSucceeded(ec, "RETIRED_FIELDS"),
                 "a FAILED row must not satisfy the already-applied check")
+        assertEquals("APPLIED", sweepOutcomeOf("RETIRED_FIELDS"), "the next sweep runs it again")
     }
 
     @Test
@@ -100,5 +108,6 @@ class MigrationSupervisorSmokeTests {
 
         assertFalse(MigrationSupervisorSupport.hasSucceeded(ec, "ENDPOINT_ACCESS"),
                 "a preview must never count as an application")
+        assertEquals("APPLIED", sweepOutcomeOf("ENDPOINT_ACCESS"), "the next sweep runs it again")
     }
 }

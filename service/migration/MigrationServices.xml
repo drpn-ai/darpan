@@ -55,7 +55,7 @@
          migration can poison. Each migration runs in its own; each ledger row is written by
          record#MigrationRun in a forced-new one. -->
     <service verb="run" noun="PendingMigrations" authenticate="false" allow-remote="false"
-             transaction="ignore">
+             transaction="ignore" semaphore="fail">
         <description>Run every registered migration that has no SUCCESS ledger row, in sequenceNum
             order. Idempotent: a second run applies nothing. Not remote — an operator runs this from
             the Migrations screen, and it deliberately sweeps every tenant's data.</description>
@@ -98,7 +98,7 @@
          rather than a dryRun boolean: a dropped boolean defaults to false, and false is the branch
          that rewrites data. Two names on the wire cannot be confused that way. -->
     <service verb="run" noun="Migration" authenticate="false" allow-remote="false"
-             transaction="ignore">
+             transaction="ignore" semaphore="fail">
         <description>Run one named migration. Honours the same gates as the sweep: parked migrations
             are refused, prerequisites are enforced, and an already-applied migration is skipped
             unless force is set.</description>

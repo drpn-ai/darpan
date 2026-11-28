@@ -142,7 +142,9 @@ class AutomationFilterCopySupportTests {
         List<String> sequences = rows.collect { it.@sequenceNum.toString() }
         assertEquals(sequences.unique(false), sequences, "every migration has its own sequenceNum: ${sequences}")
         def copy = rows.find { it.@migrationId == "AUTOMATION_FILTER_COPY" }
-        assertEquals([SERVICE, "Y", "Y"], [copy.@serviceName.toString(), copy.@enabled.toString(), copy.@supportsDryRun.toString()])
+        assertEquals([SERVICE, "Y"], [copy.@serviceName.toString(), copy.@supportsDryRun.toString()])
+        // OC142: the seed states no enabled (a deploy must not un-park it); a fresh load starts it enabled by the entity default.
+        assertEquals("", copy.@enabled.toString())
         def ledger = ec.entity.find("darpan.migration.DarpanMigration").condition("migrationId", "AUTOMATION_FILTER_TABLE").disableAuthz().one()
         // No seed carries the row and clear() removes the one droppedHere() makes, so a test boot has none at all.
         assertNull(ledger, "a test boot never registers the drop: ${ledger}")

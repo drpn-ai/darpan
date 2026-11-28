@@ -473,4 +473,68 @@
             </iterate>
         </actions>
     </service>
+
+    <!-- DAR-OPS-029 S42c (OC92). A privacy erase needs every copy of a store's data gone, and kept copies and the ID index
+         outlive the finding records (no retention covers either). -->
+    <service verb="drop" noun="ConnectionKeptData" allow-remote="false">
+        <description>One tenant's kept data read through these connections: the ID index rows they wrote, the index's
+            cursors, the kept copies' reads and rows, then the copies' folders. For an erase the caller owes (Shopify's
+            shop/redact, after its signature check). One transaction, so the nightly index never sees a copy without its rows
+            gone; a folder that will not delete fails it and the rows stay. Refused while a copy is refreshing (a lock under
+            six hours old), so the caller fails and retries rather than a refresh writing files back after the erase.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="sourceConfigIds" type="List"><description>The connections (config ids) whose data goes. Empty does
+                nothing.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="datasetsDropped" type="Integer"/>
+            <parameter name="indexRowsDropped" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="datasetsDropped" from="0"/>
+            <set field="indexRowsDropped" from="0L"/>
+            <if condition="!sourceConfigIds"><return/></if>
+
+            <entity-find entity-name="darpan.dataset.Dataset" list="dropList" for-update="true">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="sourceConfigId" operator="in" from="sourceConfigIds"/>
+            </entity-find>
+            <set field="busySince" from="ec.user.nowTimestamp.time - 6 * 3600000L"/>
+            <set field="busy" from="dropList.find { it.refreshingSince != null &amp;&amp; it.refreshingSince.time &gt; busySince }"/>
+            <if condition="busy">
+                <return error="true" message="Dataset ${busy.datasetId} is refreshing; its kept data can be dropped once the refresh ends."/></if>
+
+            <entity-find-count entity-name="darpan.idindex.RecordIdIndex" count-field="indexRowsDropped">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+            </entity-find-count>
+            <entity-delete-by-condition entity-name="darpan.idindex.RecordIdIndex">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+            </entity-delete-by-condition>
+            <entity-delete-by-condition entity-name="darpan.idindex.RecordIdIndexCursor">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="connectionId" operator="in" from="sourceConfigIds"/>
+            </entity-delete-by-condition>
+
+            <set field="datasetIds" from="dropList*.datasetId"/>
+            <if condition="datasetIds">
+                <entity-delete-by-condition entity-name="darpan.dataset.DatasetRead">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="datasetId" operator="in" from="datasetIds"/>
+                </entity-delete-by-condition>
+                <entity-delete-by-condition entity-name="darpan.dataset.Dataset">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="datasetId" operator="in" from="datasetIds"/>
+                </entity-delete-by-condition>
+                <!-- Files last: a folder that will not delete throws, and the transaction keeps every row above. -->
+                <script>datasetIds.each { String id ->
+                    File dir = darpan.dataset.DatasetRefreshSupport.datasetDir(ec, companyUserGroupId, id)
+                    if (dir.exists() &amp;&amp; !dir.deleteDir()) throw new IllegalStateException("Dataset ${id}: its kept copy folder could not be deleted")
+                }</script>
+            </if>
+            <set field="datasetsDropped" from="datasetIds.size()"/>
+        </actions>
+    </service>
 </services>

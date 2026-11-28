@@ -233,6 +233,20 @@ class JudgeSupportTests {
         assertEquals([A], rows("rules.RuleSet", [ruleSetId: mustHold])*.companyUserGroupId)
     }
 
+    /**
+     * DAR-OPS-029 S04, invariant 3 (determinism). Pairs reach the judge in the order Spark's repartition hands them back, which
+     * is not stable from run to run. The same pairs in reverse order must give the same findings in the same order, so a replay
+     * of one capture writes the same judged-findings.json.
+     */
+    @Test
+    void theSamePairsInAnyOrderGiveTheSameFindings() {
+        Map forward = judged()
+        Map reversed = judge(checkA, true)
+        assertEquals([], reversed.errors)
+        assertEquals(forward.findings, reversed.out.findings, "findings follow the compare id, not the order pairs arrive in")
+        assertEquals(forward.warnings, reversed.out.warnings)
+    }
+
     @Test
     void judgedFindingsRecordWithTheirLineage() {
         List<Map> findings = judged().findings
@@ -249,13 +263,14 @@ class JudgeSupportTests {
 
     // ---------------------------------------------------------------------------------------
 
-    /** The fixture's four pairs through Task 6's batches (two per batch) and buildFact. */
-    private Iterator<List<Map>> facts() {
+    /** The fixture's four pairs through Task 6's batches (two per batch) and buildFact; reversed hands them over last first. */
+    private Iterator<List<Map>> facts(boolean reversed = false) {
         List<Map> pairs = [
                 [compareId: "P1", file1: [status: "open", amount: "5"], file2: [status: "pending"]],
                 [compareId: "P2", file1: [status: "open", amount: "9"], file2: [status: "open"]],
                 [compareId: "P3", file1: [status: "closed", amount: "9"], file2: [status: "open"]],
                 [compareId: "P4", file1: [status: "closed", amount: "5"], file2: [status: "hide"]]]
+        if (reversed) pairs = pairs.reverse()
         Map sideState = [factTypeId: factTypeId, file1: [prefix: "file1", setAside: [], keyNames: keyNames.file1],
                          file2: [prefix: "file2", setAside: [], keyNames: keyNames.file2]]
         List<List<Map>> batches = []
@@ -271,10 +286,10 @@ class JudgeSupportTests {
         return out.out
     }
 
-    private Map judge(String checkId) {
+    private Map judge(String checkId, boolean reversed = false) {
         return underFacadeGrantDo {
             List<String> warnings = []
-            List<Map> findings = JudgeSupport.judge(ec, checkId, facts(), statementsByClaim, warnings)
+            List<Map> findings = JudgeSupport.judge(ec, checkId, facts(reversed), statementsByClaim, warnings)
             return [findings: findings, warnings: warnings]
         }
     }

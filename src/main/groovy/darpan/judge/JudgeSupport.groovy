@@ -1,5 +1,6 @@
 package darpan.judge
 
+import groovy.transform.PackageScope
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -34,6 +35,10 @@ class JudgeSupport {
      * the cause is UNEXPLAINED by no match), causeOutcomeId, outcomeKindEnumId (the cause's kind: JOK_FINDING or JOK_EXPECTED),
      * fixText, fixOwner and fixWhereEnumId (the cause's).
      *
+     * Findings are in compare id order, and within a pair in the Must hold decision's outcome order, whatever order the pairs
+     * arrive in (the matched frame comes back from Spark's repartition in no stable order), so judging the same pairs twice gives
+     * the same list. Warnings are in key order for the same reason.
+     *
      * Throws IllegalStateException, naming the check or decision, when judging cannot start or a decision call fails.
      */
     static List<Map> judge(def ec, String checkId, Iterator<List<Map>> factBatches, Map statementsByClaim, List<String> warnings = null) {
@@ -47,8 +52,8 @@ class JudgeSupport {
         Map outcomes = (config.outcomes ?: [:]) as Map
         refuseWrongShape(checkId, mustHold, explains, decisions)
 
-        Map<String, Integer> unlinked = new LinkedHashMap<>()
-        Map<String, Integer> unmeant = new LinkedHashMap<>()
+        Map<String, Integer> unlinked = new TreeMap<>()
+        Map<String, Integer> unmeant = new TreeMap<>()
         List<Map> findings = []
         while (factBatches.hasNext()) {
             List<Map> batch = factBatches.next()
@@ -108,8 +113,11 @@ class JudgeSupport {
             lines.add("Outcome ${key} of check ${checkId} has no meaning (DecisionOutcome), ${reading}".toString()) }
         lines.each { logger.warn(it) }
         if (warnings != null) warnings.addAll(lines)
+        findings.sort(true, BY_COMPARE_ID)   // stable: a pair's findings keep their outcome order
         return findings
     }
+
+    private static final Comparator<Map> BY_COMPARE_ID = { Map a, Map b -> (a.recordKey as String) <=> (b.recordKey as String) } as Comparator<Map>
 
     /** Ruling P2-17 and the brief: judging refuses a decision of the wrong shape before it runs one. */
     private static void refuseWrongShape(String checkId, String mustHold, String explains, Map decisions) {
@@ -149,7 +157,13 @@ class JudgeSupport {
         return answers
     }
 
-    private static Map call(def ec, String serviceName, Map params, String what) {
+    /**
+     * One service call that fails loudly, naming what it was for. An error already in ec.message stops it before it runs (a
+     * Moqui service call would skip silently and return null) and is named as earlier, never blamed on this call.
+     */
+    @PackageScope
+    static Map call(def ec, String serviceName, Map params, String what) {
+        if (ec.message.hasError()) throw new IllegalStateException("${what}: stopped by an earlier error: ${ec.message.errorsString}".toString())
         Map out = ec.service.sync().name(serviceName).parameters(params).call() as Map
         if (ec.message.hasError()) throw new IllegalStateException("${what}: ${ec.message.errorsString}".toString())
         return out ?: [:]

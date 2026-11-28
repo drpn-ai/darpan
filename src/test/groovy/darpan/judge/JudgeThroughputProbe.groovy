@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import reconciliation.rule.FieldComparisonRuleLogicGenerator
 
 import java.lang.management.ManagementFactory
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 @Tag("perf")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JudgeThroughputProbe {
+    private static final Logger logger = LoggerFactory.getLogger(JudgeThroughputProbe.class)
 
     private static final int PAIRS = 125602
     private static final int BATCH = 500
@@ -156,14 +159,14 @@ class JudgeThroughputProbe {
         File out = new File("build/judge-throughput.txt")
         out.parentFile.mkdirs()
         out.text = line + "\n"
-        println line
+        logger.info(line)
         String notes = ("started=${startedAt} ended=${Instant.now()} brokenPromises=${expectedBreaks} batch=${BATCH} " +
                 "load1m_before=${String.format('%.2f', loadBefore)} load1m_after=${String.format('%.2f', loadAfter)} " +
                 "maxHeapMb=${Runtime.runtime.maxMemory().intdiv(1048576L)} cpus=${Runtime.runtime.availableProcessors()} " +
                 "jvm=${System.getProperty('java.vm.name')} ${System.getProperty('java.version')} " +
                 "jvmArgs=${ManagementFactory.runtimeMXBean.inputArguments.findAll { !it.startsWith('--add-opens') }}").toString()
         new File("build/judge-throughput-notes.txt").text = notes + "\n"
-        println notes
+        logger.info(notes)
 
         if (ratio > 3.0d) {
             // The profile re-runs on a slice: the full 30-wide set plus a second pass overran the 3 GB test heap, so it profiles the first 5,000 pairs.
@@ -172,7 +175,7 @@ class JudgeThroughputProbe {
             String profile = "ratio ${String.format('%.2f', ratio)} is above 3\n\nNEW path top frames:\n" + profile { runNew(sample) } +
                     "\nOLD path top frames:\n" + profile { runOld(sample) }
             new File("build/judge-throughput-profile.txt").text = profile
-            println profile
+            logger.info(profile)
         }
     }
 

@@ -195,6 +195,21 @@ class AuditDigestSupport {
         return outcomes
     }
 
+    /**
+     * The chat space a digest posts to, for the digest and for the run update it drives (AuditRunUpdateSupport): the
+     * digest's space when it is the digest tenant's own, active and has a webhook, else null, logged under what.
+     */
+    static Map chatDestination(def ec, String tenantId, Map digest, String what) {
+        String chatSpaceId = normalize(digest.chatSpaceId)
+        if (!chatSpaceId) return null
+        def space = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                "chatSpaceId", chatSpaceId, tenantId, "audit digest destination — owner checked against the digest's tenant")
+        Map destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
+        if (destination == null) logger.warn("{} {}: chat space {} cannot be used (missing, another tenant's, inactive or without a webhook)",
+                what, digest.auditDigestId, chatSpaceId)
+        return destination
+    }
+
     private static Map sendIfDue(def ec, Map digest, Instant now) {
         String tenantId = normalize(digest.companyUserGroupId)
         ZonedDateTime local = now.atZone(tenantZone(ec, tenantId))
@@ -212,15 +227,7 @@ class AuditDigestSupport {
         if (weekly && today.dayOfWeek.value != ((digest.dayOfWeek ?: 1) as int)) return [sent: false, reason: "NOT_TODAY"]
         if (!claim(ec, digest, tenantId, today)) return [sent: false, reason: "SENT_TODAY"]
 
-        String chatSpaceId = normalize(digest.chatSpaceId)
-        Map destination = null
-        if (chatSpaceId) {
-            def space = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
-                    "chatSpaceId", chatSpaceId, tenantId, "audit digest destination — owner checked against the digest's tenant")
-            destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
-            if (destination == null) logger.warn("Audit digest {}: chat space {} cannot be used (missing, another tenant's, inactive or without a webhook)",
-                    digest.auditDigestId, chatSpaceId)
-        }
+        Map destination = chatDestination(ec, tenantId, digest, "Audit digest")
         List<String> emails = withoutDisabled(ec, emailsOf(digest.emailAddresses))
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         Map report = assemble(ec, tenantId, digest.auditId as String, today)
@@ -237,7 +244,7 @@ class AuditDigestSupport {
             Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: chatText])
             if (delivery?.ok == true) delivered = true
             // A failed post keeps the day's claim, as a run notification does: no retry storm on a dead webhook.
-            else logger.warn("Audit digest {} to space {} returned status {}{}", digest.auditDigestId, chatSpaceId,
+            else logger.warn("Audit digest {} to space {} returned status {}{}", digest.auditDigestId, digest.chatSpaceId,
                     delivery?.statusCode, delivery?.providerMessage ? " (${delivery.providerMessage})" : "")
         }
         if (emails) {

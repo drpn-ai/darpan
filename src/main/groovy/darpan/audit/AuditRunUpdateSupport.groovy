@@ -298,14 +298,7 @@ class AuditRunUpdateSupport {
 
     /** mailed: the addresses this run's update already went to, so two digests of one audit never mail one person twice. */
     private static Map deliver(def ec, String tenantId, Map digest, Map built, Set<String> mailed) {
-        String chatSpaceId = normalize(digest.chatSpaceId)
-        Map destination = null
-        if (chatSpaceId) {
-            def space = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
-                    "chatSpaceId", chatSpaceId, tenantId, "audit run update destination — owner checked against the digest's tenant")
-            destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
-            if (destination == null) logger.warn("Audit run update {}: chat space {} cannot be used", digest.auditDigestId, chatSpaceId)
-        }
+        Map destination = AuditDigestSupport.chatDestination(ec, tenantId, digest, "Audit run update")
         // Members always; a digest's addresses are added (group mailboxes, people with no Darpan account), never instead.
         // DAR-BE-397: a digest's typed addresses may name a disabled account; members already exclude them
         List<String> emails = AuditDigestSupport.withoutDisabled(ec, (defaultRecipients(ec, tenantId) + extraEmails(digest)).unique())
@@ -319,7 +312,7 @@ class AuditRunUpdateSupport {
             Map card = built.card as Map
             Map delivery = TenantNotificationSupport.deliverToDestination(destination, slack ? [text: card.fallbackText] : card)
             if (delivery?.ok == true) delivered = true
-            else logger.warn("Audit run update {} to space {} returned status {}", digest.auditDigestId, chatSpaceId, delivery?.statusCode)
+            else logger.warn("Audit run update {} to space {} returned status {}", digest.auditDigestId, digest.chatSpaceId, delivery?.statusCode)
         }
         if (emails) {
             sendEmail.call(ec, emails.join(","), [runSubject: built.subject, runHtml: built.html, runText: built.text],

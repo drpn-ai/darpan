@@ -488,42 +488,18 @@
             <if condition="windowFromDate &gt; windowThruDate">
                 <return error="true" message="Audit check ${checkId}: window ${windowFromDate} to ${windowThruDate} runs backwards"/></if>
 
-            <!-- Validate first: a bad read writes nothing. -->
-            <set field="badReads" from="[]"/>
+            <!-- Validate first: a bad read writes nothing. The status rule is AuditCheckStatus.derive, the one a verify
+                 answers too (S99-066); OC103: every read failed is a check that did not run, so nothing is filed or closed. -->
+            <set field="systemEnums" from="[:]"/>
             <iterate list="sourceReads" entry="sr">
                 <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
                     <field-map field-name="enumId" from="sr.systemEnumId"/></entity-find-one>
-                <if condition="systemEnum?.enumTypeId != 'DarpanSystemSource'">
-                    <return error="true" message="Unknown system ${sr.systemEnumId} on a source read of check ${checkId}"/></if>
-                <if condition="!(sr.statusEnumId in ['AUDSR_COMPLETE', 'AUDSR_PARTIAL', 'AUDSR_FAILED'])">
-                    <return error="true" message="Source read status ${sr.statusEnumId} is not an AuditSourceRead status"/></if>
-                <if condition="sr.statusEnumId != 'AUDSR_COMPLETE'">
-                    <set field="rootSystemId" from="systemEnum.parentEnumId ?: systemEnum.enumId"/>
-                    <script>badReads.add("The ${darpan.audit.AuditRecordFacts.systemKey(rootSystemId)} read ${sr.statusEnumId == 'AUDSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
-                </if>
+                <script>systemEnums.put(sr.systemEnumId as String, systemEnum)</script>
             </iterate>
-
-            <if condition="notRunReason">
-                <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
-                <set field="reason" from="notRunReason"/>
-                <else-if condition="!sourceReads">
-                    <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
-                    <set field="reason" value="The check recorded no source read."/>
-                </else-if>
-                <!-- OC103: every read failed is a check that did not run; nothing was read, so nothing is filed or closed. -->
-                <else-if condition="sourceReads.every { it.statusEnumId == 'AUDSR_FAILED' }">
-                    <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
-                    <set field="reason" from="badReads.join(' ')"/>
-                </else-if>
-                <else-if condition="badReads">
-                    <set field="checkStatusEnumId" value="AUDCS_PARTIAL"/>
-                    <set field="reason" from="badReads.join(' ')"/>
-                </else-if>
-                <else>
-                    <set field="checkStatusEnumId" value="AUDCS_RAN"/>
-                    <set field="reason" from="null"/>
-                </else>
-            </if>
+            <set field="derived" from="darpan.audit.AuditCheckStatus.derive(sourceReads, notRunReason, systemEnums, checkId)"/>
+            <if condition="derived.error"><return error="true" message="${derived.error}"/></if>
+            <set field="checkStatusEnumId" from="derived.checkStatusEnumId"/>
+            <set field="reason" from="derived.reason"/>
 
             <entity-find entity-name="darpan.audit.AuditCheckRun" list="existingRuns" for-update="true">
                 <econdition field-name="companyUserGroupId"/>

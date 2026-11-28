@@ -19,6 +19,8 @@ import java.time.ZoneId
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -153,6 +155,17 @@ class AuditDigestSmokeTests {
         digest("TDG_STRAY", KREWE_SPACE, "AUDDK_DAILY", "07:00")
         assertEquals("NO_DESTINATION", outcome(send("2026-10-21", "07:05"), "TDG_STRAY").reason)
         assertEquals([], posts)
+    }
+
+    /** S99-065: the digest and the run update share this; the run update had no test of another tenant's space. */
+    @Test
+    void theChatDestinationIsTheDigestTenantsOwnSpaceOrNone() {
+        assertNotNull(AuditDigestSupport.chatDestination(ec, GORJANA, [auditDigestId: "TDG_D", chatSpaceId: SPACE], "Audit run update"))
+        assertNull(AuditDigestSupport.chatDestination(ec, GORJANA, [auditDigestId: "TDG_D", chatSpaceId: KREWE_SPACE], "Audit run update"),
+                "another tenant's space")
+        assertNull(AuditDigestSupport.chatDestination(ec, GORJANA, [auditDigestId: "TDG_D", chatSpaceId: "TDG_NO_SUCH"], "Audit digest"),
+                "a space that does not exist")
+        assertNull(AuditDigestSupport.chatDestination(ec, GORJANA, [auditDigestId: "TDG_D", chatSpaceId: " "], "Audit digest"), "none named")
     }
 
     @Test

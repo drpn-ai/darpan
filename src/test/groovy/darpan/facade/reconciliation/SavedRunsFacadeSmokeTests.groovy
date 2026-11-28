@@ -809,10 +809,12 @@ class SavedRunsFacadeSmokeTests {
 
     /**
      * DAR-OPS-029 OC21 (Aditi 2026-11-28): legacy mapping saved runs are retired. A mapping id given to run#SavedRunDiff
-     * answers exactly as a missing run does (the mapping path used to write two run rows per run).
+     * answers exactly as a missing run does (the mapping path used to write two run rows per run). OC58: an id that is not a
+     * runnable saved run mints no run row (Darpan's alerts room still gets its FAILED card; no client is told).
      */
     @Test
     void aLegacyMappingIdIsNotARunnableSavedRun() {
+        long rowsBefore = runResultRowCount()
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
                 .parameters([
@@ -828,6 +830,22 @@ class SavedRunsFacadeSmokeTests {
 
         assertEquals(false, runResult.ok)
         assertEquals(["Saved run 'OrderIdSchemaMap' was not found."], runResult.errors)
+        assertEquals(rowsBefore, runResultRowCount(), "a mapping id mints no run row")
+
+        ec.message.clearErrors()
+        Map<String, Object> unknown = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([savedRunId: "RS_NO_SUCH_RUN", file1Name: "a.csv", file1Text: "order_id\nA1\n",
+                             file2Name: "b.csv", file2Text: "order_id\nA1\n", hasHeader: true])
+                .disableAuthz()
+                .call()
+        assertEquals(false, unknown.ok)
+        assertEquals(["Saved run 'RS_NO_SUCH_RUN' was not found."], unknown.errors)
+        assertEquals(rowsBefore, runResultRowCount(), "an unknown id mints no run row")
+    }
+
+    private long runResultRowCount() {
+        return ec.entity.find("darpan.reconciliation.ReconciliationRunResult").disableAuthz().useCache(false).count()
     }
 
     /** A two-sided CSV saved run on order_id, removed after the test. */

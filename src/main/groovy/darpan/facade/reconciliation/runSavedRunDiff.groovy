@@ -139,6 +139,34 @@ if (retryFromRunResultIdValue && !ec.message.hasError()) {
     }
 }
 
+// OC58: the saved run is resolved (found, valid, enabled) BEFORE a run row is minted. An unknown, retired (an old mapping id)
+// or disabled run is a bad request: it answers with its error and mints no run row or step (Darpan still gets its card, below).
+Map<String, Object> resolvedRuleSetRun = null
+if (!ec.message.hasError()) {
+    resolvedRuleSetRun = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)
+    if (resolvedRuleSetRun.error) {
+        ec.message.addError(resolvedRuleSetRun.error as String)
+    } else if (resolvedRuleSetRun.savedRun == null) {
+        ec.message.addError("Saved run '${savedRunIdValue}' was not found.")
+    } else {
+        // DAR-BE-060, MANUAL path. The scheduled path is gated separately in AutomationExecutionSupport: they reach the
+        // pipeline by different routes, so one check would leave the other running and the operator would believe it was off.
+        ReconciliationSavedRunSupport.requireRunEnabled(ec, (Map<String, Object>) resolvedRuleSetRun.savedRun,
+                ((Map<String, Object>) resolvedRuleSetRun.savedRun).runName as String)
+    }
+    // DAR-BE-362 still holds without a row: Darpan's alerts room gets the FAILED card (savedRun:<id>). No client is told: with no
+    // run row there is no notify-me subscription to answer (its key is the run row's id). Never throws.
+    if (ec.message.hasError()) {
+        AutomationExecutionSupport.notifySavedRunError(ec, [
+                reconciliationRunResultId: null,
+                companyUserGroupId       : TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                savedRunId               : savedRunIdValue,
+                runName                  : normalize(((Map) resolvedRuleSetRun?.savedRun)?.runName),
+                resultDataManagerPath    : null,
+        ], ec.message.errors.join("; "))
+    }
+}
+
 // --- Observability (run status lifecycle): RunObservability owns statusEnumId from here on.
 // beginRun creates the run row in RUNNING; every observability write is best-effort and commits
 // in its own short transaction, so these calls are safe inside this transaction="ignore" service.
@@ -612,19 +640,9 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
 try {
     // DAR-OPS-029 OC21 (Aditi 2026-11-28): legacy mapping saved runs are retired; a mapping id resolves as a missing run.
     if (!ec.message.hasError()) {
-        Map<String, Object> resolvedRuleSetRun = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)
-        if (!resolvedRuleSetRun.error) runNameValue = normalize(((Map) resolvedRuleSetRun.savedRun)?.runName)
-        if (resolvedRuleSetRun.error) {
-            ec.message.addError(resolvedRuleSetRun.error as String)
-        } else if (resolvedRuleSetRun.savedRun == null) {
-            ec.message.addError("Saved run '${savedRunIdValue}' was not found.")
-        } else if (!ReconciliationSavedRunSupport.requireRunEnabled(ec,
-                (Map<String, Object>) resolvedRuleSetRun.savedRun,
-                ((Map<String, Object>) resolvedRuleSetRun.savedRun).runName as String)) {
-            // DAR-BE-060, MANUAL path. The scheduled path is gated separately in
-            // AutomationExecutionSupport — they reach the pipeline by different routes, so one
-            // check would leave the other running and the operator would believe it was off.
-        } else {
+        // OC58: resolved (found, valid, enabled) before beginRun above; a run that was not never reaches here.
+        runNameValue = normalize(((Map) resolvedRuleSetRun?.savedRun)?.runName)
+        if (resolvedRuleSetRun?.savedRun != null) {
             Map<String, Object> savedRun = (Map<String, Object>) resolvedRuleSetRun.savedRun
             Map<String, Object> sourceBySide = (Map<String, Object>) resolvedRuleSetRun.sourceBySide
             def file1Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_1]

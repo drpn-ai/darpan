@@ -22888,6 +22888,10 @@
                             
                         }
                     },
+                    "reason": {
+                        "type": "string",
+                        "description": "DAR-OPS-029 S40c (C4): with ok false, HEADERS_NOT_CARRIED when the edit moved the base\n                URL or auth type, left the custom headers blank, and the config stores headers: nothing was saved; send the\n                headers again, or {} to remove them. Blank on every other answer."
+                    },
                     "savedOmsRestSourceConfig": {
                         "type": "object",
                         "properties": {

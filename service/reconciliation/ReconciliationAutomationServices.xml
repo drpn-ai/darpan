@@ -249,14 +249,14 @@
 
     <service verb="scan" noun="DueAutomations" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
         <description>Find active automations with nextScheduledFireTime at or before now, SUBMIT execute#Automation for each
-            (fire-and-forget onto the async worker pool), and advance nextScheduledFireTime from the automation schedule
-            expression at submission time. DAR-BE-002: this scan does not wait for any execution to finish, so it returns
-            promptly and the every-5-minute ServiceJob stops overlapping itself. scanResults therefore carries a submission
-            ACK per automation, not a run outcome — each execution reports itself on its own ReconciliationAutomationExecution
-            and ReconciliationRunResult rows (both minted at RUNNING) and on the live run-progress view. Submissions are
-            bounded by darpan.reconciliation.automation.maxConcurrentExecutions minus the executions already RUNNING;
-            automations past that budget are reported in deferredCount with their schedule untouched, so the next tick
-            re-drives the same window.</description>
+            through RunAdmission (fire-and-forget onto its own run threads, DAR-BE-143), and advance nextScheduledFireTime
+            from the automation schedule expression at submission time. DAR-BE-002: this scan does not wait for any execution
+            to finish, so it returns promptly and the every-5-minute ServiceJob stops overlapping itself. scanResults therefore
+            carries a submission ACK per automation, not a run outcome — each execution reports itself on its own
+            ReconciliationAutomationExecution and ReconciliationRunResult rows (both minted at RUNNING) and on the live
+            run-progress view. A due automation is submitted only while darpan.reconciliation.automation.maxConcurrentExecutions
+            minus the executions already RUNNING leaves room and its tenant's lane can start it at once (RunAdmission.canStartNow);
+            the rest are reported in deferredCount with their schedule untouched, so the next tick re-drives the same window.</description>
         <in-parameters>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="limit" type="Integer" default-value="100"/>
@@ -285,26 +285,17 @@
         </actions>
     </service>
 
-    <!-- Audit H2.5 / H3.3 — when a reconciliation run or an automation execution crashes mid-flight
-         (OOM, JVM kill, container restart between writes), its row is left in AUT_STAT_RUNNING
-         forever: ReconciliationOutputSupport.ACTIVE_STATUSES includes RUNNING so the UI blocks
-         re-trigger, and findOrCreateExecution only treats PENDING as reusable so the scanner skips
-         the same window forever. This reaper transitions any RUNNING / PENDING row whose
-         lastUpdatedStamp is older than the configured threshold to FAILED with an explanatory
-         status message, freeing the run and unblocking the next scheduled scan. -->
-    <service verb="sweep" noun="StuckReconciliationRuns" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
-        <description>Reaper that flips stale AUT_STAT_RUNNING / AUT_STAT_PENDING ReconciliationRunResult and ReconciliationAutomationExecution rows to AUT_STAT_FAILED.</description>
+    <!-- Audit H2.5 / H3.3: a run or execution that crashed mid-flight stays RUNNING forever without this (why: StuckRunReaper). -->
+    <service verb="sweep" noun="StuckReconciliationRuns" type="java" location="darpan.reconciliation.automation.StuckRunReaper"
+            method="sweep" transaction="ignore" allow-remote="false" authenticate="anonymous-all" semaphore="fail" semaphore-ignore="900">
+        <description>Reaper that flips stale AUT_STAT_RUNNING / AUT_STAT_PENDING ReconciliationRunResult and ReconciliationAutomationExecution
+            rows to AUT_STAT_FAILED, keeps why in errorMessage, and reports each as a run error (card to Darpan, neutral line to
+            notify-me subscribers).</description>
         <out-parameters>
             <parameter name="cutoffTimestamp" type="Timestamp"/>
             <parameter name="reapedRunResultCount" type="Integer"/>
             <parameter name="reapedExecutionCount" type="Integer"/>
         </out-parameters>
-        <actions>
-            <set field="result" from="darpan.reconciliation.automation.StuckRunReaper.sweep(ec)"/>
-            <set field="cutoffTimestamp" from="result.cutoffTimestamp"/>
-            <set field="reapedRunResultCount" from="result.reapedRunResultCount"/>
-            <set field="reapedExecutionCount" from="result.reapedExecutionCount"/>
-        </actions>
     </service>
 
 </services>

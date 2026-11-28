@@ -296,15 +296,83 @@ class DiffDetailClassifierTests {
     }
 
     @Test
-    void aDuplicateRowIsOneRuleClassNotAMissingRecord() {
+    void aDuplicateRowIsItsOwnBucketNotAMissingRecordOrARule() {
         // DAR-BE-063: presentIn is set on a duplicate row, which isMissingDiffRecord alone would read as
-        // "missing from the other side". It is a broken "key must be unique" rule, one class per side.
+        // "missing from the other side". DAR-OPS-029 S20 (OC52): nor is it a rule row; the compare counts it in
+        // duplicateDifferenceCount, so the page files it under its own bucket. Still one filter option per side.
         Map row = [type: "DUPLICATE_IN_FILE_2", id: "K2", presentIn: F2, missingIn: "", message: "Duplicated in System B"]
-        assertEquals("rule", DiffDetailClassifier.resolveDiffBucket(row, F1, F2))
+        assertEquals("duplicate", DiffDetailClassifier.resolveDiffBucket(row, F1, F2))
         Map a = DiffDetailClassifier.classifyRow(row, 0, F1, F2)
         Map b = DiffDetailClassifier.classifyRow(row + [id: "K9"], 7, F1, F2)
         assertEquals(a.ruleFilterKey, b.ruleFilterKey, "every duplicate row on a side is one filter option")
         assertEquals("duplicate_in_file_2", a.ruleFilterKey)
+        assertEquals("duplicate", DiffDetailClassifier.resolveDiffBucket(
+                [diffType: "DUPLICATE_IN_FILE_1_PAIRED", primaryId: "K3", presentIn: F2, missingIn: ""], F1, F2),
+                "a duplicate's partner row (D5) is a duplicate too")
+    }
+
+    /**
+     * DAR-OPS-029 S20 (OC52, S01a's rule): the three facets are disjoint and every row sits in exactly one, so the rule
+     * facet equals the compare's ruleDifferenceCount, the duplicate facet its duplicateDifferenceCount, and the
+     * missing facets its missingObjectDifferenceCount.
+     */
+    @Test
+    void everyRowSitsInExactlyOneBucketAndTheBucketsMatchTheSummary() {
+        Map document = [
+                summary    : [missingObjectDifferenceCount: 2, duplicateDifferenceCount: 3, ruleDifferenceCount: 2, totalDifferences: 7],
+                differences: [
+                        [diffType: "MISSING_IN_FILE_1", primaryId: "M1", missingIn: F1, presentIn: F2],
+                        [diffType: "MISSING_IN_FILE_2", primaryId: "M2", missingIn: F2, presentIn: F1],
+                        [diffType: "DUPLICATE_IN_FILE_1", primaryId: "D1", presentIn: F1, missingIn: ""],
+                        [diffType: "DUPLICATE_IN_FILE_1", primaryId: "D1", presentIn: F1, missingIn: ""],
+                        [diffType: "DUPLICATE_IN_FILE_1_PAIRED", primaryId: "D1", presentIn: F2, missingIn: ""],
+                        [diffType: "VALUE_MISMATCH", primaryId: "R1", ruleId: "rule_1", field: "qty"],
+                        [diffType: "VALUE_MISMATCH", primaryId: "R2", ruleId: "rule_1", field: "qty"],
+                ]]
+        Map page = DiffDetailClassifier.buildDifferencesPage(document, F1, F2, null, "all", null, 0, 50, true)
+        Map counts = (Map) page.bucketCounts
+        Map summary = (Map) document.summary
+        assertEquals(DiffDetailClassifier.BUCKET_ORDER, counts.keySet() as List)
+        assertEquals(summary.missingObjectDifferenceCount, counts.get("file-1") + counts.get("file-2"))
+        assertEquals(summary.duplicateDifferenceCount, counts.get("duplicate"))
+        assertEquals(summary.ruleDifferenceCount, counts.get("rule"))
+        assertEquals(summary.totalDifferences, counts.values().sum())
+        assertEquals(7, page.totalFiltered, "an empty bucket request still lists every row")
+        assertEquals(3, DiffDetailClassifier.buildDifferencesPage(document, F1, F2, ["duplicate"], "all", null, 0, 50, false).totalFiltered)
+        assertEquals(2, DiffDetailClassifier.buildDifferencesPage(document, F1, F2, ["rule", "duplicate"], "rule_1", null, 0, 50, false).totalFiltered)
+    }
+
+    /**
+     * DAR-OPS-029 S20: a document whose summary carries no side counts gets them from its rows. A duplicate row carries
+     * presentIn, and the missing-side read alone counted it as a record only that side holds.
+     */
+    @Test
+    void theFallbackSideCountsLeaveDuplicateRowsOut() {
+        Map document = [summary: [:], differences: [
+                [diffType: "MISSING_IN_FILE_1", primaryId: "M1", missingIn: F1, presentIn: F2],
+                [diffType: "DUPLICATE_IN_FILE_2", primaryId: "D2", presentIn: F2, missingIn: ""],
+                [diffType: "DUPLICATE_IN_FILE_2_PAIRED", primaryId: "D2", presentIn: F1, missingIn: ""],
+        ]]
+        Map summary = DiffDetailClassifier.buildEffectiveSummary(document, F1, F2)
+        assertEquals(0, summary.onlyInFile1Count)
+        assertEquals(1, summary.onlyInFile2Count)
+    }
+
+    /**
+     * Compat until the run result page knows the duplicate bucket (S99 removes it): the page asks for the buckets it
+     * knows, and it showed duplicates under "rule". A request naming "rule" but not "duplicate" still lists them, so a
+     * page that has not caught up never loses them; one that names neither still hides them, as it always did.
+     */
+    @Test
+    void anOldPageAskingForRuleStillSeesTheDuplicates() {
+        Map document = [differences: [
+                [diffType: "MISSING_IN_FILE_1", primaryId: "M1", missingIn: F1, presentIn: F2],
+                [diffType: "DUPLICATE_IN_FILE_2", primaryId: "D2", presentIn: F2, missingIn: ""],
+                [diffType: "VALUE_MISMATCH", primaryId: "R1", ruleId: "rule_1"],
+        ]]
+        assertEquals(3, DiffDetailClassifier.buildDifferencesPage(document, F1, F2, ["file-1", "file-2", "rule"], "all", null, 0, 50, false).totalFiltered)
+        assertEquals(2, DiffDetailClassifier.buildDifferencesPage(document, F1, F2, ["rule"], "all", null, 0, 50, false).totalFiltered)
+        assertEquals(1, DiffDetailClassifier.buildDifferencesPage(document, F1, F2, ["file-1"], "all", null, 0, 50, false).totalFiltered)
     }
 
     @Test

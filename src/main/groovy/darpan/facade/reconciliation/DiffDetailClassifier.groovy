@@ -19,7 +19,12 @@ import groovy.json.JsonSlurper
  */
 class DiffDetailClassifier {
 
-    static final List<String> BUCKET_ORDER = ['file-1', 'file-2', 'rule']
+    /**
+     * Disjoint, and every row sits in exactly one (S01a): the missing rows of each side, the duplicate-key rows
+     * (DUPLICATE_IN_FILE_n and their _PAIRED partners, the compare's duplicateDifferenceCount), and the rule rows.
+     */
+    static final List<String> BUCKET_ORDER = ['file-1', 'file-2', 'duplicate', 'rule']
+    static final String DUPLICATE_BUCKET = 'duplicate'
     static final String ALL_RULE_FILTER_KEY = 'all'
     static final String BASE_RULE_FILTER_KEY = 'base-diff'
 
@@ -42,7 +47,7 @@ class DiffDetailClassifier {
         return normalizeText(record.get('diffType') ?: record.get('type'))
     }
 
-    static Object firstRecordValue(Object record, List<String> keys) {
+    private static Object firstRecordValue(Object record, List<String> keys) {
         if (!(record instanceof Map)) return null
         Map source = (Map) record
         for (String key : keys) {
@@ -72,7 +77,7 @@ class DiffDetailClassifier {
         return "row-${rowIndex + 1}".toString()
     }
 
-    static String resolveMissingBucket(Map record, String file1Label, String file2Label) {
+    private static String resolveMissingBucket(Map record, String file1Label, String file2Label) {
         String missingToken = normalizeToken(record.get('missingIn'))
         String file1Token = normalizeToken(file1Label)
         String file2Token = normalizeToken(file2Label)
@@ -92,17 +97,22 @@ class DiffDetailClassifier {
         return 'rule'
     }
 
+    /** DAR-BE-063: a key the side holds more than once (DUPLICATE_IN_FILE_n), or that key's partner row (_PAIRED, D5). */
+    static boolean isDuplicateDiffRecord(Map record) {
+        return normalizeToken(resolveDiffType(record)).startsWith('duplicate_in_')
+    }
+
     static boolean isMissingDiffRecord(Map record) {
+        // A duplicate-key row carries presentIn, but nothing is missing.
+        if (isDuplicateDiffRecord(record)) return false
         String typeToken = normalizeToken(resolveDiffType(record))
-        // DAR-BE-063: a duplicate-key row carries presentIn but nothing is missing — it is a broken
-        // "key must be unique" rule, so it falls through to the rule bucket keyed by its type.
-        if (typeToken.startsWith('duplicate_in_')) return false
         return (normalizeText(record.get('missingIn'))
                 || normalizeText(record.get('presentIn'))
                 || typeToken.startsWith('missing_in_'))
     }
 
     static String resolveDiffBucket(Map record, String file1Label, String file2Label) {
+        if (isDuplicateDiffRecord(record)) return DUPLICATE_BUCKET
         if (isMissingDiffRecord(record)) return resolveMissingBucket(record, file1Label, file2Label)
         return 'rule'
     }
@@ -130,7 +140,7 @@ class DiffDetailClassifier {
         return "Rule ${fallbackIndex}".toString()
     }
 
-    static String resolveRuleRowDetail(Map record, String fallbackRuleId, String file1Label = null, String file2Label = null) {
+    private static String resolveRuleRowDetail(Map record, String fallbackRuleId, String file1Label = null, String file2Label = null) {
         return normalizeText(record.get('ruleLabel')) ?:
                 normalizeText(record.get('ruleName')) ?:
                         normalizeText(record.get('ruleDescription')) ?:
@@ -141,7 +151,8 @@ class DiffDetailClassifier {
     }
 
     static Map resolveRuleDescriptor(Map record, String bucket, int rowIndex, String file1Label = null, String file2Label = null) {
-        if (bucket != 'rule') {
+        // A missing row is the base comparison; a duplicate row keeps its own class (one 'Duplicates' option per side).
+        if (bucket == 'file-1' || bucket == 'file-2') {
             return [ruleFilterKey: BASE_RULE_FILTER_KEY, ruleId: BASE_RULE_FILTER_KEY, ruleLabel: 'Base comparison']
         }
         String ruleId = normalizeText(record.get('ruleId')) ?:
@@ -175,7 +186,7 @@ class DiffDetailClassifier {
     // --- facets (mirror diffDetailBucketCounts + ruleSelectorOptions computeds) ---
 
     static Map<String, Integer> buildBucketCounts(List<Map> rows) {
-        Map<String, Integer> counts = ['file-1': 0, 'file-2': 0, 'rule': 0]
+        Map<String, Integer> counts = BUCKET_ORDER.collectEntries { [(it): 0] } as LinkedHashMap<String, Integer>
         rows.each { Map row ->
             String bucket = (String) row.bucket
             if (counts.containsKey(bucket)) counts.put(bucket, counts.get(bucket) + 1)
@@ -184,7 +195,7 @@ class DiffDetailClassifier {
     }
 
     /** Whole-document count per conclusion code (DAR-UI-044); empty on a run without conclusions. */
-    static Map<String, Integer> buildConclusionCounts(List<Map> rows) {
+    private static Map<String, Integer> buildConclusionCounts(List<Map> rows) {
         Map<String, Integer> counts = new LinkedHashMap<>()
         rows.each { Map row ->
             String code = (String) row.conclusionCode
@@ -248,12 +259,14 @@ class DiffDetailClassifier {
 
     // --- effective summary (mirror buildGeneratedOutputFromPayload summary derivation) ---
 
-    static Map summarizeMissingCounts(List differences, String file1Label, String file2Label) {
+    private static Map summarizeMissingCounts(List differences, String file1Label, String file2Label) {
         int onlyInFile1Count = 0
         int onlyInFile2Count = 0
         differences.each { Object raw ->
             Map record = (raw instanceof Map) ? (Map) raw : [:]
-            String bucket = resolveMissingBucket(record, file1Label, file2Label)
+            // resolveDiffBucket, not resolveMissingBucket: a duplicate row carries presentIn, which the missing-side
+            // read alone would count as a record only that side holds.
+            String bucket = resolveDiffBucket(record, file1Label, file2Label)
             if (bucket == 'file-1') onlyInFile2Count++
             else if (bucket == 'file-2') onlyInFile1Count++
         }
@@ -283,13 +296,13 @@ class DiffDetailClassifier {
 
     // --- paging (mirror activeBucket/activeRule/filtered chain + useListPagination) ---
 
-    static int pageCountFor(int totalItems, int pageSize) {
+    private static int pageCountFor(int totalItems, int pageSize) {
         int normalizedTotal = Math.max(0, totalItems)
         int normalizedSize = pageSize < 1 ? 1 : pageSize
         return Math.max(1, (int) Math.ceil(normalizedTotal / (double) normalizedSize))
     }
 
-    static int clampPageIndex(int pageIndex, int pageCount) {
+    private static int clampPageIndex(int pageIndex, int pageCount) {
         int maxPageIndex = Math.max(0, pageCount - 1)
         int normalized = pageIndex < 0 ? 0 : pageIndex
         return Math.min(normalized, maxPageIndex)
@@ -317,6 +330,9 @@ class DiffDetailClassifier {
         List<String> activeBuckets = (requestedBuckets == null || requestedBuckets.isEmpty())
                 ? new ArrayList<>(BUCKET_ORDER)
                 : BUCKET_ORDER.findAll { requestedBuckets.contains(it) }
+        // COMPAT (OC52, until the run result page knows the duplicate bucket; S99 removes it): a page that predates the
+        // bucket showed duplicates under "rule", so a request naming "rule" but not "duplicate" still lists them.
+        if (activeBuckets.contains('rule') && !activeBuckets.contains(DUPLICATE_BUCKET)) activeBuckets.add(DUPLICATE_BUCKET)
         String normalizedSearch = (search == null) ? '' : search.trim().toLowerCase()
         String effectiveRuleKey = normalizeText(ruleFilterKey) ?: ALL_RULE_FILTER_KEY
 

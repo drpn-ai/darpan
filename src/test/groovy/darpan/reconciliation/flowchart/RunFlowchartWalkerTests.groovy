@@ -112,6 +112,31 @@ class RunFlowchartWalkerTests {
         assertTrue(skipped.any { it.id == "B" && it.status == "AUT_STAT_NO_DATA" })
     }
 
+    /**
+     * DAR-OPS-029 OC125 (lens E2, no hollow green): a walk in which no question found anything is NO_DATA, never SUCCESS.
+     * The start read nothing, so every question under it is skipped NO_DATA; one question that succeeds keeps SUCCESS.
+     */
+    @Test
+    void aWalkInWhichNoQuestionFoundAnythingIsNoDataNotSuccess() {
+        List calls = [], skipped = []; Map yes = [:]
+        Map empty = walk(chart(), [S: [status: "AUT_STAT_NO_DATA", file1: []]], calls, skipped, yes)
+        assertEquals(["S"], calls*.id)
+        assertEquals(["A", "A1", "B"] as Set, skipped.findAll { it.status == "AUT_STAT_NO_DATA" }*.id as Set)
+        assertEquals("AUT_STAT_NO_DATA", empty.statusEnumId)
+
+        Map some = walk(chart(), [S: [file1: ["K1"], findings: ["K1"]], A: [status: "AUT_STAT_NO_DATA"]], [], [], [:])
+        assertEquals("AUT_STAT_SUCCESS", some.statusEnumId, "the start succeeded, so the walk did")
+    }
+
+    @Test
+    void anExecutionWhoseQuestionsAllHadNoDataRollsUpAsNoData() {
+        assertEquals("AUT_STAT_NO_DATA", RunFlowchartSupport.rollupStatus(["AUT_STAT_NO_DATA", "AUT_STAT_NO_DATA"]))
+        assertEquals("AUT_STAT_SUCCESS", RunFlowchartSupport.rollupStatus(["AUT_STAT_SUCCESS", "AUT_STAT_NO_DATA"]))
+        assertEquals("AUT_STAT_FAILED", RunFlowchartSupport.rollupStatus(["AUT_STAT_NO_DATA", "AUT_STAT_FAILED", "AUT_STAT_NOT_RUN"]))
+        assertEquals("AUT_STAT_CANCELLED", RunFlowchartSupport.rollupStatus(["AUT_STAT_CANCELLED", "AUT_STAT_FAILED"]))
+        assertEquals("AUT_STAT_RUNNING", RunFlowchartSupport.rollupStatus(["AUT_STAT_PENDING", "AUT_STAT_NO_DATA"]))
+    }
+
     @Test
     void noRowIsCreatedBeforeItsQuestionStarts() {
         List events = []

@@ -1,5 +1,8 @@
 package darpan.reconciliation.flowchart
 
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
 /**
  * DAR-UI-048. Walks a run's questions parent-first, handing each child its parent's branch keys.
  *
@@ -10,8 +13,12 @@ package darpan.reconciliation.flowchart
  * Nothing thrown by one question escapes the walk (final review I2): that question fails with the
  * reason, its subtree is NOT_RUN, its siblings still run, and every question in the walk ends with a
  * row — so a chart can never look "in progress" forever because the walk died between questions.
+ *
+ * DAR-OPS-029 OC125: the walk is NO_DATA when no question succeeded and none failed or was cancelled (the start read
+ * nothing), never a clean SUCCESS.
  */
 class RunFlowchartWalker {
+    private static final Logger logger = LoggerFactory.getLogger(RunFlowchartWalker.class)
 
     static final String SUCCESS = "AUT_STAT_SUCCESS"
     static final String FAILED = "AUT_STAT_FAILED"
@@ -43,11 +50,14 @@ class RunFlowchartWalker {
         Map<String, Map> outcomes = [:]
         boolean cancelled = false
         boolean failed = false
+        boolean anySuccess = false
 
+        // A row that cannot be written must not end the walk, but it is never silent: the question is left without its row.
         Closure<String> skip = { Map q, String parentRunResultId, String status, String reason ->
             try {
                 return recordSkipped.call(q, parentRunResultId, status, reason)
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                logger.error("Flowchart question ${q.reconciliationRunId} could not record its ${status} row: ${t.message}", t)
                 return null
             }
         }
@@ -86,6 +96,7 @@ class RunFlowchartWalker {
                 ranRowId = ran.runResultId as String
                 String status = ran.statusEnumId as String
                 Map outcome = [runResultId: ranRowId, statusEnumId: status]
+                if (status == SUCCESS) anySuccess = true
                 if (status in [SUCCESS, NO_DATA]) {
                     Map split = QuestionOutcomeSupport.split([questionRole  : q.questionRole, scopeMode: q.scopeMode,
                                                               inputKeysFile : branchKeys, file1KeysFile: file1Keys,
@@ -102,14 +113,18 @@ class RunFlowchartWalker {
                 failed = true
                 String detail = t.message ?: t.class.simpleName
                 if (ranRowId && recordFailure != null) {
-                    try { recordFailure.call(ranRowId, REASON_COULD_NOT_FINISH + detail) } catch (Throwable ignored) { }
+                    try {
+                        recordFailure.call(ranRowId, REASON_COULD_NOT_FINISH + detail)
+                    } catch (Throwable recordError) {
+                        logger.error("Flowchart question ${id} failed (${detail}) and its row ${ranRowId} could not record it: ${recordError.message}", recordError)
+                    }
                     outcomes[id] = [runResultId: ranRowId, statusEnumId: FAILED]
                 } else {
                     outcomes[id] = [runResultId: skip(q, parentRunResultId, FAILED, REASON_COULD_NOT_RUN + detail), statusEnumId: FAILED]
                 }
             }
         }
-        String overall = cancelled ? CANCELLED : failed ? FAILED : SUCCESS
+        String overall = cancelled ? CANCELLED : failed ? FAILED : anySuccess ? SUCCESS : NO_DATA
         return [outcomes: outcomes, statusEnumId: overall]
     }
 }

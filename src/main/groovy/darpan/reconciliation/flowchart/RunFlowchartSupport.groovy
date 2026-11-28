@@ -5,6 +5,7 @@ import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.core.RunSnapshotScope
+import groovy.json.JsonOutput
 
 import static darpan.common.ValueSupport.normalize
 
@@ -86,7 +87,7 @@ class RunFlowchartSupport {
         if (params.containsKey("notFindingPlaces")) {
             List<String> places = ((params.get("notFindingPlaces") ?: []) as List).collect { normalize(it as String) }.findAll { it }.unique() as List<String>
             if (places.any { it.length() > 200 } || places.size() > 50) { ec.message.addError("Those are not places of this lifecycle."); return [:] }
-            value.set("notFindingPlaces", places ? groovy.json.JsonOutput.toJson(places) : null)
+            value.set("notFindingPlaces", places ? JsonOutput.toJson(places) : null)
         }
         boolean renamed = id && value.isFieldModified("reconciliationName")
         if (id) value.update() else value.create()
@@ -256,6 +257,7 @@ class RunFlowchartSupport {
         if (statuses.any { it in ["AUT_STAT_PENDING", "AUT_STAT_RUNNING"] }) return "AUT_STAT_RUNNING"
         if (statuses.any { it == "AUT_STAT_CANCELLED" }) return "AUT_STAT_CANCELLED"
         if (statuses.any { it == "AUT_STAT_FAILED" }) return "AUT_STAT_FAILED"
-        return "AUT_STAT_SUCCESS"
+        // DAR-OPS-029 OC125: an execution in which no question succeeded found nothing; it never reads as a clean run.
+        return statuses.any { it == "AUT_STAT_SUCCESS" } ? "AUT_STAT_SUCCESS" : "AUT_STAT_NO_DATA"
     }
 }

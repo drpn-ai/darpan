@@ -508,23 +508,15 @@ class TwoFactorSupport {
     // ---- sessions and keys ----
 
     /**
-     * Ends every sign-in of the person, in the caller's transaction: UserAccount.sessionsEndedDate moves to now (never
-     * back), then AuthSessionSupport.endEverySignIn (OC39: the same step a password change takes) deletes their login keys,
-     * revokes their CLI sessions and denies a CLI sign-in they approved that the CLI has not yet collected. The stamp is
-     * the rule; the deletes are housekeeping: a key or CLI session issued before the stamp is refused on every request
-     * (AuthSessionSupport.predatesSessionsEnd), so one minted while this ran, which the delete missed, is refused too, and
-     * so is a web session holding no key. A caller that keeps the person signed in on this request issues a fresh key
+     * Ends every sign-in of the person, in the caller's transaction, by the same step a password change takes
+     * (AuthSessionSupport.endEverySignIn, OC39/OC86): UserAccount.sessionsEndedDate moves to now (never back), then their login
+     * keys go, their CLI sessions are revoked and a CLI sign-in they approved that the CLI has not yet collected is denied.
+     * The stamp is the rule; the deletes are housekeeping: a key or CLI session issued before the stamp is refused on every
+     * request (AuthSessionSupport.predatesSessionsEnd), so one minted while this ran, which the delete missed, is refused too,
+     * and so is a web session holding no key. A caller that keeps the person signed in on this request issues a fresh key
      * afterwards (AuthFacadeSupport.issueSignedInSession).
      */
     static void endSessions(def ec, String userId) {
-        Timestamp endedAt = ec.user.nowTimestamp
-        def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: stamp when the person's sign-ins were ended")
-                .condition("userId", userId).useCache(false).one()
-        Timestamp previous = account?.sessionsEndedDate as Timestamp
-        if (account != null && (previous == null || previous.before(endedAt))) {
-            account.sessionsEndedDate = endedAt
-            account.update()
-        }
         AuthSessionSupport.endEverySignIn(ec, userId)
     }
 

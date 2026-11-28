@@ -48,7 +48,7 @@ class SlowedPhaseReaperSmokeTests {
     }
 
     @AfterEach
-    void reset() { RunObservability.resetExecutionTouchesForTests() }
+    void reset() { RunObservability.resetForTests() }
 
     @AfterAll
     void cleanup() { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }

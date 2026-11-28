@@ -98,8 +98,14 @@ class RunObservability {
     ]
 
     static boolean isTerminalStatus(String status) { TERMINAL_STATUSES.contains(status) }
-    static boolean isActiveStatus(String status) { ACTIVE_STATUSES.contains(status) }
     static int stageSequenceOf(String stageCode) { (STAGE_SEQUENCE[stageCode] ?: 0) as int }
+
+    /** errorMessage columns are text-medium (VARCHAR 255): longer text is cut there; the full text goes to errorDetail. */
+    static final int ERROR_MESSAGE_MAX = 255
+
+    static String capErrorMessage(String text) {
+        return text != null && text.length() > ERROR_MESSAGE_MAX ? text.substring(0, ERROR_MESSAGE_MAX) : text
+    }
 
     /** Create-or-adopt the run row in RUNNING with startedDate + currentStage=RESOLVE. Returns runId. */
     static String beginRun(def ec, Map<String, Object> ctx) {
@@ -161,8 +167,8 @@ class RunObservability {
              "ruleSetId", "companyUserGroupId", "createdByUserId", "windowStartDate", "windowEndDate",
              "windowTimeZone"].each { String k -> if (ctx.get(k) != null) run.set(k, ctx.get(k)) }
             run.set("statusEnumId", statusEnumId)
-            run.set("errorMessage", reason != null && reason.length() > 255 ? reason.substring(0, 255) : reason)
-            if (reason != null && reason.length() > 255) run.set("errorDetail", reason)
+            run.set("errorMessage", capErrorMessage(reason))
+            if (reason != null && reason.length() > ERROR_MESSAGE_MAX) run.set("errorDetail", reason)
             run.set("startedDate", now)
             run.set("completedDate", now)
             run.set("createdDate", now)
@@ -267,7 +273,6 @@ class RunObservability {
         }
     }
 
-    /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
     /**
      * Advisory extract progress from a source extractor: finds the RUNNING step for the stage and
      * heartbeats the processed count onto it. The count is the progress — a percent is reported only
@@ -298,7 +303,8 @@ class RunObservability {
             }
             heartbeat(ec, step, progress)
             touchAutomationExecution(ec, runIdValue, step.get("companyUserGroupId"))
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.warn("RunObservability.heartbeatStageProgress best-effort failure (runId=${norm(runId)}, stage=${stageCode}): ${e.message}")
         }
     }
 
@@ -338,11 +344,7 @@ class RunObservability {
         }
     }
 
-    static void resetExecutionTouchesForTests() {
-        EXECUTION_TOUCHED_AT.clear()
-        executionTouchClock = { -> System.currentTimeMillis() }
-    }
-
+    /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
     static void heartbeat(def ec, Object step, Map<String, Object> progress) {
         if (step == null) return
         Timestamp now = nowSafe(ec)
@@ -384,8 +386,7 @@ class RunObservability {
                 step.set("completedDate", now)
                 if (metrics?.get("recordCount") != null) step.set("recordCount", metrics.get("recordCount"))
                 if (metrics?.get("errorMessage") != null) {
-                    String errorMessage = metrics.get("errorMessage").toString()
-                    step.set("errorMessage", errorMessage.length() > 255 ? errorMessage.substring(0, 255) : errorMessage)
+                    step.set("errorMessage", capErrorMessage(metrics.get("errorMessage").toString()))
                 }
                 if (metrics?.get("metricsJson") != null) step.set("metricsJson", metrics.get("metricsJson"))
                 step.set("lastUpdatedDate", now)
@@ -429,7 +430,7 @@ class RunObservability {
     /** Terminal FAILED with a reason; closes the open step if provided; clears MDC. */
     static void failRun(def ec, String runId, Object openStepOrNull, String stageCode, String reason) {
         Timestamp now = nowSafe(ec)
-        String shortReason = reason == null ? null : (reason.length() > 255 ? reason.substring(0, 255) : reason)
+        String shortReason = capErrorMessage(reason)
         try {
             if (openStepOrNull != null && !isTerminalStatus(norm(openStepOrNull.get("statusEnumId")))) {
                 endStep(ec, openStepOrNull, STATUS_FAILED, [errorMessage: shortReason])

@@ -5,21 +5,21 @@ import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class RunObservabilityCoreTest {
 
     @Test
     void terminalAndActiveStatusesArePartitioned() {
-        assertTrue(RunObservability.isActiveStatus(RunObservability.STATUS_RUNNING))
-        assertTrue(RunObservability.isActiveStatus(RunObservability.STATUS_PENDING))
-        assertFalse(RunObservability.isActiveStatus(RunObservability.STATUS_SUCCESS))
-
-        assertTrue(RunObservability.isTerminalStatus(RunObservability.STATUS_SUCCESS))
-        assertTrue(RunObservability.isTerminalStatus(RunObservability.STATUS_FAILED))
-        assertTrue(RunObservability.isTerminalStatus(RunObservability.STATUS_NO_DATA))
-        assertTrue(RunObservability.isTerminalStatus(RunObservability.STATUS_SKIP_DUP))
+        assertEquals([RunObservability.STATUS_PENDING, RunObservability.STATUS_RUNNING] as Set, RunObservability.ACTIVE_STATUSES)
+        assertTrue(RunObservability.ACTIVE_STATUSES.intersect(RunObservability.TERMINAL_STATUSES).isEmpty(), "no status is both")
+        [RunObservability.STATUS_SUCCESS, RunObservability.STATUS_FAILED, RunObservability.STATUS_NO_DATA, RunObservability.STATUS_SKIP_DUP,
+         RunObservability.STATUS_CANCELLED, RunObservability.STATUS_NOT_RUN].each { String status ->
+            assertTrue(RunObservability.isTerminalStatus(status), status)
+        }
         assertFalse(RunObservability.isTerminalStatus(RunObservability.STATUS_RUNNING))
+        assertFalse(RunObservability.isTerminalStatus(RunObservability.STATUS_PENDING))
     }
 
     @Test
@@ -49,5 +49,12 @@ class RunObservabilityCoreTest {
         // stored rows still sort into the same slot rather than collapsing to 0.
         assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
         assertEquals(0, RunObservability.stageSequenceOf("UNKNOWN_STAGE"))
+    }
+
+    @Test
+    void errorMessagesAreCutToTheirColumn() {
+        assertEquals(255, RunObservability.capErrorMessage("x" * 300).length())
+        assertEquals("short", RunObservability.capErrorMessage("short"))
+        assertNull(RunObservability.capErrorMessage(null))
     }
 }

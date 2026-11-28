@@ -100,7 +100,8 @@ class SparkClasspathGuardTests {
                 }
             }
         }
-        assertTrue(builders >= 3, "expected the production SparkSession builders to be found, saw ${builders}")
+        // DAR-OPS-029 S99-061: one builder left (ReconciliationServices.embeddedSparkSession); the floor proves the scan found it
+        assertTrue(builders >= 1, "expected the production SparkSession builder to be found, saw ${builders}")
         assertTrue(missing.isEmpty(), "SparkSession builders that leave the Spark UI on: ${missing}")
     }
 }

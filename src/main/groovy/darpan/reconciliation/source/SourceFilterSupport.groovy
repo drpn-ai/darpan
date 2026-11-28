@@ -248,6 +248,19 @@ class SourceFilterSupport {
     }
 
     /**
+     * DAR-OPS-029 S99-060: stored filter rows (an automation's, or a compare scope side's) as getter-shape rules: the four rule
+     * fields read off each row and trimmed, then toRecordFieldRules. The one copy for AutomationRuntimeSupport and KeepPlanSupport.
+     */
+    static List<Map<String, Object>> rowsToRules(List rows) {
+        return toRecordFieldRules((rows ?: []).collect { def row ->
+            [sequenceNum    : row.sequenceNum,
+             fieldExpression: normalize(row.fieldExpression),
+             operator       : normalize(row.operator),
+             filterValues   : normalize(row.filterValues)] as Map<String, Object>
+        } as List<Map<String, Object>>)
+    }
+
+    /**
      * Translate stored rules into the shape {@link #evaluate} actually tests.
      *
      * {@code fieldExpression} is STORED as the operator-facing expression the rules board writes — a

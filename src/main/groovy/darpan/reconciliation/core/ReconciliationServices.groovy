@@ -283,13 +283,23 @@ class ReconciliationServices {
     static SparkSession embeddedSparkSession(ExecutionContext ec, String appName) {
         SparkSession spark = SparkSession.builder()
                 .appName(appName)
-                .master((String) (ec.resource.properties["spark.master"] ?: "local[*]"))
+                .master((String) (ec?.resource?.properties?.get("spark.master") ?: "local[*]"))
                 .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
                 .config("spark.sql.adaptive.enabled", "true")
                 .config("spark.ui.enabled", "false")
                 .getOrCreate()
         spark.conf().set("spark.sql.shuffle.partitions", System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16")
         return spark
+    }
+
+    /**
+     * DAR-OPS-029 S99-061: the same one session for callers that hold no ec (Keep's Spark step, the ID index): the thread's
+     * execution context gives the server's spark.master when there is one, else local[*]. The one builder in darpan.
+     */
+    static SparkSession embeddedSparkSession(String appName) {
+        // Moqui.getExecutionContext() throws when no factory is running (a unit test, a plain JVM), so ask for the factory first
+        def factory = org.moqui.Moqui.getExecutionContextFactory()
+        return embeddedSparkSession(factory != null ? factory.getExecutionContext() : null, appName)
     }
 
     // --- Private Helpers ---

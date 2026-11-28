@@ -1,5 +1,6 @@
 package darpan.reconciliation.source
 
+import darpan.reconciliation.core.ReconciliationServices
 import com.fasterxml.jackson.core.JsonFactory
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.core.JsonParser
@@ -324,26 +325,13 @@ class KeepStepSupport {
             applyToNoRecords(sideKeep, extract)
             return values
         }
-        Map applied = apply(session().read().json(lines.absolutePath), sideKeep, extract)
+        Map applied = apply(ReconciliationServices.embeddedSparkSession("KeepStep").read().json(lines.absolutePath), sideKeep, extract)
         try {
             KeepArtifacts.forEachKeptRecord(extract, collect)
         } finally {
             ((List<Dataset>) applied.persisted).each { Dataset frame -> frame.unpersist() }
         }
         return values
-    }
-
-    /** The embedded session, built as RuleSetCompareScopeAdapter builds it (getOrCreate returns the JVM's one session). */
-    private static SparkSession session() {
-        SparkSession spark = SparkSession.builder()
-                .appName("KeepStep")
-                .master("local[*]")
-                .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-                .config("spark.sql.adaptive.enabled", "true")
-                .config("spark.ui.enabled", "false") // embedded batch use; Spark UI needs legacy javax.servlet, absent under Moqui 4 jakarta
-                .getOrCreate()
-        spark.conf().set("spark.sql.shuffle.partitions", (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
-        return spark
     }
 
     /** "<rule id>|<reason>" to the rule id, for every test of every rule: the reason column split without guessing at a "|". */

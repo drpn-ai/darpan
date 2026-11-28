@@ -216,12 +216,7 @@ class KeepPlanSupport {
                 .orderBy("sequenceNum")
                 .useCache(false)
                 .list() ?: []
-        return SourceFilterSupport.toRecordFieldRules(rows.collect { def row ->
-            [sequenceNum    : row.sequenceNum,
-             fieldExpression: normalize(row.fieldExpression),
-             operator       : normalize(row.operator),
-             filterValues   : normalize(row.filterValues)] as Map<String, Object>
-        } as List<Map<String, Object>>)
+        return SourceFilterSupport.rowsToRules(rows)
     }
 
     private static Map plan(def ec, List<Map<String, Object>> rows, Map connector, Map extractOptions) {

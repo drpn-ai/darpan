@@ -183,9 +183,9 @@ class IdIndexer {
         return java.security.MessageDigest.getInstance("SHA-1").digest(identity.getBytes("UTF-8")).encodeHex().toString()
     }
 
-    /** The JVM's embedded Spark session (getOrCreate returns the one runs already started; never stopped). */
+    /** The JVM's embedded Spark session (getOrCreate returns the one runs already started; never stopped). S99-061: one builder. */
     private static SparkSession sharedSpark() {
-        return SparkSession.builder().appName("darpan").master("local[*]").config("spark.ui.enabled", "false").getOrCreate()
+        return darpan.reconciliation.core.ReconciliationServices.embeddedSparkSession("darpan")
     }
 
     private static String jsonPath(String fieldPath) { return '$.' + fieldPath }

@@ -229,7 +229,7 @@ class ErrorLogCapture implements LogEventSubscriber {
     private static final int FRAMES_PER_THROWABLE = 12
 
     /** The throwable and its causes, up to FRAMES_PER_THROWABLE frames each, stopped at STACK_MAX_CHARS, secrets masked. */
-    static String stackText(Throwable thrown) {
+    private static String stackText(Throwable thrown) {
         StringBuilder sb = new StringBuilder()
         Throwable t = thrown
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>())

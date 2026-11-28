@@ -113,16 +113,12 @@ class JobScheduleRules {
         return seconds == null ? null : (int) (seconds / 60L)
     }
 
-    static Long smallestGapSeconds(String cron, Instant from) {
-        return smallestGapSeconds(cron, from, zone())
-    }
-
     /**
      * Each gap is the larger of the time that passes and the wall-clock gap (DAR-BE-322): on a clock with daylight saving
      * the spring-forward day is 23 hours, yet a daily cron is still once a day; and the repeated fall-back hour, 0 on the
      * wall clock, still really passes. A floor is a "how often" rule, so it can be off by the one shifted hour, never more.
      */
-    static Long smallestGapSeconds(String cron, Instant from, ZoneId zone) {
+    private static Long smallestGapSeconds(String cron, Instant from, ZoneId zone) {
         List<ZonedDateTime> runs = []
         try {
             ExecutionTime time = ExecutionTime.forCron(PARSER.parse(cron.trim()))

@@ -25,7 +25,7 @@ class FactText {
         return out
     }
 
-    static String numberText(Number value) {
+    private static String numberText(Number value) {
         try {
             return new BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
         } catch (NumberFormatException ignored) {

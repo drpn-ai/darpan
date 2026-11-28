@@ -186,7 +186,7 @@ class CryptRotationSupport {
     }
 
     /** [key: currentKey | oldKeyOnly, plaintext] from the first configured key whose result is text, current key first; null when none. */
-    static Map<String, String> readRaw(String raw, Map<String, List<MNode>> keys) {
+    private static Map<String, String> readRaw(String raw, Map<String, List<MNode>> keys) {
         String plain = decryptAsText(raw, keys.get("current"))
         if (plain != null) return [key: CURRENT_KEY, plaintext: plain]
         plain = decryptAsText(raw, keys.get("old"))

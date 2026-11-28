@@ -92,6 +92,14 @@ class GraphQlDocumentCheck {
      * non-empty when the document can't be read.
      */
     static Map fieldPaths(String document) {
+        return fieldPaths(document, [0] as int[])
+    }
+
+    /**
+     * As above, spending its walk steps from `spent`, which a caller checking several documents as one (a document and the
+     * bulk queries inside it, OC210) shares across the calls: MAX_FIELD_PATHS then bounds them all together.
+     */
+    static Map fieldPaths(String document, int[] spent) {
         if (!document?.trim()) return [errors: ["The query is empty."], operations: [], fields: []]
         Document doc
         try {
@@ -103,7 +111,7 @@ class GraphQlDocumentCheck {
         List<OperationDefinition> ops = doc.getDefinitionsOfType(OperationDefinition)
         List<Map> fields = []
         boolean complete = true
-        int[] steps = [0] as int[]
+        int[] steps = spent
         String[] undefined = [null] as String[]
         for (OperationDefinition op : ops) {
             // A $variable's default is what the server uses when no value is sent, so it is reported with the argument.

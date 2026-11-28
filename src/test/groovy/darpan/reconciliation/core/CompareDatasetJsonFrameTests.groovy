@@ -230,6 +230,22 @@ class CompareDatasetJsonFrameTests {
     }
 
     @Test
+    void aNumericKeyReadsTheSameInTheCompareAndInTheConcludePass() {
+        // S01b I5 parity (S03a lead): one record anywhere with a decimal key makes Spark infer the whole column as a double,
+        // so 7 rendered "7.0" and an 11-digit id "1.2345678901E10", while the conclude pass (ConclusionKeySupport, Groovy over
+        // the parsed record) reads "7" and "12345678901": its evidence lookups missed. Both builders, the same records.
+        List<String> records = ['{"id":7,"n":1}', '{"id":7.5,"n":2}', '{"id":12345678901,"n":3}']
+        List<String> spark = ids(CompareDatasetSupport.buildJsonIdDf(json(records as String[]), paths('$.id'), "File 1", [null], ['$.id']))
+        List<String> groovy = records.collect { String r ->
+            darpan.reconciliation.conclusion.ConclusionKeySupport.compareKey((Map) new groovy.json.JsonSlurper().parseText(r), ['$.id'], null)
+        }.sort()
+        assertEquals(groovy, spark)
+        assertEquals(["12345678901", "7", "7.5"], spark)
+        // An integer-only column was always read as a long: unchanged.
+        assertEquals(["12345678901", "7"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":7}', '{"id":12345678901}'), paths('$.id'), "File 1", [null], ['$.id'])))
+    }
+
+    @Test
     void aBlankCompositeFieldFailsLoudlyAtBothLevels() {
         Dataset rootRaw = json('{"a":"x","b":" "}')
         assertThrows(IllegalArgumentException) {

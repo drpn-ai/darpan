@@ -6,7 +6,10 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.RowFactory
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
+import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.types.DataTypes
+import org.apache.spark.sql.types.DoubleType
+import org.apache.spark.sql.types.FloatType
 
 import static darpan.common.ValueSupport.normalize
 import static org.apache.spark.sql.functions.*
@@ -20,8 +23,15 @@ import static org.apache.spark.sql.functions.*
  */
 class CompareDatasetSupport {
 
-    static Column applyIdNormalizer(Column sourceCol, String idNormalizer) {
-        Column normalized = trim(sourceCol.cast("string"))
+    /**
+     * A key field's text: trimmed, then normalized. sourceType is the field's Spark type when the caller knows it (the
+     * JSON key builders): a double or float column holds every number of a field whose values include one decimal, so
+     * an integral value is written as its whole number ("7", "12345678901"), not Spark's "7.0" / "1.2345678901E10".
+     * That is the text the conclude pass reads from the parsed record (ConclusionKeySupport), and the same key whatever
+     * other records hold (S01b I5 parity).
+     */
+    static Column applyIdNormalizer(Column sourceCol, String idNormalizer, DataType sourceType = null) {
+        Column normalized = trim(keyText(sourceCol, sourceType))
         if (!idNormalizer) return normalized
 
         if ("SHOPIFY_GID_TAIL".equals(idNormalizer)) {
@@ -36,6 +46,15 @@ class CompareDatasetSupport {
             return lower(normalized)
         }
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
+    }
+
+    /** Below 1e15 a double holds every integer exactly, so the long cast is lossless; larger or non-finite values keep Spark's text. */
+    private static final double EXACT_INTEGRAL_LIMIT = 1e15d
+
+    private static Column keyText(Column sourceCol, DataType sourceType) {
+        if (!(sourceType instanceof DoubleType || sourceType instanceof FloatType)) return sourceCol.cast("string")
+        Column integral = not(isnan(sourceCol)).and(abs(sourceCol).lt(EXACT_INTEGRAL_LIMIT)).and(sourceCol.equalTo(floor(sourceCol)))
+        return when(integral, sourceCol.cast("long").cast("string")).otherwise(sourceCol.cast("string"))
     }
 
     static Dataset buildMissingDiffRows(Dataset presentDataDf, Dataset missingIdDf, String diffType,
@@ -288,13 +307,13 @@ class CompareDatasetSupport {
     private static Dataset jsonRecords(Dataset rawDf, List<Map> pathInfos, String pathLabel, List<String> idNormalizers, List<String> fieldExpressions) {
         Map sharedPathInfo = validateSharedRecordRoot(pathInfos, pathLabel)
         if (!sharedPathInfo.needsExplode) {
-            return keyedRecords(rawDf, recordKeyFieldColumns(pathInfos, idNormalizers), struct(col("*")), fieldExpressions, pathLabel)
+            return keyedRecords(rawDf, recordKeyFieldColumns(rawDf, pathInfos, idNormalizers), struct(col("*")), fieldExpressions, pathLabel)
         }
         String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
         Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
         // An empty array's item type is unknown, so its key paths cannot be resolved; it simply has no records.
         if (!datasetHasRows(explodedDf)) return emptyCompareDataDataset(rawDf.sparkSession())
-        return keyedRecords(explodedDf, explodedKeyFieldColumns(pathInfos, idNormalizers), col("exploded_item"), fieldExpressions, pathLabel)
+        return keyedRecords(explodedDf, explodedKeyFieldColumns(explodedDf, pathInfos, idNormalizers), col("exploded_item"), fieldExpressions, pathLabel)
     }
 
     private static final String HAS_KEY = "compare_id IS NOT NULL AND length(trim(compare_id)) > 0"
@@ -314,21 +333,26 @@ class CompareDatasetSupport {
     }
 
     /** One normalized key column per path, read from the exploded array item. */
-    private static List<Column> explodedKeyFieldColumns(List<Map> pathInfos, List<String> idNormalizers) {
+    private static List<Column> explodedKeyFieldColumns(Dataset explodedDf, List<Map> pathInfos, List<String> idNormalizers) {
         return [pathInfos, idNormalizers].transpose().collect { List pair ->
             Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
             String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
-            applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
+            keyFieldColumn(explodedDf, col("exploded_item.${fieldPath}"), normalizer)
         }
     }
 
     /** One normalized key column per path, read from the record root. */
-    private static List<Column> recordKeyFieldColumns(List<Map> pathInfos, List<String> idNormalizers) {
+    private static List<Column> recordKeyFieldColumns(Dataset rawDf, List<Map> pathInfos, List<String> idNormalizers) {
         return [pathInfos, idNormalizers].transpose().collect { List pair ->
             Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
             String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
-            applyIdNormalizer(col(safePath), normalizer)
+            keyFieldColumn(rawDf, col(safePath), normalizer)
         }
+    }
+
+    /** The key column, normalized with the type Spark gave the field in this frame (I5 parity). */
+    private static Column keyFieldColumn(Dataset source, Column field, String normalizer) {
+        return applyIdNormalizer(field, normalizer, source.select(field).schema().fields()[0].dataType())
     }
 
     private static boolean datasetHasRows(Dataset df) {

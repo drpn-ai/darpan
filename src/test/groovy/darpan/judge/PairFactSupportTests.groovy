@@ -44,6 +44,22 @@ class PairFactSupportTests {
         assertFalse(fact.keySet().any { it.startsWith("netsuite_") && it != "netsuite_presence" })
     }
 
+    /**
+     * DAR-OPS-029 S04, invariant 4. Missing is a presence state, never a null field. moqui-rules reads a field that is not on the
+     * fact as null, and two nulls compare equal, so an absent side must put none of its fields on the fact: its presence says it
+     * is missing. A blank value on a kept side is a value, not an absence.
+     */
+    @Test
+    void anAbsentSideIsAPresenceStateAndABlankValueStays() {
+        Map fact = PairFactSupport.buildFact([compareId: "M1", file1: [orderId: "O1", status: ""], file2: null],
+                state("hotwax", "netsuite"), [:], [:]).fact as Map
+        assertEquals("ABSENT", fact.netsuite_presence)
+        assertEquals(["compareId", "hotwax_presence", "hotwax_orderId", "hotwax_status", "netsuite_presence"], fact.keySet() as List,
+                "the absent side's fields are not on the fact at all, not even as null")
+        assertTrue(fact.containsKey("hotwax_status"))
+        assertEquals("", fact.hotwax_status, "blank is kept as a value")
+    }
+
     @Test
     void aRecordInFile2sSideFileIsSetAsideNotAbsent() {
         Map fact = PairFactSupport.buildFact([compareId: "P3", file1: [orderId: "O3"], file2: null],

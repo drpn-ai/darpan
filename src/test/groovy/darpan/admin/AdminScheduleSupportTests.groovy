@@ -1,5 +1,7 @@
 package darpan.admin
 
+import darpan.admin.AdminTestStubs.FinderStub
+import darpan.admin.AdminTestStubs.MessageFacadeStub
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import org.junit.jupiter.api.Test
 
@@ -24,12 +26,7 @@ class AdminScheduleSupportTests {
     @Test
     void scheduleBoardDeniedForNonSuperAdmin() {
         def message = new MessageFacadeStub()
-        def ec = executionContext(
-                user: new UserStub(userId: "PLAIN_USER"),
-                entity: new EntityFacadeStub(finders: [
-                        "moqui.security.UserGroupMember": new FinderStub(oneResult: [
-                                userGroupId: "DARPAN_USER", userId: "PLAIN_USER"])]),
-                message: message)
+        def ec = AdminTestStubs.plainUserEc(message: message)
 
         assertNull(AdminScheduleSupport.getScheduleBoard(ec, 24, ts("2026-09-01T14:30:00Z")))
         assertTrue(message.hasError())
@@ -163,118 +160,10 @@ class AdminScheduleSupportTests {
         assertNull(paused.scanCron)
     }
 
-    // ---- stubs (each admin test class carries its own, matching AdminTenantSupportTests) ----
-
-    private def superAdminEc(Map finders) {
+    /** A super admin, with the scan job live on its default cron unless the test sets one. */
+    private static def superAdminEc(Map finders) {
         finders["moqui.service.job.ServiceJob"] = finders["moqui.service.job.ServiceJob"] ?:
                 new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB, cronExpression: "0 0/5 * * * ?", paused: "N"])
-        finders["moqui.security.UserGroupMember"] = finders["moqui.security.UserGroupMember"] ?:
-                new FinderStub(oneResult: [userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER"])
-        return executionContext(
-                user: new UserStub(userId: "ADMIN_USER", username: "darpan.admin"),
-                entity: new EntityFacadeStub(finders: finders))
-    }
-
-
-    private static def executionContext(Map overrides = [:]) {
-        return new Expando(
-                user: overrides.user ?: new UserStub(),
-                entity: overrides.entity ?: new EntityFacadeStub(),
-                message: overrides.message ?: new MessageFacadeStub(),
-                service: overrides.service ?: new ServiceFacadeStub(),
-                l10n: overrides.l10n ?: new Expando(timeZone: "UTC"),
-                resource: new Expando(properties: [:])
-        )
-    }
-
-    static class UserStub {
-        String userId
-        String username
-        Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
-        Map<String, Object> preferences = [:]
-        Map<String, Object> context = [:]
-        Object userAccount = new Expando(timeZone: "UTC")
-
-        Object getPreference(String preferenceKey) { return preferences[preferenceKey] }
-
-        void setPreference(String preferenceKey, Object preferenceValue) { preferences[preferenceKey] = preferenceValue }
-    }
-
-    static class MessageFacadeStub {
-        List<String> errors = []
-
-        void addError(String error) { errors << error }
-
-        void addMessage(String message) {}
-
-        boolean hasError() { return !errors.isEmpty() }
-    }
-
-    static class EntityFacadeStub {
-        Map<String, FinderStub> finders = [:]
-
-        FinderStub find(String entityName) {
-            FinderStub template = finders[entityName]
-            if (template == null) {
-                template = new FinderStub()
-                finders[entityName] = template
-            }
-            return new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
-        }
-    }
-
-    static class FinderStub {
-        Map<String, Object> conditions = [:]
-        Object oneResult
-        List listResult = []
-
-        FinderStub condition(String field, Object value) {
-            conditions[field] = value
-            return this
-        }
-
-        FinderStub conditionDate(String fromField, String thruField, Object moment) { return this }
-
-        FinderStub useCache(boolean useCache) { return this }
-
-        Object one() {
-            if (oneResult instanceof Map && !conditions.every { String field, Object value -> oneResult[field] == value }) {
-                return null
-            }
-            return oneResult
-        }
-
-        List list() {
-            return listResult.findAll { Object row ->
-                if (!(row instanceof Map)) return true
-                conditions.every { String field, Object value -> row[field] == value }
-            }
-        }
-
-        FinderStub disableAuthz() { return this }
-    }
-
-    static class ServiceFacadeStub {
-        List<ServiceCallStub> calls = []
-        Map<String, Map> resultsByName = [:]
-        ServiceCallStub lastCall
-
-        ServiceCallStub sync() {
-            lastCall = new ServiceCallStub(facade: this)
-            calls << lastCall
-            return lastCall
-        }
-    }
-
-    static class ServiceCallStub {
-        ServiceFacadeStub facade
-        String serviceName
-        Map<String, Object> parametersMap = [:]
-
-        ServiceCallStub name(String serviceName) { return this.tap { it.serviceName = serviceName } }
-
-        ServiceCallStub parameters(Map<String, Object> parametersMap) { return this.tap { it.parametersMap = parametersMap } }
-
-        Map<String, Object> call() { return facade?.resultsByName?.get(serviceName) ?: [:] }
+        return AdminTestStubs.superAdminEc(finders)
     }
 }

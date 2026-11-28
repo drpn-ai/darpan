@@ -2761,7 +2761,8 @@
             <parameter name="customWindowEndDate" type="Timestamp"/>
             <parameter name="maxWindowDays" type="Integer" default-value="28"/>
             <parameter name="splitWindowDays" type="Integer" default-value="28"/>
-            <parameter name="windowTimeZone" default-value="UTC"/>
+            <parameter name="windowTimeZone"><description>The zone the schedule and windows run in. Omitted: the automation's own on
+                an edit, else the active tenant's (as the app sends), never UTC by default (DAR-OPS-029 OC44).</description></parameter>
             <parameter name="safeConfigJson" allow-html="true"/>
             <parameter name="chatSpaceId"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
@@ -2817,7 +2818,7 @@
             <set field="savedRunTypeValue" from="((savedRunType)?.toString()?.trim())?.toLowerCase() ?: 'ruleset'"/>
             <set field="scheduleExprValue" from="((scheduleExpr)?.toString()?.trim())"/>
             <set field="relativeWindowTypeEnumIdValue" from="((relativeWindowTypeEnumId)?.toString()?.trim())"/>
-            <set field="windowTimeZoneValue" from="((windowTimeZone)?.toString()?.trim()) ?: 'UTC'"/>
+            <set field="windowTimeZoneValue" from="((windowTimeZone)?.toString()?.trim())"/>
             <set field="safeConfigJsonValue" from="darpan.facade.reconciliation.AutomationFacadeSupport.canonicalJsonText(ec, safeConfigJson, 'safeConfigJson')"/>
             <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
             <set field="sourceList" from="sources ?: []"/>
@@ -2864,6 +2865,10 @@
                 <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
                     <message error="true">Automation '${automationIdValue}' was not found.</message>
                 </if>
+            </if>
+            <!-- OC44: no zone sent keeps the automation's own (an edit) or takes the tenant's (a create), as the app does. -->
+            <if condition="!windowTimeZoneValue">
+                <set field="windowTimeZoneValue" from="((automationRecord?.windowTimeZone)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.resolveActiveTenantTimeZone(ec)"/>
             </if>
             <!-- DAR-BE-199: an audit's automation keeps the audit's schedule; everything else about it can still be saved. -->
             <if condition="!ec.message.hasError() &amp;&amp; automationRecord != null">

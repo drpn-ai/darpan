@@ -132,6 +132,30 @@ class ReconciliationFacadeServicesSmokeTests {
         assertEquals([keepId], remaining*.ruleId, "the rule the editor removed is deleted, stamped or not")
     }
 
+    @Test
+    void anAutomationSavedWithoutAZoneRunsInTheTenantZoneAndAnEditKeepsItsOwn() {
+        String savedRunId = createRun("S22 zone", [])
+        def setting = ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", KREWE).disableAuthz().useCache(false).one()
+        String zoneBefore = setting?.timeZone as String
+        insert("darpan.auth.TenantSetting", [companyUserGroupId: KREWE, timeZone: "Asia/Kolkata"])
+        try {
+            Map<String, Object> created = saveSftpAutomation([automationName: "S22 zone", savedRunId: savedRunId])
+            assertTrue(created?.ok == true, "${created?.errors ?: ec.message.errors}")
+            String automationId = (created.automation as Map).automationId as String
+            assertEquals("Asia/Kolkata", storedZone(automationId), "no zone sent: the tenant's zone, as the app sends")
+
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", automationId)
+                    .disableAuthz().useCache(false).one().set("windowTimeZone", "America/New_York").update()
+            Map<String, Object> edited = saveSftpAutomation([automationId: automationId, automationName: "S22 zone renamed",
+                                                             savedRunId: savedRunId])
+            assertTrue(edited?.ok == true, "${edited?.errors ?: ec.message.errors}")
+            assertEquals("America/New_York", storedZone(automationId), "an edit that names no zone keeps the automation's own")
+        } finally {
+            if (setting != null) insert("darpan.auth.TenantSetting", [companyUserGroupId: KREWE, timeZone: zoneBefore])
+            else ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", KREWE).disableAuthz().deleteAll()
+        }
+    }
+
     private Map<String, Object> saveSftpAutomation(Map<String, Object> params) {
         Map<String, Object> sources = [FILE_1: ["OMS", "OMS_TEST_SFTP"], FILE_2: ["SHOPIFY", "SHOPIFY_TEST_SFTP"]]
         return ec.service.sync().name(F + "save#Automation").parameters([

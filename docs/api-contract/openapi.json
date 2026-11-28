@@ -33357,7 +33357,8 @@
                         "type": "integer"
                     },
                     "windowTimeZone": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The zone the schedule and windows run in. Omitted: the automation's own on\n                an edit, else the active tenant's (as the app sends), never UTC by default (DAR-OPS-029 OC44)."
                     },
                     "safeConfigJson": {
                         "type": "string"

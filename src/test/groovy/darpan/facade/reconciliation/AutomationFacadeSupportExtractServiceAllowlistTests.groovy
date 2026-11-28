@@ -25,7 +25,7 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
                 fileSide        : "FILE_1",
                 safeMetadataJson: groovy.json.JsonOutput.toJson(metadata),
         ]
-        AutomationFacadeSupport.validateApiSourceMetadata(ec, source)
+        AutomationSaveSupport.validateApiSourceMetadata(ec, source)
         return message
     }
 

@@ -12,8 +12,8 @@ import static darpan.facade.reconciliation.AutomationFacadeSupport.FILE_SIDES
 import static darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_API_RANGE
 import static darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_SFTP_FILES
 import static darpan.facade.reconciliation.AutomationFacadeSupport.SOURCE_TYPE_SFTP
-import static darpan.facade.reconciliation.AutomationFacadeSupport.captureSourceFiltersByFileSide
-import static darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet
+import static darpan.facade.reconciliation.AutomationSaveSupport.captureSourceFiltersByFileSide
+import static darpan.facade.reconciliation.AutomationSaveSupport.seedFromRuleSet
 
 /**
  * sync#Automation and get#Automation's syncStatus: an automation's snapshot re-derived from its saved run, merged with

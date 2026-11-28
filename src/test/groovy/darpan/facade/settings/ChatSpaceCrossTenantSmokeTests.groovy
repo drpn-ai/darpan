@@ -4,6 +4,7 @@ import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.facade.reconciliation.AutomationRowSupport
+import darpan.facade.reconciliation.AutomationSaveSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -153,7 +154,7 @@ class ChatSpaceCrossTenantSmokeTests {
     void anAutomationCannotBeLinkedToAnotherTenantsChatSpace() {
         // DAR-BE-077: save#Automation validates the linked space through this check.
         ec.message.clearErrors()
-        AutomationFacadeSupport.validateChatSpace(ec, VICTIM_SPACE)
+        AutomationSaveSupport.validateChatSpace(ec, VICTIM_SPACE)
         assertTrue(ec.message.hasError(), "another tenant's chat space passed the automation's chat-space check")
         ec.message.clearErrors()
     }
@@ -180,7 +181,7 @@ class ChatSpaceCrossTenantSmokeTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, VICTIM)
         try {
             ec.message.clearErrors()
-            AutomationFacadeSupport.validateChatSpace(ec, VICTIM_SPACE)
+            AutomationSaveSupport.validateChatSpace(ec, VICTIM_SPACE)
             assertFalse(ec.message.hasError(), "the owning tenant's own space was refused: ${ec.message.errors}")
             assertEquals("Victim Ops",
                     AutomationRowSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE]).chatSpaceName)

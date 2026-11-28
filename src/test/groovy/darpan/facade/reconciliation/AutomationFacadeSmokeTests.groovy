@@ -880,7 +880,7 @@ class AutomationFacadeSmokeTests {
         ])
 
         assertFalse((Boolean) saveResult.ok)
-        assertEquals([AutomationFacadeSupport.STATE_WINDOW_RETIRED], saveResult.errors,
+        assertEquals([AutomationSaveSupport.STATE_WINDOW_RETIRED], saveResult.errors,
                 "one refusal, naming the window, not one per source")
         ec.message.clearErrors()
     }
@@ -1319,11 +1319,11 @@ class AutomationFacadeSmokeTests {
                                  operator: "EXCLUDE_IN", filterValues: "CANCELLED", companyUserGroupId: KREWE]).disableAuthz().call()
             ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
 
-            assertEquals(["CANCELLED"], AutomationFacadeSupport.seedFromRuleSet(ec, KREWE, scopeId, "FILE_1")*.filterValues,
+            assertEquals(["CANCELLED"], AutomationSaveSupport.seedFromRuleSet(ec, KREWE, scopeId, "FILE_1")*.filterValues,
                     "the named tenant's filters, though the session is on another tenant")
-            assertEquals([], AutomationFacadeSupport.seedFromRuleSet(ec, GORJANA, scopeId, "FILE_1"),
+            assertEquals([], AutomationSaveSupport.seedFromRuleSet(ec, GORJANA, scopeId, "FILE_1"),
                     "another tenant's filters never leak")
-            assertEquals([], AutomationFacadeSupport.seedFromRuleSet(ec, null, scopeId, "FILE_1"), "no tenant, no rows")
+            assertEquals([], AutomationSaveSupport.seedFromRuleSet(ec, null, scopeId, "FILE_1"), "no tenant, no rows")
         } finally {
             ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
             ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", scopeId).disableAuthz().deleteAll()

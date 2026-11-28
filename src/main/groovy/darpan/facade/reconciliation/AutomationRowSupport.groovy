@@ -11,7 +11,7 @@ import static darpan.common.ValueSupport.fileNameFromPath
 import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.readString
 import static darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_SFTP_FILES
-import static darpan.facade.reconciliation.AutomationFacadeSupport.captureSourceFiltersByFileSide
+import static darpan.facade.reconciliation.AutomationSaveSupport.captureSourceFiltersByFileSide
 import static darpan.facade.reconciliation.AutomationFacadeSupport.enumCode
 import static darpan.facade.reconciliation.AutomationFacadeSupport.enumLabel
 import static darpan.facade.reconciliation.AutomationFacadeSupport.sftpServerLabel

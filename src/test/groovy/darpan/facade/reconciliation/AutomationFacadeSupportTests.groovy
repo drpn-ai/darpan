@@ -70,8 +70,8 @@ class AutomationFacadeSupportTests {
 
     @Test
     void resolveNextFireTimeReturnsNullWithoutSchedule() {
-        assertNull(AutomationFacadeSupport.resolveNextFireTime([:], ts("2026-05-01T10:00:00Z")))
-        assertNull(AutomationFacadeSupport.resolveNextFireTime([scheduleExpr: "  "], ts("2026-05-01T10:00:00Z")))
+        assertNull(AutomationSaveSupport.resolveNextFireTime([:], ts("2026-05-01T10:00:00Z")))
+        assertNull(AutomationSaveSupport.resolveNextFireTime([scheduleExpr: "  "], ts("2026-05-01T10:00:00Z")))
     }
 
     @Test
@@ -79,7 +79,7 @@ class AutomationFacadeSupportTests {
         // 10:00Z is 15:30 IST: the next 02:00 IST is May 2, 20:30Z on May 1. Read in UTC it would be 02:00Z May 2.
         Timestamp now = ts("2026-05-01T10:00:00Z")
         Map input = [scheduleExpr: "0 0 2 * * ?", windowTimeZone: "Asia/Kolkata"]
-        Timestamp saved = AutomationFacadeSupport.resolveNextFireTime(input, now)
+        Timestamp saved = AutomationSaveSupport.resolveNextFireTime(input, now)
         assertEquals(ts("2026-05-01T20:30:00Z"), saved)
         assertEquals(AutomationExecutionSupport.resolveNextScheduledFireTime(input, null, now), saved,
                 "save and the scanner must agree on the next fire")
@@ -108,7 +108,7 @@ class AutomationFacadeSupportTests {
     void acceptsDatabaseSourceOnApiInputMode() {
         MessageStub message = new MessageStub()
         def ec = stubEc(message)
-        AutomationFacadeSupport.validateSources(ec, "AUT_IN_API_RANGE", databaseSourceFixture(), null)
+        AutomationSaveSupport.validateSources(ec, "AUT_IN_API_RANGE", databaseSourceFixture(), null)
         assertFalse(message.hasError(), "Unexpected errors: ${message.errors}")
     }
 
@@ -117,7 +117,7 @@ class AutomationFacadeSupportTests {
         MessageStub message = new MessageStub()
         def ec = stubEc(message)
         List<Map<String, Object>> sources = databaseSourceFixture([databaseSourceQueryId: null])
-        AutomationFacadeSupport.validateSources(ec, "AUT_IN_API_RANGE", sources, null)
+        AutomationSaveSupport.validateSources(ec, "AUT_IN_API_RANGE", sources, null)
         assertTrue(message.hasError())
         assertTrue(message.errors.any { it.contains("databaseSourceQueryId") }, "Unexpected errors: ${message.errors}")
     }
@@ -127,7 +127,7 @@ class AutomationFacadeSupportTests {
         // DB sources carry no secrets on the source row (credentials live in DatabaseSourceConfig), so
         // the API-only sanitize/enrichment branch must leave a database-typed row untouched.
         Map<String, Object> dbSource = databaseSourceFixture().first()
-        List<Map<String, Object>> result = AutomationFacadeSupport.applyApiSourceMetadataDefaults(null, [dbSource])
+        List<Map<String, Object>> result = AutomationSaveSupport.applyApiSourceMetadataDefaults(null, [dbSource])
         assertEquals([dbSource], result)
     }
 

@@ -157,6 +157,20 @@ class DatasetRefreshTests {
         assertFalse(res.messages.any { it.contains("SECRET_TABLE") || it.contains("ops@example.com") }, res.messages.toString())
     }
 
+    // DAR-OPS-029 OC215 (security): a read's error is stored as DatasetRead.errorText, which the tenant reads; an exception's
+    // secrets (a URL token, a Bearer value) are masked there.
+    @Test
+    void aFailedReadsErrorTextIsStoredMasked() {
+        String id = dataset("mask")
+        Closure throwing = { String svc, Map p ->
+            throw new IllegalStateException("GET https://oms.example/api?token=s3cr3tTOKEN refused: Authorization: Bearer abc.DEF123")
+        }
+        refresh(id, throwing)
+        String stored = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000001"])?.errorText as String
+        assertTrue(stored?.contains("refused"), "the read's error is kept: ${stored}")
+        assertFalse(stored.contains("s3cr3tTOKEN") || stored.contains("abc.DEF123"), stored)
+    }
+
     @Test
     void aNextDayRefreshIsIncrementalFromReadThruMinusTwoDays() {
         String id = dataset("incremental")

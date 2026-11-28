@@ -4,6 +4,7 @@ import groovy.json.JsonOutput
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import darpan.common.SecretRedactor
 import darpan.facade.common.DarpanMdcSupport
 import java.sql.Timestamp
 import java.util.concurrent.ConcurrentHashMap
@@ -158,7 +159,9 @@ class RunObservability {
      * nothing) still gets a row, written terminal in one step so the stuck-run reaper never sees it
      * PENDING. No steps, no notification: nothing ran.
      */
-    static String recordTerminalRun(def ec, Map<String, Object> ctx, String statusEnumId, String reason) {
+    static String recordTerminalRun(def ec, Map<String, Object> ctx, String statusEnumId, String rawReason) {
+        // OC215 (security): the run progress API hands these columns to the tenant; an exception's secrets are masked here.
+        String reason = SecretRedactor.redact(rawReason)
         Timestamp now = nowSafe(ec)
         String runId = null
         ec.transaction.runUseOrBegin(30, "Error recording a flowchart question that did not run", {
@@ -386,7 +389,8 @@ class RunObservability {
                 step.set("completedDate", now)
                 if (metrics?.get("recordCount") != null) step.set("recordCount", metrics.get("recordCount"))
                 if (metrics?.get("errorMessage") != null) {
-                    step.set("errorMessage", capErrorMessage(metrics.get("errorMessage").toString()))
+                    // OC215 (security): every step's error text is masked, whichever caller wrote it (verify checks, notify).
+                    step.set("errorMessage", capErrorMessage(SecretRedactor.redact(metrics.get("errorMessage").toString())))
                 }
                 if (metrics?.get("metricsJson") != null) step.set("metricsJson", metrics.get("metricsJson"))
                 step.set("lastUpdatedDate", now)
@@ -428,7 +432,9 @@ class RunObservability {
     }
 
     /** Terminal FAILED with a reason; closes the open step if provided; clears MDC. */
-    static void failRun(def ec, String runId, Object openStepOrNull, String stageCode, String reason) {
+    static void failRun(def ec, String runId, Object openStepOrNull, String stageCode, String rawReason) {
+        // OC215 (security): errorMessage / errorDetail reach the tenant through the run progress API; masked for every caller.
+        String reason = SecretRedactor.redact(rawReason)
         Timestamp now = nowSafe(ec)
         String shortReason = capErrorMessage(reason)
         try {

@@ -1,5 +1,6 @@
 package darpan.reconciliation.flowchart
 
+import darpan.common.SecretRedactor
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -112,7 +113,8 @@ class RunFlowchartWalker {
                 outcomes[id] = outcome
             } catch (Throwable t) {
                 failed = true
-                String detail = t.message ?: t.class.simpleName
+                // OC215 (security): the reason lands on a run row the tenant reads; an exception's secrets are masked.
+                String detail = SecretRedactor.redact(t.message ?: t.class.simpleName)
                 if (ranRowId && recordFailure != null) {
                     try {
                         recordFailure.call(ranRowId, REASON_COULD_NOT_FINISH + detail)

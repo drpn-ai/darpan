@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.common.DarpanEntityConstants
+import darpan.common.SecretRedactor
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
@@ -220,9 +221,10 @@ class SftpAutomationSupport {
             // OC117: a run the poll service failed is told by the service's own error; statusMessage is the poll's whole log
             // (it stays in safeMetadataJson), whose first line ("10:00:00 Starting SFTP poll ...") says nothing.
             List<String> serviceErrors = serviceReportedError ? messageErrors(ec).drop(errorsBefore) : []
-            String failureReason = normalize(serviceErrors.join("; ")) ?: normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
+            // OC215 (security): the run and execution rows are tenant-visible; a poll error's secrets are masked.
+            String failureReason = SecretRedactor.redact(normalize(serviceErrors.join("; ")) ?: normalize(pollResult.statusMessage) ?: "SFTP automation run failed")
             // DAR-BE-015: a run whose rules failed is told (to Darpan, and in the row the daily error email reads) by the rule's error.
-            String errorReason = ruleExecutionFailed ? (AutomationExecutionSupport.ruleFailureReason(pollResult) ?: failureReason) : failureReason
+            String errorReason = ruleExecutionFailed ? (SecretRedactor.redact(AutomationExecutionSupport.ruleFailureReason(pollResult)) ?: failureReason) : failureReason
             Timestamp completedTimestamp = nowTimestamp(ec)
             String reconciliationRunResultId = mintedRunResultId
             if (outputProduced) {

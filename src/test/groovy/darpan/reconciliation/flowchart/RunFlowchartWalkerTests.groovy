@@ -242,4 +242,26 @@ class RunFlowchartWalkerTests {
         assertEquals(["S", "A", "A1", "B"] as Set, r.outcomes.keySet())
         assertTrue(calls >= 4)
     }
+    /** OC215 (security): a question that throws text carrying a token stores its reason masked; the tenant reads it. */
+    @Test
+    void aThrowingQuestionsReasonIsStoredMasked() {
+        List reasons = []
+        RunFlowchartWalker.walk([
+                questions: chart(), workDir: tmp.toFile(),
+                runQuestion: { Map question, Map call ->
+                    if (question.reconciliationRunId == "S") {
+                        throw new IllegalStateException("GET https://oms.example/api?token=s3cr3tTOKEN refused: Authorization: Bearer abc.DEF123")
+                    }
+                    return [runResultId: "RR_${question.reconciliationRunId}".toString(), statusEnumId: "AUT_STAT_SUCCESS", resultDocument: null]
+                },
+                recordSkipped: { Map question, String p, String status, String reason ->
+                    reasons << reason
+                    return "SKIP_${question.reconciliationRunId}".toString()
+                },
+                recordCounts: { String id, long y, long n, long u -> },
+        ])
+        String startReason = reasons.find { it?.contains("could not run") } as String
+        assertTrue(startReason != null, "the start's failure is recorded: ${reasons}")
+        assertTrue(!startReason.contains("s3cr3tTOKEN") && !startReason.contains("abc.DEF123"), "secret reached the stored reason: ${startReason}")
+    }
 }

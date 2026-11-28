@@ -230,4 +230,40 @@ class RunObservabilityWriteTest {
         RunObservability.completeRun(brokenEc, "R1", RunObservability.STATUS_SUCCESS, [:])
         RunObservability.failRun(brokenEc, "R1", brokenStep, RunObservability.STAGE_COMPARE, "boom")
     }
+    // OC215 (security): a run's error text reaches the tenant (the run progress API reads these columns), so every writer
+    // masks the secrets an exception can carry: a URL's token parameter, a Bearer value.
+    static final String LEAKY = "GET https://shop.example/api/orders?token=s3cr3tTOKEN failed: Authorization: Bearer abc.DEF123"
+
+    private static void assertMasked(Object stored) {
+        String text = stored as String
+        assertNotNull(text)
+        assertTrue(!text.contains("s3cr3tTOKEN") && !text.contains("abc.DEF123"), "secret reached the stored text: ${text}")
+    }
+
+    @Test
+    void failRunMasksTheReasonOnTheRunAndItsStep() {
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_COMPARE)
+
+        RunObservability.failRun(ec, runId, step, RunObservability.STAGE_COMPARE, LEAKY)
+        def run = ec.store.find { it.entityName == RunObservability.RUN_RESULT_ENTITY }
+        assertMasked(run.get("errorMessage"))
+        assertMasked(run.get("errorDetail"))
+        assertMasked(step.get("errorMessage"))
+    }
+
+    @Test
+    void endStepAndRecordTerminalRunMaskTheirReason() {
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_VERIFY_MISSING)
+        RunObservability.endStep(ec, step, RunObservability.STATUS_FAILED, [errorMessage: LEAKY])
+        assertMasked(step.get("errorMessage"))
+
+        String skippedId = RunObservability.recordTerminalRun(ec, [savedRunId: "SR2", companyUserGroupId: "KREWE"],
+                RunObservability.STATUS_FAILED, "This question could not run: " + LEAKY)
+        def skipped = ec.store.find { it.entityName == RunObservability.RUN_RESULT_ENTITY && it.get("reconciliationRunResultId") == skippedId }
+        assertMasked(skipped.get("errorMessage"))
+    }
 }

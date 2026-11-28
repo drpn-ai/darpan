@@ -1037,26 +1037,10 @@ class AutomationExecutionSupport {
                 if (ruleExecutionFailed) {
                     notifyRunError(ec, automation, executionMap(execution) + successFields, mintedRunResultId, ruleError)
                 // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
-                } else if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
-                        reconciliationRunResultId: reconciliationRunResultId,
-                        runName                  : normalize(readField(automation, "automationName")),
-                        savedRunId               : normalize(readField(automation, "savedRunId")),
-                        reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
-                        companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                        chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
-                        resultDataManagerPath    : resultDataManagerPath,
-                        file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
-                        file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),
-                        file1SystemLabel         : normalize(reconcileResult.file1Label),
-                        file2SystemLabel         : normalize(reconcileResult.file2Label),
-                        differenceCount          : successFields.differenceCount,
-                        onlyInFile1Count         : successFields.onlyInFile1Count,
-                        onlyInFile2Count         : successFields.onlyInFile2Count,
-                        ruleDifferenceCount      : reconcileResult.ruleDifferenceCount,
-                        ruleDifferenceFields     : reconcileResult.ruleDifferenceFields,
-                        statusEnumId             : successFields.statusEnumId,
-                        processingWarnings       : (reconcileResult.processingWarnings ?: []) as List,
-                ])
+                // S99-047: the payload is AutomationRuntimeSupport's, shared with the SFTP poller; the rule fields are this path's.
+                } else if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx,
+                        AutomationRuntimeSupport.runCompletedPayload(automation, file1Source, file2Source, reconciliationRunResultId,
+                                resultDataManagerPath, reconcileResult, successFields) + [ruleDifferenceFields: reconcileResult.ruleDifferenceFields])
                 executionResults << successFields + [
                         automationExecutionId: automationExecutionId,
                         childWindowStartDate : window.childWindowStartDate,
@@ -1952,13 +1936,7 @@ class AutomationExecutionSupport {
 
     protected static def requireApiSource(def automation, def source, String fileSide) {
         String automationId = normalize(readField(automation, "automationId"))
-        if (!source) throw new IllegalArgumentException("Automation ${automationId} is missing ${fileSide} source")
-
-        String automationTenant = normalize(readField(automation, "companyUserGroupId"))
-        String sourceTenant = normalize(readField(source, "companyUserGroupId"))
-        if (automationTenant && sourceTenant && automationTenant != sourceTenant) {
-            throw new IllegalArgumentException("Automation ${automationId} ${fileSide} source belongs to tenant ${sourceTenant}, not ${automationTenant}")
-        }
+        AutomationRuntimeSupport.requireAutomationSource(automation, source, fileSide)
 
         String sourceTypeEnumId = normalize(readField(source, "sourceTypeEnumId"))
         if (sourceTypeEnumId != AUTOMATION_SOURCE_API && sourceTypeEnumId != AUTOMATION_SOURCE_DB) {

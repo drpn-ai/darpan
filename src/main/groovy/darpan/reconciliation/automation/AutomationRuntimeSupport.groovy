@@ -217,4 +217,48 @@ class AutomationRuntimeSupport {
         if (value == null || value.length() <= maxLength) return value
         return value.substring(0, maxLength)
     }
+
+    /**
+     * DAR-OPS-029 S99-047: the completed-run notice's payload (TenantNotificationSupport.notifyRunCompleted) both automation paths
+     * send: the API range runner and the SFTP poller each built it. {@code compareResult} gives the side labels, the rule
+     * difference count and the warnings; {@code counts} the run's differenceCount, onlyInFile1Count, onlyInFile2Count and
+     * statusEnumId. The API runner adds ruleDifferenceFields itself; the SFTP notice has never carried it.
+     */
+    static Map<String, Object> runCompletedPayload(def automation, def file1Source, def file2Source, String runResultId,
+                                                   String resultDataManagerPath, Map compareResult, Map counts) {
+        return [
+                reconciliationRunResultId: runResultId,
+                runName                  : normalize(readField(automation, "automationName")),
+                savedRunId               : normalize(readField(automation, "savedRunId")),
+                reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
+                companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
+                resultDataManagerPath    : resultDataManagerPath,
+                file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
+                file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),
+                file1SystemLabel         : normalize(compareResult?.file1Label),
+                file2SystemLabel         : normalize(compareResult?.file2Label),
+                differenceCount          : counts?.differenceCount,
+                onlyInFile1Count         : counts?.onlyInFile1Count,
+                onlyInFile2Count         : counts?.onlyInFile2Count,
+                ruleDifferenceCount      : compareResult?.ruleDifferenceCount,
+                statusEnumId             : counts?.statusEnumId,
+                processingWarnings       : (compareResult?.processingWarnings ?: []) as List,
+        ] as Map<String, Object>
+    }
+
+    /**
+     * DAR-OPS-029 S99-047: an automation's source must be there and, when both name one, belong to the automation's tenant. The
+     * API range runner (requireApiSource) and the SFTP poller (requireSftpSource) each checked this before their own source type.
+     */
+    static def requireAutomationSource(def automation, def source, String fileSide) {
+        String automationId = normalize(readField(automation, "automationId"))
+        if (!source) throw new IllegalArgumentException("Automation ${automationId} is missing ${fileSide} source")
+        String automationTenant = normalize(readField(automation, "companyUserGroupId"))
+        String sourceTenant = normalize(readField(source, "companyUserGroupId"))
+        if (automationTenant && sourceTenant && automationTenant != sourceTenant) {
+            throw new IllegalArgumentException("Automation ${automationId} ${fileSide} source belongs to tenant ${sourceTenant}, not ${automationTenant}")
+        }
+        return source
+    }
 }

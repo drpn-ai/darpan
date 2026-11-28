@@ -300,25 +300,9 @@ class SftpAutomationSupport {
             // FAILED: it goes down the notifyRunError branch, never with the run's payload (it carries the raw rule error).
             if (outputProduced && reconciliationRunResultId && statusEnumId != AUTOMATION_STATUS_FAILED) {
                 try {
-                    TenantNotificationSupport.notifyRunCompleted(ec, [
-                            reconciliationRunResultId: reconciliationRunResultId,
-                            runName                  : normalize(readField(automation, "automationName")),
-                            savedRunId               : normalize(readField(automation, "savedRunId")),
-                            reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
-                            companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                            chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
-                            resultDataManagerPath    : resultDataManagerPath,
-                            file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
-                            file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),
-                            file1SystemLabel         : normalize(pollResult.file1Label),
-                            file2SystemLabel         : normalize(pollResult.file2Label),
-                            differenceCount          : updateFields.differenceCount,
-                            onlyInFile1Count         : updateFields.onlyInFile1Count,
-                            onlyInFile2Count         : updateFields.onlyInFile2Count,
-                            ruleDifferenceCount      : pollResult.ruleDifferenceCount,
-                            statusEnumId             : statusEnumId,
-                            processingWarnings       : (pollResult.processingWarnings ?: []) as List,
-                    ])
+                    // S99-047: the payload is AutomationRuntimeSupport's, shared with the API range runner.
+                    TenantNotificationSupport.notifyRunCompleted(ec, AutomationRuntimeSupport.runCompletedPayload(automation,
+                            file1Source, file2Source, reconciliationRunResultId, resultDataManagerPath, pollResult, updateFields + [statusEnumId: statusEnumId]))
                 } catch (Throwable notifyError) {
                     logger.warn("SFTP automation notification failed (best-effort): ${notifyError.message}")
                 }
@@ -542,13 +526,7 @@ class SftpAutomationSupport {
 
     protected static def requireSftpSource(def automation, def source, String fileSide) {
         String automationId = normalize(readField(automation, "automationId"))
-        if (!source) throw new IllegalArgumentException("Automation ${automationId} is missing ${fileSide} source")
-
-        String automationTenant = normalize(readField(automation, "companyUserGroupId"))
-        String sourceTenant = normalize(readField(source, "companyUserGroupId"))
-        if (automationTenant && sourceTenant && automationTenant != sourceTenant) {
-            throw new IllegalArgumentException("Automation ${automationId} ${fileSide} source belongs to tenant ${sourceTenant}, not ${automationTenant}")
-        }
+        AutomationRuntimeSupport.requireAutomationSource(automation, source, fileSide)
 
         String sourceTypeEnumId = normalize(readField(source, "sourceTypeEnumId"))
         if (sourceTypeEnumId != AUTOMATION_SOURCE_SFTP) {

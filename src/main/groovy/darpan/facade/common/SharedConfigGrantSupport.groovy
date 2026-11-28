@@ -274,12 +274,6 @@ class SharedConfigGrantSupport {
 
     /** Rejects non-tenant UserGroups so a grant can never name ADMIN or a permission group. */
     private static boolean isDarpanTenant(def ec, String tenantUserGroupId) {
-        def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup",
-                        "framework reference data: verify the grant target is a real Darpan tenant group")
-                .condition("userGroupId", tenantUserGroupId)
-                .useCache(true)
-                .one()
-        return group != null &&
-                normalize(group.groupTypeEnumId) == TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
+        return TenantAccessSupport.findTenantGroup(ec, tenantUserGroupId) != null
     }
 }

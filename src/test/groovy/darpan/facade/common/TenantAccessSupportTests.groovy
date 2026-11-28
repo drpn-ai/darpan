@@ -6,6 +6,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class TenantAccessSupportTests {
@@ -467,7 +468,7 @@ class TenantAccessSupportTests {
         )
 
         assertFalse(TenantAccessSupport.canEditActiveTenantData(ec))
-        assertEquals([], TenantAccessSupport.currentActiveTenantPermissionGroupIds(ec))
+        assertEquals([], TenantAccessSupport.buildAccessScope(ec).activeTenantPermissionGroupIds)
     }
 
     @Test
@@ -817,6 +818,47 @@ class TenantAccessSupportTests {
         assertEquals(["KREWE"], tenants*.userGroupId, "deactivated ACME must be excluded")
     }
 
+    /**
+     * S26a. Moqui's one() keeps only the full primary key, so a groupTypeEnumId condition beside userGroupId was dropped
+     * and ADMIN's description came back as a "tenant label". The stub below answers like Moqui does.
+     */
+    @Test
+    void aNonTenantGroupNeverLendsItsDescriptionAsATenantLabel() {
+        def ec = executionContext(entity: new EntityFacadeStub(finders: [
+                "moqui.security.UserGroup": new PrimaryKeyOnlyFinderStub(pkField: "userGroupId", oneResult: [
+                        userGroupId: "ADMIN", description: "Administrators", groupTypeEnumId: "UgtMoqui"]),
+        ]))
+
+        assertEquals("ADMIN", TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, "ADMIN"))
+        assertNull(TenantAccessSupport.findTenantGroup(ec, "ADMIN"))
+    }
+
+    @Test
+    void aTenantGroupLendsItsDescription() {
+        def ec = executionContext(entity: new EntityFacadeStub(finders: [
+                "moqui.security.UserGroup": new PrimaryKeyOnlyFinderStub(pkField: "userGroupId", oneResult: [
+                        userGroupId: "KREWE", description: "Krewe",
+                        groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]),
+        ]))
+
+        assertEquals("Krewe", TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, "KREWE"))
+    }
+
+    /** S26a. With no active tenant, the session's last run was the user's latest in ANY tenant, read with authz off. */
+    @Test
+    void lastRunIsNeverReadOutsideTheActiveTenant() {
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER"),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember": new FinderStub(listResult: []),
+                        (darpan.common.DarpanEntityConstants.RECONCILIATION_RUN_RESULT): new FinderStub(oneResult: [
+                                reconciliationRunResultId: "RR_1", createdByUserId: "EX_USER",
+                                companyUserGroupId: "TENANT_LEFT_BEHIND", savedRunId: "RS_1"]),
+                ]))
+
+        assertNull(TenantAccessSupport.resolveLastRun(ec))
+    }
+
     @Test
     void listAvailableTenantsExcludesDeactivatedTenantForSuperAdmin() {
         def ec = executionContext(
@@ -1048,9 +1090,21 @@ class TenantAccessSupportTests {
                 template = new FinderStub()
                 finders[entityName] = template
             }
-            FinderStub issued = new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
+            FinderStub issued = template instanceof PrimaryKeyOnlyFinderStub
+                    ? new PrimaryKeyOnlyFinderStub(pkField: template.pkField, oneResult: template.oneResult, listResult: template.listResult)
+                    : new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
             issuedFinders.computeIfAbsent(entityName) { [] as List<FinderStub> } << issued
             return issued
+        }
+    }
+
+    /** Answers one() as Moqui does when the full primary key is given: every other condition is ignored. */
+    static class PrimaryKeyOnlyFinderStub extends FinderStub {
+        String pkField
+
+        @Override
+        Object one() {
+            return oneResult instanceof Map && oneResult[pkField] == conditions[pkField] ? oneResult : null
         }
     }
 

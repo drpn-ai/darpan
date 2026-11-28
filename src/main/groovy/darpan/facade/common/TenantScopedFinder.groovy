@@ -74,11 +74,8 @@ class TenantScopedFinder {
      * @return the gated entity record, or {@code null} if not found or belongs to a foreign tenant
      */
     static def findTenantScopedById(def ec, String entityName, String pkField, Object pkValue) {
-        def rec = ec.entity.find(entityName).condition(pkField, pkValue).disableAuthz().one()
-        if (rec == null || !TenantAccessSupport.canAccessTenantRecord(ec, rec)) {
-            TenantAccessSupport.requireTenantRecordAccess(ec, rec)  // the same not-found error for both
-            return null
-        }
+        def rec = findTenantScopedByIdQuiet(ec, entityName, pkField, pkValue)
+        if (rec == null) TenantAccessSupport.requireTenantRecordAccess(ec, null)  // the same not-found error for both
         return rec
     }
 
@@ -129,26 +126,11 @@ class TenantScopedFinder {
         // polluting ec.message.  Callers (e.g. resolveRuleSetCompareScopeConfig) translate a null return
         // into their own IllegalArgumentException, so the extra error added by findTenantScopedById would
         // be noise / a double-error there.  Use findTenantScopedByIdQuiet for a clean null-only signal.
-        def parent = findTenantScopedByIdQuiet(ec, parentEntity, parentPkField, parentPkValue)
-        // Do not leak child rows if the parent is inaccessible (null = not found; canAccess = false = wrong tenant).
-        if (!TenantAccessSupport.canAccessTenantRecord(ec, parent)) return null
+        // Do not leak child rows if the parent is inaccessible (null: missing or another tenant's).
+        if (findTenantScopedByIdQuiet(ec, parentEntity, parentPkField, parentPkValue) == null) return null
         return ec.entity.find(childEntity).condition(childFkField, parentPkValue).disableAuthz()
     }
 
-    /**
-     * Deliberately verbose opt-out for legitimate tenant-neutral reads (framework reference data,
-     * enums, self-scoped auth keyed by current userId / token hash, system-cron sweeps).
-     *
-     * <p>A non-blank {@code reason} is mandatory — this prevents silent omission of intent and
-     * leaves an audit-log trail.  Passing a blank or null reason throws
-     * {@link IllegalArgumentException} immediately.</p>
-     *
-     * @param ec         Moqui ExecutionContext
-     * @param entityName entity to search without tenant scoping
-     * @param reason     non-blank justification for skipping tenant scoping (audit-logged)
-     * @return an {@code EntityFind} with authz disabled and NO tenant condition applied
-     * @throws IllegalArgumentException if {@code reason} is blank or null
-     */
     /**
      * Reads one row by its complete primary key and returns it ONLY if it belongs to the given
      * tenant — verified in code, after the read.
@@ -179,6 +161,20 @@ class TenantScopedFinder {
         return ((row.companyUserGroupId)?.toString()?.trim()) == tenant ? row : null
     }
 
+    /**
+     * Deliberately verbose opt-out for legitimate tenant-neutral reads (framework reference data,
+     * enums, self-scoped auth keyed by current userId / token hash, system-cron sweeps).
+     *
+     * <p>A non-blank {@code reason} is mandatory — this prevents silent omission of intent and
+     * leaves an audit-log trail.  Passing a blank or null reason throws
+     * {@link IllegalArgumentException} immediately.</p>
+     *
+     * @param ec         Moqui ExecutionContext
+     * @param entityName entity to search without tenant scoping
+     * @param reason     non-blank justification for skipping tenant scoping (audit-logged)
+     * @return an {@code EntityFind} with authz disabled and NO tenant condition applied
+     * @throws IllegalArgumentException if {@code reason} is blank or null
+     */
     static def findGlobalUnscoped(def ec, String entityName, String reason) {
         requireReason(reason)
         logger.info("[tenant-scope] GLOBAL unscoped read of {}: {}", entityName, reason)

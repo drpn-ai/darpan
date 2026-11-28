@@ -182,12 +182,13 @@ class TenantAccessSupport {
      * per-tenant answer for an arbitrary tenant, on BOTH ends of a grant. This is that predicate.</p>
      *
      * <p>Default-deny: a blank tenant, an anonymous caller, or a tenant with no
-     * {@code DARPAN_TENANT_ADMIN} row all return false. A super admin returns true for every tenant,
-     * consistent with {@code resolveActiveTenantPermissionScope} already granting them the role.</p>
+     * {@code DARPAN_TENANT_ADMIN} row all return false. A Darpan admin (Moqui ADMIN, super admin or DARPAN_ADMIN, see
+     * {@link #DARPAN_ADMIN_GROUP_IDS}) returns true for every tenant, as {@code resolveActiveTenantPermissionScope}
+     * already grants them the role.</p>
      *
      * <p><strong>Caller obligation:</strong> This method performs NO existence check on {@code tenantUserGroupId}.
      * A {@code true} result means "this user administers that tenant <em>if it exists</em>". Super-admins return
-     * {@code true} for any non-blank string, real or not. Callers taking unvalidated {@code tenantUserGroupId}
+     * {@code true} for any non-blank string, real or not (Darpan admins too). Callers taking unvalidated {@code tenantUserGroupId}
      * input MUST validate tenant existence independently before trusting a {@code true} result — see
      * the {@code moqui.security.UserGroup} lookup at the top of {@code add#TenantMember} in
      * {@code service/admin/MembershipAdminServices.xml} for the standard existence check.</p>
@@ -383,25 +384,16 @@ class TenantAccessSupport {
         return SYSTEM_TENANT_USER_GROUP_ID.get()
     }
 
-    static List<String> currentActiveTenantPermissionGroupIds(def ec) {
-        String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
-        boolean superAdmin = isSuperAdmin(ec)
-        boolean darpanAdmin = isDarpanAdmin(ec)
-        return (resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).permissionGroupIds ?: []) as List<String>
+    private static Map<String, Object> activeTenantPermissionScope(def ec) {
+        return resolveActiveTenantPermissionScope(ec, currentActiveTenantUserGroupId(ec), isSuperAdmin(ec), isDarpanAdmin(ec))
     }
 
     static boolean canEditActiveTenantData(def ec) {
-        String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
-        boolean superAdmin = isSuperAdmin(ec)
-        boolean darpanAdmin = isDarpanAdmin(ec)
-        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).canEdit == true
+        return activeTenantPermissionScope(ec).canEdit == true
     }
 
     static boolean canRunActiveTenantReconciliation(def ec) {
-        String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
-        boolean superAdmin = isSuperAdmin(ec)
-        boolean darpanAdmin = isDarpanAdmin(ec)
-        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).canRun == true
+        return activeTenantPermissionScope(ec).canRun == true
     }
 
     static boolean hasActiveTenantWriteAccess(def ec) {
@@ -415,23 +407,23 @@ class TenantAccessSupport {
     static boolean requireActiveTenantRunAccess(def ec,
             String readOnlyMessage = ACTIVE_TENANT_READ_ONLY_MESSAGE,
             String missingCompanyMessage = ACTIVE_TENANT_WRITE_REQUIRED_MESSAGE) {
-        if (!currentActiveTenantUserGroupId(ec)) {
-            ec?.message?.addError(missingCompanyMessage)
-            return false
-        }
-        if (hasActiveTenantRunAccess(ec)) return true
-        ec?.message?.addError(readOnlyMessage)
-        return false
+        return requireActiveTenantAccess(ec, { hasActiveTenantRunAccess(ec) }, readOnlyMessage, missingCompanyMessage)
     }
 
     static boolean requireActiveTenantWriteAccess(def ec,
             String readOnlyMessage = ACTIVE_TENANT_READ_ONLY_MESSAGE,
             String missingCompanyMessage = ACTIVE_TENANT_WRITE_REQUIRED_MESSAGE) {
+        return requireActiveTenantAccess(ec, { hasActiveTenantWriteAccess(ec) }, readOnlyMessage, missingCompanyMessage)
+    }
+
+    /** No active tenant, or the role does not allow it: an error and false. */
+    private static boolean requireActiveTenantAccess(def ec, Closure<Boolean> allowed, String readOnlyMessage,
+            String missingCompanyMessage) {
         if (!currentActiveTenantUserGroupId(ec)) {
             ec?.message?.addError(missingCompanyMessage)
             return false
         }
-        if (hasActiveTenantWriteAccess(ec)) return true
+        if (allowed.call()) return true
         ec?.message?.addError(readOnlyMessage)
         return false
     }
@@ -712,13 +704,6 @@ class TenantAccessSupport {
         }
     }
 
-    static void applyOwnerFilter(def finder, def ec, String ownerField = "ownerUserId") {
-        if (finder == null || isSuperAdmin(ec)) return
-        String userId = currentUserId(ec)
-        if (!userId) return
-        finder.condition(ownerField, userId)
-    }
-
     static String resolveScopedRuntimeLocation(def ec, String baseLocation) {
         String normalizedBase = normalize(baseLocation)
         if (!normalizedBase) return normalizedBase
@@ -766,9 +751,7 @@ class TenantAccessSupport {
         if (!isDarpanAdmin(ec)) {
             // Guard: tenant enumeration is super-admin only. Return empty so callers that iterate
             // this list produce no output rather than leaking tenant IDs across the boundary.
-            org.slf4j.LoggerFactory.getLogger(TenantAccessSupport.class)
-                    .warn("listAllTenantRecords called by non-super-admin userId={}; returning empty list",
-                            currentUserId(ec))
+            logger.warn("listAllTenantRecords called by non-super-admin userId={}; returning empty list", currentUserId(ec))
             return []
         }
 
@@ -856,9 +839,11 @@ class TenantAccessSupport {
         def finder = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
         if (finder == null) return null
 
-        finder.condition("createdByUserId", userId)
+        // S26a: only within the active tenant. With none, the user's latest run in ANY tenant was read (authz off),
+        // including one in a tenant they have since left.
         String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
-        if (activeTenantUserGroupId) finder.condition("companyUserGroupId", activeTenantUserGroupId)
+        if (!activeTenantUserGroupId) return null
+        finder.condition("createdByUserId", userId).condition("companyUserGroupId", activeTenantUserGroupId)
         applyFinderDefaults(finder, ec, false)
         if (finder.metaClass.respondsTo(finder, "orderBy", String)) finder.orderBy("-createdDate")
 
@@ -972,26 +957,25 @@ class TenantAccessSupport {
     }
 
     /**
-     * Resolves a display label for a single tenant UserGroup by its primary key. This method
-     * performs a direct PK lookup rather than enumerating all tenants, so it is safe to call
-     * from display-only paths even when the caller is not a super-admin. The lookup is scoped
-     * to {@code groupTypeEnumId = UgtDarpanCompany} so non-tenant groups yield a null match
-     * and fall back to the raw userGroupId as the label.
+     * The tenant UserGroup with this id, or null when there is none or the group is not a tenant (ADMIN, a permission
+     * group). A by-PK read: it enumerates nothing, so any caller may use it. The type is checked on the row, because a
+     * {@code groupTypeEnumId} condition beside the full PK is dropped by {@code one()} (DAR-BE-077).
      */
+    static def findTenantGroup(def ec, Object userGroupId) {
+        String normalizedUserGroupId = normalize(userGroupId)
+        def finder = normalizedUserGroupId ? ec?.entity?.find("moqui.security.UserGroup") : null
+        if (finder == null) return null
+        finder.condition("userGroupId", normalizedUserGroupId)
+        applyFinderDefaults(finder, ec, false)
+        def record = finder.one()
+        return extractString(record, "groupTypeEnumId") == DARPAN_COMPANY_GROUP_TYPE_ENUM_ID ? record : null
+    }
+
+    /** A tenant's display label (its UserGroup description), or the raw id when it is not a tenant group. */
     static String resolveTenantLabelForUserGroupId(def ec, Object userGroupId) {
         String normalizedUserGroupId = normalize(userGroupId)
         if (!normalizedUserGroupId) return null
-
-        // Direct PK lookup — does not enumerate all tenants, safe for non-super-admin callers.
-        def finder = ec?.entity?.find("moqui.security.UserGroup")
-        if (finder == null) return normalizedUserGroupId
-
-        finder.condition("userGroupId", normalizedUserGroupId)
-                .condition("groupTypeEnumId", DARPAN_COMPANY_GROUP_TYPE_ENUM_ID)
-        applyFinderDefaults(finder, ec, false)
-
-        def record = finder.one()
-        return resolveTenantLabel(record, normalizedUserGroupId)
+        return resolveTenantLabel(findTenantGroup(ec, normalizedUserGroupId), normalizedUserGroupId)
     }
 
     protected static String resolveRuntimeScopeSuffix(def ec) {

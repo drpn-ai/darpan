@@ -114,8 +114,8 @@ class SftpAutomationServiceSmokeTests {
         List<Map<String, Object>> differences = ((List) diffDocument.differences).collect { it as Map<String, Object> }
         assertTrue(differences.any { Map<String, Object> row -> row.diffType == "MISSING_IN_FILE_2" && row.primaryId == "P300" })
         assertTrue(differences.any { Map<String, Object> row -> row.diffType == "MISSING_IN_FILE_1" && row.primaryId == "P500" })
-        assertTrue(differences.any { Map<String, Object> row -> row.diffType == "FIELD_MISMATCH" && row.primaryId == "P200" && row.field == "sku" })
-        assertTrue(differences.any { Map<String, Object> row -> row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price" })
+        assertTrue(differences.any { Map<String, Object> row -> row.diffType == "FIELD_MISMATCH" && row.primaryId == "P200" && row.field == "sku = sku" })
+        assertTrue(differences.any { Map<String, Object> row -> row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price = price" })
 
         assertTrue(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/archive/products-1.json"))
         assertTrue(sftpEnvironment.hasFile("oms.test", 22, "/incoming/archive/products-2.json"))

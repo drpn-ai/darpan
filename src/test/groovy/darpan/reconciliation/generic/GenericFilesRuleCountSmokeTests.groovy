@@ -62,7 +62,7 @@ class GenericFilesRuleCountSmokeTests {
         assertEquals(0L, result.onlyInFile1Count as Long)
         assertEquals(0L, result.onlyInFile2Count as Long)
         assertEquals(1L, result.ruleDifferenceCount as Long, "the rule stage's count must reach the caller")
-        assertEquals(["sku"], (result.ruleDifferenceFields as List<Map>)*.field)
+        assertEquals(["sku = sku"], (result.ruleDifferenceFields as List<Map>)*.field)
         assertEquals(false, result.ruleExecutionFailed)
         assertEquals(0L, result.duplicateDifferenceCount as Long)
         Map summary = (Map) ((Map) new groovy.json.JsonSlurper().parse(new File(result.diffLocation as String))).summary

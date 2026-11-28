@@ -90,7 +90,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         List<Map> diffResults = (List<Map>) pairs.diffResults
         assertEquals(1, diffResults.size())
         assertEquals("FIELD_MISMATCH", diffResults[0].diffType)
-        assertEquals("sku", diffResults[0].field)
+        assertEquals("sku = sku", diffResults[0].field)
         assertEquals("DARPAN_TEST_PRODUCT_SKU_MISMATCH", diffResults[0].ruleId)
     }
 
@@ -550,10 +550,10 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals(2L, result.ruleDifferenceCount)
         // DAR-BE-155: per field, so the run notification can name what drifted.
         List<Map> fields = (List<Map>) result.ruleDifferenceFields
-        assertEquals([sku: 1, price: 1], fields.collectEntries { [(it.field): it.count] })
-        Map skuTally = fields.find { it.field == "sku" }
+        assertEquals(["sku = sku": 1, "price = price": 1], fields.collectEntries { [(it.field): it.count] })
+        Map skuTally = fields.find { it.field == "sku = sku" }
         // DAR-BE-210: one row per rule, carrying the rule's id and display name (none saved here).
-        assertEquals([field: "sku", label: "sku", ruleId: "DARPAN_TEST_PRODUCT_SKU_MISMATCH", ruleName: null, count: 1,
+        assertEquals([field: "sku = sku", label: "sku = sku", ruleId: "DARPAN_TEST_PRODUCT_SKU_MISMATCH", ruleName: null, count: 1,
                       file1Value: "SKU-B", file2Value: "SKU-B-ALT", sameValues: true], skuTally)
         assertEquals(4L, result.differenceCount)
         assertEquals(3L, result.matchedPairCount)
@@ -585,27 +585,27 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue((missingInFile2.data as String).contains("\"productId\":\"P300\""))
 
         Map<String, Object> skuDiff = diffs.find { Map<String, Object> row ->
-            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P200" && row.field == "sku"
+            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P200" && row.field == "sku = sku"
         }
         assertTrue(skuDiff != null)
         assertEquals("DARPAN_TEST_PRODUCT_SKU_MISMATCH", skuDiff.ruleId)
         assertEquals("SKU-B", skuDiff.file1Value)
         assertEquals("SKU-B-ALT", skuDiff.file2Value)
         assertEquals("WARN", skuDiff.severity)
-        assertEquals("SKU mismatch", skuDiff.message)
+        assertEquals("Field comparison failed: sku = sku", skuDiff.message)
         // DAR-BE-117: the pair's ids ride an `ids` column through Spark; these products carry no id fields, so it is empty.
         assertTrue(((Dataset) result.diffDf).columns().contains("ids"))
         assertEquals(null, skuDiff.ids)
 
         Map<String, Object> priceDiff = diffs.find { Map<String, Object> row ->
-            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price"
+            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price = price"
         }
         assertTrue(priceDiff != null)
         assertEquals("DARPAN_TEST_PRODUCT_PRICE_MISMATCH", priceDiff.ruleId)
         assertEquals("49.99", priceDiff.file1Value)
         assertEquals("59.99", priceDiff.file2Value)
         assertEquals("WARN", priceDiff.severity)
-        assertEquals("Price mismatch", priceDiff.message)
+        assertEquals("Field comparison failed: price = price", priceDiff.message)
     }
 
     @Test

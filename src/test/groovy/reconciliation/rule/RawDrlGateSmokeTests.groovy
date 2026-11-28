@@ -34,8 +34,18 @@ class RawDrlGateSmokeTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "raw-drl-gate-smoke")
-        // Seeds DARPAN_TEST_PRODUCT_COMPARE_RS with hand-written SKU/PRICE DRL, under the active tenant KREWE.
+        // The active tenant KREWE and its scope (the support's compare fixtures).
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
+        // DAR-OPS-029 S99-205b: the shared fixtures are generated rules now, so the hand-written rule this class refuses is
+        // its own (the SKU rule the support used to carry), under the active tenant KREWE.
+        ec.entity.makeValue("darpan.rule.RuleSet").setAll([ruleSetId: "RS_GATE_HANDWRITTEN", ruleSetName: "Gate hand-written",
+                companyUserGroupId: TENANT]).createOrUpdate()
+        ec.entity.makeValue("darpan.rule.Rule").setAll([ruleId: "GATE_HANDWRITTEN_SKU", ruleSetId: "RS_GATE_HANDWRITTEN", sequenceNum: 10,
+                ruleType: "DRL", enabled: "Y", severity: "WARN", companyUserGroupId: TENANT,
+                ruleLogic: 'rule "GATE_HANDWRITTEN_SKU" when $m : Map( this["file1"] != null, this["file2"] != null ) ' +
+                        'eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"))) ' +
+                        'then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "sku", ((Map) $m.get("file1")).get("sku"), ' +
+                        '((Map) $m.get("file2")).get("sku"), "WARN", "SKU mismatch"); end']).createOrUpdate()
         priorAllowRawDrl = System.getProperty(ALLOW_RAW_DRL)
         System.clearProperty(ALLOW_RAW_DRL)
         RuleEngineSupport.resetForTests()
@@ -55,7 +65,7 @@ class RawDrlGateSmokeTests {
 
     @Test
     void aHandWrittenStoredRuleIsRefusedLoudlyAndNamesNoLogic() {
-        Map<String, Object> out = runPairs("DARPAN_TEST_PRODUCT_COMPARE_RS")
+        Map<String, Object> out = runPairs("RS_GATE_HANDWRITTEN")
 
         String error = out.error as String
         assertTrue(error?.contains("is not a generated field comparison"), "the gate did not refuse the hand-written rule: ${out}")

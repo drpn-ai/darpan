@@ -1,6 +1,8 @@
 package darpan.reconciliation.support
 
 import darpan.facade.common.TenantAccessSupport
+import groovy.json.JsonOutput
+import reconciliation.rule.FieldComparisonRuleLogicGenerator
 import org.moqui.Moqui
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
@@ -504,6 +506,28 @@ class ReconciliationSmokeTestSupport {
         ])
     }
 
+    /**
+     * DAR-OPS-029 S99-205b. A FIELD_COMPARISON rule the way save#Rule stores one: its expression, and the ruleLogic
+     * FieldComparisonRuleLogicGenerator makes from it, the only logic the compile gate lets through with raw DRL off.
+     * The field compared is the same on both sides; a difference reads "field = field" (the generator's label).
+     */
+    static void seedGeneratedFieldComparison(ExecutionContext ec, String ruleId, String ruleSetId, int sequenceNum,
+                                             String field, String severity) {
+        String expression = JsonOutput.toJson([type: FieldComparisonRuleLogicGenerator.FIELD_COMPARISON_TYPE,
+                                               file1FieldPath: field, file2FieldPath: field, operator: "="])
+        upsertEntity(ec, "darpan.rule.Rule", [ruleId: ruleId], [
+                ruleId     : ruleId,
+                ruleSetId  : ruleSetId,
+                sequenceNum: sequenceNum,
+                ruleText   : "${field} = ${field}".toString(),
+                ruleType   : FieldComparisonRuleLogicGenerator.FIELD_COMPARISON_TYPE,
+                expression : expression,
+                ruleLogic  : FieldComparisonRuleLogicGenerator.generate(expression, "", "", ruleId, severity, 0),
+                enabled    : "Y",
+                severity   : severity
+        ])
+    }
+
     static void seedCompareScopeFixtures(ExecutionContext ec) {
         seedBaseCompareRuleSet(ec)
         upsertEntity(ec, "darpan.rule.RuleSet", [ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS"], [
@@ -527,26 +551,10 @@ class ReconciliationSmokeTestSupport {
                 createdByUserId: TEST_COMPANY_USER_ID
         ])
 
-        upsertEntity(ec, "darpan.rule.Rule", [ruleId: "DARPAN_TEST_PRODUCT_SKU_MISMATCH"], [
-                ruleId      : "DARPAN_TEST_PRODUCT_SKU_MISMATCH",
-                ruleSetId   : "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                sequenceNum : 10,
-                ruleText    : "Emit a field diff when SKU differs for the same product",
-                ruleLogic   : 'rule "DARPAN_TEST_PRODUCT_SKU_MISMATCH" salience 200 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "sku", ((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"), "WARN", "SKU mismatch"); end',
-                enabled     : "Y",
-                ruleType    : "DRL",
-                severity    : "WARN"
-        ])
-        upsertEntity(ec, "darpan.rule.Rule", [ruleId: "DARPAN_TEST_PRODUCT_PRICE_MISMATCH"], [
-                ruleId      : "DARPAN_TEST_PRODUCT_PRICE_MISMATCH",
-                ruleSetId   : "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                sequenceNum : 20,
-                ruleText    : "Emit a field diff when price differs for the same product",
-                ruleLogic   : 'rule "DARPAN_TEST_PRODUCT_PRICE_MISMATCH" salience 100 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "price", ((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"), "WARN", "Price mismatch"); end',
-                enabled     : "Y",
-                ruleType    : "DRL",
-                severity    : "WARN"
-        ])
+        // DAR-OPS-029 S99-205b: the SKU and price rules are what a tenant can author, generated field comparisons (the
+        // compile gate refuses any other logic once darpan.rules.allowRawDrl is off), not hand-written DRL.
+        seedGeneratedFieldComparison(ec, "DARPAN_TEST_PRODUCT_SKU_MISMATCH", "DARPAN_TEST_PRODUCT_COMPARE_RS", 10, "sku", "WARN")
+        seedGeneratedFieldComparison(ec, "DARPAN_TEST_PRODUCT_PRICE_MISMATCH", "DARPAN_TEST_PRODUCT_COMPARE_RS", 20, "price", "WARN")
         upsertEntity(ec, "darpan.rule.Rule", [ruleId: "DARPAN_TEST_PRODUCT_BROKEN_RULE"], [
                 ruleId      : "DARPAN_TEST_PRODUCT_BROKEN_RULE",
                 ruleSetId   : "DARPAN_TEST_PRODUCT_BROKEN_RS",

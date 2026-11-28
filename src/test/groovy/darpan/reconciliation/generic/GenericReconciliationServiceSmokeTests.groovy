@@ -109,14 +109,14 @@ class GenericReconciliationServiceSmokeTests {
         assertTrue(differences.any { Map<String, Object> row ->
             row.diffType == "FIELD_MISMATCH" &&
                     row.primaryId == "P200" &&
-                    row.field == "sku" &&
+                    row.field == "sku = sku" &&
                     row.file1Value == "SKU-B" &&
                     row.file2Value == "SKU-B-ALT"
         })
         assertTrue(differences.any { Map<String, Object> row ->
             row.diffType == "FIELD_MISMATCH" &&
                     row.primaryId == "P400" &&
-                    row.field == "price" &&
+                    row.field == "price = price" &&
                     row.file1Value == "49.99" &&
                     row.file2Value == "59.99"
         })

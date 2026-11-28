@@ -644,6 +644,9 @@ class RunVerificationSupport {
                     shopifySide     : shopifySide.get("fileSide"),
             ])
             applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+            // OC185: the HotWax lines it spent travel to return presence (prepareReturnPresencePass reads and removes them).
+            List spent = (List) verification.spentReturnLines
+            if (spent) serviceResult.put(SPENT_RETURN_LINES, (((List) serviceResult.get(SPENT_RETURN_LINES) ?: []) + spent).unique())
             return verification.performed == true
         } catch (Throwable t) {
             alertVerificationFailure(ec, args, "rebuilt-return-pairing", "Rebuilt return pairing failed: ${reasonOf(t)}".toString())
@@ -671,7 +674,13 @@ class RunVerificationSupport {
      * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
      * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
      */
+    /** OC185: an internal result key, from rebuilt return pairing to return presence within one run; removed when read. */
+    static final String SPENT_RETURN_LINES = "_spentReturnLines"
+
     static Map prepareReturnPresencePass(Map args) {
+        // Read and removed first, so it never outlives this run's two passes.
+        List spentReturnLines = args?.get("serviceResult") instanceof Map ?
+                (List) ((Map) args.get("serviceResult")).remove(SPENT_RETURN_LINES) : null
         def ec = args?.get("ec")
         File diffFile = (File) args?.get("diffFile")
         if (ec == null || diffFile == null || !diffFile.isFile()) return null
@@ -705,6 +714,7 @@ class RunVerificationSupport {
                             shopifySideLabel    : shopifyLabel,
                             omsSide             : omsSide.get("fileSide"),
                             shopifySide         : shopifySide.get("fileSide"),
+                            spentReturnLines    : spentReturnLines ?: [],
                             nowMillis           : System.currentTimeMillis(),
                             windowStartMillis   : args.get("windowStartMillis"),
                             omsExtractFile      : omsExtractFile,

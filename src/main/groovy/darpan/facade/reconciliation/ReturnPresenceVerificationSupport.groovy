@@ -183,6 +183,8 @@ class ReturnPresenceVerificationSupport {
      *                        [ok: Boolean, returnLinesByExternalId: Map<String, List<Map>>, errors: List<String>],
      *                        matching lookup#HotWaxOmsReturnLinesByOrderExternalId. Absent disables
      *                        order + line pairing (see ORDER + LINE PAIRING below)
+     *   spentReturnLines  : optional — HotWax return lines (returnId|returnItemSeqId) rebuilt return pairing already spent;
+     *                        Pass 1.6 never pairs them again (OC185)
      *
      * returns [performed, rewritten, pendingCount, preWindowSuppressedCount, malformedCount,
      *          removedCount, removedMissingInFile1, removedMissingInFile2, cancelledRefundSuppressedCount,
@@ -438,7 +440,8 @@ class ReturnPresenceVerificationSupport {
         if (returnLinesLookup != null && !lineCandidates.isEmpty()) {
             Set<String> alreadyRemoved = removeIdsBySide.get(omsSide) ?: ([] as Set<String>)
             List<Map<String, Object>> open = lineCandidates.findAll { !alreadyRemoved.contains(it.rowId) }
-            Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings)
+            Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings,
+                    ((args?.spentReturnLines ?: []) as List).collect { it?.toString() } as Set<String>)
             if (pairedRowIds) {
                 Set<String> omsRemovals = removeIdsBySide.computeIfAbsent(omsSide) { new LinkedHashSet<String>() }
                 int before = omsRemovals.size()
@@ -480,7 +483,7 @@ class ReturnPresenceVerificationSupport {
      * coverage pairs nothing. A capped, failed, not-ok or throwing lookup pairs nothing for that chunk.
      */
     private static Set<String> pairByOrderLine(List<Map<String, Object>> candidates, Closure returnLinesLookup,
-                                               int maxOrderLookups, List<String> warnings) {
+                                               int maxOrderLookups, List<String> warnings, Set<String> alreadySpent = [] as Set) {
         Set<String> paired = new LinkedHashSet<String>()
         List<String> orderIds = candidates.collect { it.orderId as String }.unique()
         if (orderIds.isEmpty()) return paired
@@ -508,7 +511,8 @@ class ReturnPresenceVerificationSupport {
             }
         }
 
-        Set<String> usedReturnLines = new HashSet<String>()
+        // OC185: lines an earlier pass (rebuilt return pairing) spent start out used.
+        Set<String> usedReturnLines = new HashSet<String>(alreadySpent ?: [])
         candidates.sort { Map a, Map b -> ((Long) a.createdMillis) <=> ((Long) b.createdMillis) }.each { Map<String, Object> candidate ->
             List<Map> available = (linesByOrderId.get(candidate.orderId as String) ?: []).findAll { Map line ->
                 eligibleForPairing(line, candidate) && !usedReturnLines.contains(returnLineKey(line))

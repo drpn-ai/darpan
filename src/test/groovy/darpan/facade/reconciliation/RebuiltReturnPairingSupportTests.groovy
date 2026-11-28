@@ -197,4 +197,14 @@ class RebuiltReturnPairingSupportTests {
         assertTrue(((List) partitioned.auditNotes).contains(note), "${partitioned}")
         assertFalse(((List) partitioned.warnings).contains(note), "${partitioned}")
     }
+    /** OC185: the HotWax return lines a pairing spent are reported (returnId|returnItemSeqId), for return presence's Pass 1.6. */
+    @Test
+    void thePairingReportsTheReturnLinesItSpent() {
+        File file = diff([rebuiltRow("E1", "O1", "L1,L2", T), omsRow("R1", "O1", ["L1", "L2", "L3"], T)])
+
+        Map result = pair(file)
+
+        assertEquals(1, result.pairedCount)
+        assertEquals(["MR1|00001", "MR1|00002"], result.spentReturnLines)
+    }
 }

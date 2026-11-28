@@ -1028,6 +1028,29 @@ class ReturnPresenceVerificationSupportTests {
         assertEquals([], (List) parseDocument(diff).differences)
     }
 
+    /**
+     * OC185 (S20 F12): one HotWax return line accounts for one Shopify event. Rebuilt pairing runs first and spends lines;
+     * Pass 1.6 starts from those, so a line already spent cannot absorb a second event.
+     */
+    @Test
+    void aReturnLineRebuiltPairingAlreadySpentDoesNotPairASecondEvent() {
+        File diff = writeDiffDocument([lineRow("1113004081283", OLD, "REFUND", "7187329777795", "16502340714627")])
+
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : diff,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : NOW,
+                returnLinesLookup: linesLookup(["7187329777795": [omsLine("M240616", "16502340714627", false, OLD - 19L * 86_400_000L)]]),
+                spentReturnLines : ["M240616|01"],
+        ])
+
+        assertEquals(0, result.linePairedCount)
+        assertEquals(["1113004081283"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
     @Test
     void aRefundDoesNotPairWithAShopifyKeyedOmsReturnOnTheSameLine() {
         // That OMS return carries a numeric Shopify id, so the id join already accounted for it against

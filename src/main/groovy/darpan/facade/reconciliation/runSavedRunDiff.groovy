@@ -618,6 +618,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     try {
         prepared = RunVerificationSupport.prepareReturnPresencePass([
                 ec                 : ec,
+                serviceResult      : serviceResult,
                 diffFile           : resolveOutputFile(serviceResult),
                 sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
                                       [source: file2Source, extractResult: file2Result, label: file2Label]],

@@ -36,7 +36,8 @@ class RebuiltReturnPairingSupport {
     /**
      * args: diffFile, file1Label, file2Label, omsSideLabel, shopifySideLabel, and omsSide / shopifySide (FILE_1 / FILE_2;
      * when absent, read from the labels). Returns the verify-pass map RunVerificationSupport.applyVerificationOutcome folds:
-     * performed, rewritten, removedCount, removedMissingInFile1/2, pairedCount, warnings, auditNote.
+     * performed, rewritten, removedCount, removedMissingInFile1/2, pairedCount, warnings, auditNote, and spentReturnLines: the
+     * HotWax return lines a pairing claimed (returnId|returnItemSeqId), which return presence's Pass 1.6 starts from (OC185).
      *
      * R1: a row's side is the compare's own (DiffDocumentStreamSupport.forEachMissingRowBySide), and the counts are the
      * rows actually removed (removeMissingRowsBySide), so a repeated id counts every row it took.
@@ -75,11 +76,13 @@ class RebuiltReturnPairingSupport {
                 if (normalize(data.get("statusId")) == RETURN_CANCELLED_STATUS) return
                 String orderId = normalize(data.get("orderExternalId"))
                 Long entryMillis = ReturnPresenceVerificationSupport.parseMillisOrNull(data.get("entryDate"))
-                List<String> lines = ((data.get("items") instanceof List ? (List) data.get("items") : []) as List)
-                        .collect { it instanceof Map ? normalize(((Map) it).get("orderItemExternalId")) : null }.findAll { it }
+                List<Map> items = ((data.get("items") instanceof List ? (List) data.get("items") : []) as List)
+                        .findAll { it instanceof Map && normalize(((Map) it).get("orderItemExternalId")) } as List<Map>
+                List<String> lines = items.collect { normalize(it.get("orderItemExternalId")) }
                 if (orderId && entryMillis != null && lines) {
                     omsByOrder.computeIfAbsent(orderId) { [] }.add([rowId: rowId, entryMillis: entryMillis, lines: lines,
-                                                                   claimed: new boolean[lines.size()]] as Map<String, Object>)
+                            returnId: normalize(data.get("returnId")), seqIds: items.collect { normalize(it.get("returnItemSeqId")) },
+                            claimed: new boolean[lines.size()]] as Map<String, Object>)
                 }
             }
         }
@@ -122,13 +125,24 @@ class RebuiltReturnPairingSupport {
             if (claimed.length > 0 && (0..<claimed.length).every { claimed[it] }) removedOmsIds.add((String) ret.rowId)
         }
 
+        // OC185: every HotWax return line a pairing claimed, so return presence's Pass 1.6 cannot spend it on a second event.
+        List<String> spentReturnLines = []
+        omsByOrder.values().flatten().each { Object o ->
+            Map ret = (Map) o
+            boolean[] claimed = (boolean[]) ret.claimed
+            List<String> seqIds = (List<String>) ret.seqIds
+            for (int i = 0; i < claimed.length; i++) {
+                if (claimed[i] && ret.returnId && seqIds[i]) spentReturnLines.add("${ret.returnId}|${seqIds[i]}".toString())
+            }
+        }
+
         int removedCount = pairedEventIds.size() + removedOmsIds.size()
         String auditNote = "${AUDIT_NOTE_PREFIX}${pairedEventIds.size()} return(s) on orders past Shopify's 60-day read limit " +
                 "paired with their ${args.omsSideLabel} return by order and line; ${removedOmsIds.size()} ${args.omsSideLabel} " +
                 "row(s) accounted for."
         if (removedCount == 0) {
             return [performed: true, rewritten: false, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
-                    pairedCount: 0, warnings: warnings, auditNote: null] as Map<String, Object>
+                    pairedCount: 0, warnings: warnings, auditNote: null, spentReturnLines: spentReturnLines] as Map<String, Object>
         }
 
         // A paired event is a row missing in HotWax; an accounted-for HotWax return is a row missing in Shopify.
@@ -139,7 +153,8 @@ class RebuiltReturnPairingSupport {
 
         return [performed: true, rewritten: true, removedCount: removedMissingInFile1 + removedMissingInFile2,
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
-                pairedCount: pairedEventIds.size(), warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                pairedCount: pairedEventIds.size(), warnings: warnings, auditNote: auditNote,
+                spentReturnLines: spentReturnLines] as Map<String, Object>
     }
 
     private static Map parseData(JsonSlurper slurper, Object raw) {

@@ -3,8 +3,9 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <!-- DAR-BE-159. The embedded agent's read-only tools, as the signed-in user's services. Every one reads the ACTIVE tenant
-         (from the session; no service takes a tenant id), is never remote, and returns what the agent may see: customer data
-         is redacted (AgentRedaction). Another tenant's finding reads as not found. -->
+         (from the session; no service takes a tenant id) and returns what the agent may see: customer data is redacted
+         (AgentRedaction). Another tenant's finding reads as not found. Never remote, except get#AgentAuditScope and
+         find#AuditFindingLookalikes, which the CLI reaches too (CliMethodAllowlist). -->
 
     <service verb="get" noun="AgentFinding" authz-action="view" allow-remote="false" authenticate="true">
         <description>One finding of the active tenant (darpan.audit.finding/v1) with every record's customer data redacted, and the

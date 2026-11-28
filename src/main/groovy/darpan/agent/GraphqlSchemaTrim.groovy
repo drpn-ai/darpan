@@ -81,14 +81,14 @@ fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofT
     }
 
     /** The named type under any NON_NULL / LIST wrapping. */
-    static String namedType(Object ref) {
+    private static String namedType(Object ref) {
         Object cur = ref
         while (cur instanceof Map && ((Map) cur).name == null && ((Map) cur).ofType != null) cur = ((Map) cur).ofType
         return cur instanceof Map ? ((Map) cur).name as String : null
     }
 
     /** [Order!]! style. */
-    static String typeString(Object ref) {
+    private static String typeString(Object ref) {
         if (!(ref instanceof Map)) return "?"
         Map m = (Map) ref
         if (m.kind == "NON_NULL") return typeString(m.ofType) + "!"

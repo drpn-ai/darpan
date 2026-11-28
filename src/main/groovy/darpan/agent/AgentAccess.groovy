@@ -52,7 +52,7 @@ class AgentAccess {
     }
 
     /** One grant's state now: REVOKED, NOT_GRANTED (window not started), EXPIRED, PAUSED (or at its limit) or LIVE. */
-    static String stateOf(def g, long spent, Timestamp now) {
+    private static String stateOf(def g, long spent, Timestamp now) {
         if (g.statusId == STATUS_REVOKED) return STATUS_REVOKED
         if ((g.fromDate as Timestamp).after(now)) return NOT_GRANTED
         if (g.thruDate != null && !(g.thruDate as Timestamp).after(now)) return EXPIRED
@@ -87,7 +87,7 @@ class AgentAccess {
     }
 
     /** One AgentAccessGrantEvent: who acted (byUserId, else the signed-in user, else SYSTEM), the grant before and as it is now. */
-    static void recordEvent(def ec, def grant, String action, Map before, String byUserId = null) {
+    private static void recordEvent(def ec, def grant, String action, Map before, String byUserId = null) {
         def e = ec.entity.makeValue(EVENT).setAll([grantId: grant.grantId, companyUserGroupId: grant.companyUserGroupId, userId: grant.userId,
                 action: action, byUserId: byUserId ?: (ec.user.userId ?: SYSTEM), eventDate: ec.user.nowTimestamp,
                 beforeJson: before == null ? null : JsonOutput.toJson(before), afterJson: JsonOutput.toJson(snapshot(grant))])
@@ -109,7 +109,7 @@ class AgentAccess {
     }
 
     /** The user's one grant in the tenant that is not REVOKED (the newest, should there ever be two). */
-    static def currentGrant(def ec, String tenantId, String userId) {
+    private static def currentGrant(def ec, String tenantId, String userId) {
         return TenantScopedFinder.findGlobalUnscoped(ec, GRANT, WHY).condition("companyUserGroupId", tenantId).condition("userId", userId)
                 .condition("statusId", EntityCondition.NOT_EQUAL, STATUS_REVOKED).orderBy(["-fromDate", "-grantId"])
                 .useCache(false).list().find()
@@ -121,7 +121,7 @@ class AgentAccess {
     private static final long DAY_MS = 86_400_000L
 
     /** A grant as the admin app and CLI show it, with its spend and its state now. */
-    static Map grantView(def ec, def g) {
+    private static Map grantView(def ec, def g) {
         long spent = spentMicros(ec, g.grantId as String)
         def account = ec.entity.find("moqui.security.UserAccount").condition("userId", g.userId).useCache(true).one()
         return [grantId: g.grantId, userId: g.userId, username: account?.username, tenantUserGroupId: g.companyUserGroupId,

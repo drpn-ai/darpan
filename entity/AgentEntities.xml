@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-159. The embedded agent's records: the conversation and its turns and messages (the transcript), the changes it
-  proposes to an audit (AuditChangeProposal) and the brain-change tickets it files. Every entity is tenant-owned and under
+  proposes to an audit (AuditChangeProposal), the brain-change tickets it files, a user's AI access grants (DAR-BE-194) and
+  the fresh-query log (DAR-CLI-003). Every entity but AgentReadCatalog (product-level) is tenant-owned and under
   DARPAN_ACTIVE_COMPANY_SCOPE (data/SecuritySeedData.xml, DARPAN_SCOPE_AGENT_* and friends).
   Long text (transcript content, proposal states, ticket text) is text-very-long (R50): text-long is VARCHAR(4095) on H2 and
   MySQL, too short for what these rows hold; text-very-long is LONGTEXT on MySQL 8, stored off the row.

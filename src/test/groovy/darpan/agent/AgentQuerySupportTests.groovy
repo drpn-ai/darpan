@@ -185,7 +185,8 @@ class AgentQuerySupportTests {
                     { Map row -> logged << row })
             assertEquals("TIMEOUT", result.code)
             assertEquals("TIMEOUT", logged[0].outcome)
-            assertEquals(0, AgentQueryLane.inFlight("T1"))
+            // The slot is the worker's until it ends; the interrupt ends it soon after TIMEOUT answers, not before.
+            assertTrue(eventually { AgentQueryLane.inFlight("T1") == 0 })
         } finally { AgentQuerySupport.timeoutMillis = previous }
     }
 

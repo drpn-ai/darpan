@@ -16,7 +16,6 @@ import java.util.regex.Pattern
 class AgentRedaction {
 
     static final String POPULATED = "<populated>"
-    static final int MAX_TOKEN = 64
     private static final Pattern TOKEN = Pattern.compile(/^[A-Za-z0-9#_\-.:\/]{1,64}$/)
 
     static Map redactRecord(Map record, Set<String> allowedFields) {
@@ -113,7 +112,7 @@ class AgentRedaction {
         return java.text.Normalizer.normalize(stripInvisible(s), java.text.Normalizer.Form.NFKC)
     }
 
-    static String stripInvisible(String s) {
+    private static String stripInvisible(String s) {
         StringBuilder out = new StringBuilder()
         s.codePoints().each { int cp ->
             int type = Character.getType(cp)
@@ -158,7 +157,7 @@ class AgentRedaction {
         return document.get("finding") instanceof Map ? [schema: document.get("schema"), finding: view] : view
     }
 
-    static boolean isCustomerShape(String text) {
+    private static boolean isCustomerShape(String text) {
         return KnowledgeLeakCheck.shapeHits(text).any { KnowledgeSupport.CUSTOMER_DATA_SHAPES.contains(it) }
     }
 }

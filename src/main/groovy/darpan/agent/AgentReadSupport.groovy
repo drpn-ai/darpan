@@ -56,7 +56,8 @@ class AgentReadSupport {
         Map<String, String> stateWords = enumWords(ec, "AuditFindingState")
         Map<String, Integer> byCause = new TreeMap<String, Integer>()
         Map<String, Integer> byState = new TreeMap<String, Integer>()
-        findings(ec, tenantId, base.checkId as String).condition("findingId", EntityCondition.NOT_EQUAL, findingId).list().each { def f ->
+        findings(ec, tenantId, base.checkId as String).condition("findingId", EntityCondition.NOT_EQUAL, findingId)
+                .selectField("conclusionEnumId").selectField("stateEnumId").list().each { def f ->
             String cause = (f.conclusionEnumId as String) ?: "none"
             String state = stateWords.get(f.stateEnumId as String) ?: (f.stateEnumId as String)
             byCause.put(cause, (byCause.get(cause) ?: 0) + 1)

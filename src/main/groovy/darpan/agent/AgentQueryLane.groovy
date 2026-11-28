@@ -34,6 +34,7 @@ class AgentQueryLane {
         total--
     }
 
+    /** Test seam: the tenant's slots held now, so a test can see a slot kept until its worker really ends. */
     static synchronized int inFlight(String tenantId) { return IN_FLIGHT.getOrDefault(tenantId ?: "", 0) }
 
     /** Test seam: empties the lane. */

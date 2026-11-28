@@ -7,7 +7,6 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.sql.Timestamp
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.CompletableFuture
@@ -279,7 +278,7 @@ class AgentQuerySupport {
     }
 
     /** Removes each secret (longest first) from the text. */
-    static String strip(String text, List<String> secrets) {
+    private static String strip(String text, List<String> secrets) {
         String out = text ?: ""
         secrets.findAll { it }.sort { -it.length() }.each { String s -> out = out.replace(s, "[hidden]") }
         return out
@@ -288,14 +287,9 @@ class AgentQuerySupport {
     private static Map logRow(Map meta, String outcome, int rowCount, long durationMs) {
         String query = (meta?.queryText ?: "").toString()
         return [systemEnumId: meta?.systemEnumId, connectionId: meta?.connectionId,
-                queryHash   : sha256Hex(query),
+                queryHash   : BrainTicketSupport.sha256(query),
                 queryText   : query.length() > MAX_LOGGED_QUERY_CHARS ? query.substring(0, MAX_LOGGED_QUERY_CHARS) : query,
                 rowCount    : rowCount, durationMs: durationMs, outcome: outcome]
-    }
-
-    static String sha256Hex(String text) {
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest((text ?: "").getBytes(StandardCharsets.UTF_8))
-        return digest.collect { String.format("%02x", it & 0xff) }.join()
     }
 
     /** A log failure must never hide the query's own answer. */

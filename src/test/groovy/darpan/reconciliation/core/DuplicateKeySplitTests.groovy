@@ -207,6 +207,15 @@ class DuplicateKeySplitTests {
     }
 
     @Test
+    void eachSideWithKeylessRecordsGetsOneWarningAndASideWithNoneGetsNone() {
+        // OC15: ingestFile hands each side's keylessCount over; a side without one (or with 0) adds nothing.
+        List<String> warnings = RuleSetCompareScopeAdapter.keylessWarnings(
+                [FILE_1: [keylessCount: 0L], FILE_2: [keylessCount: 4L]], [FILE_1: "OMS", FILE_2: "NetSuite"], "Orders")
+        assertEquals(["Compare scope 'Orders' FILE_2 (NetSuite) has 4 record(s) with a blank key; they are left out of the compare."], warnings)
+        assertEquals([], RuleSetCompareScopeAdapter.keylessWarnings([FILE_1: [:]], [FILE_1: "OMS"], "Orders"))
+    }
+
+    @Test
     void everyFrameTheSplitPersistsIsHandedBackForRelease() {
         // Review I3: a persisted frame nobody returns stays in Spark's CacheManager for the JVM's life.
         Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(alpha()), FILE_2: ingest(beta())])

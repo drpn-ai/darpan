@@ -190,6 +190,45 @@ class CompareDatasetJsonFrameTests {
                 pairs.collectAsList().collect { Row r -> r.toString() }.sort())
     }
 
+    // OC15 (Aditi, F-E3 option a): a record whose single-field key is null or blank leaves the compare, and is counted.
+
+    @Test
+    void jsonFramesCountTheKeylessRecordsTheDataFrameLeavesOut() {
+        Dataset raw = json('{"id":" ABC ","n":1}', '{"id":"abc","n":2}', '{"id":"  ","n":3}', '{"n":4}')
+        Map frames = CompareDatasetSupport.buildJsonFrames(raw, paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])
+        assertEquals(["abc"], ids((Dataset) frames.idDf))
+        assertEquals(["abc", "abc"], ids((Dataset) frames.dataDf))
+        assertEquals(2L, frames.keylessCount, "the blank id and the absent id")
+        // Same frames as the one-at-a-time builders.
+        assertEquals(ids(CompareDatasetSupport.buildJsonDataDf(raw, paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])), ids((Dataset) frames.dataDf))
+    }
+
+    @Test
+    void explodedAndEmptyJsonFramesCountKeylessItems() {
+        Map frames = CompareDatasetSupport.buildJsonFrames(json('{"orders":[{"id":"O1"},{"q":2},{"id":""}]}'),
+                paths('$.orders[*].id'), "File 2", [null], ['$.orders[*].id'])
+        assertEquals(["O1"], ids((Dataset) frames.dataDf))
+        assertEquals(2L, frames.keylessCount)
+        Map empty = CompareDatasetSupport.buildJsonFrames(json('{"orders":[]}'), paths('$.orders[*].id'), "File 2", [null], ['$.orders[*].id'])
+        assertEquals(0L, empty.keylessCount)
+        assertEquals(0L, ((Dataset) empty.idDf).count())
+    }
+
+    @Test
+    void csvFramesCountKeylessRowsAndACompositeKeyStillFailsLoudly() {
+        Map frames = CompareDatasetSupport.buildCsvFrames(csv("id,n", " A ,1", "A,2", ",3", "B,4"), csvKeys("id"), "File 1")
+        assertEquals(["A", "B"], ids((Dataset) frames.idDf))
+        assertEquals(["A", "A", "B"], ids((Dataset) frames.dataDf))
+        assertEquals(1L, frames.keylessCount)
+        assertThrows(IllegalArgumentException) { CompareDatasetSupport.buildCsvFrames(csv("a,b", "x,"), csvKeys("a", "b"), "File 1") }
+    }
+
+    @Test
+    void theKeylessWarningNamesTheSideAndTheCount() {
+        assertEquals("Compare scope 'Orders' FILE_2 (NetSuite) has 3 record(s) with a blank key; they are left out of the compare.",
+                CompareDatasetSupport.keylessRecordWarning("Compare scope 'Orders' FILE_2 (NetSuite)", 3L))
+    }
+
     @Test
     void aBlankCompositeFieldFailsLoudlyAtBothLevels() {
         Dataset rootRaw = json('{"a":"x","b":" "}')

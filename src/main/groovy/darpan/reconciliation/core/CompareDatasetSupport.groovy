@@ -271,22 +271,42 @@ class CompareDatasetSupport {
      * array, else the whole record). A record whose single-field key is null or blank is left out (S01b F-E3).
      */
     static Dataset buildJsonDataDf(Dataset rawDf, List<Map> pathInfos, String pathLabel, List<String> idNormalizers, List<String> fieldExpressions) {
+        return jsonRecords(rawDf, pathInfos, pathLabel, idNormalizers, fieldExpressions).filter(HAS_KEY)
+    }
+
+    /** OC15: a JSON side's [idDf, dataDf, keylessCount]: the records left out for a null or blank single-field key, counted. */
+    static Map<String, Object> buildJsonFrames(Dataset rawDf, List<Map> pathInfos, String label, List<String> idNormalizers, List<String> fieldExpressions) {
+        return framesOf(jsonRecords(rawDf, pathInfos, label, idNormalizers, fieldExpressions))
+    }
+
+    /** OC15: the run warning for a side's keyless records. */
+    static String keylessRecordWarning(Object sideRef, long count) {
+        return "${sideRef} has ${count} record(s) with a blank key; they are left out of the compare.".toString()
+    }
+
+    /** Every record with its compare_id, keyless ones included (a blank composite field has already failed loudly). */
+    private static Dataset jsonRecords(Dataset rawDf, List<Map> pathInfos, String pathLabel, List<String> idNormalizers, List<String> fieldExpressions) {
         Map sharedPathInfo = validateSharedRecordRoot(pathInfos, pathLabel)
         if (!sharedPathInfo.needsExplode) {
-            return keyedFrame(rawDf, recordKeyFieldColumns(pathInfos, idNormalizers), struct(col("*")), fieldExpressions, pathLabel)
+            return keyedRecords(rawDf, recordKeyFieldColumns(pathInfos, idNormalizers), struct(col("*")), fieldExpressions, pathLabel)
         }
         String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
         Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
         // An empty array's item type is unknown, so its key paths cannot be resolved; it simply has no records.
         if (!datasetHasRows(explodedDf)) return emptyCompareDataDataset(rawDf.sparkSession())
-        return keyedFrame(explodedDf, explodedKeyFieldColumns(pathInfos, idNormalizers), col("exploded_item"), fieldExpressions, pathLabel)
+        return keyedRecords(explodedDf, explodedKeyFieldColumns(pathInfos, idNormalizers), col("exploded_item"), fieldExpressions, pathLabel)
     }
 
     private static final String HAS_KEY = "compare_id IS NOT NULL AND length(trim(compare_id)) > 0"
 
-    private static Dataset keyedFrame(Dataset source, List<Column> fieldCols, Column data, List<String> fieldExpressions, String label) {
+    private static Dataset keyedRecords(Dataset source, List<Column> fieldCols, Column data, List<String> fieldExpressions, String label) {
         validateNoBlankCompositeKeyFields(source, fieldCols, fieldExpressions, label)
-        return source.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), data.alias("data")).filter(HAS_KEY)
+        return source.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), data.alias("data"))
+    }
+
+    private static Map<String, Object> framesOf(Dataset records) {
+        Dataset dataDf = records.filter(HAS_KEY)
+        return [idDf: distinctKeys(dataDf), dataDf: dataDf, keylessCount: records.filter("NOT (${HAS_KEY})").count()] as Map<String, Object>
     }
 
     private static Dataset distinctKeys(Dataset dataDf) {
@@ -325,8 +345,16 @@ class CompareDatasetSupport {
     }
 
     static Dataset buildCsvDataDf(Dataset rawDf, List<Map> idSpecs, String label = null, boolean hasHeader = true) {
-        return keyedFrame(rawDf, buildCsvFieldColumns(rawDf, idSpecs, label), struct(col("*")),
-                idSpecs.collect { (String) it.idExpr }, label)
+        return csvRecords(rawDf, idSpecs, label).filter(HAS_KEY)
+    }
+
+    /** OC15: a CSV side's [idDf, dataDf, keylessCount], as buildJsonFrames. */
+    static Map<String, Object> buildCsvFrames(Dataset rawDf, List<Map> idSpecs, String label = null) {
+        return framesOf(csvRecords(rawDf, idSpecs, label))
+    }
+
+    private static Dataset csvRecords(Dataset rawDf, List<Map> idSpecs, String label) {
+        return keyedRecords(rawDf, buildCsvFieldColumns(rawDf, idSpecs, label), struct(col("*")), idSpecs.collect { (String) it.idExpr }, label)
     }
 
     private static List<Column> buildCsvFieldColumns(Dataset rawDf, List<Map> idSpecs, String label) {

@@ -31,6 +31,20 @@ class RuleSetCompareScopeAdapter {
      *  every repeated-key row. */
     static final String DUPLICATE_KEY_WARNING_TAIL = "every record under them is reported as a duplicate finding and left out of the compare."
 
+    /**
+     * OC15 (Aditi, F-E3): one warning per side whose ingest left records out for a null or blank single-field key
+     * (ingestFile's keylessCount), so a record with no key is reported instead of vanishing from every bucket.
+     */
+    static List<String> keylessWarnings(Map<String, Object> ingestBySide, Map<String, String> labelBySide, String compareScopeLabel) {
+        List<String> warnings = []
+        (ingestBySide ?: [:]).each { String fileSide, Object ingest ->
+            long keyless = (((Map) ingest)?.get("keylessCount") ?: 0L) as long
+            if (keyless > 0L) warnings.add(CompareDatasetSupport.keylessRecordWarning(
+                    "Compare scope '${compareScopeLabel}' ${fileSide} (${labelBySide?.get(fileSide) ?: fileSide})", keyless))
+        }
+        return warnings
+    }
+
     /** The repeated-key warning, built in one place so it always ends with DUPLICATE_KEY_WARNING_TAIL (I4). */
     static String duplicateKeyWarning(Object sideRef, long count) {
         return "${sideRef} has ${count} key(s) on more than one record; ${DUPLICATE_KEY_WARNING_TAIL}".toString()
@@ -253,6 +267,8 @@ class RuleSetCompareScopeAdapter {
                 keepPersisted.addAll((List<Dataset>) ingest.persisted ?: [])
                 ingestBySide.put(fileSide, ingest)
             }
+            Map<String, String> labelBySide = activeSides.collectEntries { String side -> [(side): (String) ((Map) sidePlanBySide[side]).label] }
+            processingWarnings.addAll(keylessWarnings(ingestBySide, labelBySide, compareScopeLabel))
             // What each Keep side set aside, keyed file1/file2, read before anything below narrows the frames. A compare id held
             // by a kept and a set-aside record (review M8) is in both: the kept record takes part in the compare, and the id is
             // still named here, as the extractor's side file names every record it set aside.
@@ -283,7 +299,7 @@ class RuleSetCompareScopeAdapter {
             // with one order twice in HotWax showed nothing, and to collapse silently into a match on a base-diff run.
             // An evaluate run never joins on compare_id, so its repeated ids are its findings and pass through untouched.
             Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
-                    splitDuplicateKeys(ingestBySide, activeSides.collectEntries { String side -> [(side): ((Map) sidePlanBySide[side]).label] })
+                    splitDuplicateKeys(ingestBySide, labelBySide)
             ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
             ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
                 if (count > 0) processingWarnings.add(duplicateKeyWarning(

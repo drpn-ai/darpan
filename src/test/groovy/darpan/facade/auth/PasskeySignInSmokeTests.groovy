@@ -560,107 +560,50 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     }
 
     @Test
-    @DisplayName("DAR-BE-301: with a username, begin lists that person's passkeys and the finish signs them in")
-    void passkeyFirstSignInWithAUsername() {
+    @DisplayName("OC77: a typed username changes nothing: allowCredentials stays empty and the passkey names the person")
+    void aTypedUsernameChangesNothing() {
         SoftwarePasskey key = enrolPasskey(USERNAME)
         enrolPasskey(OTHER_USERNAME)
-        Map begun = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
+        Map begun = anon("begin#PasskeyFirstSignIn", [username: OTHER_USERNAME])
         assertEquals([], begun.errors)
-        Map options = (Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)
-        assertEquals([key.id], (options.allowCredentials as List<Map>)*.id)
+        assertEquals([], new JsonSlurper().parseText(begun.out.publicKeyOptions as String).allowCredentials)
         Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
                 passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
         assertEquals([], finished.errors)
         assertTrue(finished.out.authenticated as boolean)
-        assertEquals(USER_ID, finished.out.sessionInfo.userId)
+        assertEquals(USER_ID, finished.out.sessionInfo.userId, "the passkey, not the typed name, says who signs in")
         assertEquals(1, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
     }
 
+    /**
+     * OC77 (Aditi 2026-11-28, "Discoverable-only"; DAR-OPS-029 S23 adversarial review): begin once looked the typed string up as
+     * a username or an email, so begin("alice") and begin("alice@corp") returned identical credentials exactly when they were
+     * one account with passkeys, and a decoy's shape told it from a real list. Now begin reads no account: two different typed
+     * strings, an unknown name, a real one and none at all get the same reply apart from the fresh challenge and token.
+     */
     @Test
-    @DisplayName("DAR-BE-301: an unknown or passkey-less username gets one stable decoy credential, shaped like a real one (no enumeration), held to the floor")
-    void anUnknownUsernameGetsTheSameShape() {
-        SoftwarePasskey key = enrolPasskey(USERNAME)
-        Closure<Map> begin = { String username ->
+    @DisplayName("OC77: every begin answers the same, whoever is named, held to the floor (no enumeration)")
+    void everyBeginAnswersTheSame() {
+        enrolPasskey(USERNAME)
+        Closure<Map> begin = { Map params ->
             long started = System.nanoTime()
-            Map begun = anon("begin#PasskeyFirstSignIn", [username: username])
+            Map begun = anon("begin#PasskeyFirstSignIn", params)
             long tookMillis = (System.nanoTime() - started).intdiv(1_000_000L)
-            assertTrue(tookMillis >= TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, "${username} begin held to the floor: ${tookMillis} ms")
-            assertEquals([], begun.errors, username)
-            assertEquals(true, begun.out.ok, username)
-            assertNotNull(begun.out.challengeToken, username)
+            assertTrue(tookMillis >= TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, "${params} begin held to the floor: ${tookMillis} ms")
+            assertEquals([], begun.errors, "${params}")
             return begun
         }
-        Closure<List<Map>> allowed = { Map begun ->
-            (List<Map>) new JsonSlurper().parseText(begun.out.publicKeyOptions as String).allowCredentials
+        Closure<Map> shape = { Map begun ->
+            Map options = new LinkedHashMap((Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String))
+            options.remove("challenge")
+            return [keys: begun.out.keySet(), options: options, expires: begun.out.expiresInSeconds]
         }
-        Map known = begin(USERNAME)
-        assertEquals([key.id], allowed(known)*.id, "a known username with a passkey: its real ids")
-
-        Map answers = [unknown: "nobody.at.all", passkeyless: OTHER_USERNAME, otherUnknown: "someone.else"]
-                .collectEntries { String label, String username -> [(label): begin(username)] }
-        answers.each { String label, Map begun ->
-            assertEquals(known.out.keySet(), begun.out.keySet(), "${label}: the same keys")
-            assertEquals(((Map) new JsonSlurper().parseText(known.out.publicKeyOptions as String)).keySet(),
-                    ((Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)).keySet(), "${label}: the same option keys")
-            List<Map> decoys = allowed(begun)
-            assertEquals(1, decoys.size(), "${label}: one descriptor, as a person with one passkey")
-            assertEquals(allowed(known)[0].keySet(), decoys[0].keySet(), "${label}: the descriptor's keys")
-            assertEquals("public-key", decoys[0].type)
-            assertEquals(["internal", "hybrid"], decoys[0].transports)
-            assertEquals(43, (decoys[0].id as String).length(), "${label}: 32 bytes, base64url")
-            assertNotEquals(key.id, decoys[0].id, "${label}: never a real id")
+        Map real = shape(begin([username: USERNAME]))
+        assertEquals([], real.options.allowCredentials)
+        [[username: USERNAME.toUpperCase()], [username: "${USERNAME}@example.com".toString()], [username: OTHER_USERNAME],
+         [username: "nobody.at.all"], [username: "someone.else"], [:]].each { Map params ->
+            assertEquals(real, shape(begin(params)), "${params} answers as a real account does")
         }
-        assertEquals(allowed(answers.unknown), allowed(begin("nobody.at.all")), "the same username gets the same decoy")
-        assertEquals(allowed(answers.unknown), allowed(begin("Nobody.At.All")), "case does not change it (the lookup ignores case)")
-        assertNotEquals(allowed(answers.unknown), allowed(answers.otherUnknown), "different usernames, different decoys")
-        assertNotEquals(allowed(answers.unknown), allowed(answers.passkeyless))
-        Set<String> realIds = ec.entity.find(PasskeySupport.CREDENTIAL).disableAuthz().useCache(false).list()*.credentialId as Set
-        answers.values().each { assertFalse(allowed(it)[0].id in realIds) }
-
-        // A decoy cannot finish: it is no one's passkey.
-        assertEquals([FIRST_REFUSAL], anon("finish#PasskeyFirstSignIn", [challengeToken: answers.unknown.out.challengeToken,
-                passkeyAssertion: key.assertion(answers.unknown.out.publicKeyOptions as String)]).errors)
-    }
-
-    @Test
-    @DisplayName("DAR-BE-301 review: decoys come from one stored random key: created once when begins race, stable across a cache reset, never the crypt-pass")
-    void decoysUseAStoredRandomKey() {
-        String username = "nobody.at.all"
-        Closure<String> decoy = { Map out -> new JsonSlurper().parseText(out.publicKeyOptions as String).allowCredentials[0].id }
-        Closure<String> hmac = { byte[] key, String value ->
-            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256")
-            mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"))
-            AuthPrimitives.b64url(mac.doFinal(value.getBytes("UTF-8")))
-        }
-        Closure<List> keyRows = { ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().useCache(false).list() }
-
-        ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
-        PasskeySupport.resetForTests()
-        List<Map> raced = anonInParallel("facade.AuthFacadeServices.begin#PasskeyFirstSignIn", [[username: username], [username: username]])
-        String first = decoy(raced[0])
-        assertEquals(first, decoy(raced[1]), "two begins at once agree")
-        assertEquals(1, keyRows().size(), "the key row is made once")
-        String stored = keyRows()[0].secretValue
-        assertEquals(32, AuthPrimitives.b64urlDecode(stored).length)
-
-        PasskeySupport.resetForTests()
-        assertEquals(first, decoy(anon("begin#PasskeyFirstSignIn", [username: username]).out), "re-read from the database: the same decoy")
-        assertEquals(1, keyRows().size())
-        assertEquals(hmac(AuthPrimitives.b64urlDecode(stored), username), first, "the decoy is the stored key's HMAC")
-        ["MoquiDefaultPassword:CHANGEME", "CHANGE_ME"].each { String pass ->
-            byte[] derived = AuthPrimitives.b64urlDecode(hmac(pass.getBytes("UTF-8"), "darpan-passkey-first-sign-in-decoy-v1"))
-            assertNotEquals(hmac(derived, username), first, "not computable from the crypt-pass ${pass}")
-            assertNotEquals(hmac(pass.getBytes("UTF-8"), username), first)
-        }
-
-        // Another node stored the key first: this node uses that row, not one of its own.
-        ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
-        PasskeySupport.resetForTests()
-        String othersKey = AuthPrimitives.newToken()
-        ec.entity.makeValue(PasskeySupport.AUTH_SECRET).setAll([secretId: PasskeySupport.DECOY_SECRET_ID, secretValue: othersKey,
-                createdDate: ec.user.nowTimestamp]).create()
-        assertEquals(hmac(AuthPrimitives.b64urlDecode(othersKey), username), decoy(anon("begin#PasskeyFirstSignIn", [username: username]).out))
-        assertEquals(1, keyRows().size())
     }
 
     @Test
@@ -701,26 +644,6 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
         assertEquals([FIRST_REFUSAL], finished.errors)
         assertEquals("PASSKEY_REFUSED", finished.out.reason)
         assertNull(ec.user.userId)
-    }
-
-    @Test
-    @DisplayName("DAR-BE-301: another person's passkey cannot finish a challenge begun for a username")
-    void anotherAccountsPasskeyCannotFinishAUsernameChallenge() {
-        enrolPasskey(USERNAME)
-        SoftwarePasskey otherKey = enrolPasskey(OTHER_USERNAME)
-        Map begun = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
-        Map crossed = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
-                passkeyAssertion: otherKey.assertion(begun.out.publicKeyOptions as String)])
-        assertEquals([FIRST_REFUSAL], crossed.errors)
-        assertEquals("PASSKEY_REFUSED", crossed.out.reason)
-        assertNull(ec.user.userId)
-        assertEquals(0, events(OTHER_ID, "PASSKEY_FIRST_SIGN_IN").size())
-        assertEquals(0, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
-
-        // An unknown username's challenge can never be finished.
-        Map unknown = anon("begin#PasskeyFirstSignIn", [username: "nobody.at.all"])
-        assertEquals([FIRST_REFUSAL], anon("finish#PasskeyFirstSignIn", [challengeToken: unknown.out.challengeToken,
-                passkeyAssertion: otherKey.assertion(unknown.out.publicKeyOptions as String)]).errors)
     }
 
     @Test

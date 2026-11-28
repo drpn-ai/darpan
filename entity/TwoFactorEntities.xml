@@ -22,11 +22,13 @@
         <field name="confirmedDate" type="date-time">
             <description>When it was turned on (the app's first right code; a passkey's registration).</description></field>
         <field name="endedDate" type="date-time"/>
-        <field name="endedReason" type="text-short"><description>USER_OFF, USER_REMOVED, ADMIN_RESET or REPLACED.</description></field>
+        <field name="endedReason" type="text-short"><description>USER_OFF, USER_REMOVED, ADMIN_RESET, REPLACED, or SETUP_FAILED (a
+            pending app setup that took 5 wrong codes, DAR-OPS-029 OC76).</description></field>
         <field name="lastUsedTimeStep" type="number-integer">
             <description>The 30-second step of the last code accepted; a code is accepted only for a later step (no replay).</description></field>
         <field name="lastUsedDate" type="date-time"/>
-        <field name="failedCodeCount" type="number-integer"><description>Wrong codes since failedWindowStart.</description></field>
+        <field name="failedCodeCount" type="number-integer"><description>ACTIVE: wrong codes since failedWindowStart. PENDING: wrong
+            codes against the setup; the 5th ends it (SETUP_FAILED).</description></field>
         <field name="failedWindowStart" type="date-time"><description>Start of the 24-hour window failedCodeCount counts in.</description></field>
         <field name="codesLockedDate" type="date-time">
             <description>Set at 20 wrong codes in 24 hours: codes are refused until a password reset or an admin reset.</description></field>
@@ -105,16 +107,14 @@
     <entity entity-name="PasskeySignInChallenge" package="darpan.auth" use="transactional" cache="never">
         <description>DAR-BE-301. A sign-in with a passkey alone, no password: begin#PasskeyFirstSignIn makes the row and
             finish#PasskeyFirstSignIn uses it. Anonymous until the passkey names the person, so it has no userId (and
-            SignInChallenge, whose userId is NOT NULL, cannot hold it). Only the token's SHA-256 is stored. Lives 5 minutes,
+            SignInChallenge, whose userId is NOT NULL, cannot hold it), and discoverable only (OC77): it names no account, so
+            every begin answers alike. Only the token's SHA-256 is stored. Lives 5 minutes,
             any finish uses it up (one attempt per token), swept a day past its end (by the indexed expiresDate, in a short
             transaction of its own); the rows one address made in the last minute are the begin limit. Written only by darpan.facade.auth.PasskeySupport.</description>
         <field name="challengeId" type="id" is-pk="true"/>
         <field name="tokenHash" type="id-long" not-null="true"><description>SHA-256 (hex) of the 32-byte random token.</description></field>
         <field name="webauthnChallenge" type="id-long">
             <description>The WebAuthn challenge (base64url, 32 random bytes) the passkey must sign; not a secret.</description></field>
-        <field name="usernameHint" type="text-medium">
-            <description>The username (or email) typed before the passkey, as typed, at most 255 characters; empty for a
-                discoverable sign-in. When set, only a passkey of the account it names can finish the row.</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="expiresDate" type="date-time"/>
         <field name="usedDate" type="date-time"/>
@@ -122,17 +122,6 @@
         <index name="PKSI_CHAL_TOKEN" unique="true"><index-field name="tokenHash"/></index>
         <index name="PKSI_CHAL_IP"><index-field name="requestIp"/><index-field name="createdDate"/></index>
         <index name="PKSI_CHAL_EXPIRES"><index-field name="expiresDate"/></index>
-    </entity>
-
-    <entity entity-name="AuthSecret" package="darpan.auth" use="configuration" cache="never">
-        <description>DAR-BE-301. An instance-wide random secret the sign-in code needs, made once on first use and shared by
-            every node: PASSKEY_DECOY is the key of begin#PasskeyFirstSignIn's decoy credential ids (32 random bytes,
-            base64url). Independent of the entity crypt-pass on purpose (that may be a public default). Not encrypted: it
-            only hides which usernames exist, which anyone who can read this table can read directly. Written only by
-            darpan.facade.auth.PasskeySupport; never exported by /transfer.</description>
-        <field name="secretId" type="id" is-pk="true"/>
-        <field name="secretValue" type="text-medium"/>
-        <field name="createdDate" type="date-time"/>
     </entity>
 
     <entity entity-name="TwoFactorRolePolicy" package="darpan.auth" use="configuration" cache="never">
@@ -154,7 +143,7 @@
         <field name="userId" type="id" not-null="true"/>
         <field name="eventType" type="text-short">
             <description>SETUP_STARTED, SETUP_CONFIRMED, CODE_OK, CODE_FAILED, RECOVERY_USED, CODES_RENEWED, TURNED_OFF,
-                ADMIN_RESET, CODES_LOCKED or LOCK_CLEARED; DAR-BE-270: PASSKEY_ADDED, PASSKEY_OK, PASSKEY_FAILED,
+                ADMIN_RESET, CODES_LOCKED, LOCK_CLEARED or SETUP_FAILED (OC76); DAR-BE-270: PASSKEY_ADDED, PASSKEY_OK, PASSKEY_FAILED,
                 PASSKEY_COUNTER_REGRESSED, PASSKEY_RENAMED, PASSKEY_REMOVED or APP_REMOVED; DAR-BE-301: PASSKEY_FIRST_SIGN_IN
                 (signed in with a passkey alone, no password).</description></field>
         <field name="byUserId" type="id"><description>Who did it, when not the person themselves (an admin reset).</description></field>

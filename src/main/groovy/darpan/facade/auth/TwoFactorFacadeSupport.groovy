@@ -130,15 +130,15 @@ class TwoFactorFacadeSupport {
 
     /**
      * DAR-BE-301 begin#PasskeyFirstSignIn: sign in with a passkey alone, no password. Request options (publicKeyOptions,
-     * JSON text) and the challengeToken finish#PasskeyFirstSignIn takes (300 s, one attempt). Anonymous, so the answer
-     * names no one: an unknown or passkey-less username gets the same keys as a known one, with one decoy credential in
-     * allowCredentials (PasskeySupport.decoyCredentialId), and every begin is held to
-     * TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, after its writes have committed, so the work done for a known username
-     * does not show in the time either. Refusals (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
+     * JSON text) and the challengeToken finish#PasskeyFirstSignIn takes (300 s, one attempt). Discoverable only (OC77): no
+     * account is read and allowCredentials is empty, so every begin answers alike; each is held to
+     * TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS after its writes commit. typedUsername is accepted and not read: the service
+     * still declares it, and the UI still sends it (DAR-OPS-029 S23 handoff to S25/U17a to drop both). Refusals
+     * (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
      */
-    static Map<String, Object> beginPasskeyFirstSignIn(def ec, Object username) {
+    static Map<String, Object> beginPasskeyFirstSignIn(def ec, Object typedUsername) {
         long started = System.nanoTime()
-        Map<String, Object> begun = PasskeySupport.firstSignInOptions(ec, username)
+        Map<String, Object> begun = PasskeySupport.firstSignInOptions(ec)
         TwoFactorSupport.holdToFloor(started)
         if (begun.refusal) return refused(ec, [:], (TwoFactorRefusal) begun.refusal, false)
         Map<String, Object> result = [challengeToken: begun.challengeToken, publicKeyOptions: begun.publicKeyOptions,

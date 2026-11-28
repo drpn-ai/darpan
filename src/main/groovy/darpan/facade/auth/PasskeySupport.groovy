@@ -24,8 +24,6 @@ import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 import java.nio.charset.StandardCharsets
 import java.sql.Timestamp
 
@@ -51,19 +49,6 @@ class PasskeySupport {
     /** DAR-BE-301: the rows of a sign-in with a passkey alone (begin/finish#PasskeyFirstSignIn). */
     static final String FIRST_SIGN_IN_CHALLENGE = "darpan.auth.PasskeySignInChallenge"
     static final int FIRST_SIGN_IN_BEGINS_PER_MINUTE = 10
-    static final int USERNAME_HINT_MAX_LENGTH = 255
-    private static final String ACCOUNT = "moqui.security.UserAccount"
-    /** A decoy descriptor's transports: what a platform passkey reports most often. */
-    static final String DECOY_TRANSPORTS = "internal,hybrid"
-    static final String AUTH_SECRET = "darpan.auth.AuthSecret"
-    static final String DECOY_SECRET_ID = "PASSKEY_DECOY"
-    /** [factory, key]: the decoy key as read for one framework instance (tests boot several in one JVM). */
-    private static volatile Map decoyKeyCache
-
-    /** Test-only: forgets the cached decoy key. Idempotent, never throws. */
-    static void resetForTests() {
-        try { decoyKeyCache = null } catch (Throwable ignored) { }
-    }
 
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
@@ -391,20 +376,19 @@ class PasskeySupport {
     // ---- a passkey alone (DAR-BE-301) ----
 
     /**
-     * begin#PasskeyFirstSignIn: a new PasskeySignInChallenge row (the token's hash, a fresh WebAuthn challenge, the username
-     * as typed) and request options with userVerification required, so one gesture is the passkey and the person's
-     * biometric or PIN. With no username allowCredentials is empty (the browser offers its own discoverable passkeys). With
-     * one, it lists the live passkeys of the account the username names; for a username that names nobody, or a person with
-     * no live passkey, it holds one decoy descriptor (decoyCredentialId: the same for the same username, unlike any real
-     * id), so the answer never says whether the account exists or has a passkey. Returns [challengeToken,
-     * publicKeyOptions, expiresInSeconds] or [refusal]: PASSKEYS_UNAVAILABLE, or TOO_MANY_ATTEMPTS once
-     * FIRST_SIGN_IN_BEGINS_PER_MINUTE begins came from this address in the last minute (counted from the stored rows, as
-     * CliAuthSupport.overStartLimit, so a restart does not reset it).
+     * begin#PasskeyFirstSignIn: a new PasskeySignInChallenge row (the token's hash and a fresh WebAuthn challenge) and request
+     * options with userVerification required, so one gesture is the passkey and the person's biometric or PIN. Discoverable
+     * only (OC77, Aditi 2026-11-28): allowCredentials is always empty and no account is read, so the browser offers the passkeys
+     * it holds and every begin answers alike whatever was typed (a username lookup let begin("alice") and begin("alice@corp")
+     * be compared to learn that an account exists and has passkeys). A security key that holds no discoverable credential
+     * signs in with the password and a code instead. Returns [challengeToken, publicKeyOptions, expiresInSeconds] or
+     * [refusal]: PASSKEYS_UNAVAILABLE, or TOO_MANY_ATTEMPTS once FIRST_SIGN_IN_BEGINS_PER_MINUTE begins came from this address
+     * in the last minute (counted from the stored rows, as CliAuthSupport.overStartLimit, so a restart does not reset it).
      *
-     * <p>Every write is a short transaction of its own (the sweep of rows a day past their end, by the indexed
-     * expiresDate; the new row), so no lock is held while the caller holds the answer to the timing floor.
+     * <p>Every write is a short transaction of its own (the sweep of rows a day past their end, by the indexed expiresDate;
+     * the new row), so no lock is held while the caller holds the answer to the timing floor.
      */
-    static Map<String, Object> firstSignInOptions(def ec, Object username) {
+    static Map<String, Object> firstSignInOptions(def ec) {
         RelyingParty rp = relyingParty(ec)
         if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
         Timestamp now = ec.user.nowTimestamp
@@ -420,107 +404,39 @@ class PasskeySupport {
                     .deleteAll()
         })
 
-        String hint = usernameHint(username)
-        List<Map> passkeys = hint ? activePasskeys(ec, (String) accountNamed(ec, hint)?.userId) : []
-        if (hint && !passkeys) passkeys = [[credential: [credentialId: decoyCredentialId(ec, hint), transports: DECOY_TRANSPORTS]]]
         String token = AuthPrimitives.newToken()
         String challenge = AuthPrimitives.newToken()
         ec.transaction.runRequireNew(null, "Could not start a passkey sign-in", {
             ec.entity.makeValue(FIRST_SIGN_IN_CHALLENGE).setAll([tokenHash: AuthPrimitives.sha256Hex(token), webauthnChallenge: challenge,
-                    usernameHint: hint, createdDate: now, expiresDate: new Timestamp(now.time + SignInChallenges.LIFETIME_SECONDS * 1000L),
+                    createdDate: now, expiresDate: new Timestamp(now.time + SignInChallenges.LIFETIME_SECONDS * 1000L),
                     requestIp: address]).setSequencedIdPrimary().create()
         })
-        return [challengeToken: token, publicKeyOptions: requestOptionsJson(rp, challenge, passkeys),
+        return [challengeToken: token, publicKeyOptions: requestOptionsJson(rp, challenge, []),
                 expiresInSeconds: SignInChallenges.LIFETIME_SECONDS]
-    }
-
-    /**
-     * The decoy credential id begin#PasskeyFirstSignIn lists for a username with no live passkey: HMAC-SHA256 of the
-     * username (trimmed, lower case, as the case-insensitive lookup treats it) under decoyKey, base64url: 32 bytes, as
-     * many authenticators' ids are. Stable for a username (two begins, two nodes, a restart look alike), different per
-     * username, and not a credential anyone holds, so a finish with it is refused like any unknown passkey.
-     */
-    static String decoyCredentialId(def ec, String username) {
-        Mac mac = Mac.getInstance("HmacSHA256")
-        mac.init(new SecretKeySpec(decoyKey(ec), "HmacSHA256"))
-        return AuthPrimitives.b64url(mac.doFinal(username.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)))
-    }
-
-    /**
-     * The decoy key: one random 32-byte secret, made once and stored in AuthSecret (DECOY_SECRET_ID), so every node and
-     * every restart uses the same one, and nothing public (not the crypt-pass, which an instance may leave at a default)
-     * can compute it. Read once per framework and kept in memory. Created race-safely: the PK is fixed, so a second node
-     * creating it at the same moment fails its insert and reads the first one's row.
-     */
-    private static byte[] decoyKey(def ec) {
-        Object factory = ec.factory
-        Map cached = decoyKeyCache
-        if (cached != null && cached.factory.is(factory)) return (byte[]) cached.key
-        synchronized (PasskeySupport) {
-            cached = decoyKeyCache
-            if (cached == null || !cached.factory.is(factory)) {
-                cached = [factory: factory, key: loadOrCreateDecoyKey(ec)]
-                decoyKeyCache = cached
-            }
-            return (byte[]) cached.key
-        }
-    }
-
-    private static byte[] loadOrCreateDecoyKey(def ec) {
-        String value = storedDecoySecret(ec)
-        if (!value) {
-            String fresh = AuthPrimitives.newToken()
-            try {
-                ec.transaction.runRequireNew(null, "Could not store the passkey decoy key", {
-                    ec.entity.makeValue(AUTH_SECRET).setAll([secretId: DECOY_SECRET_ID, secretValue: fresh,
-                            createdDate: ec.user.nowTimestamp]).create()
-                })
-            } catch (Exception e) {
-                logger.info("Passkey decoy key: another node stored it first ({}); reading theirs", e.class.simpleName)
-            }
-            value = storedDecoySecret(ec)
-        }
-        byte[] key = value ? AuthPrimitives.b64urlDecode(value) : null
-        if (key == null || key.length < 32) throw new IllegalStateException("The passkey decoy key could not be read")
-        return key
-    }
-
-    /** Read in a transaction of its own, so a row another node committed after this request's transaction began is seen. */
-    private static String storedDecoySecret(def ec) {
-        return (String) ec.transaction.runRequireNew(null, "Could not read the passkey decoy key", {
-            TwoFactorRecords.find(ec, AUTH_SECRET, "global: the instance's passkey decoy key")
-                    .condition("secretId", DECOY_SECRET_ID).useCache(false).one()?.secretValue
-        })
     }
 
     /**
      * finish#PasskeyFirstSignIn's check: the person the assertion signs in, or null. The token's row is claimed first, in a
      * transaction of its own: locked, live (unused, unexpired) and used up there, so every attempt spends the token even
      * when what follows refuses or rolls back. Then, in another: the assertion's credential must be a live passkey (its
-     * owner is who it is checked for), of the account the row's usernameHint names when there is one, and verifyAssertion
-     * must pass against the row's challenge (user verified, counter, PASSKEY_OK / PASSKEY_FAILED events).
+     * owner is who it is checked for) and verifyAssertion must pass against the row's challenge (user verified, counter,
+     * PASSKEY_OK / PASSKEY_FAILED events).
      */
     static String claimFirstSignIn(def ec, Object token, Object assertionJson) {
         String value = normalize(token)
         if (!value || relyingParty(ec) == null) return null
-        Map claimed = (Map) ec.transaction.runRequireNew(null, "Could not claim a passkey sign-in", {
+        String challenge = (String) ec.transaction.runRequireNew(null, "Could not claim a passkey sign-in", {
             def row = TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "pre-auth: passkey-first sign-in challenge by token hash, no session yet")
                     .condition("tokenHash", AuthPrimitives.sha256Hex(value)).forUpdate(true).useCache(false).one()
             if (row == null || row.usedDate != null || !((Timestamp) row.expiresDate)?.after(ec.user.nowTimestamp)) return null
             row.usedDate = ec.user.nowTimestamp
             row.update()
-            return [challenge: row.webauthnChallenge, usernameHint: row.usernameHint]
+            return row.webauthnChallenge
         })
-        if (claimed == null || !claimed.challenge) return null
+        if (!challenge) return null
         return (String) ec.transaction.runRequireNew(null, "Could not check a passkey sign-in", {
             String ownerId = firstSignInOwner(ec, assertionJson)
-            if (ownerId == null) return null
-            if (claimed.usernameHint && accountNamed(ec, (String) claimed.usernameHint)?.userId != ownerId) {
-                logger.info("Passkey-first sign-in refused for userId {}: not the account the username named", ownerId)
-                refuse(ec, ownerId)
-                return null
-            }
-            return verifyAssertion(ec, ownerId, assertionJson, (String) claimed.challenge) ? ownerId : null
+            return ownerId != null && verifyAssertion(ec, ownerId, assertionJson, challenge) ? ownerId : null
         })
     }
 
@@ -537,32 +453,6 @@ class PasskeySupport {
             return null
         }
         return credentialId ? (String) liveOwnerOf(ec, AuthPrimitives.sha256Hex(credentialId))?.userId : null
-    }
-
-    /**
-     * The account a typed username names, found as the framework's password sign-in finds it
-     * (MoquiShiroRealm.loginPrePassword): the username, else the username ignoring case, else the email address ignoring
-     * case. Null when nothing matches, or more than one account does.
-     */
-    private static def accountNamed(def ec, String username) {
-        if (!username) return null
-        def exact = TwoFactorRecords.find(ec, ACCOUNT, "pre-auth: the account a typed username names")
-                .condition("username", username).useCache(false).one()
-        if (exact != null) return exact
-        for (String field in ["username", "emailAddress"]) {
-            List found = TwoFactorRecords.find(ec, ACCOUNT, "pre-auth: the account a typed username names, ignoring case")
-                    .condition(ec.entity.conditionFactory.makeCondition(field, EntityCondition.ComparisonOperator.EQUALS, username).ignoreCase())
-                    .useCache(false).limit(2).list()
-            if (found) return found.size() == 1 ? found[0] : null
-        }
-        return null
-    }
-
-    /** The username as typed, trimmed, at most USERNAME_HINT_MAX_LENGTH characters (the stored column; a username or
-     *  email is never longer), or null. */
-    static String usernameHint(Object username) {
-        String value = normalize(username)
-        return value && value.length() > USERNAME_HINT_MAX_LENGTH ? value.substring(0, USERNAME_HINT_MAX_LENGTH) : value
     }
 
     /** A refused assertion: the PASSKEY_FAILED event, and false. */

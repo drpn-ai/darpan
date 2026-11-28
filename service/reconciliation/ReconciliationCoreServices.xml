@@ -40,6 +40,8 @@
             <parameter name="differenceCount" type="Long"/>
             <parameter name="onlyInFile1Count" type="Long"/>
             <parameter name="onlyInFile2Count" type="Long"/>
+            <parameter name="duplicateDifferenceCount" type="Long"><description>Records under a key repeated on its side (DAR-BE-165): each is a DUPLICATE_IN_FILE_1/2 row, counted in differenceCount, and its key is in neither onlyIn count nor matchedCount.</description></parameter>
+            <parameter name="matchedCount" type="Long"><description>Keys held once on each side and present on both: with the onlyIn counts and duplicate records, every keyed record is in exactly one bucket.</description></parameter>
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
@@ -81,7 +83,6 @@
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/unified/output"/>
             <parameter name="outputFileName"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="UnifiedReconciliation"/>
         </in-parameters>
     </service>
@@ -106,8 +107,6 @@
             <parameter name="file1Label"/>
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
-            <parameter name="allowDuplicateCompareIds" type="Boolean" default-value="false"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopePreparation"/>
             <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
@@ -166,9 +165,7 @@
             <parameter name="file1Label"/>
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
-            <parameter name="allowDuplicateCompareIds" type="Boolean" default-value="false"/>
             <parameter name="buildMatchedPairs" type="Boolean" default-value="true"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopeBaseDiff"/>
             <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
@@ -214,7 +211,6 @@
             <set field="compareScopeId" from="null"/>
             <set field="file1Label" from="null"/>
             <set field="file2Label" from="null"/>
-            <set field="allowDuplicateCompareIdsValue" from="allowDuplicateCompareIds == true"/>
             <set field="buildMatchedPairsValue" from="buildMatchedPairs != false"/>
 
             <service-call name="reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope"
@@ -224,9 +220,9 @@
                     file1FileTypeEnumId:file1FileTypeEnumId, file2FileTypeEnumId:file2FileTypeEnumId,
                     file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
                     file1Label:file1LabelInput, file2Label:file2LabelInput,
-                    hasHeader:hasHeader, allowDuplicateCompareIds:allowDuplicateCompareIdsValue,
+                    hasHeader:hasHeader,
                     file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation, file2KeysOutLocation:file2KeysOutLocation,
-                    keepBySide:keepBySide, sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    keepBySide:keepBySide, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
             <if condition="!ec.message.hasError() &amp;&amp; prepared">
@@ -324,7 +320,6 @@
                 <description>Row `type` on every emitted finding. Nothing downstream switches on it, so
                     it is a label for the operator rather than a discriminator.</description>
             </parameter>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopeEvaluate"/>
             <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
@@ -372,7 +367,7 @@
                     file1FileTypeEnumId:file1FileTypeEnumId, file1SchemaFileName:file1SchemaFileName,
                     file1Label:file1LabelInput, hasHeader:hasHeader,
                     file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
-                    keepBySide:keepBySide, sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    keepBySide:keepBySide, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
             <if condition="!ec.message.hasError() &amp;&amp; prepared">
@@ -427,7 +422,6 @@
             <parameter name="file1Label"/>
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScope"/>
             <parameter name="ruleBatchSize" type="Integer" default-value="500"/>
             <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
@@ -503,10 +497,9 @@
                     file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
                     file1Label:file1LabelInput, file2Label:file2LabelInput,
                     hasHeader:hasHeader,
-                    allowDuplicateCompareIds:activeRuleCount == 0,
                     buildMatchedPairs:activeRuleCount > 0 || judgeWithDecisions == true,
                     file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation, file2KeysOutLocation:file2KeysOutLocation,
-                    keepBySide:keepBySide, sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    keepBySide:keepBySide, sparkAppName:sparkAppName]"
                     out-map="baseResult"/>
 
             <if condition="!ec.message.hasError() &amp;&amp; baseResult">
@@ -605,7 +598,6 @@
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/router/output"/>
             <parameter name="outputFileName"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="ReconciliationRouter"/>
         </in-parameters>
         <out-parameters>

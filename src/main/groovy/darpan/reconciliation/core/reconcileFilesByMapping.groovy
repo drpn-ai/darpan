@@ -1,6 +1,7 @@
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationMappingSupport
+import darpan.reconciliation.core.ReconciliationServices
 import org.slf4j.LoggerFactory
 
 import static darpan.common.ValueSupport.normalize
@@ -23,45 +24,11 @@ def detectFileTypeFromName = { String name ->
     if (lower?.endsWith(".json")) return "JSON"
     return null
 }
-def splitIdExpression = { String expr ->
-    def raw = normalize(expr)
-    if (!raw) return [idExpr: null, normalizer: null]
-    int separatorIndex = raw.indexOf("|")
-    if (separatorIndex < 0) return [idExpr: raw, normalizer: null]
-    String idExpr = normalize(raw.substring(0, separatorIndex))
-    String idNormalizer = normalize(raw.substring(separatorIndex + 1))
-    return [idExpr: idExpr, normalizer: idNormalizer]
-}
-def normalizeIdNormalizer = { String rawNormalizer ->
-    def code = normalize(rawNormalizer)
-    if (!code) return null
-    def normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
-    if (normalized == "SHOPIFY_GID_TAIL") return "SHOPIFY_GID_TAIL"
-    throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported value: SHOPIFY_GID_TAIL")
-}
 def safeNameFromLocation = { String location, String fallback ->
     def loc = normalize(location) ?: ""
     def parts = loc.tokenize("/\\")
     return parts ? parts[-1] : (fallback ?: "file")
 }
-def resolveEnumLabel = { String enumId, String fallback ->
-    def normalized = normalize(enumId)
-    if (!normalized) return fallback
-    def enumValue = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.Enumeration",
-            "framework reference data: enumeration label lookup")
-            .condition("enumId", normalized)
-            .useCache(true)
-            .one()
-    def description = normalize(enumValue?.description)
-    if (normalize(enumValue?.enumTypeId) == "DarpanSystemSource" && normalized == "OMS") {
-        return description ?: "HotWax"
-    }
-    def code = normalize(enumValue?.enumCode)
-    if (code) return code
-    if (description) return description
-    return normalized
-}
-
 if (!reconciliationMappingId) {
     throw new IllegalArgumentException("reconciliationMappingId is required")
 }
@@ -75,9 +42,10 @@ if (!file1SystemEnumId || !file2SystemEnumId) {
 List<String> processingWarnings = (processingWarnings ?: []) as List<String>
 
 def resolveIdFieldForCompare = { Map memberConfig, String systemEnumId ->
-    def parsedExpr = splitIdExpression(memberConfig.idFieldExpression ?: memberConfig.systemFieldName ?: "id")
-    def inlineNormalizer = normalizeIdNormalizer(parsedExpr.normalizer)
-    def memberNormalizer = normalizeIdNormalizer(memberConfig.idValueNormalizer)
+    // The shared parser and normalizer list: the copies here rejected CASE_FOLD, which every other path accepts.
+    def parsedExpr = ReconciliationServices.splitIdExpression(memberConfig.idFieldExpression ?: memberConfig.systemFieldName ?: "id")
+    def inlineNormalizer = ReconciliationServices.resolveIdNormalizer(parsedExpr.normalizer)
+    def memberNormalizer = ReconciliationServices.resolveIdNormalizer(memberConfig.idValueNormalizer)
     def finalNormalizer = memberNormalizer ?: inlineNormalizer
     if (memberNormalizer && inlineNormalizer && memberNormalizer != inlineNormalizer) {
         processingWarnings.add("Mapping member normalizer ${memberNormalizer} overrides inline normalizer ${inlineNormalizer} for system ${systemEnumId}")
@@ -170,21 +138,15 @@ def file2IdField = resolveIdFieldForCompare(file2Config, file2SystemEnumId)
 def file1Schema = file1Config.schemaFileName
 def file2Schema = file2Config.schemaFileName
 
-def file1Label = normalize(file1Label) ?: resolveEnumLabel(file1SystemEnumId, "File 1")
-def file2Label = normalize(file2Label) ?: resolveEnumLabel(file2SystemEnumId, "File 2")
+def file1Label = normalize(file1Label) ?: ReconciliationServices.resolveEnumLabel(ec, file1SystemEnumId, "File 1")
+def file2Label = normalize(file2Label) ?: ReconciliationServices.resolveEnumLabel(ec, file2SystemEnumId, "File 2")
 def mappingRecord = TenantScopedFinder.findTenantScopedByIdQuiet(
         ec, DarpanEntityConstants.RECONCILIATION_MAPPING, "reconciliationMappingId", reconciliationMappingId)
 
-def reconType = "${file1Type}_${file2Type}"
-reconciliationType = (reconType == "CSV_CSV") ? "CSV" : (reconType == "JSON_JSON" ? "JSON" : "MIXED")
+reconciliationType = ReconciliationServices.determineReconciliationType(file1Type, file2Type)
 
 def outputBase = outputLocation ?: "runtime://tmp/reconciliation/router/output"
 def outputFileNameValue = normalize(outputFileName)
-// Security (HIGH gaps 3,5): IGNORE any caller-supplied sparkMaster. Resolving it server-side only
-// prevents an authenticated API caller (Postman) from redirecting the tenant's Spark job — and the
-// staged financial data — to an attacker-controlled cluster. Operators set spark.master via the
-// server property; the PWA never sends this field, so no legitimate input is rejected.
-def sparkMasterToUse = (ec.resource.properties['spark.master'] ?: "local[*]")
 def sparkAppNameToUse = sparkAppName ?: "ReconciliationRouter"
 validationErrors = []
 
@@ -209,7 +171,6 @@ def result = ec.service.sync()
                 reconciliationMappingId: reconciliationMappingId,
                 reconciliationMappingName: mappingRecord?.mappingName,
                 companyUserGroupId    : mappingRecord?.companyUserGroupId,
-                sparkMaster           : sparkMasterToUse,
                 sparkAppName          : sparkAppNameToUse,
                 processingWarnings    : processingWarnings
         ])
@@ -220,6 +181,8 @@ diffFileName = result.diffFileName
 differenceCount = result.differenceCount
 onlyInFile1Count = result.onlyInFile1Count
 onlyInFile2Count = result.onlyInFile2Count
+duplicateDifferenceCount = result.duplicateDifferenceCount
+matchedCount = result.matchedCount
 reconciliationType = result.reconciliationType ?: reconciliationType
 validationErrors = result.validationErrors ?: []
 processingWarnings = result.processingWarnings ?: processingWarnings

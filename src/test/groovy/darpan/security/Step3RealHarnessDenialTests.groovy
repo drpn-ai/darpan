@@ -143,53 +143,25 @@ class Step3RealHarnessDenialTests {
      */
     @Test
     void prepareRuleSetCompareScopeThrowsForForeignRuleSetId() {
-        // Build a context-stack Expando that mimics what the Moqui service framework injects.
-        // prepareRuleSetCompareScope reads ruleSetId, compareScopeId, file1/2Location, etc. from it.
-        def fakeContextStack = new LinkedHashMap<String, Object>()
-        fakeContextStack.put("ruleSetId",      FOREIGN_RULE_SET_ID)
-        fakeContextStack.put("compareScopeId", "SCOPE_GORJANA_FOREIGN")
-        fakeContextStack.put("file1Location",  "runtime://fake/file1.csv")
-        fakeContextStack.put("file2Location",  "runtime://fake/file2.csv")
-        fakeContextStack.put("hasHeader",       Boolean.TRUE)
-        fakeContextStack.put("allowDuplicateCompareIds", Boolean.FALSE)
-
-        // Wrap the real EC in an Expando that overrides contextStack only — ec itself remains typed.
-        // prepareRuleSetCompareScope casts ec.contextStack to Map<String, Object>, then uses TenantScopedFinder
-        // methods that accept def ec (the wrapper).  This is intentional — the real ec provides the entity
-        // layer and active-tenant session; contextStack provides the service input parameters.
-        def wrappedEc = new Expando()
-        wrappedEc.contextStack = fakeContextStack
-        wrappedEc.entity = ec.entity
-        wrappedEc.user = ec.user
-        wrappedEc.message = ec.message
-        wrappedEc.resource = ec.resource
-
-        // TenantScopedFinder.findTenantScopedChildren delegates to findTenantScopedByIdQuiet, which
-        // calls ec.entity.find(...).condition(...).disableAuthz().one() — this needs the real entity facade.
-        // The prepareRuleSetCompareScope signature is (ExecutionContext ec), so we cannot pass Expando directly.
-        // Instead, call ReconciliationServices.resolveRuleSetCompareScopeConfig directly with the real ec
-        // (same TenantScopedFinder gate path, tested above) to cover the :47 adapter gate indirectly.
-        // The direct adapter call requires a Moqui service context; verify the gate via the resolver instead.
-        //
-        // INDIRECT COVERAGE NOTE: prepareRuleSetCompareScope:47 calls the same
-        // TenantScopedFinder.findTenantScopedChildren gate as resolveRuleSetCompareScopeConfig:506.
-        // The resolver test above (resolveRuleSetCompareScopeConfigThrowsForForeignRuleSetId) exercises
-        // that exact gate path with a real ExecutionContext.  prepareRuleSetCompareScope is additionally
-        // covered by the Moqui service call path tested in RuleSetCompareScopeServiceSmokeTests (happy path)
-        // and by the DisableAuthzRatchetTest ratchet.
-
-        // Direct call: confirm the typed-ec gate method throws for the foreign ruleSetId on the real ec.
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class) {
-            ReconciliationServices.resolveRuleSetCompareScopeConfig(
-                    ec,
-                    FOREIGN_RULE_SET_ID,
-                    "SCOPE_GORJANA_FOREIGN",
-                    null,
-                    null
-            )
+        // The adapter itself, through its service: the gate must refuse GORJANA's RuleSet before any source is read.
+        // (This test used to call resolveRuleSetCompareScopeConfig again, so the adapter's own gate went untested.)
+        Throwable thrown = null
+        try {
+            ec.service.sync()
+                    .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                    .parameters([ruleSetId    : FOREIGN_RULE_SET_ID, compareScopeId: "SCOPE_GORJANA_FOREIGN",
+                                 file1Location: "runtime://fake/file1.csv", file2Location: "runtime://fake/file2.csv"])
+                    .disableAuthz()
+                    .call()
+        } catch (Throwable t) {
+            thrown = t
         }
-        assertTrue(ex.message.contains(FOREIGN_RULE_SET_ID),
-                "Gate must reject the foreign ruleSetId by name. Got: ${ex.message}")
+        String said = ((thrown?.toString() ?: "") + " " + ec.message.errorsString)
+        assertTrue(thrown != null || ec.message.hasError(), "a foreign ruleSetId must not prepare a compare")
+        assertTrue(said.contains(FOREIGN_RULE_SET_ID), "the refusal names the denied ruleSetId: ${said}")
+        assertTrue(said.contains("not found") || said.contains("not accessible"), "the refusal says not found: ${said}")
+        assertFalse(said.contains("fake/file"), "no source was read: ${said}")
+        ec.message.clearErrors()
     }
 
     // -----------------------------------------------------------------------

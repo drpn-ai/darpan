@@ -22,7 +22,6 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.regex.Pattern
 
-import static darpan.common.ValueSupport.normalize
 import static org.apache.spark.sql.functions.*
 
 class ReconciliationServices {
@@ -36,9 +35,7 @@ class ReconciliationServices {
     // we stop collecting, record how many were dropped, and emit a loud warning (surfaced in the
     // completion alert) so the run is reported as truncated rather than crashing the process. The cap
     // is high enough that normal runs are unaffected; override via the system property if needed.
-    static final int MAX_RULE_DIFF_ROWS =
-            (System.getProperty("darpan.reconciliation.rule.maxRuleDiffRows") ?: "1000000").isInteger() ?
-                    (System.getProperty("darpan.reconciliation.rule.maxRuleDiffRows") ?: "1000000").toInteger() : 1_000_000
+    static final int MAX_RULE_DIFF_ROWS = Integer.getInteger("darpan.reconciliation.rule.maxRuleDiffRows", 1_000_000)
     // Non-printable delimiter (ASCII Unit Separator, U+001F) for composed composite compare_id values —
     // avoids collisions with ordinary field values the way a printable delimiter like '-' or '::' could.
     static final String COMPOSITE_KEY_DELIMITER = "\u001F"
@@ -87,7 +84,7 @@ class ReconciliationServices {
      * Core Spark-based reconciliation of two ID DataFrames.
      */
     static Map<String, Object> reconcileIdDataFrames(ExecutionContext ec) {
-        return reconcileIdDataFramesInternal(ec, (Map<String, Object>) ec.contextStack)
+        return reconcileIdDataFramesInternal(ec, (Map<String, Object>) ec.context)
     }
 
     private static Map<String, Object> reconcileIdDataFramesInternal(ExecutionContext ec, Map<String, Object> context) {
@@ -133,227 +130,119 @@ class ReconciliationServices {
      * Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.
      */
     static Map<String, Object> reconcileUnifiedFiles(ExecutionContext ec) {
-        return reconcileUnifiedFilesInternal(ec, (Map<String, Object>) ec.contextStack)
+        return reconcileUnifiedFilesInternal(ec, (Map<String, Object>) ec.context)
     }
 
     private static Map<String, Object> reconcileUnifiedFilesInternal(ExecutionContext ec, Map<String, Object> context) {
-        Dataset onlyIn1Df = null
-        Dataset onlyIn2Df = null
-        Dataset idDf1 = null
-        Dataset idDf2 = null
-
+        List<Dataset> persisted = []
         try {
             String file1Location = (String) context.get("file1Location")
             String file2Location = (String) context.get("file2Location")
             String file1Type = (String) context.get("file1Type")
             String file2Type = (String) context.get("file2Type")
-            String file1IdField = (String) context.get("file1IdField")
-            String file2IdField = (String) context.get("file2IdField")
-            String file1IdExpression = (String) context.get("file1IdExpression")
-            String file2IdExpression = (String) context.get("file2IdExpression")
-            String file1SchemaFileName = (String) context.get("file1SchemaFileName")
-            String file2SchemaFileName = (String) context.get("file2SchemaFileName")
-            String file1LabelParam = (String) context.get("file1Label")
-            String file2LabelParam = (String) context.get("file2Label")
-            String reconciliationMappingId = (String) context.get("reconciliationMappingId")
+            if (!file1Location || !file2Location || !file1Type || !file2Type) {
+                ec.message.addError("Required parameters missing: file1Location, file2Location, file1Type, file2Type")
+                return [:]
+            }
             String reconciliationMappingName = (String) context.get("reconciliationMappingName")
-            String companyUserGroupId = (String) context.get("companyUserGroupId")
-            Boolean hasHeader = (Boolean) context.get("hasHeader")
-            String outputLocation = (String) context.get("outputLocation") ?: "runtime://tmp/reconciliation/unified/output"
-            String outputFileName = (String) context.get("outputFileName")
-            // Security (HIGH gaps 3,5, defense-in-depth 2026-06-30): IGNORE any caller-supplied
-            // sparkMaster. Resolve the Spark master server-side only (resource property, else local[*])
-            // so a future allow-remote exposure of this service cannot let a caller redirect the tenant's
-            // Spark job to an attacker-controlled cluster. Operators set spark.master via server property.
-            String sparkMaster = (String) (ec.resource.properties["spark.master"] ?: "local[*]")
-            String sparkAppName = (String) context.get("sparkAppName") ?: "UnifiedReconciliation"
-
+            // `hasHeader ?: true` read false as true, so a headerless CSV lost its first record to the header row.
+            boolean hasHeader = context.get("hasHeader") != Boolean.FALSE
             List<String> processingWarnings = (List<String>) context.get("processingWarnings") ?: []
             List<String> validationErrors = (List<String>) context.get("validationErrors") ?: []
 
-
-            if (!file1Location || !file2Location || !file1Type || !file2Type) {
-                 ec.message.addError("Required parameters missing: file1Location, file2Location, file1Type, file2Type")
-                 return [:]
-            }
-
-            String label1 = normalize(file1LabelParam) ?: "File 1"
-            String label2 = normalize(file2LabelParam) ?: "File 2"
+            String label1 = normalize(context.get("file1Label")) ?: "File 1"
+            String label2 = normalize(context.get("file2Label")) ?: "File 2"
             String type1 = normalize(file1Type)?.toUpperCase()
             String type2 = normalize(file2Type)?.toUpperCase()
+            Map id1Spec = CompareIdExpressionSupport.parseIdSpec((String) (context.get("file1IdExpression") ?: context.get("file1IdField")), "CSV".equals(type1))
+            Map id2Spec = CompareIdExpressionSupport.parseIdSpec((String) (context.get("file2IdExpression") ?: context.get("file2IdField")), "CSV".equals(type2))
+            String reconciliationType = CompareIdExpressionSupport.determineReconciliationType(type1, type2)
 
-            Map id1Spec = CompareIdExpressionSupport.parseIdSpec(file1IdExpression ?: file1IdField, "CSV".equals(type1))
-            Map id2Spec = CompareIdExpressionSupport.parseIdSpec(file2IdExpression ?: file2IdField, "CSV".equals(type2))
+            SparkSession spark = embeddedSparkSession(ec, (String) context.get("sparkAppName") ?: "UnifiedReconciliation")
+            Map<String, Object> ingestBySide = [
+                    FILE_1: ingestFile(ec, spark, file1Location, type1, id1Spec, hasHeader, label1, validationErrors, (String) context.get("file1SchemaFileName")),
+                    FILE_2: ingestFile(ec, spark, file2Location, type2, id2Spec, hasHeader, label2, validationErrors, (String) context.get("file2SchemaFileName"))
+            ] as Map<String, Object>
 
-            String reconType = "${type1}_${type2}"
-            String reconciliationType = (reconType == "CSV_CSV") ? "CSV" : (reconType == "JSON_JSON" ? "JSON" : "MIXED")
-
-            SparkSession spark = SparkSession.builder()
-                    .appName(sparkAppName)
-                    .master(sparkMaster)
-                    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-                     .config("spark.sql.adaptive.enabled", "true")
-                    .config("spark.ui.enabled", "false") // embedded batch use: no unauthenticated UI port; the UI's jakarta.servlet is the container's
-                    .getOrCreate()
-            // Audit 2026-06-11 #18: getOrCreate returns a JVM singleton, so per-call builder .config()
-            // is ignored after the first session. Set shuffle partitions at runtime so embedded local[*]
-            // batches avoid the 200-partition default overhead on small datasets. Overridable.
-            spark.conf().set("spark.sql.shuffle.partitions",
-                    (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
-
-            // Ingestion
-            Map ingest1 = ingestFile(ec, spark, file1Location, type1, id1Spec, hasHeader ?: true, label1, validationErrors, file1SchemaFileName)
-            Map ingest2 = ingestFile(ec, spark, file2Location, type2, id2Spec, hasHeader ?: true, label2, validationErrors, file2SchemaFileName)
-
-            idDf1 = (Dataset) ingest1.idDf
-            Dataset dataDf1 = (Dataset) ingest1.dataDf
-            idDf2 = (Dataset) ingest2.idDf
-            Dataset dataDf2 = (Dataset) ingest2.dataDf
-
-            idDf1 = idDf1.persist(StorageLevel.DISK_ONLY())
-            idDf2 = idDf2.persist(StorageLevel.DISK_ONLY())
-
-            // Delegation to Core Logic
-            Map<String, Object> coreInput = [
-                df1: idDf1,
-                df2: idDf2,
-                idColumnName: "compare_id",
-                df1Label: label1,
-                df2Label: label2
-            ]
-            Map<String, Object> coreResult = reconcileIdDataFramesInternal(ec, coreInput)
-
-            onlyIn1Df = (Dataset) coreResult.get("onlyInDf1")
-            onlyIn2Df = (Dataset) coreResult.get("onlyInDf2")
-            Long count1 = (Long) coreResult.get("onlyInDf1Count")
-            Long count2 = (Long) coreResult.get("onlyInDf2Count")
-            Long differenceCount = (Long) coreResult.get("differenceCount")
-
-             // Output Formatting
-             Dataset diffDf = null
-             if (differenceCount > 0) {
-                String label1Norm = label1?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file1"
-                String label2Norm = label2?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file2"
-                String missingInTypeForFile1 = "missing_in_" + label2Norm
-                String missingInTypeForFile2 = "missing_in_" + label1Norm
-                String noteForFile1 = "Present in " + label1 + ", missing in " + label2
-                String noteForFile2 = "Present in " + label2 + ", missing in " + label1
-
-                Dataset diffs1 = null
-                if (count1 > 0) {
-                    Dataset joined1 = dataDf1.join(onlyIn1Df, "compare_id", "inner")
-                    diffs1 = joined1.select(
-                            lit(missingInTypeForFile1).alias("type"),
-                            col("compare_id").alias("id"),
-                            lit(label1).alias("presentIn"),
-                            lit(label2).alias("missingIn"),
-                            to_json(col("data")).alias("data"),
-                            lit(noteForFile1).alias("note")
-                    )
-                }
-                Dataset diffs2 = null
-                if (count2 > 0) {
-                    Dataset joined2 = dataDf2.join(onlyIn2Df, "compare_id", "inner")
-                    diffs2 = joined2.select(
-                            lit(missingInTypeForFile2).alias("type"),
-                            col("compare_id").alias("id"),
-                            lit(label2).alias("presentIn"),
-                            lit(label1).alias("missingIn"),
-                            to_json(col("data")).alias("data"),
-                            lit(noteForFile2).alias("note")
-                    )
-                }
-                if (diffs1 != null && diffs2 != null) diffDf = diffs1.union(diffs2)
-                else if (diffs1 != null) diffDf = diffs1
-                else diffDf = diffs2
-             }
-
-            // Write Output
-             String diffLocation = null
-             String diffFileName = null
-
-             File outputDir = resolveOutputDirectory(ec, outputLocation)
-
-             String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
-             String mappingSlug = reconciliationMappingName ? reconciliationMappingName.replaceAll(/[^A-Za-z0-9_-]/, "-") : null
-             String basePrefix = (reconciliationType == "CSV") ? "csv" : (reconciliationType == "JSON" ? "json" : "mixed")
-             String defaultBase = mappingSlug ? "${mappingSlug}-diff-${timestamp}.json" : "${basePrefix}-diff-${timestamp}.json"
-             String baseFileName = outputFileName ?: defaultBase
-             if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
-
-             File outputFile = nextFreeJsonOutputFile(outputDir, baseFileName)
-             baseFileName = outputFile.getName()
-
-            diffLocation = outputFile.getAbsolutePath()
-            diffFileName = baseFileName
-
-             // Write JSON
-            Map outputMetadata = [
-                timestamp: formatMetadataTimestamp(ec.user.nowTimestamp),
-                file1Label: label1,
-                file2Label: label2,
-                file1Type: type1,
-                file2Type: type2,
-                reconciliation: reconciliationType,
-                companyUserGroupId: companyUserGroupId,
-                reconciliationMappingId: reconciliationMappingId,
-                reconciliationMappingName: reconciliationMappingName
-            ]
-            Map outputSummary = [
-                totalDifferences: differenceCount,
-                onlyInFile1Count: count1,
-                onlyInFile2Count: count2
-            ]
-
-            outputFile.withWriter("UTF-8") { writer ->
-                writer << "{\n"
-                writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata) + ",\n"
-                writer << "\"summary\":" + JsonOutput.toJson(outputSummary) + ",\n"
-                writer << "\"validationErrors\":" + JsonOutput.toJson(validationErrors) + ",\n"
-                writer << "\"differences\":["
-                boolean first = true
-                if (differenceCount > 0 && diffDf != null) {
-                    def iter = diffDf.toJSON().toLocalIterator()
-                    while (iter.hasNext()) {
-                        def rowJson = iter.next()
-                        if (!first) writer << ","
-                        writer << "\n" << rowJson
-                        first = false
-                    }
-                }
-                writer << "]\n}"
+            // DAR-BE-165, as on the RuleSet path: a key on more than one record of a side is a finding for each of those
+            // records and leaves the compare on both sides. The anti-join below used to match it and read clean.
+            Map<String, Object> split = RuleSetCompareScopeAdapter.splitDuplicateKeys(ingestBySide)
+            persisted.addAll((List<Dataset>) split.persistedFrames)
+            Map<String, String> labelBySide = [FILE_1: label1, FILE_2: label2]
+            ((Map<String, Long>) split.duplicateKeyCountBySide).each { String side, Long keys ->
+                processingWarnings.add("${side} (${labelBySide[side]}) has ${keys} key(s) on more than one record; ${RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL}".toString())
             }
+            Map side1 = (Map) ((Map) split.ingestBySide).FILE_1
+            Map side2 = (Map) ((Map) split.ingestBySide).FILE_2
+            Dataset idDf1 = ((Dataset) side1.idDf).persist(StorageLevel.DISK_ONLY())
+            Dataset idDf2 = ((Dataset) side2.idDf).persist(StorageLevel.DISK_ONLY())
+            persisted.addAll([idDf1, idDf2])
 
-            Map<String, Object> result = [:]
-            result.put("reconciliationType", reconciliationType)
-            result.put("diffLocation", diffLocation)
-            result.put("diffFileName", diffFileName)
-            result.put("differenceCount", differenceCount)
-            result.put("onlyInFile1Count", count1)
-            result.put("onlyInFile2Count", count2)
-            result.put("validationErrors", validationErrors)
-            result.put("processingWarnings", processingWarnings)
-            return result
+            Map<String, Object> core = reconcileIdDataFramesInternal(ec,
+                    [df1: idDf1, df2: idDf2, idColumnName: "compare_id", df1Label: label1, df2Label: label2] as Map<String, Object>)
+            long count1 = (Long) core.get("onlyInDf1Count")
+            long count2 = (Long) core.get("onlyInDf2Count")
+            long matchedCount = CompareDatasetSupport.countDataset(CompareDatasetSupport.buildMatchedIdDataset(idDf1, idDf2))
+
+            // The mapping path's row types stay what they were: missing_in_<label without punctuation>.
+            String label1Token = label1.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file1"
+            String label2Token = label2.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file2"
+            Dataset duplicates1 = (Dataset) ((Map) split.duplicateDataBySide).FILE_1
+            Dataset duplicates2 = (Dataset) ((Map) split.duplicateDataBySide).FILE_2
+            Dataset diffDf = [
+                    CompareDatasetSupport.buildMissingDiffRows((Dataset) side1.dataDf, (Dataset) core.get("onlyInDf1"), "missing_in_" + label2Token,
+                            label1, label2, "Present in " + label1 + ", missing in " + label2),
+                    CompareDatasetSupport.buildMissingDiffRows((Dataset) side2.dataDf, (Dataset) core.get("onlyInDf2"), "missing_in_" + label1Token,
+                            label2, label1, "Present in " + label2 + ", missing in " + label1),
+                    CompareDatasetSupport.buildDuplicateRows(duplicates1, "DUPLICATE_IN_FILE_1", label1, "Duplicated in " + label1 + ": more than one record shares this key"),
+                    CompareDatasetSupport.buildDuplicateRows(duplicates2, "DUPLICATE_IN_FILE_2", label2, "Duplicated in " + label2 + ": more than one record shares this key")
+            ].inject((Dataset) null) { Dataset acc, Dataset rows -> CompareDatasetSupport.unionDatasets(acc, rows) }
+            long duplicateCount = CompareDatasetSupport.countDataset(duplicates1) + CompareDatasetSupport.countDataset(duplicates2)
+            long differenceCount = count1 + count2 + duplicateCount
+
+            String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
+            String mappingSlug = reconciliationMappingName ? reconciliationMappingName.replaceAll(/[^A-Za-z0-9_-]/, "-") : null
+            String defaultBase = "${mappingSlug ?: reconciliationType.toLowerCase()}-diff-${timestamp}.json"
+            Map<String, Object> output = writeDiffDatasetOutput(ec, diffDf, (String) context.get("outputLocation") ?: "runtime://tmp/reconciliation/unified/output",
+                    (String) context.get("outputFileName"), defaultBase,
+                    [timestamp               : formatMetadataTimestamp(ec.user.nowTimestamp), file1Label: label1, file2Label: label2,
+                     file1Type               : type1, file2Type: type2, reconciliation: reconciliationType,
+                     companyUserGroupId      : context.get("companyUserGroupId"), reconciliationMappingId: context.get("reconciliationMappingId"),
+                     reconciliationMappingName: reconciliationMappingName] as Map<String, Object>,
+                    [totalDifferences: differenceCount, onlyInFile1Count: count1, onlyInFile2Count: count2,
+                     duplicateDifferenceCount: duplicateCount, matchedCount: matchedCount] as Map<String, Object>,
+                    validationErrors, processingWarnings)
+
+            return [reconciliationType: reconciliationType, diffLocation: output.diffLocation, diffFileName: output.diffFileName,
+                    differenceCount   : differenceCount, onlyInFile1Count: count1, onlyInFile2Count: count2,
+                    duplicateDifferenceCount: duplicateCount, matchedCount: matchedCount,
+                    validationErrors  : validationErrors, processingWarnings: processingWarnings] as Map<String, Object>
         } catch (Exception e) {
-             // Audit 2026-06-11 #9: do NOT swallow a Spark/ingest/join failure into an empty,
-             // success-shaped map. Downstream code reads [:] as "0 differences, clean run" and the
-             // run is recorded SUCCEEDED, hiding a broken sync — the exact failure this platform
-             // exists to surface. Re-raise so the run fails loudly. The finally block below still
-             // releases persisted Datasets on this path.
-             logger.error("Unified reconciliation failed", e)
-             throw new RuntimeException("Unified reconciliation failed: ${e.message}", e)
+            // Audit 2026-06-11 #9: never an empty, success-shaped map: downstream reads [:] as a clean run.
+            logger.error("Unified reconciliation failed", e)
+            throw new RuntimeException("Unified reconciliation failed: ${e.message}", e)
         } finally {
-            // Audit H2.1 / H9.8 — Dataset.unpersist() ran only on the happy path; the catch block
-            // returned without releasing DISK_ONLY blockmgr files, so every failed reconciliation
-            // leaked driver-side blocks. Move all unpersist calls into a finally that runs on success
-            // and on failure. spark.stop() is intentionally NOT called: SparkSession.builder()
-            // .getOrCreate() returns a JVM singleton and stopping it would prevent every subsequent
-            // reconciliation from reusing the session.
-            try { if (onlyIn1Df != null) onlyIn1Df.unpersist() } catch (Throwable ignored) { /* best-effort cleanup */ }
-            try { if (onlyIn2Df != null) onlyIn2Df.unpersist() } catch (Throwable ignored) { /* best-effort cleanup */ }
-            try { if (idDf1 != null) idDf1.unpersist() } catch (Throwable ignored) { /* best-effort cleanup */ }
-            try { if (idDf2 != null) idDf2.unpersist() } catch (Throwable ignored) { /* best-effort cleanup */ }
+            // Audit H2.1 / H9.8: persisted frames are released on success and failure alike.
+            CompareDatasetSupport.unpersistDatasets(persisted)
         }
+    }
+
+    /**
+     * The JVM's one embedded SparkSession. The master is the server's spark.master property, never a caller's value
+     * (security HIGH gaps 3,5: a caller must not send a tenant's data to another cluster), and the UI port stays off.
+     * getOrCreate ignores builder config after the first session, so the shuffle partition count (audit 2026-06-11 #18)
+     * is set on the session at runtime.
+     */
+    static SparkSession embeddedSparkSession(ExecutionContext ec, String appName) {
+        SparkSession spark = SparkSession.builder()
+                .appName(appName)
+                .master((String) (ec.resource.properties["spark.master"] ?: "local[*]"))
+                .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+                .config("spark.sql.adaptive.enabled", "true")
+                .config("spark.ui.enabled", "false")
+                .getOrCreate()
+        spark.conf().set("spark.sql.shuffle.partitions", System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16")
+        return spark
     }
 
     // --- Private Helpers ---
@@ -514,7 +403,7 @@ class ReconciliationServices {
         return rawDf.na().fill("")
     }
 
-    static String resolvePath(ExecutionContext ec, String location) {
+    private static String resolvePath(ExecutionContext ec, String location) {
          def rr = ec.resource.getLocationReference(location)
          if (rr != null && rr.supportsUrl()) {
              def url = rr.getUrl()
@@ -909,14 +798,6 @@ class ReconciliationServices {
         return CompareDatasetSupport.buildEvaluationFindingRows(dataDf, diffType, sourceLabel, note)
     }
 
-    static List<Row> findDuplicateCompareIdRows(Dataset dataDf, int sampleLimit = 5) { return CompareDatasetSupport.findDuplicateCompareIdRows(dataDf, sampleLimit) }
-
-    static Dataset collapseDuplicateCompareIds(Dataset dataDf) { return CompareDatasetSupport.collapseDuplicateCompareIds(dataDf) }
-
-    static String buildDuplicateCompareIdExamples(List<Row> duplicateRows) { return CompareDatasetSupport.buildDuplicateCompareIdExamples(duplicateRows) }
-
-    static void validateUniqueCompareIds(Dataset dataDf, String compareScopeLabel, String fileSide, String fileLabel) { CompareDatasetSupport.validateUniqueCompareIds(dataDf, compareScopeLabel, fileSide, fileLabel) }
-
     static Dataset unionDatasets(Dataset firstDf, Dataset secondDf) { return CompareDatasetSupport.unionDatasets(firstDf, secondDf) }
 
     static Dataset emptyMissingDiffDataset(Dataset referenceDf) { return CompareDatasetSupport.emptyMissingDiffDataset(referenceDf) }
@@ -924,8 +805,6 @@ class ReconciliationServices {
     static Dataset buildMatchedIdDataset(Dataset file1IdDf, Dataset file2IdDf) { return CompareDatasetSupport.buildMatchedIdDataset(file1IdDf, file2IdDf) }
 
     static long countDataset(Dataset df) { return CompareDatasetSupport.countDataset(df) }
-
-    static long appendBoundedRuleDiffs(List<Map<String, Object>> accumulated, List<Map<String, Object>> batchDiffs, int cap) { return CompareDatasetSupport.appendBoundedRuleDiffs(accumulated, batchDiffs, cap) }
 
     static Dataset persistAndMaterialize(Dataset df) { return CompareDatasetSupport.persistAndMaterialize(df) }
 

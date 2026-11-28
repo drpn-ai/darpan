@@ -56,7 +56,7 @@ class ReconciliationServicesTests {
     @Test
     void appendBoundedRuleDiffsAddsAllWhenUnderCap() {
         List<Map<String, Object>> acc = []
-        long dropped = ReconciliationServices.appendBoundedRuleDiffs(acc, [[a: 1], [a: 2]], 10)
+        long dropped = CompareDatasetSupport.appendBoundedRuleDiffs(acc, [[a: 1], [a: 2]], 10)
         assertEquals(0L, dropped)
         assertEquals(2, acc.size())
     }
@@ -64,7 +64,7 @@ class ReconciliationServicesTests {
     @Test
     void appendBoundedRuleDiffsDropsOverflowWithinABatch() {
         List<Map<String, Object>> acc = [[a: 0]]
-        long dropped = ReconciliationServices.appendBoundedRuleDiffs(acc, [[a: 1], [a: 2], [a: 3]], 2)
+        long dropped = CompareDatasetSupport.appendBoundedRuleDiffs(acc, [[a: 1], [a: 2], [a: 3]], 2)
         // cap=2, acc already holds 1, so only 1 more fits and 2 are dropped.
         assertEquals(2L, dropped)
         assertEquals(2, acc.size())
@@ -73,7 +73,7 @@ class ReconciliationServicesTests {
     @Test
     void appendBoundedRuleDiffsDropsEntireBatchOnceCapReached() {
         List<Map<String, Object>> acc = [[a: 0], [a: 1]]
-        long dropped = ReconciliationServices.appendBoundedRuleDiffs(acc, [[a: 2], [a: 3]], 2)
+        long dropped = CompareDatasetSupport.appendBoundedRuleDiffs(acc, [[a: 2], [a: 3]], 2)
         assertEquals(2L, dropped)
         assertEquals(2, acc.size())
     }

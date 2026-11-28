@@ -339,7 +339,7 @@ class ReconciliationSavedRunSupportTests {
                 .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
         assertFalse((code =~ /warnings[^\n]*getErrors\(\)/).find(), "ec.message errors folded into warnings")
         assertFalse((code =~ /warnings[^\n]*\bt\.message\b|check failed: \$\{/).find(), "exception text folded into warnings")
-        assertEquals(2, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "both checks send their raw errors to Darpan's alerts room")
+        assertEquals(4, (code =~ /settleCheckErrors\((?:EXCHANGE|RETURNS)_CHECK,/).size(), "both checks (prepare and run) send their raw errors to Darpan's alerts room")
     }
 
     // ─── OC19: a manual run that compared nothing closes as the scheduled path does (DAR-BE-390/393) ──────────────
@@ -409,5 +409,21 @@ class ReconciliationSavedRunSupportTests {
                 .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
         assertTrue(code.contains("[duplicateDifferenceCount: serviceResult.duplicateDifferenceCount]"),
                 "writeRuleSetOutput's summary passes duplicateDifferenceCount through from the compare")
+    }
+
+    /**
+     * F24 (OC121): a verify check whose PREPARE step throws degrades to an unverified run with the neutral warning and the
+     * alerts-room text, as the scheduled path does, never a failed run. Every check error (prepare or run) settles through one
+     * closure, so all four sites keep raw text out of the warnings.
+     */
+    @Test
+    void runSavedRunDiffDegradesAPrepareFailureLikeTheScheduledPath() {
+        String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
+                .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
+        assertTrue((code =~ /try \{\s*prepared = RunVerificationSupport\.prepareExchangePairPass\(/).find(), "exchange prepare is wrapped")
+        assertTrue((code =~ /try \{\s*prepared = RunVerificationSupport\.prepareReturnPresencePass\(/).find(), "returns prepare is wrapped")
+        assertEquals(4, (code =~ /settleCheckErrors\((?:EXCHANGE|RETURNS)_CHECK,/).size(), "prepare and run of both checks settle their errors")
+        assertEquals(1, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "one place sends raw text to the alerts room")
     }
 }

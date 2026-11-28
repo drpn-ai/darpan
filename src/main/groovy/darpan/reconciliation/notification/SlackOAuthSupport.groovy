@@ -61,14 +61,14 @@ class SlackOAuthSupport {
 
     /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
     static void resetForTests() {
-        try { resetExchangeHook() } catch (Throwable ignored) { }
+        exchangeHook = null
     }
 
     static String resolveClientId(def ec) {
         return firstConfigured(ec, CLIENT_ID_ENV, CLIENT_ID_PROPERTY)
     }
 
-    static String resolveClientSecret(def ec) {
+    private static String resolveClientSecret(def ec) {
         return firstConfigured(ec, CLIENT_SECRET_ENV, CLIENT_SECRET_PROPERTY)
     }
 
@@ -158,15 +158,8 @@ class SlackOAuthSupport {
 
     /** The URL to send the admin to. Scope list and state are what Slack shows on its consent screen. */
     static String buildAuthorizeUrl(String clientId, String redirectUri, String stateToken) {
-        Map<String, String> params = [
-                client_id   : clientId,
-                scope       : REQUESTED_SCOPES,
-                redirect_uri: redirectUri,
-                state       : stateToken,
-        ]
-        String query = params.collect { entry ->
-            "${URLEncoder.encode(entry.key, StandardCharsets.UTF_8.name())}=${URLEncoder.encode(entry.value, StandardCharsets.UTF_8.name())}"
-        }.join("&")
+        String query = SlackApiClient.formEncode([client_id: clientId, scope: REQUESTED_SCOPES, redirect_uri: redirectUri,
+                                                  state: stateToken] as Map<String, Object>)
         return "${AUTHORIZE_URL}?${query}".toString()
     }
 
@@ -175,7 +168,7 @@ class SlackOAuthSupport {
      *
      * @return {@code [ok, teamId, teamName, appId, botUserId, botAccessToken, grantedScopes, reason]}
      */
-    static Map<String, Object> exchangeCode(def ec, String code, String redirectUri) {
+    private static Map<String, Object> exchangeCode(def ec, String code, String redirectUri) {
         String clientId = resolveClientId(ec)
         String clientSecret = resolveClientSecret(ec)
         if (!clientId || !clientSecret) return [ok: false, reason: "SLACK_APP_NOT_CONFIGURED"]
@@ -340,10 +333,8 @@ class SlackOAuthSupport {
     }
 
     private static Map<String, Object> postForm(String clientId, String clientSecret, String code, String redirectUri) {
-        String form = [client_id: clientId, client_secret: clientSecret, code: code, redirect_uri: redirectUri]
-                .findAll { it.value }
-                .collect { "${URLEncoder.encode(it.key, StandardCharsets.UTF_8.name())}=${URLEncoder.encode(it.value as String, StandardCharsets.UTF_8.name())}" }
-                .join("&")
+        String form = SlackApiClient.formEncode([client_id: clientId, client_secret: clientSecret, code: code,
+                                                 redirect_uri: redirectUri] as Map<String, Object>)
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
         HttpRequest request = HttpRequest.newBuilder(URI.create(ACCESS_URL))
                 .timeout(Duration.ofSeconds(15))

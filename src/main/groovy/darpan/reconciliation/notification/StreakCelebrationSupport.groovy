@@ -62,7 +62,7 @@ class StreakCelebrationSupport {
         return [imageUrl: base + GIF_PATH + entry.file, altText: entry.altText, title: entry.title]
     }
 
-    static boolean hasCelebration(Map<String, Object> payload) {
+    private static boolean hasCelebration(Map<String, Object> payload) {
         Map celebration = payload?.get(CELEBRATION_KEY) as Map
         return celebration != null && ((celebration.imageUrl)?.toString()?.trim())
     }

@@ -103,7 +103,7 @@ class IdIndexCatalog {
                 .disableAuthz().updateAll([indexedVersion: null])
     }
 
-    static List<String> customerPatterns() {
+    private static List<String> customerPatterns() {
         String text = null
         try { text = DarpanSettings.stringValue(CUSTOMER_PATTERNS_SETTING) } catch (Exception ignored) { }
         List<String> fromSetting = (text ?: "").split(/\r?\n/).collect { it.trim() }.findAll { it }

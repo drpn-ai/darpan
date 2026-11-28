@@ -52,7 +52,7 @@ class IdIndexRows {
     }
 
     /** The scalar values a dotted path reaches in a record; lists along the way are flattened. Blank values are left out. */
-    static List<String> valuesAt(Object node, String path) {
+    private static List<String> valuesAt(Object node, String path) {
         List<Object> current = [node]
         for (String p : (path ?: "").tokenize(".")) {
             List<Object> next = []
@@ -66,7 +66,7 @@ class IdIndexRows {
     }
 
     /** "lineItems[*].id" -> "lineItems.id" (valuesAt flattens lists by itself). */
-    static String plainPath(String fieldPath) { return (fieldPath ?: "").replace("[*]", "") }
+    private static String plainPath(String fieldPath) { return (fieldPath ?: "").replace("[*]", "") }
 
     private static Object first(Map record, String path) {
         List<String> v = valuesAt(record, plainPath(path))

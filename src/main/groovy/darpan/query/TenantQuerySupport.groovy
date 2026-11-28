@@ -30,7 +30,7 @@ class TenantQuerySupport {
 
     // ---- queries
 
-    static Map toQueryMap(def row) {
+    private static Map toQueryMap(def row) {
         return [tenantQueryId: row.userScriptId, queryName: row.scriptName, description: row.description, readSpecJson: row.readSpecJson,
                 scriptBody: row.scriptBody, isActive: row.isActive, ownerUserId: row.ownerUserId, readText: readText(row.readSpecJson as String),
                 lastUpdatedStamp: row.lastUpdatedStamp]
@@ -42,14 +42,14 @@ class TenantQuerySupport {
     }
 
     /** The tenant's query row, or null (another tenant's reads as not found). */
-    static def ownQuery(def ec, String tenantId, String tenantQueryId) {
+    private static def ownQuery(def ec, String tenantId, String tenantQueryId) {
         if (!tenantQueryId) return null
         def row = unscoped(ec, "jexl.script.UserScript").condition("userScriptId", tenantQueryId).useCache(false).one()
         return row?.companyUserGroupId == tenantId ? row : null
     }
 
     /** A query a schedule runs sends what it computes to the schedule's addresses: changing or deleting it needs tenant admin. */
-    static boolean scheduledNeedsAdmin(def ec, String tenantId, String tenantQueryId) {
+    private static boolean scheduledNeedsAdmin(def ec, String tenantId, String tenantQueryId) {
         if (!tenantQueryId) return false
         boolean scheduled = unscoped(ec, "jexl.script.UserScriptDeployment").condition("userScriptId", tenantQueryId)
                 .condition("companyUserGroupId", tenantId).useCache(false).count() > 0
@@ -110,13 +110,13 @@ class TenantQuerySupport {
 
     // ---- schedules
 
-    static def ownSchedule(def ec, String tenantId, String scheduleId) {
+    private static def ownSchedule(def ec, String tenantId, String scheduleId) {
         if (!scheduleId) return null
         def row = unscoped(ec, "jexl.script.UserScriptDeployment").condition("scriptDeploymentId", scheduleId).useCache(false).one()
         return row?.companyUserGroupId == tenantId ? row : null
     }
 
-    static Map toScheduleMap(def ec, def row) {
+    private static Map toScheduleMap(def ec, def row) {
         List deliveries = unscoped(ec, "jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", row.scriptDeploymentId)
                 .orderBy("deliverySeqId").useCache(false).list()
         Map email = null, chat = null

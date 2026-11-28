@@ -24,7 +24,7 @@ class OrderLookup {
                 capped: search.capped, cappedReason: search.cappedReason]
     }
 
-    static List<Map> openFindings(def ec, String tenantId, Collection<String> ids) {
+    private static List<Map> openFindings(def ec, String tenantId, Collection<String> ids) {
         if (!ids) return []
         def ecf = ec.entity.conditionFactory
         List<String> keys = new ArrayList<String>(ids).take(60)

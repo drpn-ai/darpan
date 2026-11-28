@@ -184,11 +184,11 @@ class IdIndexer {
     }
 
     /** The JVM's embedded Spark session (getOrCreate returns the one runs already started; never stopped). */
-    static SparkSession sharedSpark() {
+    private static SparkSession sharedSpark() {
         return SparkSession.builder().appName("darpan").master("local[*]").config("spark.ui.enabled", "false").getOrCreate()
     }
 
-    static String jsonPath(String fieldPath) { return '$.' + fieldPath }
+    private static String jsonPath(String fieldPath) { return '$.' + fieldPath }
 
     /**
      * get_json_object's answer as a list of scalar texts: a JSON array (flattened), or one scalar; objects are dropped. A

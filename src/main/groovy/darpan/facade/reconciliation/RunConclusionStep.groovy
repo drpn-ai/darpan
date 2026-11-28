@@ -102,6 +102,9 @@ class RunConclusionStep {
                     brain      : brain,
                     // DAR-BE-198 (b): the run says its Unexplained rows are expected (gorjana R6).
                     unexplainedExpected: normalize(scope?.unexplainedOutcome) == RunConclusionSupport.OUTCOME_EXPECTED,
+                    // DAR-OPS-029 S03a (lens E3): WITHIN_HOURS reads the run's own time, the brain's read time: the document's
+                    // timestamp, or a replay's run folder time; null (unreadable) reads the clock once for the pass.
+                    asOf       : documentLabels.readAtMillis,
                     lookups    : lookups,
                     fetchLookup: { Map lookup, List<String> ids ->
                         lookupFetcher.call(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)

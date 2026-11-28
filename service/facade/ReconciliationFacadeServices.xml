@@ -1599,10 +1599,20 @@
             </if>
 
             <if condition="!ec.message.hasError()">
-                <service-call name="facade.ReconciliationFacadeServices.list#GeneratedOutputs"
-                        in-map="[savedRunId: savedRunIdValue, pageIndex: 0, pageSize: 200]"
-                        out-map="generatedOutputList"/>
-                <set field="generatedOutputsToDelete" from="generatedOutputList.generatedOutputs ?: []"/>
+                <!-- Every page, collected before any file goes (a delete would shift the pages): list#GeneratedOutputs
+                     returns at most 200 rows, and every run row of this run is deleted below, so an output left on a later
+                     page would stay on disk with nothing that lists it. -->
+                <set field="generatedOutputsToDelete" from="[]"/>
+                <set field="outputPageIndex" from="0"/>
+                <set field="outputPageCount" from="1"/>
+                <while condition="outputPageIndex &lt; outputPageCount">
+                    <service-call name="facade.ReconciliationFacadeServices.list#GeneratedOutputs"
+                            in-map="[savedRunId: savedRunIdValue, pageIndex: outputPageIndex, pageSize: 200]"
+                            out-map="generatedOutputList"/>
+                    <set field="ignoreOutputsAdd" from="generatedOutputsToDelete.addAll(generatedOutputList.generatedOutputs ?: [])"/>
+                    <set field="outputPageCount" from="(generatedOutputList.pagination?.pageCount ?: 1) as int"/>
+                    <set field="outputPageIndex" from="outputPageIndex + 1"/>
+                </while>
                 <iterate list="generatedOutputsToDelete" entry="generatedOutput">
                     <if condition="generatedOutput.fileName">
                         <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"

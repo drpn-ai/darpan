@@ -56,6 +56,49 @@ class TenantFacadeAdversarialTests {
                 [reconciliationRunResultId: "ADV_RR_B"]).isEmpty(), "a subscription row was written on tenant B's run")
     }
 
+    // ---- cancel a run: the app offers Cancel only with run access (DAR-OPS-029 S26b, OC75) ----------
+
+    /** A member of tenant A with {@code role}, signed in and active in A. */
+    private void actAsMemberOfA(String userId, String username, String role) {
+        h.insert("moqui.security.UserAccount", [userId: userId, username: username, userFullName: username,
+                currentPassword: "", disabled: "N", emailAddress: "${username}@example.invalid".toString()])
+        h.insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: userId, fromDate: TenantAttackHarness.FROM_DATE])
+        h.insert("moqui.security.UserGroupMember", [userGroupId: A, userId: userId, fromDate: TenantAttackHarness.FROM_DATE])
+        h.insert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: A, userId: userId,
+                permissionUserGroupId: role, fromDate: TenantAttackHarness.FROM_DATE])
+        h.actAs(username, A)
+    }
+
+    private void seedRunningRunOfA(String runId) {
+        h.withoutReferentialIntegrity {
+            h.insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: runId, companyUserGroupId: A,
+                    statusEnumId: "AUT_STAT_RUNNING"])
+        }
+    }
+
+    /** A viewer can see tenant A's run but has no run access: the app shows no Cancel, so neither may the server (CLI, curl). */
+    @Test
+    void viewerCannotCancelOwnTenantsRun() {
+        seedRunningRunOfA("ADV_RR_A_VIEWER")
+        actAsMemberOfA("ADV_A_VIEWER", "adv.aviewer", TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID)
+        Map out = h.call("facade.ReconciliationFacadeServices.cancel#ReconciliationRun", [reconciliationRunResultId: "ADV_RR_A_VIEWER"])
+        assertNotEquals(true, out.cancelRequested, "a viewer cancelled tenant A's run: ${out}")
+        def row = h.raw("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "ADV_RR_A_VIEWER"])
+        assertEquals(null, row.cancelRequestedDate, "a viewer's cancel was recorded on the run: ${out}")
+        assertEquals("AUT_STAT_RUNNING", row.statusEnumId)
+    }
+
+    /** Run access (tenant user, editor, tenant admin) still cancels, as the app's Cancel does. */
+    @Test
+    void tenantUserCanCancelOwnTenantsRun() {
+        seedRunningRunOfA("ADV_RR_A_RUNNER")
+        actAsMemberOfA("ADV_A_RUNNER", "adv.arunner", TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)
+        Map out = h.call("facade.ReconciliationFacadeServices.cancel#ReconciliationRun", [reconciliationRunResultId: "ADV_RR_A_RUNNER"])
+        assertEquals(true, out.cancelRequested, "a tenant user could not cancel tenant A's run: ${out}")
+        assertTrue(h.raw("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "ADV_RR_A_RUNNER"])
+                .cancelRequestedDate != null)
+    }
+
     // ---- chat space -------------------------------------------------------------------------
 
     @Test

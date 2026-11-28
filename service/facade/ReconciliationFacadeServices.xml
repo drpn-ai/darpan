@@ -4168,6 +4168,12 @@
             <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, runRow)">
                 <message error="true">Reconciliation run '${runIdValue}' was not found.</message>
             </if>
+            <!-- DAR-OPS-029 OC75: seeing a run is not stopping it. Only a member who may start a run in this tenant may stop
+                 one (as run#SavedRunDiff, DAR-BE-292); a read-only member, CLI key included, is refused. Checked after the
+                 record gate, so a foreign or missing run still answers "not found" first. -->
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for reconciliation runs.')"/>
+            </if>
             <if condition="!ec.message.hasError()">
                 <set field="statusEnumId" from="runRow.statusEnumId"/>
                 <if condition="darpan.facade.reconciliation.RunObservability.isTerminalStatus(((statusEnumId)?.toString()?.trim()))">

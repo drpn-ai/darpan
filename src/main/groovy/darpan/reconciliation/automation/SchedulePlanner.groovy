@@ -54,6 +54,7 @@ class SchedulePlanner {
     private static Timestamp seedFireTime(Map automation, Timestamp from) {
         Timestamp stored = automation.get("nextScheduledFireTime") as Timestamp
         if (stored != null && !stored.before(from)) return stored
-        return AutomationExecutionSupport.resolveNextScheduledFireTime(automation, stored, from)
+        // the resolver answers strictly after its base: start a millisecond early so a fire exactly at `from` is kept
+        return AutomationExecutionSupport.resolveNextScheduledFireTime(automation, stored, new Timestamp(from.time - 1))
     }
 }

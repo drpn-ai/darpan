@@ -71,6 +71,14 @@ class SchedulePlannerTests {
                       ts("2026-11-02T14:00:00Z")], fires)
     }
 
+    /** DAR-OPS-029 S07a QA: with the stored fire before the window, a fire exactly at its start was dropped. */
+    @Test
+    void aFireExactlyAtTheWindowStartIsProjected() {
+        Map automation = [scheduleExpr: "0 0 2 * * ?", windowTimeZone: "UTC", nextScheduledFireTime: ts("2026-08-31T02:00:00Z")]
+        assertEquals([ts("2026-09-01T02:00:00Z"), ts("2026-09-02T02:00:00Z")], SchedulePlanner.projectFireTimes(automation,
+                ts("2026-09-01T02:00:00Z"), ts("2026-09-02T12:00:00Z"), 50))
+    }
+
     @Test
     void projectsNothingForAnAutomationWithNoScheduleExpression() {
         Map automation = [scheduleExpr: null, windowTimeZone: "UTC", nextScheduledFireTime: null]

@@ -3,6 +3,8 @@ package darpan.reconciliation.automation
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
+import java.sql.Timestamp
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -82,5 +84,43 @@ class ExtractReplaySupportTests {
         Map picked = ExtractReplaySupport.pickFromRunFolder(runDir, RUN, false)
 
         assertEquals("acme-orders.json", picked.files.FILE_1.fileName, picked.error as String)
+    }
+
+    /** DAR-OPS-029 S07a QA: the runner stamps a relative path; a replay opened it as a Moqui location and never found it. */
+    @Test
+    void aStampedPathResolvesUnderTheDataManagerWhetherRelativeOrALocation() {
+        String dm = "runtime://datamanager"
+        String rel = "reconciliation-runs/101793/20261027-152223914/oms.json"
+        write("reconciliation-runs/101793/20261027-152223914", "oms.json")
+
+        Map relative = ExtractReplaySupport.resolveStamped(rel, dm, runDir)
+        assertEquals(rel, relative.dataManagerPath)
+        assertEquals("${dm}/${rel}".toString(), relative.fileLocation)
+        assertTrue((relative.file as File).isFile())
+        assertEquals(rel, ExtractReplaySupport.resolveStamped("${dm}/${rel}".toString(), dm, runDir).dataManagerPath)
+
+        assertNull(ExtractReplaySupport.resolveStamped("../outside.json", dm, runDir))
+        assertNull(ExtractReplaySupport.resolveStamped("runtime://elsewhere/x.json", dm, runDir))
+        assertNull(ExtractReplaySupport.resolveStamped("/etc/passwd", dm, runDir))
+        assertNull(ExtractReplaySupport.resolveStamped(" ", dm, runDir))
+    }
+
+    @Test
+    void aSideReadTwiceCountsItsLatestReadWhateverOrderTheRowsCameIn() {
+        // DAR-OPS-029 S07a: beginStep mints a step per attempt, and the read had no order, so the count was the last row returned.
+        Timestamp early = Timestamp.valueOf("2026-10-27 15:00:00"), late = Timestamp.valueOf("2026-10-27 15:40:00")
+        List<Map> steps = [
+                [reconciliationRunStepId: "100002", stageCode: "EXTRACT_FILE1", startedDate: late, recordCount: 412],
+                [reconciliationRunStepId: "100001", stageCode: "EXTRACT_FILE1", startedDate: early, recordCount: 9],
+                [reconciliationRunStepId: "100003", stageCode: "EXTRACT_FILE2", startedDate: early, recordCount: 380],
+                [reconciliationRunStepId: "100004", stageCode: "COMPARE", startedDate: late, recordCount: 1],
+        ]
+        assertEquals([FILE_1: 412, FILE_2: 380], ExtractReplaySupport.countsBySide(steps))
+        assertEquals([FILE_1: 412, FILE_2: 380], ExtractReplaySupport.countsBySide(steps.reverse()))
+        // the same start time: the later sequenced id, "100000" after "99999"
+        assertEquals([FILE_1: 7], ExtractReplaySupport.countsBySide([
+                [reconciliationRunStepId: "100000", stageCode: "EXTRACT_FILE1", startedDate: early, recordCount: 7],
+                [reconciliationRunStepId: "99999", stageCode: "EXTRACT_FILE1", startedDate: early, recordCount: 3]]))
+        assertEquals([:], ExtractReplaySupport.countsBySide([]))
     }
 }

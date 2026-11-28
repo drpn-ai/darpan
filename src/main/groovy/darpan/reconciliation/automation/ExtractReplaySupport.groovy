@@ -64,11 +64,17 @@ class ExtractReplaySupport {
             if (picked.error) throw new IllegalStateException("Execution ${executionId}: ${picked.error}")
             files = picked.files as Map<String, Map<String, Object>>
         }
+        String dataManagerLocation = DataManagerSupport.resolveDataManagerLocation(ec)
+        File root = DataManagerSupport.resolveDirectoryFile(ec, dataManagerLocation, false)
         files.each { String side, Map<String, Object> file ->
-            File onDisk = DataManagerSupport.resolveDirectoryFile(ec, file.fileLocation as String, false)
+            Map<String, Object> landed = resolveStamped(file.fileLocation as String, dataManagerLocation, root)
+            File onDisk = landed?.file as File
             if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) {
                 throw new IllegalStateException("Execution ${executionId}: the ${side} extract ${file.fileName} is no longer on disk.")
             }
+            // a location the compare can open, whichever shape was stamped (DAR-OPS-029 S07a)
+            file.fileLocation = landed.fileLocation
+            file.dataManagerPath = landed.dataManagerPath
             file.recordCount = counts[side]
             file.dataAvailable = true
             file.replayedFromExecutionId = executionId
@@ -87,11 +93,8 @@ class ExtractReplaySupport {
         Map<String, Map<String, Object>> landed = [:]
         [(SIDE_1): "file1", (SIDE_2): "file2"].each { String side, String field ->
             if (!counts.containsKey(side)) return
-            String path = normalize(readField(runRow, "${field}DataManagerPath"))
-            File onDisk = path ? DataManagerSupport.resolveDataManagerFile(ec, path) : null
-            if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) return
-            landed[side] = [dataManagerPath: path, fileName: normalize(readField(runRow, "${field}Name")) ?: onDisk.name,
-                            recordCount    : counts[side]] as Map<String, Object>
+            Map<String, Object> file = landedFile(ec, runRow, "${field}DataManagerPath", "${field}Name")
+            if (file != null) landed[side] = [dataManagerPath: file.dataManagerPath, fileName: file.fileName, recordCount: counts[side]] as Map<String, Object>
         }
         return landed
     }
@@ -111,10 +114,8 @@ class ExtractReplaySupport {
         Map<String, Map<String, Object>> landed = [:]
         [(SIDE_1): ["file1DataManagerPath", "file1Name"], (SIDE_2): ["file2DataManagerPath", "file2Name"],
          (RESULT): ["resultDataManagerPath", "resultFileName"]].each { String part, List<String> fields ->
-            String path = normalize(readField(execution, fields[0]))
-            File onDisk = path ? DataManagerSupport.resolveDataManagerFile(ec, path) : null
-            if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) return
-            landed[part] = [dataManagerPath: path, fileName: normalize(readField(execution, fields[1])) ?: onDisk.name, file: onDisk] as Map<String, Object>
+            Map<String, Object> file = landedFile(ec, execution, fields[0], fields[1])
+            if (file != null) landed[part] = file
         }
         return landed
     }
@@ -155,14 +156,58 @@ class ExtractReplaySupport {
         return files
     }
 
+    /**
+     * A row's landed file: [dataManagerPath, fileName, file], or null when the path is blank, outside the data manager root,
+     * gone or empty. The path is data-manager relative and resolved under its root only.
+     */
+    private static Map<String, Object> landedFile(def ec, def row, String pathField, String nameField) {
+        String dataManagerLocation = DataManagerSupport.resolveDataManagerLocation(ec)
+        Map<String, Object> landed = resolveStamped(normalize(readField(row, pathField)), dataManagerLocation,
+                DataManagerSupport.resolveDirectoryFile(ec, dataManagerLocation, false))
+        File onDisk = landed?.file as File
+        if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) return null
+        return [dataManagerPath: landed.dataManagerPath, fileName: normalize(readField(row, nameField)) ?: onDisk.name, file: onDisk] as Map<String, Object>
+    }
+
+    /**
+     * Pure (DAR-OPS-029 S07a): a stamped path, data-manager relative ("reconciliation-runs/...", what the runner stamps) or a
+     * location under the data manager ("runtime://datamanager/reconciliation-runs/..."), as [dataManagerPath, fileLocation,
+     * file]; null when blank or anywhere outside the data manager root. Every reader here goes through it: replayResults used to
+     * open a relative stamp as a Moqui location (under the runtime, not the data manager), so a stamped replay never found it.
+     */
+    static Map<String, Object> resolveStamped(String stamped, String dataManagerLocation, File root) {
+        String path = normalize(stamped)
+        String location = normalize(dataManagerLocation)
+        if (!path || root == null) return null
+        if (location && path.startsWith(location + "/")) path = path.substring(location.length() + 1)
+        String relative = DataManagerSupport.normalizeRelativePath(path)
+        if (!relative) return null
+        File file = new File(root, relative)
+        if (!file.canonicalPath.startsWith(root.canonicalPath + File.separator)) return null
+        return [dataManagerPath: relative, fileLocation: DataManagerSupport.childLocation(location, relative), file: file] as Map<String, Object>
+    }
+
     /** Record counts of the read steps that finished; a side missing here was not read in full. */
     private static Map<String, Integer> readCounts(def ec, String tenantId, String runResultId) {
         if (!runResultId) return [:]
-        Map<String, String> sideOfStage = [(RunObservability.STAGE_EXTRACT_FILE1): SIDE_1, (RunObservability.STAGE_EXTRACT_FILE2): SIDE_2]
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationRunStep", WHY)
+        return countsBySide(TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationRunStep", WHY)
                 .condition("companyUserGroupId", tenantId).condition("reconciliationRunResultId", runResultId)
-                .condition("statusEnumId", RunObservability.STATUS_SUCCESS).useCache(false).list()*.getMap()   // EntityList.findAll casts to Boolean
+                .condition("statusEnumId", RunObservability.STATUS_SUCCESS).useCache(false).list()*.getMap())  // EntityList.findAll casts to Boolean
+    }
+
+    /**
+     * Pure (DAR-OPS-029 S07a): each side's record count from its finished read steps. A side read twice in one run (beginStep
+     * mints a row per attempt) takes its LATEST step, by startedDate then step id, never whichever row the database returned last.
+     */
+    static Map<String, Integer> countsBySide(List<Map> finishedSteps) {
+        Map<String, String> sideOfStage = [(RunObservability.STAGE_EXTRACT_FILE1): SIDE_1, (RunObservability.STAGE_EXTRACT_FILE2): SIDE_2]
+        return (finishedSteps ?: [])
                 .findAll { sideOfStage[readField(it, "stageCode") as String] != null }
+                .sort { Map a, Map b ->
+                    String aId = a.reconciliationRunStepId as String, bId = b.reconciliationRunStepId as String
+                    // sequenced ids: a shorter id is an older one ("99999" before "100000")
+                    (a.startedDate as Comparable) <=> (b.startedDate as Comparable) ?: aId?.length() <=> bId?.length() ?: aId <=> bId
+                }
                 .collectEntries { [(sideOfStage[readField(it, "stageCode") as String]): readField(it, "recordCount") as Integer] }
     }
 }

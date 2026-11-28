@@ -72,8 +72,7 @@ class ConclusionTreeEngine implements Closeable {
             facts.each { Map fact -> session.insert(fact) }
             Map<String, Object> fired = RuleEngineSupport.fireAllRulesBounded(session, "conclusion-tree")
             if (fired.halted) {
-                throw new IllegalStateException("Conclusion evaluation exceeded ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms " +
-                        "and was halted; no conclusions were written")
+                throw new IllegalStateException("Conclusion evaluation ${RuleEngineSupport.incompleteReason(fired)}; no conclusions were written")
             }
         } finally {
             session.dispose()

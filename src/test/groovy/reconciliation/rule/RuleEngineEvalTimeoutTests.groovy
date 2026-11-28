@@ -49,6 +49,27 @@ class RuleEngineEvalTimeoutTests {
                 "halt fired before the budget elapsed: ${result.elapsedMillis}ms")
     }
 
+    /** DAR-OPS-029 S99-011: a session stopped by the fire cap may hold unfired activations, so it is incomplete too. */
+    @Test
+    void reachingTheFireCapIsReportedAsIncomplete() {
+        KieSession capped = [
+                fireAllRules: { int max -> max },
+                halt        : { -> throw new IllegalStateException("the watchdog must not fire for a capped session") },
+        ] as KieSession
+
+        Map<String, Object> result = RuleEngineSupport.fireAllRulesBounded(capped, "RS_CAP")
+        assertTrue((boolean) result.capped, "fired == MAX_RULE_FIRES must read as capped")
+        assertTrue((boolean) result.halted, "a capped session is incomplete, never a clean result")
+        assertTrue(RuleEngineSupport.incompleteReason(result).contains("fire cap"))
+    }
+
+    @Test
+    void incompleteReasonNamesTheCause() {
+        assertEquals(null, RuleEngineSupport.incompleteReason([fired: 7, halted: false, capped: false]))
+        assertTrue(RuleEngineSupport.incompleteReason([fired: 3, halted: true, capped: false]).contains("ms"))
+        assertTrue(RuleEngineSupport.incompleteReason([fired: 3, halted: true, capped: true]).contains("fire cap"))
+    }
+
     @Test
     void defaultBudgetIsSaneAndOverridable() {
         assertTrue(RuleEngineSupport.MAX_RULE_EVAL_MILLIS >= 10_000L,

@@ -81,8 +81,8 @@ class RuleEngineSupport {
     }
 
     /**
-     * fireAllRules with a wall-clock budget. Returns [fired, halted, elapsedMillis]; when
-     * {@code halted} is true the evaluation was cut off mid-run and results are incomplete —
+     * fireAllRules with a wall-clock budget and the fire cap. Returns [fired, halted, capped, elapsedMillis]; when
+     * {@code halted} is true the evaluation was cut off mid-run (watchdog, or {@code capped}: the fire cap) and results are incomplete —
      * callers must surface an error, never partial output.
      * Also the conclusion engine's budget (DAR-BE-063): one watchdog for every Drools session.
      */
@@ -101,10 +101,21 @@ class RuleEngineSupport {
         long started = System.currentTimeMillis()
         try {
             int fired = session.fireAllRules(MAX_RULE_FIRES)
-            return [fired: fired, halted: halted.get(), elapsedMillis: System.currentTimeMillis() - started]
+            // DAR-OPS-029 S99-011: fireAllRules stops at the cap with activations possibly unfired, so a capped session is
+            // incomplete like a halted one (it used to return quietly and its partial facts read as a clean evaluation).
+            boolean capped = fired >= MAX_RULE_FIRES
+            if (capped) logger.error("Rule evaluation for ruleSet={} reached the {}-fire cap; results are incomplete", ruleSetId, MAX_RULE_FIRES)
+            return [fired: fired, halted: halted.get() || capped, capped: capped, elapsedMillis: System.currentTimeMillis() - started]
         } finally {
             watchdog.cancel(false)
         }
+    }
+
+    /** Why a bounded fire is incomplete, or null when it ran to the end. */
+    static String incompleteReason(Map<String, Object> fired) {
+        if (fired?.capped) return "reached the ${MAX_RULE_FIRES}-fire cap, so some rows may not have run".toString()
+        if (fired?.halted) return "exceeded ${MAX_RULE_EVAL_MILLIS}ms and was halted".toString()
+        return null
     }
 
     // MACH P0 #5 — the compile path fails CLOSED on tenant-authored rule logic (see compileGateViolation). Set for an
@@ -289,7 +300,7 @@ class RuleEngineSupport {
         Map compiled = getOrBuildContainer(ec, ruleSetId, true, false)
         List<Map> facts = toFacts(rows)
         Map<String, Object> fireResult = fireFactsInNewSession(compiled.container as KieContainer, ruleSetId, facts)
-        if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
+        if (fireResult.halted) return [error: "Rule evaluation for ruleSet ${ruleSetId} ${incompleteReason(fireResult)}; results discarded as incomplete.".toString()]
         return [compiled: compiled, facts: facts, fired: fireResult.fired, matchedResults: fireResult.matchedResults]
     }
 
@@ -341,14 +352,10 @@ class RuleEngineSupport {
             session.setGlobal("results", matchedResults)
             facts.each { Map fact -> session.insert(fact) }
             Map<String, Object> fireResult = fireAllRulesBounded(session, ruleSetId)
-            return [halted: fireResult.halted, fired: fireResult.fired, matchedResults: matchedResults]
+            return [halted: fireResult.halted, capped: fireResult.capped, fired: fireResult.fired, matchedResults: matchedResults]
         } finally {
             disposeQuietly(session)
         }
-    }
-
-    private static String haltedEvaluationError(String ruleSetId) {
-        return "Rule evaluation for ruleSet ${ruleSetId} exceeded ${MAX_RULE_EVAL_MILLIS}ms and was halted; results discarded as incomplete.".toString()
     }
 
     private static Map<String, Object> getOrBuildContainer(def ec, String ruleSetId, boolean useCache = true, boolean forceRebuild = false) {

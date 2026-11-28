@@ -103,11 +103,11 @@ class DeriveEngine implements Closeable {
      * fail, so nothing is written (OC173: the cap used to return quietly and leave the later records underived).
      */
     static void requireComplete(Map<String, Object> fired) {
-        if (fired.halted) {
-            throw new IllegalStateException("Derive rules ran past ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms and were halted; no records were written")
-        }
         if ((fired.fired as int) >= RuleEngineSupport.MAX_RULE_FIRES) {
             throw new IllegalStateException("Derive rules reached the ${RuleEngineSupport.MAX_RULE_FIRES}-fire cap, so some rows may not have run; no records were written")
+        }
+        if (fired.halted) {
+            throw new IllegalStateException("Derive rules ran past ${RuleEngineSupport.MAX_RULE_EVAL_MILLIS}ms and were halted; no records were written")
         }
     }
 

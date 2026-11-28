@@ -1251,15 +1251,11 @@ class AutomationExecutionSupport {
                 runOwnerUserGroupId: normalize(readField(automation, "companyUserGroupId")),
                 // Routed through the single audited dispatch seam rather than opening its own
                 // disableAuthz site (DisableAuthzRatchetTest pins the count exactly).
-                dispatcher         : { String serviceName, Map serviceParams ->
-                    return dispatchInternalService(ec, serviceName,
-                            (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
-                },
+                dispatcher         : internalDispatcher(ec),
                 // The SAME defaults the extractor resolved for this execution. An API source keeps no
                 // config id of its own (see RunVerificationSupport.resolveSourceConfigId), so without
                 // these the lookup resolves nothing on exactly the OMS/Shopify runs it exists for.
-                runConfigDefaults  : executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
-                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null,
+                runConfigDefaults  : runConfigDefaultsOf(executionParams),
         ])
     }
 
@@ -1290,13 +1286,8 @@ class AutomationExecutionSupport {
         String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
         // The RUN OWNER's tenant, never the session's — the scheduler authenticates as anonymous _NA_.
         String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
-        Closure dispatcher = { String serviceName, Map serviceParams ->
-            return dispatchInternalService(ec, serviceName,
-                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
-        }
-        Map<String, Object> runConfigDefaults =
-                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
-                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
+        Closure dispatcher = internalDispatcher(ec)
+        Map<String, Object> runConfigDefaults = runConfigDefaultsOf(executionParams)
 
         Map prepared
         try {
@@ -1308,7 +1299,7 @@ class AutomationExecutionSupport {
                                           [source: file2Source, extractResult: file2Result, label: file2Label]],
                     file1Label         : file1Label,
                     file2Label         : file2Label,
-                    windowStartMillis  : readWindowStartMillis(window),
+                    windowStartMillis  : windowEdgeMillis(window, "Start"),
                     runOwnerUserGroupId: runOwnerUserGroupId,
                     dispatcher         : dispatcher,
                     runConfigDefaults  : runConfigDefaults,
@@ -1372,13 +1363,8 @@ class AutomationExecutionSupport {
         String file1Label = normalize(reconcileResult?.file1Label) ?: "file1"
         String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
         String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
-        Closure dispatcher = { String serviceName, Map serviceParams ->
-            return dispatchInternalService(ec, serviceName,
-                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
-        }
-        Map<String, Object> runConfigDefaults =
-                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
-                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
+        Closure dispatcher = internalDispatcher(ec)
+        Map<String, Object> runConfigDefaults = runConfigDefaultsOf(executionParams)
 
         Map prepared
         try {
@@ -1389,8 +1375,8 @@ class AutomationExecutionSupport {
                                            fileSide: FILE_SIDE_1],
                                           [source: file2Source, extractResult: file2Result, label: file2Label,
                                            fileSide: FILE_SIDE_2]],
-                    windowStartMillis  : readWindowStartMillis(window),
-                    windowEndMillis    : readWindowEndMillis(window),
+                    windowStartMillis  : windowEdgeMillis(window, "Start"),
+                    windowEndMillis    : windowEdgeMillis(window, "End"),
                     runOwnerUserGroupId: runOwnerUserGroupId,
                     dispatcher         : dispatcher,
                     runConfigDefaults  : runConfigDefaults,
@@ -1474,23 +1460,29 @@ class AutomationExecutionSupport {
         }
     }
 
-    /** The run's reporting-window end as epoch millis; null means this run has no window. */
-    protected static Long readWindowEndMillis(Map<String, Object> window) {
-        Object end = window?.get("childWindowEndDate") ?: window?.get("windowEndDate")
-        if (end instanceof java.util.Date) return ((java.util.Date) end).time
-        if (end instanceof Number) return ((Number) end).longValue()
+    /**
+     * The run's reporting-window start or end ("Start"/"End") as epoch millis: the child window's, else the whole window's. Null
+     * means this run has no window, which degrades the passes to grace-only behaviour, as for a saved run with no window.
+     */
+    protected static Long windowEdgeMillis(Map<String, Object> window, String edge) {
+        Object at = window?.get("childWindow${edge}Date".toString()) ?: window?.get("window${edge}Date".toString())
+        if (at instanceof java.util.Date) return ((java.util.Date) at).time
+        if (at instanceof Number) return ((Number) at).longValue()
         return null
     }
 
-    /**
-     * The run's reporting-window start as epoch millis, for the window-start gate. Null degrades the
-     * pass to grace-only behaviour, exactly as it does for a saved run with no window.
-     */
-    protected static Long readWindowStartMillis(Map<String, Object> window) {
-        Object start = window?.get("childWindowStartDate") ?: window?.get("windowStartDate")
-        if (start instanceof java.util.Date) return ((java.util.Date) start).time
-        if (start instanceof Number) return ((Number) start).longValue()
-        return null
+    /** The single audited dispatch seam as the verification passes call it: null parameters dropped. */
+    private static Closure internalDispatcher(def ec) {
+        return { String serviceName, Map serviceParams ->
+            return dispatchInternalService(ec, serviceName,
+                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
+        }
+    }
+
+    /** The config defaults the extractor resolved for this execution, which an API source's lookups need (no id of its own). */
+    private static Map<String, Object> runConfigDefaultsOf(Map executionParams) {
+        return executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
+                (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
     }
 
     /**
@@ -1508,7 +1500,10 @@ class AutomationExecutionSupport {
                     file1Result: file1Result, file2Result: file2Result, runResultId: runResultId, stepCtx: stepCtx])
             // DAR-BE-157: rows a HIDE rule dropped are not differences this run reports.
             darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(reconcileResult, (Map) concluded?.hiddenByBucket, "differenceCount", (Collection) concluded?.repeatSidesCleared)
-        } catch (Throwable ignored) {
+        } catch (Throwable concludeError) {
+            // DAR-OPS-029 F-C3: a conclusion never fails a run whose compare succeeded, but its failure is logged, not swallowed
+            logger.warn("Conclusions skipped for automation {} run {}: {}", readField(automation, "automationId"), runResultId,
+                    sanitizeErrorMessage(concludeError))
             if (ec?.message?.hasError()) ec.message.clearErrors()
         }
     }

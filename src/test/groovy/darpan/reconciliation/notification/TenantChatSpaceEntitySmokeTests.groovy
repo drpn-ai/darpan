@@ -10,7 +10,9 @@ import org.moqui.context.ExecutionContext
 import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertTrue
 import darpan.reconciliation.support.SharedMoqui
 
 @SharedMoqui
@@ -64,5 +66,20 @@ class TenantChatSpaceEntitySmokeTests {
                              chatSpaceId: created.chatSpaceId, subscribedDate: ec.user.nowTimestamp]).call()
         assertNotNull(ec.entity.find("darpan.reconciliation.ReconciliationRunNotifySubscription")
                 .condition([reconciliationRunResultId: "RUNRES_1", userId: "USER_A"]).one())
+    }
+
+    /**
+     * DAR-OPS-029 (S29 F6, fork): Moqui prints an entity value in "Error creating/updating <value>" WARN lines. toString masked
+     * only encrypt="true" fields, so a clear-stored webhook URL (anyone holding it posts into the client's room) reached the
+     * raw log. A field whose name names a secret, token, webhook or headers value now prints ***.
+     */
+    @Test
+    void anEntityValuePrintsWithoutItsSecretBearingFields() {
+        def value = ec.entity.makeValue("darpan.reconciliation.TenantChatSpace")
+                .setAll([chatSpaceId: "CS_MASK", spaceName: "Ops room",
+                         webhookUrl: "https://chat.googleapis.com/v1/spaces/AAA111/messages?key=k-secret&token=t-secret"])
+        String text = value.toString()
+        assertFalse(text.contains("t-secret") || text.contains("k-secret"), text)
+        assertTrue(text.contains("Ops room") && text.contains("CS_MASK"), "other fields still print: " + text)
     }
 }

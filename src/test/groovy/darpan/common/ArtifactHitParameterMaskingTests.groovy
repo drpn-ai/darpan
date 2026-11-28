@@ -5,6 +5,7 @@ import org.moqui.impl.context.ContextJavaUtil
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-OPS-029 OC149 (Aditi 2026-11-28): an ArtifactHit row stores its call's parameters as text. The framework fork
@@ -49,5 +50,15 @@ class ArtifactHitParameterMaskingTests {
                 ContextJavaUtil.hitParameterString([note: long90, n: 7, empty: "", nothing: null, list: [1, 2], map: [a: 1]]))
         assertEquals(1000, ContextJavaUtil.hitParameterString((1..40).collectEntries { ["field${it}".toString(), "y" * 80] }).length())
         assertEquals("", ContextJavaUtil.hitParameterString(null))
+    }
+
+    /** DAR-OPS-029 (S29 F6): the entity-field rule EntityValueBase.toString uses: secret-bearing names, not every id or code. */
+    @Test
+    void sensitiveFieldNamesForEntityPrinting() {
+        ["webhookUrl", "googleChatWebhookUrl", "headersJson", "currentPassword", "clientSecret", "accessToken", "apiKey",
+         "privateKeyPem", "recoveryCode", "credentialsJson"].each { assertTrue(ContextJavaUtil.isSensitiveFieldName(it), it) }
+        ["statusId", "chatSpaceId", "spaceName", "currencyUomId", "recordKey", "conclusionCode", "baseUrl"].each {
+            assertFalse(ContextJavaUtil.isSensitiveFieldName(it), it)
+        }
     }
 }

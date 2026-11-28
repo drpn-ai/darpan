@@ -174,6 +174,47 @@ class GenericReconciliationServiceSmokeTests {
         assertNotNull(updatedManifest.completedDate)
     }
 
+    /**
+     * DAR-OPS-029 S99-046: the one run-result writer both run paths call (runSavedRunDiff, reconcileGenericFiles). A row it makes
+     * with no status states RUNNING (S99-022); an update without a status keeps the row's; a foreign id fails closed, or, for
+     * the saved-run path (makeWhenMissing), makes a fresh row of the active tenant and leaves the foreign row untouched.
+     */
+    @Test
+    void theSharedRunResultWriterMakesRunningFailsClosedOnAForeignIdAndWritesAStatusOnlyWhenStated() {
+        String entity = "darpan.reconciliation.ReconciliationRunResult"
+        Closure row = { String id -> ec.entity.find(entity).condition("reconciliationRunResultId", id).disableAuthz().useCache(false).one() }
+        Closure clean = { -> ec.entity.find(entity).condition("resultDataManagerPath", "like", "s99-046/%").disableAuthz().deleteAll()
+            ec.entity.find(entity).condition("reconciliationRunResultId", "S99_046_FOREIGN").disableAuthz().deleteAll() }
+        clean()
+        try {
+            String tenant = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+            String made = darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec,
+                    [resultDataManagerPath: "s99-046/made.json", savedRunId: "DARPAN_TEST_PRODUCT_COMPARE_RS"])
+            assertEquals("AUT_STAT_RUNNING", row(made).statusEnumId, "a made row states RUNNING, never a default status")
+            assertEquals(tenant, row(made).companyUserGroupId)
+            darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec, [reconciliationRunResultId: made, differenceCount: 3])
+            assertEquals("AUT_STAT_RUNNING", row(made).statusEnumId, "an update without a status keeps the row's")
+            assertEquals(3, row(made).differenceCount as int)
+            darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec, [reconciliationRunResultId: made, statusEnumId: "AUT_STAT_SUCCESS"])
+            assertEquals("AUT_STAT_SUCCESS", row(made).statusEnumId, "a stated status is written")
+
+            ReconciliationSmokeTestSupport.insertEntityDirect(ec, "moqui.security.UserGroup", [userGroupId: "GORJANA_DENIAL_TEST",
+                    description: "Gorjana (denial test)", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+            ec.entity.makeValue(entity).setAll([reconciliationRunResultId: "S99_046_FOREIGN", companyUserGroupId: "GORJANA_DENIAL_TEST",
+                    statusEnumId: "AUT_STAT_RUNNING", createdDate: Timestamp.valueOf("2026-05-05 10:00:00")]).create()
+            assertEquals(null, darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec,
+                    [reconciliationRunResultId: "S99_046_FOREIGN", resultDataManagerPath: "s99-046/foreign.json"]), "a foreign id fails closed")
+            String fresh = darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec,
+                    [reconciliationRunResultId: "S99_046_FOREIGN", resultDataManagerPath: "s99-046/fresh.json"], true)
+            assertFalse(fresh == null || fresh == "S99_046_FOREIGN", "makeWhenMissing makes a fresh row: ${fresh}")
+            assertEquals(tenant, row(fresh).companyUserGroupId)
+            assertEquals(null, row("S99_046_FOREIGN").resultDataManagerPath, "the foreign row is never written")
+            assertEquals(null, darpan.facade.reconciliation.ReconciliationOutputSupport.persistRunResult(ec, [:]), "nothing to write")
+        } finally {
+            clean()
+        }
+    }
+
     @Test
     void persistRunResultDoesNotReadOrOverwriteForeignTenantRunResultId() {
         // Arrange: create a ReconciliationRunResult owned by a FOREIGN tenant (GORJANA)

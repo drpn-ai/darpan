@@ -73,70 +73,9 @@ def resolveRuleSet = { String ruleSetId ->
     return TenantScopedFinder.findTenantScopedByIdQuiet(
             ec, DarpanEntityConstants.RULE_SET, "ruleSetId", normalized)
 }
-def persistRunResult = { Map<String, Object> fields ->
-    String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
-    String existingRunResultId = normalize(fields.reconciliationRunResultId)
-    String statusEnumIdValue = normalize(fields.statusEnumId)
-    if (!resultPath && !existingRunResultId && !statusEnumIdValue) return null
-
-    return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
-        def runResultValue = null
-        if (existingRunResultId) {
-            // P0 #4 step 2 — gate ReconciliationRunResult by active tenant; fail closed on foreign/missing.
-            // Use the quiet variant so no ec.message error is added — the denial is expected and
-            // handled here (create-fresh fallback), and we must not pollute the caller's error state.
-            runResultValue = TenantScopedFinder.findTenantScopedByIdQuiet(
-                    ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
-                    "reconciliationRunResultId", existingRunResultId)
-            if (runResultValue == null) {
-                // Foreign or missing — do NOT read or update. Fail closed. No clearErrors() needed.
-                logger.warn("[P0#4] persistRunResult: denied foreign/missing reconciliationRunResultId '{}' — fail closed, tracking reset", existingRunResultId)
-                return null
-            }
-        }
-        boolean creating = runResultValue == null
-        if (creating) {
-            runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-            if (existingRunResultId) runResultValue.reconciliationRunResultId = existingRunResultId
-        }
-
-        [
-                savedRunId             : normalize(fields.savedRunId),
-                savedRunType           : normalize(fields.savedRunType),
-                reconciliationRunId     : normalize(fields.reconciliationRunId),
-                reconciliationMappingId : normalize(fields.reconciliationMappingId),
-                ruleSetId              : normalize(fields.ruleSetId),
-                compareScopeId         : normalize(fields.compareScopeId),
-                companyUserGroupId     : normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                createdByUserId        : TenantAccessSupport.currentUserId(ec),
-                file1Name              : normalize(fields.file1Name),
-                file1DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath),
-                file2Name              : normalize(fields.file2Name),
-                file2DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath),
-                resultDataManagerPath  : resultPath,
-                statusEnumId           : statusEnumIdValue,
-                reconciliationType     : normalize(fields.reconciliationType),
-                differenceCount        : fields.differenceCount,
-                onlyInFile1Count       : fields.onlyInFile1Count,
-                onlyInFile2Count       : fields.onlyInFile2Count,
-                startedDate            : fields.startedDate,
-                completedDate          : fields.completedDate,
-        ].each { entry ->
-            if (entry.value != null) runResultValue.set(entry.key as String, entry.value)
-        }
-
-        if (creating) {
-            runResultValue.createdDate = fields.createdDate ?: ec.user.nowTimestamp
-            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
-            if (!existingRunResultId) runResultValue.setSequencedIdPrimary()
-            runResultValue.create()
-        } else {
-            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
-            runResultValue.update()
-        }
-        return runResultValue.reconciliationRunResultId
-    })
-}
+// DAR-OPS-029 S99-046: the run-result writer is ReconciliationOutputSupport's, shared with runSavedRunDiff; a foreign or
+// missing pre-created id fails closed (P0 #4), and every call here states its status.
+def persistRunResult = { Map<String, Object> fields -> ReconciliationOutputSupport.persistRunResult(ec, fields) }
 
 String providedFile1Name = normalize(file1Name)
 String providedFile2Name = normalize(file2Name)

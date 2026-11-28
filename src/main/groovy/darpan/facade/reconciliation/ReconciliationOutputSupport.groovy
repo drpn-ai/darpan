@@ -38,6 +38,68 @@ class ReconciliationOutputSupport {
     static final String STATUS_NO_DATA = "AUT_STAT_NO_DATA"
     static final String STATUS_SKIPPED_DUPLICATE = "AUT_STAT_SKIP_DUP"
     protected static final Set<String> ACTIVE_STATUSES = [STATUS_PENDING, STATUS_RUNNING] as Set
+
+    /**
+     * DAR-OPS-029 S99-046: write a run's result row: its artifact fields (names, paths, counts, dates) and a status only when
+     * the caller states one. runSavedRunDiff (which leaves status to RunObservability) and reconcileGenericFiles each kept
+     * this find-or-make and field map. An id is found owner-checked on the row (findOneOwnedByTenant: a tenant condition beside
+     * a full PK is dropped by one(), DAR-BE-077). A foreign or missing id fails closed (null; nothing read or written) unless
+     * {@code makeWhenMissing}, which makes a fresh row instead: the saved-run path, whose id is beginRun's, so a miss means
+     * that row's write failed. A made row is RUNNING unless the fields state a status (S99-022: never a default status).
+     * Null when there is nothing to write (no result path, id or status).
+     */
+    static String persistRunResult(def ec, Map<String, Object> fields, boolean makeWhenMissing = false) {
+        String resultPath = DataManagerSupport.normalizeRelativePath(fields?.resultDataManagerPath)
+        String existingRunResultId = normalize(fields?.reconciliationRunResultId)
+        String statusEnumIdValue = normalize(fields?.statusEnumId)
+        if (!resultPath && !existingRunResultId && !statusEnumIdValue) return null
+
+        return (String) ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
+            def runResultValue = existingRunResultId ?
+                    TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                            "reconciliationRunResultId", existingRunResultId, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                            "run-result write by its own run's id: owner re-checked on the row") : null
+            if (runResultValue == null && existingRunResultId && !makeWhenMissing) {
+                logger.warn("persistRunResult: denied foreign or missing reconciliationRunResultId '{}'; fail closed", existingRunResultId)
+                return null
+            }
+            boolean creating = runResultValue == null
+            if (creating) runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+            [
+                    savedRunId             : normalize(fields.savedRunId),
+                    savedRunType           : normalize(fields.savedRunType),
+                    reconciliationRunId    : normalize(fields.reconciliationRunId),
+                    reconciliationMappingId: normalize(fields.reconciliationMappingId),
+                    ruleSetId              : normalize(fields.ruleSetId),
+                    compareScopeId         : normalize(fields.compareScopeId),
+                    companyUserGroupId     : normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                    createdByUserId        : TenantAccessSupport.currentUserId(ec),
+                    file1Name              : normalize(fields.file1Name),
+                    file1DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath),
+                    file2Name              : normalize(fields.file2Name),
+                    file2DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath),
+                    resultDataManagerPath  : resultPath,
+                    statusEnumId           : statusEnumIdValue,
+                    reconciliationType     : normalize(fields.reconciliationType),
+                    differenceCount        : fields.differenceCount,
+                    onlyInFile1Count       : fields.onlyInFile1Count,
+                    onlyInFile2Count       : fields.onlyInFile2Count,
+                    startedDate            : fields.startedDate,
+                    completedDate          : fields.completedDate,
+            ].each { entry -> if (entry.value != null) runResultValue.set(entry.key as String, entry.value) }
+            if (creating) {
+                if (!runResultValue.statusEnumId) runResultValue.statusEnumId = STATUS_RUNNING
+                runResultValue.createdDate = fields.createdDate ?: ec.user.nowTimestamp
+                runResultValue.lastUpdatedDate = ec.user.nowTimestamp
+                runResultValue.setSequencedIdPrimary()
+                runResultValue.create()
+            } else {
+                runResultValue.lastUpdatedDate = ec.user.nowTimestamp
+                runResultValue.update()
+            }
+            return runResultValue.reconciliationRunResultId
+        })
+    }
     protected static final Map<String, String> STATUS_LABELS = [
             (STATUS_PENDING)          : "Pending execution",
             (STATUS_RUNNING)          : "Running",

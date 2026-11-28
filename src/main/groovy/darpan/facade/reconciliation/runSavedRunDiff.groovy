@@ -310,70 +310,10 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
     }
     return descriptor
 }
-// Writes run-result ARTIFACT fields only (paths, names, counts, dates). statusEnumId is owned
-// by RunObservability (beginRun/completeRun/failRun) — this closure must never set it. It always
-// updates the run row created by RunObservability.beginRun (found by reconciliationRunResultId)
-// and never creates a competing row for the same run.
-def persistRunResult = { Map<String, Object> fields ->
-    String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
-    String existingRunResultId = normalize(fields.reconciliationRunResultId)
-    // Degenerate case: if RunObservability.beginRun's write failed, obsRunId comes back null and
-    // existingRunResultId is never populated. A later persist call that still has a
-    // resultDataManagerPath falls through this guard and creates a fresh run-result row here,
-    // whose statusEnumId is never set to RUNNING (the entity default applies instead). Accepted
-    // best-effort behavior for now; revisit when the watchdog/cleanup phase lands.
-    if (!resultPath && !existingRunResultId) return null
-
-    return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
-        // The run-result id is the whole PK, so the owner is checked on the row: a tenant condition
-        // beside a full PK is dropped by one() (DAR-BE-077).
-        def runResultValue = existingRunResultId ?
-                TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
-                        "reconciliationRunResultId", existingRunResultId,
-                        TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                        "run-result update by the id beginRun minted — owner re-checked on the row") :
-                null
-        boolean creating = runResultValue == null
-        if (creating) runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-
-        [
-                savedRunId             : normalize(fields.savedRunId),
-                savedRunType           : normalize(fields.savedRunType),
-                reconciliationRunId     : normalize(fields.reconciliationRunId),
-                reconciliationMappingId : normalize(fields.reconciliationMappingId),
-                ruleSetId              : normalize(fields.ruleSetId),
-                compareScopeId         : normalize(fields.compareScopeId),
-                companyUserGroupId     : normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                createdByUserId        : TenantAccessSupport.currentUserId(ec),
-                file1Name              : normalize(fields.file1Name),
-                file1DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath),
-                file2Name              : normalize(fields.file2Name),
-                file2DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath),
-                resultDataManagerPath  : resultPath,
-                reconciliationType     : normalize(fields.reconciliationType),
-                differenceCount        : fields.differenceCount,
-                onlyInFile1Count       : fields.onlyInFile1Count,
-                onlyInFile2Count       : fields.onlyInFile2Count,
-                startedDate            : fields.startedDate,
-                completedDate          : fields.completedDate,
-        ].each { entry ->
-            if (entry.value != null) runResultValue.set(entry.key as String, entry.value)
-        }
-        if (creating) {
-            // S99-022: the run-result status has no default. A row made here (no beginRun row to update) is RUNNING
-            // until its run ends it, or the reaper does; it never reads SUCCESS by default.
-            if (!runResultValue.statusEnumId) runResultValue.statusEnumId = ReconciliationOutputSupport.STATUS_RUNNING
-            runResultValue.createdDate = fields.createdDate ?: ec.user.nowTimestamp
-            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
-            runResultValue.setSequencedIdPrimary()
-            runResultValue.create()
-        } else {
-            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
-            runResultValue.update()
-        }
-        return runResultValue.reconciliationRunResultId
-    })
-}
+// Writes run-result ARTIFACT fields only (paths, names, counts, dates): no call here states a status, which RunObservability
+// owns (beginRun/completeRun/failRun). DAR-OPS-029 S99-046: the writer is ReconciliationOutputSupport's, shared with
+// reconcileGenericFiles. It updates the row beginRun made; if that write failed (no row to find), it makes one, RUNNING (S99-022).
+def persistRunResult = { Map<String, Object> fields -> ReconciliationOutputSupport.persistRunResult(ec, fields, true) }
 def buildRunArtifactContext = { String runId ->
     String runToken = DataManagerSupport.safeToken(runId, "run")
     String timestamp = DataManagerSupport.formatRunTimestamp(ec)

@@ -430,7 +430,7 @@ class KeptCopySupport {
         boolean writesSideFile = side.excludedRecordsSidecar == "Y"
         if (rules && !writesSideFile && side.excludedRecordsSidecar != "N") return notServed(SIDE_FILE_UNDECLARED)
         Map collector = rules && writesSideFile ? ExcludedRecordsSidecar.newCollector() : null
-        Map<String, Integer> excludedCounts = [:], absentCounts = [:]
+        SourceFilterSupport.RejectionTally rejections = new SourceFilterSupport.RejectionTally()
         File recordsWork = null
         File projectedWork = null
         File documentWork = null
@@ -484,10 +484,7 @@ class KeptCopySupport {
                         inWindow++
                         Map<String, Object> verdict = SourceFilterSupport.evaluate(record, rules)
                         if (verdict != null) {
-                            if (collector != null) ExcludedRecordsSidecar.collect(collector, record, (Map) verdict.rule)
-                            String key = String.valueOf(((Map) verdict.rule).sequenceNum)
-                            Map<String, Integer> bucket = SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? absentCounts : excludedCounts
-                            bucket.put(key, (bucket.get(key) ?: 0) + 1)
+                            rejections.reject(verdict, collector, record)
                             continue
                         }
                         // one record a line; a projecting connector's service trims them after the filters, as its extractor does
@@ -538,12 +535,7 @@ class KeptCopySupport {
                     extractedRecordCount: inWindow,
                     keptRecordCount     : kept,
                     // as the extractors report it: absent when no rules, every rule listed (zero counts too) when some
-                    filters             : rules ? [configuredExclusions: rules.collect { Map<String, Object> rule ->
-                        String key = String.valueOf(rule.sequenceNum)
-                        [sequenceNum     : rule.sequenceNum, fieldExpression: rule.fieldExpression, operator: rule.operator,
-                         values          : new ArrayList<String>((List) rule.values), excludedCount: excludedCounts.get(key) ?: 0,
-                         fieldAbsentCount: absentCounts.get(key) ?: 0]
-                    }] : null,
+                    filters             : rules ? [configuredExclusions: rejections.configuredExclusions(rules)] : null,
             ].findAll { it.value != null } as Map<String, Object>
 
             documentWork = File.createTempFile("kept-copy-", ".partial", outDir)

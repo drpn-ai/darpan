@@ -85,7 +85,7 @@ class DataSourceOrderGrainOptionsTests {
         assertEquals([[suffix: "dropped-invoices", entries: [[invoice: "A2", customer: "C2", firstSection: null]], truncated: false]], r.sidecars)
         List<Map> lineCalls = ((AcmeLedgerFixture.ScriptedTransport) r.transport).calls.findAll { it.document == "AcmeLines" }
         assertFalse(lineCalls.any { (it.variables.filter as String).contains("A2") }, "a dropped record's children are never read")
-        assertEquals([:], r.excludedByRule)
+        assertEquals([:], r.rejections.excludedCounts())
     }
 
     @Test
@@ -160,7 +160,7 @@ class DataSourceOrderGrainOptionsTests {
         assertEquals(2, firstInvoiceCall(region).variables.first)  // 900 / 450
         assertEquals(["A1"], region.records*.invoiceNo.unique(), "the rule reads the selected field, so nothing is field-absent")
         assertEquals(["NORTH"], region.records*.region.unique())
-        assertEquals([:], region.fieldAbsentByRule)
+        assertEquals([:], region.rejections.fieldAbsentCounts())
     }
 
     @Test

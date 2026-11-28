@@ -319,13 +319,7 @@ class DataDefinedExtract {
         List<Map<String, Object>> rules = (List<Map<String, Object>>) (request.filters ?: [])
         Map filters = [:]
         if (rules) {
-            filters.configuredExclusions = rules.collect { Map<String, Object> rule -> [
-                    sequenceNum     : rule.sequenceNum,
-                    fieldExpression : rule.fieldExpression,
-                    operator        : rule.operator,
-                    values          : new ArrayList<String>((List) (rule.values ?: [])),
-                    excludedCount   : (((Map) result.excludedByRule).get(rule.sequenceNum) ?: 0),
-                    fieldAbsentCount: (((Map) result.fieldAbsentByRule).get(rule.sequenceNum) ?: 0)] }
+            filters.configuredExclusions = ((SourceFilterSupport.RejectionTally) result.rejections).configuredExclusions(rules)
         }
         Map metadata = [
                 transport              : definitionRow.protocol,

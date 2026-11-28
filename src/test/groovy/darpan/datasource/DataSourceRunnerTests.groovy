@@ -150,7 +150,7 @@ class DataSourceRunnerTests {
         Map r = runIt([mode: "ids", keys: ["A1", "A2"], filters: rules], new AcmeLedgerFixture.ScriptedTransport(), d)
         // C2 is A2's customer, on the invoice level under each record: A2's three units are excluded.
         assertEquals(["A1"], r.records*.invoiceNo.unique())
-        assertEquals([1: 3], r.excludedByRule)
+        assertEquals(["1": 3], r.rejections.excludedCounts())
         assertEquals([neverDropped: 0], r.metadata)
         assertEquals([1, 2, 2], r.records*.units)
         IllegalArgumentException e = assertThrows(IllegalArgumentException) {

@@ -54,8 +54,7 @@ class DataSourceRunner {
     private final AtomicInteger batchCount = new AtomicInteger()
     /** Filter results: excluded records (capped, ExcludedRecordsSidecar) and counts per rule sequence. */
     final Map excludedCollector = darpan.reconciliation.conclusion.ExcludedRecordsSidecar.newCollector()
-    final Map<Integer, Integer> excludedByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
-    final Map<Integer, Integer> fieldAbsentByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
+    final darpan.reconciliation.source.SourceFilterSupport.RejectionTally rejections = new darpan.reconciliation.source.SourceFilterSupport.RejectionTally()
     private List<Map<String, Object>> filterRules = []
     /** Per query step, this run's document, cost per record and fixed values (its selections). */
     private final Map<String, Map> plans = [:]
@@ -109,7 +108,7 @@ class DataSourceRunner {
         }
         return [rootRecords: rootRecordCount.get(), records: recordCount.get(), batches: batchCount.get(),
                 counts: new LinkedHashMap(counts), pages: new LinkedHashMap(pagesByStep),
-                excludedByRule: new LinkedHashMap(excludedByRule), fieldAbsentByRule: new LinkedHashMap(fieldAbsentByRule),
+                rejections: rejections,
                 metadata: new LinkedHashMap((Map) (definition.metadata ?: [:])),
                 sidecars: sidecars.values().collect { Map sc -> [suffix: sc.suffix, entries: new ArrayList((List) sc.entries), truncated: sc.truncated] },
                 pageSizes: pageSizes.collectEntries { k, v -> [(k): v.get()] }]
@@ -651,11 +650,7 @@ class DataSourceRunner {
             view.putAll(projected)
             Map<String, Object> verdict = darpan.reconciliation.source.SourceFilterSupport.evaluate(view, filterRules)
             if (verdict == null) { kept.add(r); return }
-            Map rule = (Map) verdict.rule
-            synchronized (excludedCollector) { darpan.reconciliation.conclusion.ExcludedRecordsSidecar.collect(excludedCollector, projected, rule) }
-            Map<Integer, Integer> bucket = darpan.reconciliation.source.SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? fieldAbsentByRule : excludedByRule
-            Integer seq = (Integer) rule.sequenceNum
-            synchronized (bucket) { bucket.put(seq, (bucket.get(seq) ?: 0) + 1) }
+            rejections.reject(verdict, excludedCollector, projected)
         }
         return kept
     }

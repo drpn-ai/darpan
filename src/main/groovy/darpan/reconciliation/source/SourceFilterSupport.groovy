@@ -137,8 +137,7 @@ class SourceFilterSupport {
         if (!parsedRules) return [records: records, configuredExclusions: null]
         List<Map> kept = []
         Map excludedCollector = ExcludedRecordsSidecar.newCollector()
-        Map<String, Integer> exclusionCounts = [:]
-        Map<String, Integer> fieldAbsentCounts = [:]
+        RejectionTally tally = new RejectionTally()
         for (Object raw : (records ?: [])) {
             Map record = (Map) raw
             Map<String, Object> verdict = evaluate(record, parsedRules)
@@ -146,18 +145,44 @@ class SourceFilterSupport {
                 kept.add(record)
                 continue
             }
-            ExcludedRecordsSidecar.collect(excludedCollector, record, (Map) verdict.get("rule"))
-            String key = String.valueOf(((Map) verdict.get("rule")).get("sequenceNum"))
-            Map<String, Integer> bucket = REASON_FIELD_ABSENT == verdict.get("reason") ? fieldAbsentCounts : exclusionCounts
-            bucket.put(key, (bucket.get(key) ?: 0) + 1)
-        }
-        List<Map<String, Object>> configuredExclusions = parsedRules.collect { Map<String, Object> rule ->
-            String key = String.valueOf(rule.get("sequenceNum"))
-            return exclusionEntry(rule.get("sequenceNum"), rule.get("fieldExpression"), rule.get("operator"), (List) rule.get("values"),
-                    exclusionCounts.get(key) ?: 0, fieldAbsentCounts.get(key) ?: 0)
+            tally.reject(verdict, excludedCollector, record)
         }
         ExcludedRecordsSidecar.flush(excludedCollector)
-        return [records: kept, configuredExclusions: configuredExclusions, excludedCollector: excludedCollector]
+        return [records: kept, configuredExclusions: tally.configuredExclusions(parsedRules), excludedCollector: excludedCollector]
+    }
+
+    /**
+     * DAR-OPS-029 S99-062. One read's rejections, for every path that applies the rules to records (applyToRecords, the
+     * data-defined runner, the kept copy): each rejected record goes into the excluded-records collector, and its rule's
+     * count goes up under the verdict's reason (FIELD_ABSENT, or excluded). Safe for parallel readers.
+     */
+    static class RejectionTally {
+        private final Map<String, Integer> excluded = new LinkedHashMap<>()
+        private final Map<String, Integer> fieldAbsent = new LinkedHashMap<>()
+
+        /** One rejection by {@link #evaluate}'s verdict: the record into the collector (skipped when null), the rule's count up. */
+        synchronized void reject(Map<String, Object> verdict, Map collector, Map record) {
+            Map rule = (Map) verdict.get("rule")
+            if (collector != null) ExcludedRecordsSidecar.collect(collector, record, rule)
+            Map<String, Integer> bucket = REASON_FIELD_ABSENT == verdict.get("reason") ? fieldAbsent : excluded
+            String key = String.valueOf(rule.get("sequenceNum"))
+            bucket.put(key, (bucket.get(key) ?: 0) + 1)
+        }
+
+        /** Rule sequenceNum (as text) -> records it excluded; a copy. */
+        synchronized Map<String, Integer> excludedCounts() { new LinkedHashMap<>(excluded) }
+
+        /** Rule sequenceNum (as text) -> records it rejected for lacking the field; a copy. */
+        synchronized Map<String, Integer> fieldAbsentCounts() { new LinkedHashMap<>(fieldAbsent) }
+
+        /** Every rule's {@link #exclusionEntry}, a zero-count rule included (a missing entry reads as "not applied"). */
+        synchronized List<Map<String, Object>> configuredExclusions(List<Map<String, Object>> rules) {
+            return (rules ?: []).collect { Map<String, Object> rule ->
+                String key = String.valueOf(rule.get("sequenceNum"))
+                exclusionEntry(rule.get("sequenceNum"), rule.get("fieldExpression"), rule.get("operator"), (List) rule.get("values"),
+                        excluded.get(key) ?: 0, fieldAbsent.get(key) ?: 0)
+            }
+        }
     }
 
     /**

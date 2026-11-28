@@ -48,6 +48,13 @@ class AuditCheckAutomation {
         return made
     }
 
+    /**
+     * A paused automation for the run, made under the AUDIT's tenant. This stays Groovy and does not call save#Automation
+     * (DAR-OPS-029 S99-054): save#Automation stamps and gates on the session's active tenant (requireActiveTenantWriteAccess,
+     * assignTenantOwnershipOnCreate), and the agent pipeline makes these while another tenant is active; XML entity-finds
+     * over RuleSet, RuleSetCompareScope and RuleSetCompareSource would take the DARPAN_ACTIVE_COMPANY_SCOPE filter and read
+     * the active tenant's rows instead. The rest is connector, extract-option and filter work in Groovy helpers.
+     */
     private static String createAutomation(def ec, String tenantId, Map audit, String ruleSetId) {
         def ruleSet = AuditSettingsSupport.rows(ec, "darpan.rule.RuleSet", tenantId).condition("ruleSetId", ruleSetId).list().find()
         // ruleSetId is not the scope's key: the first by id, so a run with several scopes always gets the same one.

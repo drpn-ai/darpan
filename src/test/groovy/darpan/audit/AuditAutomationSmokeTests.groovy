@@ -486,6 +486,34 @@ class AuditAutomationSmokeTests {
         assertFalse(AuditAutomationSupport.namesNoRuleOfTheRun(null, [:]), "a blank ruleIds takes any rule")
     }
 
+    // OC47 (S21a) wired: a result file cut off mid-rows, or with no differences section, reads as fewer rows (or none). Judged
+    // as it reads, the missing rows' findings would close; the check is restated as not run, with the file's own problem.
+    @Test
+    void aResultFileCutOffOrWithoutItsRowsClosesNothing() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-04", ["C1", "C2"], []), omsSource, nsSource,
+                [recordCount: 2], [recordCount: 0], [diffLocation: diff("c1", [row("MISSING_IN_FILE_2", "C1", "missing in NetSuite"),
+                                                                             row("MISSING_IN_FILE_2", "C2", "missing in NetSuite")])], null)
+        assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [finding("C1").stateEnumId, finding("C2").stateEnumId])
+
+        File cut = new File(diff("c2", [row("MISSING_IN_FILE_2", "C1", "missing in NetSuite"), row("MISSING_IN_FILE_2", "C2", "missing in NetSuite")]))
+        List<String> lines = cut.readLines("UTF-8")
+        cut.text = lines.findAll { !it.contains('"C2"') && it != "}" }.join("\n").replaceAll(/,\s*$/, "")   // the writer stopped after C1
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-05", ["C1", "C2"], ["C1", "C2"]), omsSource, nsSource,
+                [recordCount: 2], [recordCount: 2], [diffLocation: cut.absolutePath], null)
+        Map run = checkRun("2026-09-05")
+        assertEquals("AUDCS_NOT_RUN", run.statusEnumId)
+        assertTrue((run.reason as String).contains("ends before its differences section does"), run.reason as String)
+        assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [finding("C1").stateEnumId, finding("C2").stateEnumId], "C2 was never read: nothing closes")
+
+        File headless = new File(dir, "c3-diff.json")
+        headless.text = '{"summary":{}}'
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-06", ["C1", "C2"], ["C1", "C2"]), omsSource, nsSource,
+                [recordCount: 2], [recordCount: 2], [diffLocation: headless.absolutePath], null)
+        assertEquals("AUDCS_NOT_RUN", checkRun("2026-09-06").statusEnumId)
+        assertTrue((checkRun("2026-09-06").reason as String).contains("no differences section"), checkRun("2026-09-06").reason as String)
+        assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [finding("C1").stateEnumId, finding("C2").stateEnumId])
+    }
+
     @Test
     void aFailedReadIsRecordedAndClosesNothing() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-10", ["F1"], []), omsSource, nsSource,

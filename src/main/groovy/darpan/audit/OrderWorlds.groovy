@@ -91,7 +91,8 @@ class OrderWorlds {
                 }
             }
         }
-        Closure<Long> stepOf = { Map e -> (stepByStatement?.get(e.row.statementId as String) ?: Long.MAX_VALUE) as Long }
+        // A step of 0 is the earliest step; only a statement with no step sorts last.
+        Closure<Long> stepOf = { Map e -> Long step = stepByStatement?.get(e.row.statementId as String); step != null ? step : Long.MAX_VALUE }
         Map<String, Map> earliest = [:]
         entries.each { Map e ->
             if (e.state != OPEN) return

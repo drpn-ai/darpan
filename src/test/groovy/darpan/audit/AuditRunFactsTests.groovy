@@ -60,6 +60,13 @@ class AuditRunFactsTests {
         assertEquals("R10", (facts.groups as List<Map>)[0].rule)
     }
 
+    // DAR-OPS-029 S11 (S10 QA): step 0 sorts first; only a statement with no step sorts last.
+    @Test
+    void stepZeroSortsFirstAndNoStepLast() {
+        Map<String, Long> steps = [R5: 0L, R2: 10L]
+        assertEquals(["R5", "R2", "R1"], ["R1", "R2", "R5"].sort(false) { String a, String b -> AuditRunFacts.stepOrder(steps, a, b) })
+    }
+
     @Test
     void csvEscapesAsRfc4180AndNeverHandsASpreadsheetAFormula() {
         assertEquals('"a,b"', AuditRunFacts.csvField("a,b"))

@@ -34,6 +34,14 @@ class OrderWorldsTests {
         assertEquals(out["F-1"].world, out["F-2"].world)
     }
 
+    // DAR-OPS-029 S11 (S10 QA): a statement at step 0 is the earliest step, not "no step".
+    @Test
+    void stepZeroIsTheEarliestStepNotNone() {
+        Map out = OrderWorlds.rank([entry("F-1", "R1"), entry("F-0", "R0")], ["F-1": R1_LINE, "F-0": R10_LINE], STEP + [R0: 0L])
+        assertEquals("R0", out["F-1"].waitingOn, "R1 waits on the step-0 finding")
+        assertNull(out["F-0"].waitingOn)
+    }
+
     @Test
     void aReturnJoinsItsExchangeByTheExchangesName() {
         // R2: the return of #GOR197457937, whose exchange is EXC-#GOR197457937-1; R1: the exchange's completed line.

@@ -54,6 +54,11 @@ class AuditAutomationSupport {
     /** DAR-OPS-029 S11: why a check whose findings the ledger refused reads as not run, never as ran with none. */
     static final String FINDINGS_NOT_RECORDED_REASON = "The check ran but its findings could not be recorded."
 
+    /** OC47: a compare's result document that cannot be read whole (DiffDocumentStreamSupport.DiffRowScan.problem()). */
+    static class IncompleteResultException extends IllegalStateException {
+        IncompleteResultException(String problem) { super(problem ?: "The result file could not be read whole.") }
+    }
+
     /** Every ledger call goes through here, so a test can refuse one. */
     private static final Closure<Map> DEFAULT_LEDGER = { def ec, String serviceName, Map params ->
         AutomationExecutionSupport.dispatchInternalService(ec, serviceName, params)
@@ -380,11 +385,16 @@ class AuditAutomationSupport {
         Set<String> unjudgedStatementIds = new LinkedHashSet<String>()
         List<Map> findings = null
         Map recorded = null
+        String notRecordedReason = FINDINGS_NOT_RECORDED_REASON
         // From here the check's health reads ran (or partial): any failure to judge or record its findings restates it.
         try {
             findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds,
                     unjudgedStatementIds).findAll { !unjudged.contains(it.recordKey as String) } : []
             recorded = call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings])
+        } catch (IncompleteResultException e) {
+            logger.error("Audit check ${check.checkId} (${window.auditPeriod}): ${e.message} Nothing judged.")
+            notRecordedReason = truncate(e.message, REASON_MAX)
+            recorded = null
         } catch (Exception e) {
             logger.error("Audit findings for check ${check.checkId} (${window.auditPeriod}) not recorded: ${sanitizeErrorDetail(e)}")
             ec.message.clearErrors()
@@ -393,7 +403,7 @@ class AuditAutomationSupport {
         if (recorded == null) {
             // The check's health is already written as ran (or partial): restate it as not run, so a morning whose findings
             // were lost never reads as a clean one. A verify wrote no health, so there is nothing to restate.
-            if (!window.auditVerifyKeys) call(ec, "${LEDGER}.record#CheckRun", runParams + [notRunReason: FINDINGS_NOT_RECORDED_REASON])
+            if (!window.auditVerifyKeys) call(ec, "${LEDGER}.record#CheckRun", runParams + [notRunReason: notRecordedReason])
             return
         }
         // DAR-BE-118: closes what THIS run examined and did not report, so a later run the same morning closes too. OC33 (S13):
@@ -553,7 +563,7 @@ class AuditAutomationSupport {
         // DAR-OPS-029 S11 (H5): two rows for one statement and record (rule rows of one key under a link that takes any rule,
         // duplicates) keep the row that ranks first by its content, not whichever the compare happened to write first.
         Map<String, String> keptRank = [:]
-        DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say
             // type / id / note. Read either.
             Map row = AuditAutomationSupport.rowOf(raw)
@@ -591,6 +601,9 @@ class AuditAutomationSupport {
                         checks          : AuditAutomationSupport.checksOf(row.checks)] + AuditAutomationSupport.amountsOf(check, row))
             }
         }
+        // OC47 (S21a): a file cut off mid-rows, without its differences section, or with a row that does not parse reads as
+        // fewer rows; judged as it reads, the missing rows' findings would close. Nothing is judged from it.
+        if (!scan.complete) throw new IncompleteResultException(scan.problem())
         // In key order, so the ledger meets them (and numbers new findings) the same way whatever order the compare wrote.
         return byKey.keySet().sort().collect { byKey.get(it) } as List<Map>
     }

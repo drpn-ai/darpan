@@ -169,11 +169,11 @@ class AuditRunFacts {
         return out ?: null
     }
 
-    /** R2 before R10; a code without a number after every numbered one. */
-    /** DAR-BE-250. By the statements' steps (none last), then ruleOrder. */
+    /** DAR-BE-250. By the statements' steps (none last), then ruleOrder: R2 before R10, a code without a number last. */
     static int stepOrder(Map<String, Long> stepOf, String a, String b) {
         Long sa = stepOf?.get(a), sb = stepOf?.get(b)
-        return (sa ?: Long.MAX_VALUE) <=> (sb ?: Long.MAX_VALUE) ?: ruleOrder(a, b)
+        // A step of 0 is the first step; only a statement with no step sorts last.
+        return (sa != null ? sa : Long.MAX_VALUE) <=> (sb != null ? sb : Long.MAX_VALUE) ?: ruleOrder(a, b)
     }
 
     static int ruleOrder(String a, String b) {

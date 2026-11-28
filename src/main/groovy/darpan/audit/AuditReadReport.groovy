@@ -1,7 +1,6 @@
 package darpan.audit
 
 import darpan.config.DarpanSettings
-import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonSlurper
 import org.moqui.entity.EntityCondition
 
@@ -53,12 +52,12 @@ class AuditReadReport {
         Map<String, Map> checks = checksOf(ec, tenantId, auditId)
         if (!checks) return null
         if (reportDate == null) {
-            def latest = rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checks.keySet())
+            def latest = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("checkId", EntityCondition.IN, checks.keySet())
                     .orderBy("-reportDate").limit(1).list().find()
             if (latest == null) return null
             reportDate = latest.reportDate as Date
         }
-        def playFind = rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checks.keySet())
+        def playFind = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("checkId", EntityCondition.IN, checks.keySet())
                 .condition("reportDate", reportDate)
         if (period) playFind.condition("period", period)
         List<Map> playRuns = playFind.list()*.getMap()
@@ -66,7 +65,7 @@ class AuditReadReport {
 
         // Earlier plays, newest first: enough for LOOKUP_EVERY_PLAY and CALLS_GREW.
         int depth = Math.max(((limits.lookupEveryPlayRuns ?: 1) as int) - 1, 1)
-        List<Map> earlierRuns = rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, checks.keySet())
+        List<Map> earlierRuns = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("checkId", EntityCondition.IN, checks.keySet())
                 .condition("reportDate", EntityCondition.LESS_THAN, reportDate).orderBy("-reportDate").limit(depth * checks.size() * 2)
                 .list()*.getMap()
         List<Date> earlierDays = (earlierRuns*.reportDate as List<Date>).unique().take(depth)
@@ -76,7 +75,7 @@ class AuditReadReport {
         Set<String> playedBefore = earlierRuns.findAll { r -> playRuns.any { it.checkId == r.checkId && it.period == r.period } }
                 *.checkId.toSet() as Set<String>
         if (playRuns.any { !playedBefore.contains(it.checkId) }) {
-            rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", EntityCondition.IN, playRuns*.checkId)
+            AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("checkId", EntityCondition.IN, playRuns*.checkId)
                     .condition("period", EntityCondition.IN, playRuns*.period.unique())
                     .condition("reportDate", EntityCondition.LESS_THAN, reportDate).list()
                     .each { r -> if (playRuns.any { it.checkId == r.checkId && it.period == r.period }) playedBefore << (r.checkId as String) }
@@ -221,30 +220,27 @@ class AuditReadReport {
         try {
             Object parsed = new JsonSlurper().parseText(text as String)
             return parsed instanceof Map ? parsed as Map : null
-        } catch (Exception ignored) {
+        } catch (groovy.json.JsonException ignored) {
             return null // a tally cut at the column's length reads as unknown, never as zero
         }
     }
 
     private static Map<String, Map> checksOf(def ec, String tenantId, String auditId) {
-        List statementIds = rows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.statementId
+        List statementIds = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditStatement", tenantId, WHY).condition("auditId", auditId).list()*.statementId
         if (!statementIds) return [:]
-        List checkIds = rows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("statementId", EntityCondition.IN, statementIds)
+        List checkIds = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId, WHY).condition("statementId", EntityCondition.IN, statementIds)
                 .list()*.checkId.unique()
         if (!checkIds) return [:]
-        return rows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkId", EntityCondition.IN, checkIds).list()
+        return AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheck", tenantId, WHY).condition("checkId", EntityCondition.IN, checkIds).list()
                 .collectEntries { [(it.checkId as String): it.getMap()] }
     }
 
     private static Map<String, List<Map>> readsOf(def ec, String tenantId, List runIds) {
         Map<String, List<Map>> out = [:].withDefault { [] }
         if (!runIds) return out
-        rows(ec, "darpan.audit.AuditSourceRead", tenantId).condition("checkRunId", EntityCondition.IN, runIds)
+        AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditSourceRead", tenantId, WHY).condition("checkRunId", EntityCondition.IN, runIds)
                 .orderBy(["checkRunId", "readSeqId"]).list().each { out[it.checkRunId as String] << it.getMap() }
         return out
     }
 
-    private static def rows(def ec, String entityName, String tenantId) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
-    }
 }

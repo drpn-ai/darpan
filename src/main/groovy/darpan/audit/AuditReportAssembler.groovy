@@ -646,7 +646,7 @@ class AuditReportAssembler {
      * the ones its statement names, else its automation's sources (FILE_1 then FILE_2). Words before sources because a
      * one-sided check reads one system and judges another (R13 reads Shopify and asks HotWax). Each system once.
      */
-    static Map<String, List<String>> checkSystems(def ec, String tenantId, List<Map> checks, Map<String, String> statementTextByCheck = [:]) {
+    private static Map<String, List<String>> checkSystems(def ec, String tenantId, List<Map> checks, Map<String, String> statementTextByCheck = [:]) {
         Map<String, List<String>> out = [:]
         List<Map> unnamed = []
         checks.findAll { it }.each { Map check ->
@@ -708,12 +708,7 @@ class AuditReportAssembler {
         def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup", WHY)
                 .condition("userGroupId", tenantId).useCache(false).one()
         if (group == null) return null
-        def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
-                .condition("companyUserGroupId", tenantId).useCache(false).one()
-        ZoneId zone
-        try { zone = setting?.timeZone ? ZoneId.of(setting.timeZone as String) : ZoneId.of("UTC") }
-        catch (Exception ignored) { zone = ZoneId.of("UTC") }
-        return [name: group.description ?: tenantId, zone: zone]
+        return [name: group.description ?: tenantId, zone: AuditReportGraph.tenantZone(ec, tenantId)]
     }
 
     /**

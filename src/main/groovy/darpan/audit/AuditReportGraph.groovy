@@ -30,8 +30,8 @@ class AuditReportGraph {
     /** The audit's id from its code (report.audit.id in the JSON), within the tenant only; null when it has none. */
     static String auditIdFor(def ec, String tenantId, String auditCode) {
         if (!tenantId || !auditCode) return null
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.audit.Audit", WHY).condition("companyUserGroupId", tenantId)
-                .condition("auditCode", auditCode).useCache(false).list().find()?.get("auditId") as String
+        return AuditReportAssembler.tenantRows(ec, "darpan.audit.Audit", tenantId, WHY)
+                .condition("auditCode", auditCode).list().find()?.get("auditId") as String
     }
 
     /** True when the finding is the tenant's own; another tenant's reads exactly like one that does not exist. */
@@ -47,13 +47,13 @@ class AuditReportGraph {
      */
     static List<Map> checkExtracts(def ec, String tenantId, String checkCode, Date reportDate, String period) {
         if (!tenantId || !checkCode || !reportDate || !period) return []
-        String checkId = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkCode", checkCode).list().find()?.get("checkId")
-        String executionId = checkId ? tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", checkId)
+        String checkId = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheck", tenantId, WHY).condition("checkCode", checkCode).list().find()?.get("checkId")
+        String executionId = checkId ? AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("checkId", checkId)
                 .condition("reportDate", reportDate).condition("period", period).list().find()?.get("automationExecutionId") : null
-        def execution = executionId ? tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
+        def execution = executionId ? AuditReportAssembler.tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId, WHY)
                 .condition("automationExecutionId", executionId).list().find() : null
         if (execution == null) return []
-        Map<String, String> systemBySide = tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
+        Map<String, String> systemBySide = AuditReportAssembler.tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId, WHY)
                 .condition("automationId", execution.get("automationId")).list().collectEntries { [(it.fileSide): it.systemEnumId] }
         return [["FILE_1", "file1"], ["FILE_2", "file2"]].collect { String side, String field ->
             String path = execution.get("${field}DataManagerPath".toString()) as String
@@ -62,10 +62,6 @@ class AuditReportGraph {
                     records : execution.get("${field}RecordCount".toString()),
                     filePath: path] : null
         }.findAll() as List<Map>
-    }
-
-    private static def tenantRows(def ec, String entityName, String tenantId) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
     }
 
     /** The morning to report: date as YYYY-MM-DD, or blank for today in the tenant's zone. Throws on a malformed date. */
@@ -112,15 +108,16 @@ class AuditReportGraph {
     }
 
     private static boolean auditRanOn(def ec, String tenantId, String auditId, LocalDate day) {
-        List statementIds = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.statementId
+        List statementIds = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditStatement", tenantId, WHY).condition("auditId", auditId).list()*.statementId
         if (!statementIds) return false
-        List checkIds = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("statementId", "in", statementIds)
+        List checkIds = AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId, WHY).condition("statementId", "in", statementIds)
                 .list()*.checkId.unique()
-        return checkIds && tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("reportDate", Date.valueOf(day))
+        return checkIds && AuditReportAssembler.tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId, WHY).condition("reportDate", Date.valueOf(day))
                 .condition("checkId", "in", checkIds).count() > 0
     }
 
-    private static ZoneId tenantZone(def ec, String tenantId) {
+    /** The tenant's time zone setting; UTC when it has none or it is not a zone. */
+    static ZoneId tenantZone(def ec, String tenantId) {
         def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false).one()
         return zoneOr(setting?.timeZone as String, ZoneId.of("UTC"))
@@ -128,7 +125,7 @@ class AuditReportGraph {
 
     private static ZoneId zoneOr(String id, ZoneId fallback) {
         try { return id?.trim() ? ZoneId.of(id.trim()) : fallback }
-        catch (Exception ignored) { return fallback }
+        catch (java.time.DateTimeException ignored) { return fallback }
     }
 
     static Map report(Map document) {

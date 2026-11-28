@@ -679,6 +679,38 @@ class RunConclusionSupportTests {
         assertEquals([differenceCount: 3], untouched)
     }
 
+    // DAR-OPS-029 S03a (lens E1, conservation): a hidden field-difference row comes off the rule count as well as the total,
+    // so the total stays the sum of its buckets. Before, it came off the total only.
+    @Test
+    void aHiddenRuleRowComesOffTheRuleCount() {
+        Map counts = [differenceCount: 5, onlyInFile1Count: 1, onlyInFile2Count: 1, ruleDifferenceCount: 3, missingObjectDifferenceCount: 2]
+        RunConclusionSupport.applyHidden(counts, [RULE: 2])
+        assertEquals([differenceCount: 3, onlyInFile1Count: 1, onlyInFile2Count: 1, ruleDifferenceCount: 1, missingObjectDifferenceCount: 2], counts)
+    }
+
+    // Lens E1 end to end: after a HIDE rule takes a rule row, the written summary's total is the sum of its buckets and the
+    // number of rows the document holds.
+    @Test
+    void afterHidingTheSummaryStillAddsUpToTheRowsWritten() {
+        Closure<Map> ruleRow = { String id, String reason ->
+            [diffType: "RULE_1", compareScopeId: "SCOPE_1", objectType: "ORDER_LINE_UNIT", primaryId: id, presentIn: "", missingIn: "",
+             data: JsonOutput.toJson([omsOrderId: id.split(SEP)[0], reason: reason]), message: "Quantity differs"]
+        }
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2), ruleRow("M2${SEP}01", "retired"), ruleRow("M3${SEP}01", "live")],
+                [totalDifferences: 3, onlyInFile1Count: 1, onlyInFile2Count: 0, ruleDifferenceCount: 2, duplicateDifferenceCount: 0,
+                 missingObjectDifferenceCount: 1])
+        List rules = [[conclusionEnumId: "CONC_RETIRED_ITEM", label: "Retired item", appliesToBucket: "RULE", outcome: "HIDE",
+                       conditions: [cond(subject: "FILE_1", fieldExpression: "reason", operator: "IN", conditionValues: ["retired"], checkLabel: "Retired")]]]
+        Map out = RunConclusionSupport.concludeRun(args(doc, rules))
+        Map d = parse(doc)
+        Map s = (Map) d.summary
+        assertEquals([RULE: 1], out.hiddenByBucket, "the case is not hollow: one rule row was hidden")
+        assertEquals(2, ((List) d.differences).size())
+        assertEquals(1, s.ruleDifferenceCount)
+        assertEquals(s.totalDifferences, s.onlyInFile1Count + s.onlyInFile2Count + s.ruleDifferenceCount + s.duplicateDifferenceCount)
+        assertEquals(((List) d.differences).size(), s.totalDifferences)
+    }
+
     // DAR-BE-337: gorjana's split Happiness Guarantee RMAs. A rule that hides every repeated-key row takes the warning with it;
     // one repeat it does not explain keeps the warning, so the run still says it did not finish cleanly.
     @Test

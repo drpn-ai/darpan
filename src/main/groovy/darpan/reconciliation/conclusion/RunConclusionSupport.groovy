@@ -69,7 +69,9 @@ class RunConclusionSupport {
 
     /**
      * DAR-BE-157. Takes hidden rows off a run's counts, wherever they are kept: a row missing from FILE_2 is one only in
-     * FILE_1, and the reverse. Only the keys present are changed; no hidden rows, no change.
+     * FILE_1, and the reverse; a hidden field-difference row is one rule difference fewer. Every hidden row comes off the
+     * total and off its own bucket's count, so the total stays the sum of the buckets. A single-sided run's FINDING rows
+     * have no bucket count (only the total). Only the keys present are changed; no hidden rows, no change.
      */
     static void applyHidden(Map counts, Map hiddenByBucket, String totalKey = "differenceCount") {
         if (!counts || !hiddenByBucket) return
@@ -82,8 +84,8 @@ class RunConclusionSupport {
         minus("missingInFile2Count", onlyIn1)
         minus("onlyInFile2Count", onlyIn2)
         minus("missingInFile1Count", onlyIn2)
-        // The run result page shows this one (a hidden row is a missing-object row by construction).
         minus("missingObjectDifferenceCount", onlyIn1 + onlyIn2)
+        minus("ruleDifferenceCount", (hiddenByBucket.get("RULE") ?: 0) as int)
         // DAR-BE-337: a rule can explain repeated keys too (gorjana: a Happiness Guarantee return with two resolutions has one RMA
         // per resolution). Once it hid every repeated-key row, the warning that announced them goes with them; a repeat no rule
         // explains keeps it, and the run still says it did not finish cleanly.

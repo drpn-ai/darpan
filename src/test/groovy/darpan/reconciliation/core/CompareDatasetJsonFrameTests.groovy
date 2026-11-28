@@ -98,6 +98,56 @@ class CompareDatasetJsonFrameTests {
                 ids(CompareDatasetSupport.buildJsonDataDf(arrayRaw, arrayPaths, "File 1", [null, null], ['$.rows[*].a', '$.rows[*].b'])))
     }
 
+    private Dataset csv(String... lines) {
+        // ReconciliationServices.readCsvDataset's options, read from memory instead of a path.
+        return spark.read().option("header", "true").csv(spark.createDataset(lines.toList(), Encoders.STRING())).na().fill("")
+    }
+
+    private static List<Map> csvKeys(String... columns) {
+        return columns.collect { String c -> [idExpr: c, idNormalizer: null] as Map }
+    }
+
+    @Test
+    void csvKeysAreTrimmedAndDistinctInTheIdFrameOnly() {
+        Dataset raw = csv("id,n", " A ,1", "A,2", ",3", "B,4")
+        assertEquals(["A", "B"], ids(CompareDatasetSupport.buildCsvIdDf(raw, csvKeys("id"), "File 1")))
+        Dataset dataDf = CompareDatasetSupport.buildCsvDataDf(raw, csvKeys("id"), "File 1")
+        assertEquals(["A", "A", "B"], ids(dataDf), "a blank single-field key leaves the frame (S01b F-E3)")
+        assertEquals(["compare_id", "data"], dataDf.columns() as List)
+        assertEquals(["1", "2", "4"], dataDf.select("data.n").collectAsList().collect { Row r -> r.getString(0) }.sort(),
+                "csv data is the whole row")
+    }
+
+    @Test
+    void csvCompositeKeysJoinEveryFieldAndABlankFieldFailsLoudly() {
+        Dataset raw = csv("a,b", "x,1", "y,2")
+        List<String> expected = ["x${SEP}1".toString(), "y${SEP}2".toString()]
+        assertEquals(expected, ids(CompareDatasetSupport.buildCsvIdDf(raw, csvKeys("a", "b"), "File 1")))
+        assertEquals(expected, ids(CompareDatasetSupport.buildCsvDataDf(raw, csvKeys("a", "b"), "File 1")))
+        assertThrows(IllegalArgumentException) { CompareDatasetSupport.buildCsvIdDf(csv("a,b", "x,"), csvKeys("a", "b"), "File 1") }
+        assertThrows(IllegalArgumentException) { CompareDatasetSupport.buildCsvDataDf(csv("a,b", "x,"), csvKeys("a", "b"), "File 1") }
+    }
+
+    @Test
+    void aMissingCsvKeyColumnNamesTheColumnsThatExist() {
+        def e = assertThrows(IllegalArgumentException) {
+            CompareDatasetSupport.buildCsvIdDf(csv("orderId,n", "A,1"), csvKeys("id"), "OMS")
+        }
+        assertTrue(e.message.contains("OMS: CSV compare source expected column 'id'"), e.message)
+        assertTrue(e.message.contains("[orderId, n]"), e.message)
+    }
+
+    @Test
+    void aNumberAndItsTextGiveTheSameKeyOnEitherSide() {
+        // S01b I5: one normalisation for both sides, whatever the source type: cast to text, then trim.
+        List<String> jsonKeys = ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":7}', '{"id":7007}'), paths('$.id'), "File 1", [null], ['$.id']))
+        List<String> csvKeys = ids(CompareDatasetSupport.buildCsvIdDf(csv("id", " 7 ", "007"), csvKeys("id"), "File 2"))
+        assertEquals(["7", "7007"], jsonKeys)
+        assertEquals(["007", "7"], csvKeys, "leading zeros are not stripped: 007 and 7 are different keys")
+        assertEquals(["ab"], ids(CompareDatasetSupport.buildJsonIdDf(json('{"id":"Ab"}'), paths('$.id'), "File 1", ["CASE_FOLD"], ['$.id'])))
+        assertEquals(["ab"], ids(CompareDatasetSupport.buildCsvIdDf(csv("id", "aB "), [[idExpr: "id", idNormalizer: "CASE_FOLD"]], "File 2")))
+    }
+
     @Test
     void aBlankCompositeFieldFailsLoudlyAtBothLevels() {
         Dataset rootRaw = json('{"a":"x","b":" "}')

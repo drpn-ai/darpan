@@ -45,7 +45,7 @@ class CompareIdExpressionSupport {
     }
 
     // JSON & CSV Helpers
-    static String normalizeCsvId(String expr) {
+    private static String normalizeCsvId(String expr) {
         def raw = normalize(expr)
         if (!raw) return "id"
         if (raw.startsWith("\$")) {

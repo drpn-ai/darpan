@@ -315,17 +315,10 @@ class ReconciliationMappingSupport {
         return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
     }
 
+    private static final List<String> MAPPING_SEARCH_FIELDS =
+            ["reconciliationMappingId", "mappingName", "description", "companyUserGroupId", "companyLabel"].asImmutable()
+
     protected static boolean mappingRowMatches(Map<String, Object> row, String search) {
-        return [
-                row.reconciliationMappingId,
-                row.mappingName,
-                row.description,
-                row.companyUserGroupId,
-                row.companyLabel,
-                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []),
-                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode } : []),
-        ].any { Object value ->
-            value?.toString()?.toLowerCase()?.contains(search)
-        }
+        return ReconciliationSavedRunSupport.rowMatches(row, MAPPING_SEARCH_FIELDS, search)
     }
 }

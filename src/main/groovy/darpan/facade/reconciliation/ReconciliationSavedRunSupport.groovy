@@ -1398,22 +1398,22 @@ class ReconciliationSavedRunSupport {
         return [finding: finding, file1: side1, file2: side2]
     }
 
+    private static final List<String> SAVED_RUN_SEARCH_FIELDS = ["savedRunId", "runName", "description", "companyUserGroupId",
+            "companyLabel", "runType", "reconciliationMappingId", "ruleSetId", "compareScopeId", "compareScopeDescription"].asImmutable()
+
     protected static boolean savedRunMatches(Map<String, Object> row, String search) {
-        return [
-                row.savedRunId,
-                row.runName,
-                row.description,
-                row.companyUserGroupId,
-                row.companyLabel,
-                row.runType,
-                row.reconciliationMappingId,
-                row.ruleSetId,
-                row.compareScopeId,
-                row.compareScopeDescription,
-                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []),
-                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode } : []),
-        ].any { Object value ->
-            value?.toString()?.toLowerCase()?.contains(search)
+        return rowMatches(row, SAVED_RUN_SEARCH_FIELDS, search)
+    }
+
+    /**
+     * DAR-OPS-029 S99-064: a list row matches a (lowercased) search when one of its named fields, or one of its system
+     * options' labels or enum codes, contains it. The saved-run and mapping lists share it.
+     */
+    static boolean rowMatches(Map<String, Object> row, List<String> fields, String search) {
+        List<Object> values = fields.collect { String field -> row.get(field) }
+        if (row.systemOptions instanceof Collection) {
+            ((Collection) row.systemOptions).each { Object option -> values << option?.label; values << option?.enumCode }
         }
+        return values.any { Object value -> value?.toString()?.toLowerCase()?.contains(search) }
     }
 }

@@ -130,8 +130,8 @@ class AuditReportAssembler {
         // steps' units wait on it and are listed under it, not counted. Every statement's records are read up front.
         Map<String, Map> recordsByFinding = recordsFor(ec, tenantId, ledger*.row*.findingId as List<String>)
         Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
-            [(st.statementId as String): sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
-        Map<String, Map> split = stepUnits(statements, entriesByStatement, recordsByFinding)
+            [(st.statementId as String): AuditOrderUnits.sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
+        Map<String, Map> split = AuditOrderUnits.stepUnits(statements, entriesByStatement, recordsByFinding)
         Set<String> waitingIds = split.values().collectMany { ((it.waiting ?: []) as List<Map>).collectMany { (it.entries as List<Map>)*.row*.findingId } } as Set<String>
         // DAR-BE-361. Current state on the current report: the latest morning's report (the one a blank date shows, which
         // is yesterday's until today's run) splits each open row into open, acknowledged or reminded, with remind days
@@ -203,7 +203,7 @@ class AuditReportAssembler {
             byCategory[cat.enumCode as String] = counts
         }
 
-        Map oldest = ledger.findAll { it.state == OPEN && !waitingIds.contains(it.row.findingId as String) }.with { sortOldestFirst(it) }.find()
+        Map oldest = ledger.findAll { it.state == OPEN && !waitingIds.contains(it.row.findingId as String) }.with { AuditOrderUnits.sortOldestFirst(it) }.find()
         Map summary = sumCounts(byCategory.values() as List) + [
                 oldestOpen: oldest == null ? null : [
                         id        : oldest.row.findingId,
@@ -418,83 +418,8 @@ class AuditReportAssembler {
     }
 
     // ---------------------------------------------------------------------------------------------------------
-    // DAR-UI-075. Findings by order
+    // DAR-UI-075. A unit as the report lists it (the grouping itself is AuditOrderUnits)
     // ---------------------------------------------------------------------------------------------------------
-
-    /**
-     * The order a finding is a line of: its HotWax order item's order (the item's id before its "/"), else its NetSuite
-     * sales order line's order; null when the finding is not about an order line. A finding that only mentions an order
-     * (a credit memo naming its Shopify order) is not one, so returns and memos stay findings of their own.
-     */
-    static String orderKeyOf(Map records) {
-        Closure<String> first = { String system, String type -> ((((records ?: [:])[system] ?: [:]) as Map)[type] as List)?.find()?.id as String }
-        return first("OMS", "orderItem")?.with { it.contains("/") ? it.substring(0, it.indexOf("/")) : it } ?:
-                first("NetSuite", "salesOrderLine")
-    }
-
-    /**
-     * Ledger entries as the report lists them: the lines of one order together as one unit (its earliest line's row, so
-     * oldest-first and newToday hold; its worst state: open, else fixed), one line or many; a finding that
-     * is not an order line a unit of its own. Units keep the order of their earliest line.
-     */
-    static List<Map> orderUnits(List<Map> entries, Map<String, Map> recordsByFinding) {
-        Map<String, List<Map>> byOrder = new LinkedHashMap<>()
-        List<Object> keys = []
-        entries.each { Map e ->
-            String order = orderKeyOf(recordsByFinding[e.row.findingId as String])
-            if (order) {
-                if (!byOrder.containsKey(order)) { byOrder[order] = []; keys << order }
-                byOrder[order] << e
-            } else keys << e
-        }
-        return keys.collect { Object key ->
-            if (!(key instanceof String)) return [row: ((Map) key).row, state: ((Map) key).state, entries: [(Map) key]]
-            List<Map> lines = byOrder[key]
-            String state = lines.any { it.state == OPEN } ? OPEN : FIXED
-            return [row: lines[0].row, state: state, entries: lines, order: key]
-        }
-    }
-
-    /**
-     * DAR-BE-250. Earliest step wins: each statement's order units (statements in story order, sequenceNum then code),
-     * split into those it counts and those waiting on an earlier step of the same order (OrderWorlds). A unit's open lines
-     * wait together (they share its world and its step); its fixed lines never wait, so when its open lines wait, they
-     * are a waiting unit and its fixed lines stay counted as fixed at their own step (DAR-OPS-029 S10: before, such an
-     * order was counted open at both steps). Each waiting unit is hung, with its statement, on the first open unit of its
-     * order world that a statement counts, which is at the step it waits on. Returns statementId -> [counted, waiting].
-     */
-    static Map<String, Map> stepUnits(List<Map> statements, Map<String, List<Map>> entriesByStatement, Map<String, Map> recordsByFinding) {
-        Map<String, Long> step = statements.collectEntries { [(it.statementId as String): it.sequenceNum == null ? null : (it.sequenceNum as Long)] }
-        List<Map> all = statements.collectMany { (entriesByStatement.get(it.statementId as String) ?: []) as List<Map> } as List<Map>
-        Map<String, Map> worlds = OrderWorlds.rank(all, recordsByFinding, step)
-        Map<String, Map> out = new LinkedHashMap<>()
-        Map<String, Map> holderByWorld = [:]
-        statements.each { Map st ->
-            List<Map> counted = [], waiting = []
-            orderUnits((entriesByStatement.get(st.statementId as String) ?: []) as List<Map>, recordsByFinding).each { Map unit ->
-                List<Map> lines = unit.entries as List<Map>
-                String world = worlds.get(lines[0].row.findingId as String)?.world
-                List<Map> open = lines.findAll { it.state == OPEN }
-                String waitingOn = open ? worlds.get(open[0].row.findingId as String)?.waitingOn : null
-                if (waitingOn == null) {
-                    counted << (unit + [world: world])
-                    return
-                }
-                waiting << (unit + [row: open[0].row, state: OPEN, entries: open, world: world, waitingOn: waitingOn])
-                List<Map> fixed = lines.findAll { it.state != OPEN }
-                if (fixed) counted << (unit + [row: fixed[0].row, state: FIXED, entries: fixed, world: world])
-            }
-            counted.each { Map unit -> if (unit.state == OPEN && unit.world != null) holderByWorld.putIfAbsent(unit.world as String, unit) }
-            out.put(st.statementId as String, [counted: counted, waiting: waiting])
-        }
-        out.each { String statementId, Map split ->
-            (split.waiting as List<Map>).each { Map unit ->
-                Map holder = holderByWorld.get(unit.world as String)
-                if (holder != null) ((List) (holder.waitingUnits = holder.waitingUnits ?: [])) << (unit + [statementId: statementId])
-            }
-        }
-        return out
-    }
 
     /** DAR-BE-250. The findings waiting on a counted one, as it lists them: each with its statement, id, headline, cause and
      *  its own statement's level (DAR-BE-348). */
@@ -502,24 +427,9 @@ class AuditReportAssembler {
                                          Map<String, String> codes, Map<String, String> statementCodeById, Map levels) {
         return ((unit.waitingUnits ?: []) as List<Map>).collect { Map w ->
             Map f = unitFinding(w, day, recordsByFinding, causes, codes, levels)
-            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: itemOf(f),
+            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: AuditOrderUnits.itemOf(f),
              priority: f.priority, prioritySource: f.prioritySource, priorityReason: f.priorityReason]
         }
-    }
-
-    /**
-     * DAR-BE-254. What a finding is about, for a row that names it in a word (Aditi: "it says R4 here.. shouldnt it be the
-     * SKU"): its records' SKUs (up to two, then "and N more"), else its line ids, else null (an order-level finding).
-     */
-    static String itemOf(Map finding) {
-        List<Map> recs = []
-        (((finding?.records ?: [:]) as Map).values()).each { Object byType ->
-            ((byType ?: [:]) as Map).values().each { Object list -> recs.addAll(((list ?: []) as List).findAll { it instanceof Map } as List<Map>) }
-        }
-        List<String> skus = recs.collect { it.sku as String }.findAll().unique()
-        List<String> picked = skus ?: ((finding?.lines ?: []) as List<Map>).collect { it.id as String }.findAll().unique()
-        if (!picked) return null
-        return picked.size() <= 2 ? picked.join(', ') : "${picked.take(2).join(', ')} and ${picked.size() - 2} more".toString()
     }
 
     /** Each conclusion's words and, when it is held by another line's cause (relatedEnumId), that cause. */
@@ -549,17 +459,17 @@ class AuditReportAssembler {
         if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" } + acknowledgement
         String order = unit.order as String
         List<Map> lines = (unit.entries as List<Map>).collect(line)
-        List<Map> context = takeOrderLineRecords(lines)
+        List<Map> context = AuditOrderUnits.takeOrderLineRecords(lines)
         List<Map> stuck = lines.any { it.held } ? lines.findAll { !it.held && it.cause } : []
         List<String> own = lines*.cause.findAll().unique() as List<String>
         String cause = stuck ? stuck[0].cause : (own.size() == 1 ? own[0] : null)
-        List<String> numbers = stuck.collect { Map l -> lineNumber(order, l) }
+        List<String> numbers = stuck.collect { Map l -> AuditOrderUnits.lineNumber(order, l) }
         String named = numbers.size() == 1 ? "line ${numbers[0]}" :
                 "lines ${numbers.size() > 1 ? numbers[0..-2].join(', ') + ' and ' + numbers[-1] : ''}"
         String headline = stuck ?
-                "Order ${order}: ${named} ${lowerFirst(cause)}, holding ${lines.size() - stuck.size()} more line${lines.size() - stuck.size() == 1 ? '' : 's'}" :
-                lines.size() == 1 ? "Order ${order}: ${oneLine(order, lines[0])}" :
-                "Order ${order}: ${lines.size()} lines${cause ? ', ' + lowerFirst(cause) : ''}"
+                "Order ${order}: ${named} ${AuditOrderUnits.lowerFirst(cause)}, holding ${lines.size() - stuck.size()} more line${lines.size() - stuck.size() == 1 ? '' : 's'}" :
+                lines.size() == 1 ? "Order ${order}: ${AuditOrderUnits.oneLine(order, lines[0])}" :
+                "Order ${order}: ${lines.size()} lines${cause ? ', ' + AuditOrderUnits.lowerFirst(cause) : ''}"
         Map first = lines[0]
         return [id        : order,
                 kind      : "order",
@@ -568,75 +478,13 @@ class AuditReportAssembler {
                 state     : codes[unit.state as String],
                 firstFound: first.firstFound,
                 ageDays   : first.ageDays,
-                records   : mergedRecords(lines*.records as List<Map>),
+                records   : AuditOrderUnits.mergedRecords(lines*.records as List<Map>),
                 difference: null,
                 cause     : cause,
                 stuck     : stuck*.id,
                 lines     : lines,
-                orderLines: orderLines(order, lines, context),
+                orderLines: AuditOrderUnits.orderLines(order, lines, context),
                 next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes) + acknowledgement
-    }
-
-    /**
-     * DAR-UI-099: the other lines of the order its findings carry (AuditAutomationSupport.ORDER_LINE records), taken off
-     * each line's records so they are listed once, in orderLines, and not as records of their own.
-     */
-    private static List<Map> takeOrderLineRecords(List<Map> lines) {
-        List<Map> context = []
-        lines.each { Map l ->
-            Map copy = new LinkedHashMap()
-            ((Map) (l.records ?: [:])).each { String system, Map byType ->
-                Map kept = new LinkedHashMap(byType)
-                ((List) (kept.remove(AuditAutomationSupport.ORDER_LINE) ?: [])).each { context << [system: system, record: it] }
-                if (kept) copy.put(system, kept)
-            }
-            l.records = copy
-        }
-        return context
-    }
-
-    /**
-     * DAR-UI-099 (Aditi: "always make sure all lines are present within the order... a store credit line item is added").
-     * Every line of the order, in line order: those with a finding (its id, cause and state) and those without (as the run
-     * read them: completed and billed, or set aside, e.g. approved and not yet fulfilled), with SKU, status and units; then
-     * the lines only another system has with no line of their own, e.g. NetSuite's "Store Credit - Redemption".
-     */
-    static List<Map> orderLines(String order, List<Map> lines, List<Map> context) {
-        Map<String, Map> byItem = new LinkedHashMap<>()
-        String ownSystem = null
-        lines.each { Map l ->
-            ((Map) (l.records ?: [:])).each { String system, Map byType ->
-                byType.each { String type, List list ->
-                    list.each { Map r ->
-                        String id = r.id as String
-                        if (!id?.startsWith(order + "/") || byItem.containsKey(id)) return
-                        ownSystem = ownSystem ?: system
-                        if (system != ownSystem) return
-                        byItem.put(id, [line: itemNumber(order, id), item: id,
-                                        sku: r.sku, status: r.status, finding: l.id, cause: l.cause, state: l.state])
-                    }
-                }
-            }
-        }
-        List<Map> others = []
-        context.each { Map c ->
-            Map r = (Map) c.record
-            String id = r.id as String
-            if (id?.startsWith(order + "/")) {
-                if ((ownSystem == null || c.system == ownSystem) && !byItem.containsKey(id)) {
-                    ownSystem = ownSystem ?: c.system
-                    byItem.put(id, [line: itemNumber(order, id), item: id, sku: r.sku,
-                                    status: r.status, quantity: r.quantity, setAside: r.setAside == true, finding: null])
-                }
-            } else if (!others.any { it.system == c.system && it.item == (r.item ?: id) }) {
-                others << [system: c.system, item: r.item ?: id, itemType: r.itemType, amount: r.amount, status: r.status]
-            }
-        }
-        List<Map> sorted = byItem.values().sort(false) { Map a, Map b ->
-            ((a.line as String)?.isInteger() ? (a.line as String).toInteger() : Integer.MAX_VALUE) <=>
-                    ((b.line as String)?.isInteger() ? (b.line as String).toInteger() : Integer.MAX_VALUE) ?: (a.item as String) <=> (b.item as String)
-        }
-        return (sorted.collect { it.findAll { k, v -> v != null } } + others.collect { it.findAll { k, v -> v != null } }) as List<Map>
     }
 
     /**
@@ -696,11 +544,11 @@ class AuditReportAssembler {
             def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
                     .condition("stateEnumId", OPEN)
             if (period) find.condition("period", period)
-            [(st.statementId as String): sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })]
+            [(st.statementId as String): AuditOrderUnits.sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })]
         }
         Map<String, Map> records = recordsFor(ec, tenantId, entriesByStatement.values().flatten()*.row*.findingId as List<String>)
         return [statements: statements, entriesByStatement: entriesByStatement, records: records,
-                split: stepUnits(statements, entriesByStatement, records)]
+                split: AuditOrderUnits.stepUnits(statements, entriesByStatement, records)]
     }
 
     /**
@@ -718,22 +566,12 @@ class AuditReportAssembler {
         if (f.stateEnumId != OPEN || statement == null) return [findingId]
         Map<String, Map> split = openStepUnits(ec, tenantId, statement.auditId as String, f.period as String).split as Map<String, Map>
         // The row is a counted unit: the line's own, or the one it waits under (holders carry their waiting units).
-        Map row = split.values().collectMany { it.counted as List<Map> }.find { Map u -> rowLines(u).any { it.row.findingId == findingId } }
+        Map row = split.values().collectMany { it.counted as List<Map> }.find { Map u -> AuditOrderUnits.rowLines(u).any { it.row.findingId == findingId } }
         // A waiting unit whose order has no open counted unit is listed nowhere else: it covers itself.
         Map unit = row ?: ((split[f.statementId as String]?.waiting ?: []) as List<Map>).find { Map u ->
             (u.entries as List<Map>).any { it.row.findingId == findingId } }
         if (unit == null) return [findingId]
-        return openRowIds(unit)
-    }
-
-    /** DAR-BE-361. A row's lines: its own, then those of the later-step units waiting under it. */
-    private static List<Map> rowLines(Map unit) {
-        return (unit.entries as List<Map>) + ((unit.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> }
-    }
-
-    /** DAR-BE-361. The findings one Acknowledge of this row covers, and whose acknowledgements its state reads: its open lines. */
-    private static List<String> openRowIds(Map unit) {
-        return rowLines(unit).findAll { it.state == OPEN }.collect { it.row.findingId as String }.unique()
+        return AuditOrderUnits.openRowIds(unit)
     }
 
     private static boolean acknowledged(Map unit) {
@@ -747,7 +585,7 @@ class AuditReportAssembler {
     private static void markAcknowledgements(def ec, String tenantId, List<Map> units, List<String> findingIds, LocalDate today, ZoneId zone) {
         Map acks = acknowledgementsOf(ec, tenantId, findingIds)
         if (!(acks.rows as Map)) return
-        units.findAll { it.state == OPEN }.each { Map unit -> unit.ack = acknowledgementOf(openRowIds(unit), acks, today, zone) }
+        units.findAll { it.state == OPEN }.each { Map unit -> unit.ack = acknowledgementOf(AuditOrderUnits.openRowIds(unit), acks, today, zone) }
     }
 
     /**
@@ -793,65 +631,6 @@ class AuditReportAssembler {
         Map summary = AcknowledgementSupport.summary(rows[memberIds[0]], state, acks.labels as Map<String, String>)
         summary.at = isoDateTime(summary.at as Timestamp, zone)
         return [state: state, summary: summary]
-    }
-
-    /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax
-     *  and not billed in NetSuite" from "Item M1167975/01 is completed ...". With a cause and no such words, the cause. */
-    private static String oneLine(String order, Map line) {
-        String item = lineItemId(line)
-        String headline = (line.headline ?: "") as String
-        int at = item ? headline.indexOf(item) : -1
-        if (at >= 0) return "line ${lineNumber(order, line)}${headline.substring(at + item.length())}".toString()
-        return "line ${lineNumber(order, line)}${line.cause ? ', ' + lowerFirst(line.cause as String) : ''}".toString()
-    }
-
-    /** DAR-UI-099: "2" for item M1132010/02 of order M1132010; the item id when it has no number after the order. */
-    static String itemNumber(String order, String item) {
-        if (!item?.startsWith(order) || item.length() <= order.length()) return item
-        String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
-        return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
-    }
-
-    /**
-     * "1" for item M1168785/01 of order M1168785 (a person reads "line 1", not "/01"); the item id itself when it is not
-     * under the order's key (R10 keys an order by its NetSuite sales order). DAR-BE-372 rule 5: never the finding id; a
-     * line nothing names reads "?".
-     */
-    private static String lineNumber(String order, Map line) {
-        String item = lineItemId(line)
-        if (!item) return "?"
-        if (!item.startsWith(order) || item.length() <= order.length()) return item
-        String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
-        return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
-    }
-
-    /**
-     * DAR-BE-372 rule 5. A line's HotWax item id: its HotWax item record's, else the one its own headline names ("Line
-     * M1230020/01 is open in NetSuite ..." on an R10 line that holds only a NetSuite record). Null when neither does.
-     */
-    static String lineItemId(Map line) {
-        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
-        if (item) return item
-        def named = ((line.headline ?: "") as String) =~ /^(?:Line|Item) (\S+)/
-        return named.find() ? named.group(1) : null
-    }
-
-    private static String lowerFirst(String text) {
-        return text ? text.substring(0, 1).toLowerCase() + text.substring(1) : text
-    }
-
-    /** Every line's records once each, systems and types in first-seen order. */
-    private static Map mergedRecords(List<Map> perLine) {
-        Map<String, Map<String, List>> out = new LinkedHashMap<>()
-        perLine.each { Map bySystem ->
-            (bySystem ?: [:]).each { String system, Map byType ->
-                byType.each { String type, List list ->
-                    List into = out.computeIfAbsent(system) { new LinkedHashMap<>() }.computeIfAbsent(type) { [] }
-                    list.each { Map r -> if (!into.any { it.id == r.id }) into << r }
-                }
-            }
-        }
-        return out
     }
 
     private static Map briefFinding(Map entry, LocalDate day, Map records, Map<String, String> codes) {
@@ -1292,15 +1071,6 @@ class AuditReportAssembler {
         return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): AuditRecordFacts.recordsJson(v, false, zone)] }
     }
 
-    /** Oldest first: firstFound ascending, then id ascending with F-99 before F-100. */
-    private static List<Map> sortOldestFirst(List<Map> entries) {
-        return entries.sort(false) { Map a, Map b ->
-            ((a.row.firstFoundDate as Date) <=> (b.row.firstFoundDate as Date)) ?:
-                    ((a.row.findingId as String).length() <=> (b.row.findingId as String).length()) ?:
-                    ((a.row.findingId as String) <=> (b.row.findingId as String))
-        }
-    }
-
     private static Map loadTenant(def ec, String tenantId) {
         if (!tenantId) return null
         def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup", WHY)
@@ -1367,4 +1137,6 @@ class AuditReportAssembler {
     static Map periodWindow(def ec, Map audit, String period, LocalDate day) { AuditPeriods.periodWindow(ec, audit, period, day) }
     static LocalDate recordableFrom(LocalDate day, String periodCode) { AuditPeriods.recordableFrom(day, periodCode) }
     static Map resolveCheckRun(def ec, String tenantId, List auditIds, LocalDate day, String period) { AuditPeriods.resolveCheckRun(ec, tenantId, auditIds, day, period) }
+    static String lineItemId(Map line) { AuditOrderUnits.lineItemId(line) }
+    static List<Map> orderLines(String order, List<Map> lines, List<Map> context) { AuditOrderUnits.orderLines(order, lines, context) }
 }

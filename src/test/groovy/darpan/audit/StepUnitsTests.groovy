@@ -58,7 +58,7 @@ class StepUnitsTests {
     @Test
     void everyEntryLandsInExactlyOneUnitAndEveryWaitingUnitHangsOnce() {
         Map s = scenario()
-        Map<String, Map> split = AuditReportAssembler.stepUnits(s.statements as List<Map>, s.entries as Map, s.records as Map)
+        Map<String, Map> split = AuditOrderUnits.stepUnits(s.statements as List<Map>, s.entries as Map, s.records as Map)
         Map<String, List<String>> b = buckets(split)
         List<String> all = (s.entries as Map).values().flatten()*.row*.findingId as List<String>
         assertEquals(all.sort(), (b.counted + b.waiting).sort(), "each entry counted or waiting, once")
@@ -69,7 +69,7 @@ class StepUnitsTests {
     @Test
     void anOrderWaitingAtALaterStepIsNotCountedOpenThereBecauseOneOfItsLinesWasFixedToday() {
         Map s = scenario()
-        Map<String, Map> split = AuditReportAssembler.stepUnits(s.statements as List<Map>, s.entries as Map, s.records as Map)
+        Map<String, Map> split = AuditOrderUnits.stepUnits(s.statements as List<Map>, s.entries as Map, s.records as Map)
         List<Map> s8 = split.S8.counted as List<Map>
         assertEquals([["M1", FIXED, ["F-3"]], ["M9", OPEN, ["F-9"]]],
                 s8.collect { [it.order, it.state, (it.entries as List<Map>)*.row*.findingId] },
@@ -96,7 +96,7 @@ class StepUnitsTests {
         Map entries = (s.entries as Map) + [S0: [entry("F-0", "S0", OPEN), entry("F-0b", "S0", FIXED)]]
         Map records = (s.records as Map) + ["F-0": item("M1/04"), "F-0b": item("M1/05")]
         [withUnstepped, withUnstepped.reverse(), [withUnstepped[1], withUnstepped[0], withUnstepped[2]]].each { List<Map> order ->
-            Map<String, Map> split = AuditReportAssembler.stepUnits(order, entries, records)
+            Map<String, Map> split = AuditOrderUnits.stepUnits(order, entries, records)
             Map holder = (split.S4.counted as List<Map>).find { it.order == "M1" }
             assertNotNull(holder, "M1 counts at S4 for ${order*.statementId}")
             assertEquals([["S0", ["F-0"]], ["S8", ["F-2"]]].toSet(),

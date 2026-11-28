@@ -144,16 +144,45 @@ class KeepStepSupport {
             if (sparkWrites) summary.put(EXTRACTOR_SIDE_FILE, [total: part?.total ?: 0, kept: part?.kept ?: 0, truncated: part?.truncated == true])
             KeepArtifacts.writeSummary(extract, summary)
             if (!sparkWrites && ownedBefore == null) return
-            Map merged = ExcludedRecordsSidecar.newCollector()
-            try {
-                if (part != null) ExcludedRecordsSidecar.merge(merged, part)
-                if (sparkWrites) ExcludedRecordsSidecar.merge(merged, setAsideCollector(extract, summary))
-                writeSideFile(extract, merged)
-            } finally {
-                ExcludedRecordsSidecar.discard(merged)
-            }
+            rewriteSideFile(extract, part, sparkWrites ? setAsideCollector(extract, summary) : null)
         } finally {
             ExcludedRecordsSidecar.discard(part)
+        }
+    }
+
+    /**
+     * DAR-OPS-029 S05 (OC36, QA 8a). Puts a landed extract back as its read left it, for a pass that compares it with no Keep
+     * (its plan has no rules now, or its extract filters at the read again): that compare took every record, so an earlier Spark
+     * Keep's artifact must not make the conclude pass, a sync pulse or a backtest skip records it took. The side file goes back to
+     * the extractor's part (writeArtifact's own reading of the mark; a side file only Keep wrote is removed), then the rows, then
+     * the summary, which readers look for first. With no summary only a stray rows file is removed. Twice is the same as once.
+     */
+    static void forgetKeep(File extract) {
+        if (extract == null) return
+        Map previous = KeepArtifacts.readSummary(extract)
+        Map ownedBefore = previous?.get(EXTRACTOR_SIDE_FILE) as Map
+        if (ownedBefore != null) {
+            Map part = extractorPart(extract, ownedBefore)
+            try {
+                rewriteSideFile(extract, part, null)
+            } finally {
+                ExcludedRecordsSidecar.discard(part)
+            }
+        }
+        KeepArtifacts.rowsFile(extract).delete()
+        KeepArtifacts.keepFile(extract).delete()
+    }
+
+    /** The side file as the extractor's part (first) and Spark's set-aside records (after), each collector released here. */
+    private static void rewriteSideFile(File extract, Map extractorPart, Map sparkPart) {
+        Map merged = ExcludedRecordsSidecar.newCollector()
+        try {
+            if (extractorPart != null) ExcludedRecordsSidecar.merge(merged, extractorPart)
+            if (sparkPart != null) ExcludedRecordsSidecar.merge(merged, sparkPart)
+            writeSideFile(extract, merged)
+        } finally {
+            ExcludedRecordsSidecar.discard(merged)
+            ExcludedRecordsSidecar.discard(sparkPart)
         }
     }
 
@@ -342,12 +371,9 @@ class KeepStepSupport {
                     [id: rule.get("id"), sequenceNum: rule.get("sequenceNum"), label: rule.get("label"), source: rule.get("source")]
                 },
                 configuredExclusions: rules.findAll { it.get("source") == "TENANT" }.collect { Map rule ->
-                    [sequenceNum     : rule.get("sequenceNum"),
-                     fieldExpression : rule.get("label"),
-                     operator        : rule.get("operator"),
-                     values          : new ArrayList((List) rule.get("values")),
-                     excludedCount   : countOf("${rule.get('id')}|${SourceFilterSupport.REASON_VALUE}".toString()),
-                     fieldAbsentCount: countOf("${rule.get('id')}|${SourceFilterSupport.REASON_FIELD_ABSENT}".toString())]
+                    SourceFilterSupport.exclusionEntry(rule.get("sequenceNum"), rule.get("label"), rule.get("operator"), (List) rule.get("values"),
+                            countOf("${rule.get('id')}|${SourceFilterSupport.REASON_VALUE}".toString()),
+                            countOf("${rule.get('id')}|${SourceFilterSupport.REASON_FIELD_ABSENT}".toString()))
                 },
                 builtIn             : rules.findAll { it.get("source") == "BUILT_IN" }.collect { Map rule ->
                     [sequenceNum: rule.get("sequenceNum"), label: rule.get("label"), setAsideCount: byRule.get(rule.get("id") as String) ?: 0L]

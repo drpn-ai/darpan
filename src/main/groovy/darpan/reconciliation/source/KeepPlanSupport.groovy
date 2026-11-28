@@ -129,17 +129,14 @@ class KeepPlanSupport {
         return KeepArtifacts.filteredAtRead(landed, builtInFields)
     }
 
-    /** The compare ops that can hold on a record that lacks the field (KeepLineTranslator.OPS' values). */
-    private static final Set<String> ABSENCE_OPS = ["LT", "LE", "NE", "NOT_IN", "IS_NULL", "NOT_LIKE"] as Set
-
-    /** Whether any test of a compiled rule could set aside a record that lacks the field it reads. */
+    /** Whether any test of a compiled rule could set aside a record that lacks the field it reads (KeepRules.HOLDS_FOR_NO_VALUE). */
     private static boolean holdsOnAbsence(Map rule) {
         return ((List<Map>) rule.get("tests") ?: []).any { Map test -> predicateHoldsOnAbsence((Map) test.get("test")) }
     }
 
     private static boolean predicateHoldsOnAbsence(Map predicate) {
         switch (predicate?.get("kind")) {
-            case "compare": return ABSENCE_OPS.contains(predicate.get("op"))
+            case "compare": return KeepRules.HOLDS_FOR_NO_VALUE.contains(predicate.get("op"))
             case "not": return true
             case "all": case "any": return ((List<Map>) predicate.get("of") ?: []).any { predicateHoldsOnAbsence(it) }
             default: return false
@@ -160,7 +157,7 @@ class KeepPlanSupport {
     /** "File 2 (ACME)" for FILE_2 on connector ACME; "The ACME side" when the side is not given. */
     private static String sideName(String fileSide, Map connector) {
         String system = normalize(connector?.get("systemEnumId"))
-        String side = normalize(fileSide)?.replace("_", " ")?.toLowerCase()?.capitalize()
+        String side = normalize(fileSide)?.replace("_", " ")?.toLowerCase(Locale.ROOT)?.capitalize()
         if (side) return system ? "${side} (${system})".toString() : side
         return system ? "The ${system} side".toString() : "A side"
     }
@@ -239,7 +236,7 @@ class KeepPlanSupport {
             rules.addAll(SourceFilterSupport.toKeepRules(SourceFilterSupport.parseRules(rows)))
             KeepRules.validate(rules)
             out.rules = rules
-            out.writeSidecar = normalize(connector.get("excludedRecordsSidecar"))?.toUpperCase() == "Y"
+            out.writeSidecar = normalize(connector.get("excludedRecordsSidecar"))?.toUpperCase(Locale.ROOT) == "Y"
             ((Set) out.fields).addAll(KeepRules.fields(rules))
         }
         return out

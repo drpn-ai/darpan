@@ -139,6 +139,59 @@ class KeepStepSupportTests {
         assertEquals(1, ((List) out.persisted).size())
     }
 
+    /**
+     * DAR-OPS-029 S05, conservation over a mixed corpus (blank, padded, case-varied and missing values, and non-object entries,
+     * which take no row). Every record is kept or set aside by exactly one rule: the summary's kept and set-aside counts add up
+     * to the records, the per-rule counts add up to the set-aside count, the rows file holds one line per set-aside record, and
+     * the two readers visit exactly those records, disjointly. Which records are kept is checked against SourceFilterSupport.evaluate
+     * and the built-in's own test (lineType exactly X), the first rule that holds owning the record.
+     */
+    @Test
+    void everyRecordIsKeptOrSetAsideByExactlyOneRuleAndTheCountsAddUp() {
+        List<String> statuses = ["open", "Cancelled", " cancelled ", "", null, "void"]
+        List<String> channels = ["web", "WEB ", "pos", "", null]
+        List<String> lineTypes = ["A", "X", "x", null]
+        List<String> regions = ["zz-1", "ZZ9", "aa", "", null]
+        List<Map> records = []
+        int n = 0
+        statuses.each { s -> channels.each { c -> lineTypes.each { l -> regions.each { r ->
+            Map record = [id: "R${n++}".toString(), amount: n]
+            [status: s, channel: c, lineType: l, region: r].each { k, v -> if (v != null) record.put(k, v) }
+            records.add(record)
+        } } } }
+        List mixed = []
+        records.eachWithIndex { Map record, int i -> mixed.add(record); if (i % 97 == 0) mixed.addAll([7, "x", null]) }
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules([
+                [sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "cancelled, void"],
+                [sequenceNum: 2, fieldExpression: "channel", operator: "INCLUDE_IN", filterValues: "web"],
+                [sequenceNum: 3, fieldExpression: "region", operator: "INCLUDE_PREFIX", filterValues: "zz"]])
+        File file = extract(mixed)
+
+        Map out = ingest(file, sideKeep([rules()[0]] + SourceFilterSupport.toKeepRules(parsed)))
+
+        Map summary = KeepArtifacts.readSummary(file)
+        long kept = summary.keptCount as long
+        long aside = summary.setAsideCount as long
+        assertEquals(records.size() as long, kept + aside)
+        long perRule = ((List<Map>) summary.configuredExclusions).sum { (it.excludedCount as long) + (it.fieldAbsentCount as long) } as long
+        perRule += ((List<Map>) summary.builtIn).sum { it.setAsideCount as long } as long
+        assertEquals(aside, perRule)
+        assertEquals(aside, rowLines(file).size() as long)
+
+        List<String> keptIds = []
+        List<String> asideIds = []
+        KeepArtifacts.forEachKeptRecord(file) { Map r -> keptIds.add(r.id as String) }
+        KeepArtifacts.forEachSetAsideRecord(file) { Map r, String ruleId -> asideIds.add(r.id as String) }
+        assertEquals(kept, keptIds.size() as long)
+        assertEquals(aside, asideIds.size() as long)
+        assertEquals(records*.id.sort(), (keptIds + asideIds).sort())
+
+        List<String> expected = records.findAll { Map r -> r.lineType != "X" && SourceFilterSupport.evaluate(r, parsed) == null }*.id
+        assertEquals(expected.sort(), keptIds.sort())
+        assertEquals(expected.sort(), ids(out.idDf))
+        assertTrue(0 < kept && 0 < aside, "the corpus exercises both outcomes")
+    }
+
     @Test
     void configuredExclusionsAreWhatApplyToRecordsReportsForTheSameFilters() {
         List<Map<String, Object>> parsed = SourceFilterSupport.parseRules([
@@ -289,6 +342,46 @@ class KeepStepSupportTests {
         assertFalse(sidecarOf(file).exists(), "nothing set aside now and no extractor part: no side file")
     }
 
+    /**
+     * DAR-OPS-029 S05, OC36 (QA 8a). A landed extract Spark kept once, compared again by a pass that runs no Keep (its plan now has
+     * no rules, or its extract filters at the read again), took every record: the old artifact must not make the conclude pass skip
+     * records the compare took. forgetKeep removes the summary and the rows, and puts the side file back as the extractor wrote it
+     * (removing a side file only Keep wrote). Over an extract Keep never ran on it changes nothing; twice is the same as once.
+     */
+    @Test
+    void forgetKeepPutsTheExtractBackAsItsReadLeftIt() {
+        File file = extract(sixRecords(), "acme-orders.json", new File(dir, "extractor"))
+        File side = extractorSideFile(file)
+        String extractorText = side.getText("UTF-8")
+        ingest(file, sideKeep(rules(), true))
+        assertTrue(KeepArtifacts.keepFile(file).isFile() && KeepArtifacts.rowsFile(file).isFile(), "test precondition")
+
+        KeepStepSupport.forgetKeep(file)
+        KeepStepSupport.forgetKeep(file)
+
+        assertFalse(KeepArtifacts.keepFile(file).exists())
+        assertFalse(KeepArtifacts.rowsFile(file).exists())
+        Map sidecar = new groovy.json.JsonSlurper().parse(side, "UTF-8") as Map
+        assertEquals(["x1", "x2"], ((List<Map>) sidecar.records)*.id)
+        assertEquals(2, sidecar.total)
+        assertTrue(side.getText("UTF-8").contains('"amount":24.00') && side.getText("UTF-8").contains('"amount":1.0E+7'), side.getText("UTF-8"))
+        List seen = []
+        KeepArtifacts.forEachKeptRecord(file) { Map r -> seen.add(r.id) }
+        assertEquals(6, seen.size(), "every record reads as kept again")
+
+        File keepOnly = extract(sixRecords(), "acme-orders.json", new File(dir, "keep-only"))
+        ingest(keepOnly, sideKeep(rules(), true))
+        assertTrue(sidecarOf(keepOnly).isFile(), "test precondition")
+        KeepStepSupport.forgetKeep(keepOnly)
+        assertFalse(sidecarOf(keepOnly).exists(), "a side file only Keep wrote goes with it")
+
+        File untouched = extract(sixRecords(), "acme-orders.json", new File(dir, "never-kept"))
+        File untouchedSide = extractorSideFile(untouched)
+        KeepStepSupport.forgetKeep(untouched)
+        assertEquals(extractorText, untouchedSide.getText("UTF-8"))
+        assertEquals(["acme-orders.excluded.json", "acme-orders.json"].sort(), untouched.parentFile.list().toList().sort())
+    }
+
     @Test
     void anExtractorFilesTruncationAndTotalCarryOver() {
         File file = extract(sixRecords())
@@ -362,7 +455,7 @@ class KeepStepSupportTests {
     @Test
     void rulesThatNameNoFieldStillNumberTheirRows() {
         // a decision whose lines were all judged on the driver: a constant, no Keep text column
-        List<Map> constant = [[id: "B:R1", sequenceNum: 1, label: "Everything", source: "DECISION",
+        List<Map> constant = [[id: "B:R1", sequenceNum: 1, label: "Everything", source: "BUILT_IN",
                                tests: [[test: [kind: "const", holds: true], reason: "OUT_1"]]]]
         File file = extract([[id: "1"], [id: "2"], [id: "3"]])
         Map out = ingest(file, sideKeep(constant))

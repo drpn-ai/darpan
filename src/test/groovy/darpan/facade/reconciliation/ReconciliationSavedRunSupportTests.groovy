@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -302,5 +303,41 @@ class ReconciliationSavedRunSupportTests {
         assertEquals('$.records[*].tranId', ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", '$.records[*].tranId'))
         assertEquals("tranId", ReconciliationSavedRunSupport.foldConnectorRecordRoot(null, "tranId"))
         assertNull(ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", null))
+    }
+
+    // ─── OC18: a verify check that did not finish (DAR-BE-362, errors-warnings-to-alerts-room-only) ──────
+
+    @Test
+    void anUnfinishedCheckTellsTheRunAWarningWithNoErrorTextInIt() {
+        String warning = ReconciliationSavedRunSupport.checkIncompleteWarning("Exchange presence check")
+        assertEquals("Exchange presence check did not finish; this run's results may be incomplete.", warning)
+    }
+
+    @Test
+    void theAlertNamesTheTenantRunAndCheckAndCarriesTheRawErrorCapped() {
+        String raw = "Connection refused: oms.example.com:443 " + ("x" * 400)
+        String text = ReconciliationSavedRunSupport.checkFailureAlertText(
+                [companyUserGroupId: "GORJANA", runName: "API Order Sync", reconciliationRunResultId: "RR_100"],
+                "Return presence check", [raw, "second error"])
+        assertTrue(text.startsWith("Return presence check did not finish · GORJANA · API Order Sync · run RR_100: Connection refused"), text)
+        assertTrue(text.contains("Connection refused: oms.example.com:443"), "the raw error goes to Darpan's own room")
+        assertTrue(text.length() <= text.indexOf(": Connection") + 2 + darpan.ops.ErrorChatSupport.ERROR_MAX_CHARS, "capped: ${text.length()}")
+    }
+
+    @Test
+    void noRawErrorsMeansNoAlertText() {
+        assertNull(ReconciliationSavedRunSupport.checkFailureAlertText([:], "Exchange presence check", []))
+        assertNull(ReconciliationSavedRunSupport.checkFailureAlertText([:], "Exchange presence check", null))
+    }
+
+    /** The manual run path folds no ec.message error and no exception text into the warnings a client's room is sent. */
+    @Test
+    void runSavedRunDiffKeepsRawCheckErrorsOutOfItsWarnings() {
+        String code = ReconciliationSmokeTestSupport.resolveBackendRoot()
+                .resolve("runtime/component/darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy").toFile().text
+                .replaceAll(/(?s)\/\*.*?\*\//, " ").split("\n").findAll { !it.trim().startsWith("//") }.join("\n")
+        assertFalse((code =~ /warnings[^\n]*getErrors\(\)/).find(), "ec.message errors folded into warnings")
+        assertFalse((code =~ /warnings[^\n]*\bt\.message\b|check failed: \$\{/).find(), "exception text folded into warnings")
+        assertEquals(2, (code =~ /ReconciliationSavedRunSupport\.alertCheckFailure\(/).size(), "both checks send their raw errors to Darpan's alerts room")
     }
 }

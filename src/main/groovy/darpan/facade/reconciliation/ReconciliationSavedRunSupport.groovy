@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.common.DarpanEntityConstants
+import darpan.ops.ErrorChatSupport
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.CompareIdExpressionSupport
@@ -1303,6 +1304,33 @@ class ReconciliationSavedRunSupport {
             default:
                 return normalized
         }
+    }
+
+    /**
+     * DAR-OPS-029 OC18 (DAR-BE-362, errors-warnings-to-alerts-room-only). A verify check that did not finish leaves the run
+     * this warning: its processingWarnings reach the completion message a client's room is sent, so it names the check and
+     * never the error.
+     */
+    static String checkIncompleteWarning(String checkLabel) {
+        return "${checkLabel} did not finish; this run's results may be incomplete.".toString()
+    }
+
+    /** The alerts-room text for a check that did not finish: tenant, run, run result and the raw errors, capped. Null with no errors. */
+    static String checkFailureAlertText(Map run, String checkLabel, List rawErrors) {
+        List<String> errors = (rawErrors ?: []).collect { normalize(it) }.findAll { it } as List<String>
+        if (!errors) return null
+        String detail = errors.join("; ")
+        if (detail.length() > ErrorChatSupport.ERROR_MAX_CHARS) detail = detail.substring(0, ErrorChatSupport.ERROR_MAX_CHARS)
+        String where = [normalize(run?.companyUserGroupId), normalize(run?.runName),
+                        normalize(run?.reconciliationRunResultId) ? "run ${normalize(run.reconciliationRunResultId)}" : null]
+                .findAll { it }.join(" · ")
+        return "${checkLabel} did not finish${where ? ' · ' + where : ''}: ${detail}".toString()
+    }
+
+    /** Sends a check's raw errors to Darpan's alerts room, never a client's. Never throws (postAlertText does not). */
+    static void alertCheckFailure(def ec, Map run, String checkLabel, List rawErrors) {
+        String text = checkFailureAlertText(run, checkLabel, rawErrors)
+        if (text) ErrorChatSupport.postAlertText(ec, text)
     }
 
     protected static boolean savedRunMatches(Map<String, Object> row, String search) {

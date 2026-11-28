@@ -194,6 +194,13 @@ def notifySavedRunFailure = { String reason ->
     ], reason)
 }
 
+// OC18: who a verify check's alerts-room text names (the run need not have a runResult yet).
+String EXCHANGE_CHECK = "Exchange presence check"
+String RETURNS_CHECK = "Return presence check"
+def checkAlertRun = { ->
+    return [companyUserGroupId: normalize(obsCtx?.companyUserGroupId), runName: savedRunNoticeName(), reconciliationRunResultId: obsRunId]
+}
+
 def enumLabel = { String enumId ->
     return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
 }
@@ -472,22 +479,29 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
 
     def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
     Map verification
+    List<String> checkErrors = []
     try {
         verification = (Map) ((Closure) prepared.run).call()
     } catch (Throwable t) {
-        verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0,
-                warnings: ["Exchange presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
+        verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0, warnings: [], auditNote: null] as Map
+        checkErrors << (normalize(t.message) ?: t.class.simpleName)
     }
     if (ec.message.hasError()) {
-        verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+        checkErrors.addAll((ec.message.getErrors() ?: []).collect { it?.toString() })
         verification.lookupFailed = true
         ec.message.clearErrors()
+    }
+    // OC18: the raw error goes to Darpan's alerts room; the run (and so a client's completion message) gets a neutral line.
+    if (checkErrors) {
+        verification.warnings = ((verification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(EXCHANGE_CHECK)]
+        ReconciliationSavedRunSupport.alertCheckFailure(ec, checkAlertRun(), EXCHANGE_CHECK, checkErrors)
     }
     RunVerificationSupport.applyExchangeOutcome(serviceResult, verification, (String) prepared.omsFileSide)
     RunObservability.endStep(ec, exchangeStep,
             verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : verification.sweepExchangeCount ?: 0,
-             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+             errorMessage: verification.lookupFailed ? (checkErrors ? checkErrors.first() :
+                     (verification.warnings ? verification.warnings.first().toString() : null)) : null,
              metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
                      verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }
@@ -563,16 +577,22 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
     Map returnsVerification
     boolean checkFailed = false
+    List<String> checkErrors = []
     try {
         returnsVerification = (Map) ((Closure) prepared.run).call()
     } catch (Throwable t) {
         checkFailed = true
-        returnsVerification = [performed: false, rewritten: false, removedCount: 0,
-                warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+        returnsVerification = [performed: false, rewritten: false, removedCount: 0, warnings: []] as Map
+        checkErrors << (normalize(t.message) ?: t.class.simpleName)
     }
     if (ec.message.hasError()) {
-        returnsVerification.warnings = ((returnsVerification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+        checkErrors.addAll((ec.message.getErrors() ?: []).collect { it?.toString() })
         ec.message.clearErrors()
+    }
+    // OC18: the raw error goes to Darpan's alerts room; the run (and so a client's completion message) gets a neutral line.
+    if (checkErrors) {
+        returnsVerification.warnings = ((returnsVerification.warnings ?: []) as List) + [ReconciliationSavedRunSupport.checkIncompleteWarning(RETURNS_CHECK)]
+        ReconciliationSavedRunSupport.alertCheckFailure(ec, checkAlertRun(), RETURNS_CHECK, checkErrors)
     }
     // The filter REMOVES rows from the diff file it already found (grace/window suppression), the
     // mirror image of the old append — so counts move DOWN here, which is exactly what
@@ -581,7 +601,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     RunObservability.endStep(ec, returnsStep,
             checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : (returnsVerification.removedCount ?: 0),
-             errorMessage: checkFailed && returnsVerification.warnings ? returnsVerification.warnings.first().toString() : null,
+             errorMessage: checkFailed && checkErrors ? checkErrors.first() : null,
              metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
                      returnsVerification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }

@@ -259,6 +259,11 @@ class SavedRunsFacadeSmokeTests {
         assertEquals(2L, runResult.runResult.generatedOutput.totalDifferences)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile1Count)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile2Count)
+        // DAR-OPS-029 S99-014: the upload rule-set branch answers like the API branch, so the run notification can name the
+        // mismatching fields and a rule failure reads FAILED (it dropped ruleDifferenceFields and the status).
+        assertTrue(runResult.runResult.containsKey("ruleDifferenceFields"), "upload runResult carries ruleDifferenceFields")
+        assertEquals([], runResult.runResult.ruleDifferenceFields)
+        assertEquals("AUT_STAT_SUCCESS", runResult.runResult.statusEnumId)
 
         def manifest = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
                 .condition("reconciliationRunResultId", runResult.runResult.reconciliationRunResultId as String)

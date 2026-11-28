@@ -1151,6 +1151,9 @@ try {
                                 .call()
 
                         if (!ec.message.hasError()) {
+                            // DAR-OPS-029 S99-014: answer like the API branch, so the notification names the mismatching
+                            // fields and a rule set that did not fully evaluate ends FAILED, never a clean compare.
+                            boolean uploadRuleExecutionFailed = serviceResult.ruleExecutionFailed == true
                             runResult = [
                                     savedRunId               : savedRun.savedRunId,
                                     runName                  : savedRun.runName,
@@ -1163,6 +1166,9 @@ try {
                                     onlyInFile1Count         : serviceResult.onlyInFile1Count,
                                     onlyInFile2Count         : serviceResult.onlyInFile2Count,
                                     ruleDifferenceCount      : serviceResult.ruleDifferenceCount,
+                                    ruleDifferenceFields     : (serviceResult.ruleDifferenceFields ?: []) as List,
+                                    duplicateDifferenceCount : serviceResult.duplicateDifferenceCount,
+                                    statusEnumId             : uploadRuleExecutionFailed ? ReconciliationOutputSupport.STATUS_FAILED : ReconciliationOutputSupport.STATUS_SUCCEEDED,
                                     ruleSetId                : savedRun.ruleSetId,
                                     compareScopeId           : savedRun.compareScopeId,
                                     compareScopeDescription  : savedRun.compareScopeDescription,
@@ -1176,7 +1182,9 @@ try {
                                     processingWarnings       : (serviceResult.processingWarnings ?: []) as List,
                                     generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
                             ]
-                            RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: serviceResult.differenceCount])
+                            RunObservability.endStep(ec, obsStep,
+                                    uploadRuleExecutionFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                                    [recordCount: serviceResult.differenceCount, errorMessage: uploadRuleExecutionFailed ? "rule execution failed" : null])
                             obsStep = null
                         }
                     } catch (Throwable t) {

@@ -167,8 +167,8 @@ class ReturnPresenceVerificationSupport {
      *   diffFile          : File — ruleset diff document (writeDiffDatasetOutput format), required
      *   omsSideLabel      : String — the file1Label/file2Label value the OMS-returns connector resolved to
      *   shopifySideLabel  : String — the file1Label/file2Label value the Shopify-return-refs connector resolved to
-     *   file1Label        : String, file2Label : String — as written into the document's metadata,
-     *                        needed only to attribute removals back to onlyInFile1Count/onlyInFile2Count
+     *   file1Label        : String, file2Label : String — as written into the document's metadata
+     *   omsSide, shopifySide : FILE_1 / FILE_2, the compare's side of each (R1); when absent, read from the labels
      *   graceHours        : optional, default DEFAULT_GRACE_HOURS
      *   nowMillis         : optional, default now
      *   windowStartMillis : optional — the run's REPORTING window start (see class doc's WINDOW-START
@@ -206,10 +206,9 @@ class ReturnPresenceVerificationSupport {
         Closure returnLinesLookup = (args?.returnLinesLookup instanceof Closure) ? (Closure) args.returnLinesLookup : null
         int maxOrderLookups = normalizeInt(args?.maxOrderLookups, DEFAULT_MAX_ORDER_LOOKUPS)
 
-        String omsToken = DiffDetailClassifier.normalizeToken(omsSideLabel)
-        String shopifyToken = DiffDetailClassifier.normalizeToken(shopifySideLabel)
-        String file1Token = DiffDetailClassifier.normalizeToken(file1Label)
-        String file2Token = DiffDetailClassifier.normalizeToken(file2Label)
+        // R1: each row's side is the compare's own (forEachMissingRowBySide), matched to the run's OMS and Shopify sides.
+        String omsSide = normalize(args?.omsSide) ?: DiffDocumentStreamSupport.sideForLabel(omsSideLabel, file1Label, file2Label)
+        String shopifySide = normalize(args?.shopifySide) ?: DiffDocumentStreamSupport.sideForLabel(shopifySideLabel, file1Label, file2Label)
 
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, pendingCount: 0,
@@ -218,6 +217,10 @@ class ReturnPresenceVerificationSupport {
                 warnings: warnings, auditNote: null] as Map<String, Object>
         if (diffFile == null || !diffFile.isFile()) {
             warnings.add("Return presence check skipped: diff file was not available.")
+            return inert
+        }
+        if (!omsSide || !shopifySide || omsSide == shopifySide) {
+            warnings.add("Return presence check skipped: could not tell which side is ${omsSideLabel} and which is ${shopifySideLabel}.".toString())
             return inert
         }
 
@@ -230,7 +233,7 @@ class ReturnPresenceVerificationSupport {
         Set<String> omsOrderIds = readOmsOrderIds(args?.omsExtractFile as File, warnings)
 
         JsonSlurper slurper = new JsonSlurper()
-        Map<String, Set<String>> removeIdsByToken = [:]
+        Map<String, Set<String>> removeIdsBySide = [:]
         // orderId -> row ids of the missing-in-OMS REFUND rows grading LEFT in place. Populated in
         // Pass 1, resolved in bulk in Pass 1.5 (CANCELLATION-REFUND SUPPRESSION, see class doc).
         Map<String, Set<String>> candidateRowIdsByOrderId = [:]
@@ -242,10 +245,9 @@ class ReturnPresenceVerificationSupport {
         int siblingReturnCount = 0
         int cancelledItemCount = 0
         int malformedCount = 0
-        boolean sawDifferencesHeader = DiffDocumentStreamSupport.forEachMissingRow(diffFile, slurper) { Map row ->
-            String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-            boolean missingInOms = missingToken && missingToken == omsToken
-            boolean missingInShopify = !missingInOms && missingToken && missingToken == shopifyToken
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachMissingRowBySide(diffFile, slurper) { Map row, String side ->
+            boolean missingInOms = side == omsSide
+            boolean missingInShopify = side == shopifySide
             if (!missingInOms && !missingInShopify) return
 
             // The row's data column carries the record from the side that IS present — the
@@ -361,15 +363,19 @@ class ReturnPresenceVerificationSupport {
 
             String rowId = DiffDocumentStreamSupport.rowIdOf(row)
             if (!rowId) return
-            removeIdsByToken.computeIfAbsent(missingToken) { new LinkedHashSet<String>() }.add(rowId)
+            removeIdsBySide.computeIfAbsent(side) { new LinkedHashSet<String>() }.add(rowId)
             if (pending) pendingCount++
             else if (preWindow) preWindowCount++
             else if (cancelledByField) cancelledByFieldCount++
             else if (siblingSuppressed) siblingReturnCount++
             else if (cancelledItemSuppressed) cancelledItemCount++
         }
-        if (!sawDifferencesHeader) {
+        if (!scan.headerFound) {
             warnings.add("Return presence check skipped: diff document has no differences section.")
+            return inert
+        }
+        if (!scan.complete) {
+            warnings.add("Return presence check skipped: ${scan.problem()}".toString())
             return inert
         }
         // M2 posture (carried over from the retired matching code): surface malformed counts as an
@@ -419,7 +425,7 @@ class ReturnPresenceVerificationSupport {
                     // time. The note's per-reason tallies are read as a breakdown of removedCount
                     // — a live returns run reported 37 + 15 + 2 = 54 reasons against 48 rows
                     // removed — so they must never exceed it.
-                    Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
+                    Set<String> omsRemovals = removeIdsBySide.computeIfAbsent(omsSide) { new LinkedHashSet<String>() }
                     int alreadyRemoved = omsRemovals.size()
                     omsRemovals.addAll(rowIds)
                     cancelledRefundCount += omsRemovals.size() - alreadyRemoved
@@ -430,18 +436,18 @@ class ReturnPresenceVerificationSupport {
         // Pass 1.6 — ORDER + LINE PAIRING. Same fail-closed posture and same removal set as Pass 1.5.
         int linePairedCount = 0
         if (returnLinesLookup != null && !lineCandidates.isEmpty()) {
-            Set<String> alreadyRemoved = removeIdsByToken.get(omsToken) ?: ([] as Set<String>)
+            Set<String> alreadyRemoved = removeIdsBySide.get(omsSide) ?: ([] as Set<String>)
             List<Map<String, Object>> open = lineCandidates.findAll { !alreadyRemoved.contains(it.rowId) }
             Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings)
             if (pairedRowIds) {
-                Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
+                Set<String> omsRemovals = removeIdsBySide.computeIfAbsent(omsSide) { new LinkedHashSet<String>() }
                 int before = omsRemovals.size()
                 omsRemovals.addAll(pairedRowIds)
                 linePairedCount = omsRemovals.size() - before
             }
         }
 
-        int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
+        int removedCount = (removeIdsBySide.values()*.size().sum() ?: 0) as int
         String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount,
                 cancelledItemCount, linePairedCount)
         if (removedCount == 0) {
@@ -451,21 +457,14 @@ class ReturnPresenceVerificationSupport {
                     linePairedCount: 0, warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
-        int removedMissingInOms = removeIdsByToken.get(omsToken)?.size() ?: 0
-        int removedMissingInShopify = removeIdsByToken.get(shopifyToken)?.size() ?: 0
-        // onlyInFile1Count counts records present only in file1 = missing in file2, and vice versa —
-        // same mapping DiffDocumentStreamSupport.summaryLessRemovedMissing relies on.
-        int removedMissingInFile1 = (omsToken && omsToken == file1Token ? removedMissingInOms : 0) +
-                (shopifyToken && shopifyToken == file1Token ? removedMissingInShopify : 0)
-        int removedMissingInFile2 = (omsToken && omsToken == file2Token ? removedMissingInOms : 0) +
-                (shopifyToken && shopifyToken == file2Token ? removedMissingInShopify : 0)
-
-        // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
-        DiffDocumentStreamSupport.removeMissingRows(diffFile, ".returns-verify-tmp", removeIdsByToken,
-                removedCount, removedMissingInFile1, removedMissingInFile2, auditNote)
+        // Pass 2 — remove by side; the counts are the rows actually removed, so a repeated id counts every row (S20 F6).
+        Map<String, Integer> dropped = DiffDocumentStreamSupport.removeMissingRowsBySide(diffFile, ".returns-verify-tmp",
+                removeIdsBySide, auditNote)
+        int removedMissingInFile1 = dropped.get(DiffDocumentStreamSupport.FILE_1) ?: 0
+        int removedMissingInFile2 = dropped.get(DiffDocumentStreamSupport.FILE_2) ?: 0
 
         return [performed: true, rewritten: true, pendingCount: pendingCount, preWindowSuppressedCount: preWindowCount,
-                malformedCount: malformedCount, removedCount: removedCount,
+                malformedCount: malformedCount, removedCount: removedMissingInFile1 + removedMissingInFile2,
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
                 cancelledRefundSuppressedCount: cancelledRefundCount,
                 siblingReturnSuppressedCount: siblingReturnCount,

@@ -73,7 +73,7 @@ class ReturnPresenceVerificationSupportTests {
     /** A "missing in Shopify" row: the OMS return is present, data carries the OMS record (entryDate). */
     private static Map missingInShopifyRow(String id, long entryDateMillis) {
         return [
-                diffType : "MISSING_IN_FILE_2",
+                diffType : "MISSING_IN_FILE_1",
                 primaryId: id,
                 presentIn: OMS_LABEL,
                 missingIn: SHOPIFY_LABEL,
@@ -87,7 +87,7 @@ class ReturnPresenceVerificationSupportTests {
     private static Map missingInOmsRow(String id, long createdAtMillis, String refundOrReturnType = "REFUND",
                                        String orderId = DEFAULT_ORDER_ID) {
         return [
-                diffType : "MISSING_IN_FILE_1",
+                diffType : "MISSING_IN_FILE_2",
                 primaryId: id,
                 presentIn: SHOPIFY_LABEL,
                 missingIn: OMS_LABEL,
@@ -106,7 +106,7 @@ class ReturnPresenceVerificationSupportTests {
                                                             String refundOrReturnType = "REFUND",
                                                             String orderId = DEFAULT_ORDER_ID) {
         return [
-                diffType : "MISSING_IN_FILE_1",
+                diffType : "MISSING_IN_FILE_2",
                 primaryId: id,
                 presentIn: SHOPIFY_LABEL,
                 missingIn: OMS_LABEL,
@@ -142,7 +142,7 @@ class ReturnPresenceVerificationSupportTests {
                                                         String orderId = DEFAULT_ORDER_ID) {
         Map data = [refundOrReturnId: id, refundOrReturnType: "REFUND", orderId: orderId,
                     createdAt: isoInstant(createdAtMillis), refundLineEverFulfilled: everFulfilled]
-        return [diffType : "MISSING_IN_FILE_1", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
+        return [diffType : "MISSING_IN_FILE_2", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
                 data     : JsonOutput.toJson(data),
                 message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString()]
     }
@@ -197,6 +197,25 @@ class ReturnPresenceVerificationSupportTests {
                 nowMillis        : NOW,
                 windowStartMillis: windowStartMillis,
         ])
+    }
+
+    // --- R1 (S21a): fixtures name each row's side as the compare does: file1 = Shopify, file2 = OMS, so a row missing in
+    // OMS is MISSING_IN_FILE_2. The pass reads the side from it, and the summary drops by the rows actually removed.
+
+    /** S20 F6: an id repeated on one side is every one of its rows; the summary must drop by both, not by one id. */
+    @Test
+    void aRepeatedIdLowersTheSummaryByEveryRowItRemoves() {
+        File file = writeDiffDocument([missingInShopifyRow("7777", RECENT), missingInShopifyRow("7777", RECENT)])
+
+        Map result = verify(file)
+
+        assertEquals(2, result.removedCount)
+        assertEquals(2, result.removedMissingInFile1, "both rows are missing from Shopify, file 1")
+        assertEquals(0, result.removedMissingInFile2)
+        Map document = parseDocument(file)
+        assertEquals([], document.differences)
+        assertEquals(0, ((Map) document.summary).totalDifferences)
+        assertEquals(0, ((Map) document.summary).onlyInFile2Count)
     }
 
     // --- GRACE: the behaviour this task exists to keep ---
@@ -376,7 +395,7 @@ class ReturnPresenceVerificationSupportTests {
 
     @Test
     void aRowWithNoParseableOwnDateIsLeftAsReportedAndCountedMalformed() {
-        Map row = [diffType: "MISSING_IN_FILE_2", primaryId: "7777", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
+        Map row = [diffType: "MISSING_IN_FILE_1", primaryId: "7777", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
                    data: JsonOutput.toJson([externalId: "7777", orderExternalId: "7025799037059"]) /* no entryDate */,
                    message: "Present in ${OMS_LABEL}, missing in ${SHOPIFY_LABEL}".toString()]
         File file = writeDiffDocument([row])
@@ -451,7 +470,7 @@ class ReturnPresenceVerificationSupportTests {
 
     @Test
     void gradesAnAllDigitsStringEntryDateTheSameAsANumber() {
-        Map row = [diffType: "MISSING_IN_FILE_2", primaryId: "7778", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
+        Map row = [diffType: "MISSING_IN_FILE_1", primaryId: "7778", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
                    data: JsonOutput.toJson([externalId: "7778", orderExternalId: "7025799037059",
                            entryDate: String.valueOf(RECENT), returnId: "R-7778"]),
                    message: "Present in ${OMS_LABEL}, missing in ${SHOPIFY_LABEL}".toString()]
@@ -960,7 +979,7 @@ class ReturnPresenceVerificationSupportTests {
         Map data = [refundOrReturnId: id, refundOrReturnType: type, orderId: orderId,
                     createdAt: isoInstant(createdAtMillis), orderCancelledAt: null, lineIds: lineIds]
         if (orderReadable != null) data.orderReadable = orderReadable
-        return [diffType : "MISSING_IN_FILE_1", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
+        return [diffType : "MISSING_IN_FILE_2", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
                 data     : JsonOutput.toJson(data),
                 message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString()]
     }

@@ -529,8 +529,15 @@ class RunVerificationSupport {
         return systemEnumId == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL
     }
 
-    /** A returns pair's two sides, {@code [omsSide, shopifySide]}, or null when the run is not one. */
-    private static List<Map> returnsPairSides(def ec, List sides) {
+    /**
+     * A returns pair's two sides, {@code [omsSide, shopifySide]}, or null when the run is not one. Each carries its
+     * fileSide (FILE_1 / FILE_2): its own, or its place, since every caller lists file 1 first (R1).
+     */
+    private static List<Map> returnsPairSides(def ec, List rawSides) {
+        List<Map> sides = []
+        rawSides.eachWithIndex { Object raw, int index ->
+            if (raw instanceof Map) sides.add((Map) raw + [fileSide: normalize(((Map) raw).get("fileSide")) ?: (index == 0 ? "FILE_1" : "FILE_2")])
+        }
         Map omsSide = (Map) sides.find { Map side ->
             isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
         }
@@ -570,6 +577,8 @@ class RunVerificationSupport {
                     file2Label      : normalize(args.get("file2Label")),
                     omsSideLabel    : normalize(omsSide.get("label")),
                     shopifySideLabel: normalize(shopifySide.get("label")),
+                    omsSide         : omsSide.get("fileSide"),
+                    shopifySide     : shopifySide.get("fileSide"),
             ])
             applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
             return verification.performed == true
@@ -630,6 +639,8 @@ class RunVerificationSupport {
                             file2Label          : normalize(args.get("file2Label")),
                             omsSideLabel        : omsLabel,
                             shopifySideLabel    : shopifyLabel,
+                            omsSide             : omsSide.get("fileSide"),
+                            shopifySide         : shopifySide.get("fileSide"),
                             nowMillis           : System.currentTimeMillis(),
                             windowStartMillis   : args.get("windowStartMillis"),
                             omsExtractFile      : omsExtractFile,

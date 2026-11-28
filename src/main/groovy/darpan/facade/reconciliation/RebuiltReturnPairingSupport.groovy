@@ -34,9 +34,12 @@ class RebuiltReturnPairingSupport {
     static final String RETURN_CANCELLED_STATUS = "RETURN_CANCELLED"
 
     /**
-     * args: diffFile, file1Label, file2Label, omsSideLabel, shopifySideLabel. Returns the verify-pass map
-     * RunVerificationSupport.applyVerificationOutcome folds: performed, rewritten, removedCount,
-     * removedMissingInFile1/2, pairedCount, warnings, auditNote.
+     * args: diffFile, file1Label, file2Label, omsSideLabel, shopifySideLabel, and omsSide / shopifySide (FILE_1 / FILE_2;
+     * when absent, read from the labels). Returns the verify-pass map RunVerificationSupport.applyVerificationOutcome folds:
+     * performed, rewritten, removedCount, removedMissingInFile1/2, pairedCount, warnings, auditNote.
+     *
+     * R1: a row's side is the compare's own (DiffDocumentStreamSupport.forEachMissingRowBySide), and the counts are the
+     * rows actually removed (removeMissingRowsBySide), so a repeated id counts every row it took.
      */
     static Map<String, Object> pairRebuiltReturns(Map args) {
         File diffFile = (File) args?.diffFile
@@ -45,25 +48,22 @@ class RebuiltReturnPairingSupport {
                                      removedMissingInFile2: 0, pairedCount: 0, warnings: warnings, auditNote: null] as Map<String, Object>
         if (diffFile == null || !diffFile.isFile()) return inert
 
-        String omsToken = DiffDetailClassifier.normalizeToken(args.omsSideLabel)
-        String shopifyToken = DiffDetailClassifier.normalizeToken(args.shopifySideLabel)
-        String file1Token = DiffDetailClassifier.normalizeToken(args.file1Label)
-        String file2Token = DiffDetailClassifier.normalizeToken(args.file2Label)
-        if (!omsToken || !shopifyToken) return inert
+        String omsSide = normalize(args.omsSide) ?: DiffDocumentStreamSupport.sideForLabel(args.omsSideLabel, args.file1Label, args.file2Label)
+        String shopifySide = normalize(args.shopifySide) ?: DiffDocumentStreamSupport.sideForLabel(args.shopifySideLabel, args.file1Label, args.file2Label)
+        if (!omsSide || !shopifySide || omsSide == shopifySide) return inert
 
         // Pass 1 — collect only the keys. Rows missing in HotWax carry the Shopify record; rows missing in
         // Shopify carry the HotWax record.
         JsonSlurper slurper = new JsonSlurper()
         List<Map<String, Object>> events = []
         Map<String, List<Map<String, Object>>> omsByOrder = [:]
-        boolean sawDifferences = DiffDocumentStreamSupport.forEachMissingRow(diffFile, slurper) { Map row ->
-            String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-            if (missingToken != omsToken && missingToken != shopifyToken) return
+        DiffDocumentStreamSupport.DiffRowScan scan = DiffDocumentStreamSupport.forEachMissingRowBySide(diffFile, slurper) { Map row, String side ->
+            if (side != omsSide && side != shopifySide) return
             Map data = parseData(slurper, row.get("data"))
             if (data == null) return
             String rowId = DiffDocumentStreamSupport.rowIdOf(row)
             if (!rowId) return
-            if (missingToken == omsToken) {
+            if (side == omsSide) {
                 if (data.get(ORDER_READABLE_FIELD) != false) return
                 String orderId = normalize(data.get("orderId"))
                 List<String> lineIds = splitIds(data.get("lineIds"))
@@ -83,7 +83,11 @@ class RebuiltReturnPairingSupport {
                 }
             }
         }
-        if (!sawDifferences) return inert
+        if (!scan.headerFound) return inert
+        if (!scan.complete) {
+            warnings.add("Rebuilt return pairing skipped: ${scan.problem()}".toString())
+            return inert
+        }
 
         // Pass 1.5 — pair in memory, oldest event first.
         Set<String> pairedEventIds = new LinkedHashSet<String>()
@@ -127,16 +131,13 @@ class RebuiltReturnPairingSupport {
                     pairedCount: 0, warnings: warnings, auditNote: null] as Map<String, Object>
         }
 
-        // A row missing in HotWax is present only in Shopify's file, and vice versa (onlyInFileN mapping).
-        int removedMissingInFile1 = (shopifyToken == file1Token ? removedOmsIds.size() : 0) +
-                (omsToken == file1Token ? pairedEventIds.size() : 0)
-        int removedMissingInFile2 = (shopifyToken == file2Token ? removedOmsIds.size() : 0) +
-                (omsToken == file2Token ? pairedEventIds.size() : 0)
-        Map<String, Set<String>> removeIdsByToken = [(omsToken): pairedEventIds, (shopifyToken): removedOmsIds]
-        DiffDocumentStreamSupport.removeMissingRows(diffFile, ".rebuilt-pair-tmp", removeIdsByToken,
-                removedCount, removedMissingInFile1, removedMissingInFile2, auditNote)
+        // A paired event is a row missing in HotWax; an accounted-for HotWax return is a row missing in Shopify.
+        Map<String, Integer> dropped = DiffDocumentStreamSupport.removeMissingRowsBySide(diffFile, ".rebuilt-pair-tmp",
+                [(omsSide): pairedEventIds, (shopifySide): removedOmsIds], auditNote)
+        int removedMissingInFile1 = dropped.get(DiffDocumentStreamSupport.FILE_1) ?: 0
+        int removedMissingInFile2 = dropped.get(DiffDocumentStreamSupport.FILE_2) ?: 0
 
-        return [performed: true, rewritten: true, removedCount: removedCount,
+        return [performed: true, rewritten: true, removedCount: removedMissingInFile1 + removedMissingInFile2,
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
                 pairedCount: pairedEventIds.size(), warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }

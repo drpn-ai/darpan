@@ -240,6 +240,15 @@ class DiffDocumentStreamSupport {
         return null
     }
 
+    /** The side (FILE_1 / FILE_2) a label names, or null when it names neither or both (two sides sharing a label). */
+    static String sideForLabel(Object label, Object file1Label, Object file2Label) {
+        String token = DiffDetailClassifier.normalizeToken(label)
+        String file1 = DiffDetailClassifier.normalizeToken(file1Label)
+        String file2 = DiffDetailClassifier.normalizeToken(file2Label)
+        if (!token || file1 == file2) return null
+        return token == file1 ? FILE_1 : token == file2 ? FILE_2 : null
+    }
+
     /** The document's side labels from its metadata header line: [file1, file2], either null when absent. */
     private static List<String> documentLabels(JsonSlurper slurper, String metadataLine) {
         Object metadata = headerFragment(slurper, metadataLine, METADATA_PREFIX)

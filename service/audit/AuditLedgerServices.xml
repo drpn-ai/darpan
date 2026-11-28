@@ -53,6 +53,8 @@
             <parameter name="stillOpenCount" type="Integer"/>
             <parameter name="reopenedCount" type="Integer"/>
             <parameter name="refreshedCount" type="Integer"/>
+            <parameter name="backdatedCount" type="Integer"><description>OC74. Sightings on a morning before the finding's
+                latest check event: history written, state and evidence left with the later morning.</description></parameter>
         </out-parameters>
         <actions>
             <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
@@ -92,6 +94,7 @@
             <set field="stillOpenCount" from="0" type="Integer"/>
             <set field="reopenedCount" from="0" type="Integer"/>
             <set field="refreshedCount" from="0" type="Integer"/>
+            <set field="backdatedCount" from="0" type="Integer"/>
             <iterate list="findings" entry="f">
                 <set field="statementId" from="statementIdByCode[f.statementCode]"/>
                 <entity-find entity-name="darpan.audit.AuditFinding" list="existingList" for-update="true">
@@ -136,6 +139,40 @@
                 <if condition="existingList">
                     <set field="finding" from="existingList[0]"/>
                     <set field="finding.statementId" from="statementId"/>
+                    <!-- OC74: a morning before the finding's latest check event (a play of past days) writes its own history
+                         row and widens the dates; state, close fields and evidence stay with the later morning. An open
+                         finding's latest check event is its last sighting, so only a fixed one reads its history to decide. -->
+                    <set field="history" from="null"/>
+                    <if condition="finding.stateEnumId == 'AUDFS_FIXED'">
+                        <service-call name="audit.AuditLedgerServices.get#FindingCheckHistory" out-map="history"
+                                in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, asOfDate:reportDate]"/>
+                        <set field="backdated" from="history.latestDate != null &amp;&amp; (reportDate &lt; history.latestDate ||
+                                (reportDate == history.latestDate &amp;&amp; checkStamp &lt; history.latestStamp))"/>
+                        <else>
+                            <set field="backdated" from="reportDate &lt; finding.lastSeenDate || (reportDate == finding.lastSeenDate
+                                    &amp;&amp; finding.lastCheckedStamp != null &amp;&amp; checkStamp &lt; finding.lastCheckedStamp)"/>
+                        </else>
+                    </if>
+                    <if condition="backdated">
+                        <if condition="history == null">
+                            <service-call name="audit.AuditLedgerServices.get#FindingCheckHistory" out-map="history"
+                                    in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, asOfDate:reportDate]"/>
+                        </if>
+                        <set field="eventTypeEnumId" from="history.seenOnDate ? null : (!history.stateAsOf ? 'AUDFE_FOUND' :
+                                (history.stateAsOf == 'FIXED' ? 'AUDFE_REOPENED' : 'AUDFE_STILL_OPEN'))"/>
+                        <if condition="eventTypeEnumId">
+                            <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
+                            <service-call name="audit.AuditLedgerServices.create#FindingEvent"
+                                    in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
+                                             eventTypeEnumId:eventTypeEnumId, eventStamp:checkStamp, eventDate:reportDate]"/>
+                        </if>
+                        <if condition="reportDate &lt; finding.firstFoundDate"><set field="finding.firstFoundDate" from="reportDate"/></if>
+                        <if condition="reportDate &gt; finding.lastSeenDate"><set field="finding.lastSeenDate" from="reportDate"/></if>
+                        <entity-update value-field="finding"/>
+                        <set field="backdatedCount" from="backdatedCount + 1"/>
+                        <script>findingIds.add(finding.findingId)</script>
+                        <continue/>
+                    </if>
                     <if condition="finding.stateEnumId == 'AUDFS_FIXED'">
                         <set field="eventTypeEnumId" value="AUDFE_REOPENED"/>
                         <set field="reopenedCount" from="reopenedCount + 1"/>
@@ -325,6 +362,20 @@
             </entity-find>
             <iterate list="candidates" entry="finding">
                 <set field="notReported" from="reportedIds != null ? !reportedIds.contains(finding.findingId) : !reported.contains(finding.recordKey)"/>
+                <!-- OC74: a close for a morning before the finding's last sighting writes that morning's fixed row only (when
+                     it was not fixed that morning already); the later sighting keeps it open. -->
+                <set field="backdated" from="reportDate &lt; finding.lastSeenDate || (reportDate == finding.lastSeenDate
+                        &amp;&amp; finding.lastCheckedStamp != null &amp;&amp; checkStamp &lt; finding.lastCheckedStamp)"/>
+                <if condition="backdated &amp;&amp; examined.contains(finding.recordKey) &amp;&amp; notReported">
+                    <service-call name="audit.AuditLedgerServices.get#FindingCheckHistory" out-map="history"
+                            in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, asOfDate:reportDate]"/>
+                    <if condition="history.stateAsOf == 'OPEN'">
+                        <service-call name="audit.AuditLedgerServices.create#FindingEvent"
+                                in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
+                                         eventTypeEnumId:'AUDFE_FIXED', eventStamp:checkStamp, eventDate:reportDate]"/>
+                    </if>
+                    <continue/>
+                </if>
                 <if condition="examined.contains(finding.recordKey) &amp;&amp; notReported">
                     <set field="why" from="explanations?.get(finding.recordKey)"/>
                     <if condition="why">
@@ -540,6 +591,39 @@
             <set field="statementIdByCode" from="statements.collectEntries { [(it.statementCode): it.statementId] }"/>
             <set field="auditIds" from="statements*.auditId.unique()"/>
             <set field="inactiveStatementIds" from="statements.findAll { it.isActive == 'N' }*.statementId"/>
+        </actions>
+    </service>
+
+    <!-- OC74 (DAR-OPS-029 S13). A play of past days (DAR-BE-178) records mornings out of order: a finding's state, close
+         fields and evidence follow its LATEST check event (eventDate, then eventStamp); a morning before that writes its
+         own history row only. Only check events count; a person's acknowledgement events never move the state. -->
+    <service verb="get" noun="FindingCheckHistory" authenticate="false" allow-remote="false">
+        <description>A finding's check events as of one morning: the latest check event, the state on that morning (OPEN,
+            FIXED, or none before it) and whether a check already saw the record that morning.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingId" required="true"/>
+            <parameter name="asOfDate" type="Date" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="latestDate" type="Date"/>
+            <parameter name="latestStamp" type="Timestamp"/>
+            <parameter name="stateAsOf"><description>OPEN, FIXED, or empty when no check event is on or before asOfDate.</description></parameter>
+            <parameter name="seenOnDate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditFindingEvent" list="checkEvents">
+                <econdition field-name="findingId"/>
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="byTypeEnumId" value="AUDAT_CHECK"/>
+                <order-by field-name="eventDate"/>
+                <order-by field-name="eventStamp"/>
+            </entity-find>
+            <set field="latestDate" from="checkEvents ? checkEvents[-1].eventDate : null"/>
+            <set field="latestStamp" from="checkEvents ? checkEvents[-1].eventStamp : null"/>
+            <set field="upTo" from="checkEvents.findAll { !it.eventDate.after(asOfDate) }"/>
+            <set field="stateAsOf" from="upTo ? (upTo[-1].eventTypeEnumId == 'AUDFE_FIXED' ? 'FIXED' : 'OPEN') : null"/>
+            <set field="seenOnDate" from="checkEvents.any { it.eventDate == asOfDate &amp;&amp; it.eventTypeEnumId != 'AUDFE_FIXED' }"/>
         </actions>
     </service>
 

@@ -134,7 +134,8 @@ class AuditLedgerInvariantsSmokeTests {
         String id = (record(CHECK, "2026-10-07", [finding("R4", "REOPEN-1")]).findingIds as List)[0]
         closeWith("2026-10-07", [examinedRecordKeys: ["REOPEN-1"], reportedRecordKeys: [], reportedFindingIds: []])
         assertEquals("AUDFS_FIXED", row(id).stateEnumId)
-        Map again = record(CHECK, "2026-10-07", [finding("R4", "REOPEN-1")])
+        // A later run of the same morning: its stamp follows the 18:00 close (an earlier stamp is a back-dated read, OC74).
+        Map again = record(CHECK, "2026-10-07", [finding("R4", "REOPEN-1")], [checkStamp: Timestamp.valueOf("2026-10-07 19:00:00")])
         assertEquals(1, again.reopenedCount, "it did break again: reopened")
         assertEquals(1L, row(id).timesSeen as Long, "still one morning")
     }

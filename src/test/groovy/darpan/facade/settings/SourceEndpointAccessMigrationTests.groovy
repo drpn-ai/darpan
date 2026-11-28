@@ -140,4 +140,31 @@ class SourceEndpointAccessMigrationTests {
                     "${systemEnumId} must be disabled — a NULL canReadOrders must resolve to Shopify's own 'N' default")
         }
     }
+
+    /**
+     * DAR-OPS-029 (S99-302 gate, found by Session 018): ENDPOINT_ACCESS has not run on prod, and since then people have
+     * switched endpoints on from the connection page (and fresh Shopify installs write their own rows), while the dead
+     * canReadOrders column kept 'N' on every edit. The migration must only fill in MISSING endpoint rows: an explicit row
+     * someone saved stays exactly as it is.
+     */
+    @Test
+    void anExplicitEndpointRowIsNeverOverwritten() {
+        ec.entity.makeValue("darpan.hotwax.HotWaxOmsRestSourceConfig")
+                .setAll([omsRestSourceConfigId: "mig-closed-switched", description: "Closed, switched on since",
+                         companyUserGroupId   : MIG_TENANT, baseUrl: "https://switched.example.com",
+                         isActive             : "Y", canReadOrders: "N"]).createOrUpdate()
+        ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
+                .setAll([configTypeEnumId: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, configId: "mig-closed-switched",
+                         systemEnumId    : "OMS_GQL", companyUserGroupId: MIG_TENANT, isEnabled: "Y"]).createOrUpdate()
+
+        runMigration()
+
+        assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-closed-switched", "OMS_GQL"),
+                "the row someone switched on stays on")
+        assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-closed-switched", "OMS_RETURNS_GQL"),
+                "an endpoint with no row still takes the legacy closed state")
+        assertEquals(4L, accessRowCount("mig-closed-switched"))
+    }
 }

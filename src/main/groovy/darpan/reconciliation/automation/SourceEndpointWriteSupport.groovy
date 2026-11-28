@@ -151,13 +151,21 @@ class SourceEndpointWriteSupport {
 
                 disabledConfigCount++
                 catalog.each { Map<String, Object> endpoint ->
+                    // DAR-OPS-029 (S99-302 gate): fill in only a MISSING row. An existing row is someone's explicit
+                    // choice (a connection page switch, a fresh install's row) made since; the dead canReadOrders 'N'
+                    // must never switch it off. Re-runs stay idempotent.
+                    def existing = TenantScopedFinder.findGlobalUnscoped(ec, SourceEndpointAccessSupport.ENTITY_NAME,
+                            "one-time canReadOrders migration checks each endpoint row before filling a gap (operator upgrade step)")
+                            .condition([configTypeEnumId: configTypeEnumId, configId: configId, systemEnumId: endpoint.systemEnumId])
+                            .useCache(false).one()
+                    if (existing != null) return
                     ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
                             .setAll([configTypeEnumId  : configTypeEnumId,
                                      configId          : configId,
                                      systemEnumId      : endpoint.systemEnumId,
                                      companyUserGroupId: readString(config, "companyUserGroupId"),
                                      isEnabled         : "N"])
-                            .createOrUpdate()
+                            .create()
                     rowsWritten++
                 }
             }

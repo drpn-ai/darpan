@@ -140,11 +140,13 @@ class JsonSchemaUtil {
         String normalized = ((rawSystemId)?.toString()?.trim())
         if (!normalized) return null
 
-        return ec?.entity?.find("moqui.basic.Enumeration")
-                ?.condition("enumTypeId", SYSTEM_ENUM_TYPE_ID)
+        // DAR-OPS-029 S99-202: one() keeps only the full primary key, so an enumTypeId condition beside enumId was dropped
+        // and any enum read as a system. Read by key, check the type on the row.
+        def row = ec?.entity?.find("moqui.basic.Enumeration")
                 ?.condition("enumId", normalized)
                 ?.useCache(useCache)
                 ?.one()
+        return row?.enumTypeId == SYSTEM_ENUM_TYPE_ID ? row : null
     }
 
     static String resolveSystemLabel(def ec, Object rawSystemId, String fallback = null, boolean useCache = true) {

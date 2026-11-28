@@ -1,5 +1,6 @@
 package jsonschema.common
 
+import darpan.reconciliation.support.FakeEntityFind
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -22,15 +23,18 @@ class JsonSchemaUtilTests {
 
     @Test
     void resolveSystemLabelUsesEnumerationWhenAvailable() {
-        FinderStub finder = new FinderStub(oneResult: [enumId: "SHOPIFY", enumCode: "Shopify", description: "Shopify Description"])
+        FinderStub finder = new FinderStub(oneResult: [enumId: "SHOPIFY", enumTypeId: "DarpanSystemSource", enumCode: "Shopify",
+                                                       description: "Shopify Description"])
         EntityFacadeStub entity = new EntityFacadeStub(finders: ["moqui.basic.Enumeration": finder])
         def ec = new Expando(entity: entity)
 
         String label = JsonSchemaUtil.resolveSystemLabel(ec, "SHOPIFY", null, true)
 
-        assertEquals("Shopify", label)
-        assertEquals("DarpanSystemSource", finder.conditions.enumTypeId)
-        assertEquals("SHOPIFY", finder.conditions.enumId)
+        // A real system row carries its type, so the label is the system's description (FacadeSupport.enumLabel); the old stub
+        // row had no type and so read the enumCode.
+        assertEquals("Shopify Description", label)
+        // S99-202: read by the key alone (Moqui would drop a type condition beside it); the type is checked on the row.
+        assertEquals([enumId: "SHOPIFY"], finder.conditions)
         assertTrue(finder.useCacheValue)
     }
 
@@ -176,5 +180,18 @@ class JsonSchemaUtilTests {
             if (failDelete) throw new IllegalStateException("boom")
             deleted = true
         }
+    }
+
+    /**
+     * DAR-OPS-029 S99-202: Moqui's one() keeps only the full primary key, so an enumTypeId condition beside enumId was
+     * dropped and any enum (a status, a run type) read as a system. The type is checked on the row.
+     */
+    @Test
+    void aNonSystemEnumIsNotASystem() {
+        List<Map> rows = [[enumId: "SHOPIFY", enumTypeId: JsonSchemaConstants.SYSTEM_ENUM_TYPE_ID, description: "Shopify"],
+                          [enumId: "AUT_STAT_FAILED", enumTypeId: "AutomationStatus", description: "Failed"]]
+        Map ec = [entity: [find: { String name -> new FakeEntityFind(["enumId"], rows) }]]
+        assertEquals("Shopify", JsonSchemaUtil.findSystemEnum(ec, "SHOPIFY")?.description)
+        assertNull(JsonSchemaUtil.findSystemEnum(ec, "AUT_STAT_FAILED"), "a status enum is not a system")
     }
 }

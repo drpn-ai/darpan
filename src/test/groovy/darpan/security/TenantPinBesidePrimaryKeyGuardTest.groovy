@@ -68,6 +68,7 @@ class TenantPinBesidePrimaryKeyGuardTest {
                         .forEach { Path p ->
                             String text = unescapeXml(p.toFile().text)
                             List<Map<String, Object>> hits = findDroppedPins(text, primaryKeys, constants)
+                            if (p.toString().endsWith(".xml")) hits += findDroppedXmlFieldMaps(text, primaryKeys)
                             chainsSeen += hits.size()
                             hits.findAll { it.dropped }.each { Map<String, Object> hit ->
                                 String key = "${p.fileName}|${(hit.pk as List).join(',')}"
@@ -106,6 +107,51 @@ class TenantPinBesidePrimaryKeyGuardTest {
         assertEquals([], findDroppedPins(list, pks, consts))
     }
 
+    /**
+     * DAR-OPS-029 S99-202 (S26a F18): the drop is not only about tenant pins. Any condition beside a full primary key goes,
+     * on a framework entity too: OC66 was a groupTypeEnumId condition beside the UserGroup PK, unseen by this guard.
+     * And service XML's entity-find-one drops a field-map beside the full PK the same way.
+     */
+    @Test
+    void theDetectorCatchesAnyConditionBesideAFullKeyIncludingFrameworkEntitiesAndXml() {
+        Map<String, List<String>> pks = [UserGroup: ["userGroupId"], TenantChatSpace: ["chatSpaceId"]]
+        String typeBesidePk = 'ec.entity.find("moqui.security.UserGroup").condition("userGroupId", id)' +
+                '.condition("groupTypeEnumId", "UGT_TENANT").useCache(true).one()'
+        String pkOnly = 'ec.entity.find("moqui.security.UserGroup").condition("userGroupId", id).one()'
+        assertEquals([true], findDroppedPins(typeBesidePk, pks, [:])*.dropped)
+        assertEquals([], findDroppedPins(pkOnly, pks, [:]), "a key-only find has nothing to drop")
+
+        String xmlPinned = '<entity-find-one entity-name="darpan.reconciliation.TenantChatSpace" value-field="space">\n' +
+                '  <field-map field-name="chatSpaceId"/>\n  <field-map field-name="companyUserGroupId" from="tenantId"/>\n</entity-find-one>'
+        String xmlPkOnly = '<entity-find-one entity-name="darpan.reconciliation.TenantChatSpace" value-field="space">' +
+                '<field-map field-name="chatSpaceId"/></entity-find-one>'
+        assertEquals([true], findDroppedXmlFieldMaps(xmlPinned, pks)*.dropped)
+        assertEquals([false], findDroppedXmlFieldMaps(xmlPkOnly, pks)*.dropped)
+        assertTrue(readPrimaryKeys(ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component"))
+                .get("UserGroup") == ["userGroupId"], "framework entity PKs are read")
+    }
+
+    private static final Pattern XML_FIND_ONE = Pattern.compile(
+            /<entity-find-one\s+entity-name="([^"]+)"[^>]*?(?:\/>|>(.*?)<\/entity-find-one>)/, Pattern.DOTALL)
+    private static final Pattern XML_FIELD_MAP = Pattern.compile(/<field-map\s+field-name="(\w+)"/)
+
+    /** Service XML entity-find-one blocks whose field-maps hold the entity's full PK plus another field (dropped by one()). */
+    private static List<Map<String, Object>> findDroppedXmlFieldMaps(String text, Map<String, List<String>> primaryKeys) {
+        List<Map<String, Object>> hits = []
+        Matcher m = XML_FIND_ONE.matcher(text)
+        while (m.find()) {
+            List<String> pk = primaryKeys[m.group(1).tokenize(".").last()]
+            if (!pk || m.group(2) == null) continue
+            Set<String> fields = [] as Set
+            Matcher f = XML_FIELD_MAP.matcher(m.group(2))
+            while (f.find()) fields << f.group(1)
+            if (!fields) continue
+            boolean dropped = fields.containsAll(pk) && fields.size() > pk.size()
+            hits << [entity: m.group(1).tokenize(".").last(), pk: pk, dropped: dropped, line: text.substring(0, m.start()).count("\n") + 1]
+        }
+        return hits
+    }
+
     private static List<Map<String, Object>> findDroppedPins(String text, Map<String, List<String>> primaryKeys,
                                                              Map<String, String> constants) {
         List<Map<String, Object>> hits = []
@@ -128,14 +174,17 @@ class TenantPinBesidePrimaryKeyGuardTest {
             Set<String> conditions = [] as Set
             Matcher c = CONDITION.matcher(chain)
             while (c.find()) conditions << c.group(1)
-            if (!tenantScopedFinder && !conditions.contains("companyUserGroupId")) continue
+            // S99-202: an explicit find is checked whenever it has more conditions than a key could need (any extra
+            // condition beside a full PK is dropped, not only a tenant pin); findTenantScoped adds its own tenant condition.
+            if (!tenantScopedFinder && conditions.size() < 2) continue
 
             String entityRef = m.group(2).trim().replaceAll(/^["']|["']$/, "")
             String simple = entityRef.tokenize(".").last()
             String entity = (constants[simple] ?: simple).tokenize(".").last()
             List<String> pk = primaryKeys[entity]
             if (!pk) continue
-            boolean dropped = conditions.containsAll(pk) && !pk.contains("companyUserGroupId")
+            boolean dropped = conditions.containsAll(pk) && !pk.contains("companyUserGroupId") &&
+                    (tenantScopedFinder || conditions.size() > pk.size())
             hits << [entity: entity, pk: pk, dropped: dropped, line: text.substring(0, m.start()).count("\n") + 1]
         }
         return hits
@@ -155,6 +204,20 @@ class TenantPinBesidePrimaryKeyGuardTest {
                     Matcher f = pkField.matcher(m.group(2))
                     while (f.find()) fields << f.group(1)
                     pks[m.group(1)] = fields
+                }
+            }
+        }
+        // S99-202: framework entities (UserGroup, UserAccount, Enumeration, ...) too; a Darpan entity of the same name wins.
+        Path frameworkEntities = componentRoot.resolve("../../framework/entity").normalize()
+        if (Files.exists(frameworkEntities)) {
+            Files.walk(frameworkEntities).filter { it.toString().endsWith(".xml") }.forEach { Path p ->
+                Matcher m = entity.matcher(p.toFile().text)
+                while (m.find()) {
+                    if (pks.containsKey(m.group(1))) continue
+                    List<String> fields = []
+                    Matcher f = pkField.matcher(m.group(2))
+                    while (f.find()) fields << f.group(1)
+                    if (fields) pks[m.group(1)] = fields
                 }
             }
         }

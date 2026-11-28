@@ -191,7 +191,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived", status: "ran", reason: null], r4.subMap(["id", "text", "weight", "status", "reason"]))
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
                        matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409], systems: ["OMS", "NetSuite"],
-                       window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
+                       window: [from: "2026-10-01", thru: "2026-10-08"], outsideRules: null]], r4.checks, "outsideRules null: this run predates D11")
         assertEquals(counted(1, 0, 0), r4.counts)
         Map brief = (r4.findings as List)[0]
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
@@ -435,6 +435,46 @@ class AuditReportAssemblerSmokeTests {
         }
         // A report with every statement categorised keeps its four categories only.
         assertFalse((report(GORJANA, "2026-10-08").categories as Map).containsKey("uncategorised"))
+    }
+
+    // D11 (Aditi 2026-11-28: "U1, but show the rest"; OC53). The Unexplained rows no rule of a check targets are outside the
+    // rules: no statement counts them, but each check lists them, the first 200 shown and the rest counted as omitted.
+    @Test
+    void rowsOutsideEveryRuleAreListedPerCheckAndNeverCounted() {
+        insert("moqui.security.UserGroup", [userGroupId: "TOUT", description: "Outside rules"])
+        audit("TOUT", "TOUT_AUDIT", "outside", "Outside", "AUDP_MONTH")
+        statement("TOUT", "TOUT_AUDIT", "TOUT_S1", "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "outside S1")
+        [A: 1, B: 2, C: 3].each { String c, int seq ->
+            insert("darpan.audit.AuditCheck", [checkId: "TOUT_${c}".toString(), companyUserGroupId: "TOUT", checkCode: "outside-${c}".toString(), label: c])
+            link("TOUT", "TOUT_${c}".toString(), "TOUT_S1", seq)
+        }
+        Closure run = { String checkId, Map outsideRules ->
+            Map base = [companyUserGroupId: "TOUT", checkId: checkId, reportDate: Date.valueOf("2026-10-08")]
+            ec.service.sync().name("${LEDGER}.record#CheckRun").parameters(base + [sourceReads: [read("OMS", "AUDSR_COMPLETE", 5, null)]]).call()
+            ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters(base + [findings: [], outsideRules: outsideRules]).call()
+            noErrors()
+        }
+        // A: three outside the rules, two kept (as if past the cap). B: a run that had none. C: no run that morning.
+        run("TOUT_A", [count: 3, rows: [
+                [recordKey: "M1\u001F01", diffType: "MISSING_IN_FILE_2", bucket: "MISSING_FROM_FILE_2", note: "not in NetSuite",
+                 records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: "M1/01", recordData: '{"sku":"S-1"}']]],
+                [recordKey: "M2\u001F01", diffType: "MISSING_IN_FILE_2", bucket: "MISSING_FROM_FILE_2", note: null, records: []]]])
+        run("TOUT_B", [count: 0, rows: []])
+
+        Map doc = report("TOUT", "TOUT_AUDIT", "2026-10-08")
+        Map s1 = doc.categories.orders.statements.S1 as Map
+        Map<String, Map> byCheck = (s1.checks as List<Map>).collectEntries { [(it.id): it] }
+        assertEquals([count: 3, rows: [
+                [recordKey: "M1/01", diffType: "MISSING_IN_FILE_2", bucket: "MISSING_FROM_FILE_2", note: "not in NetSuite",
+                 records: [OMS: [orderItem: [[id: "M1/01", internalId: null, status: null, sku: "S-1"]]]]],
+                [recordKey: "M2/01", diffType: "MISSING_IN_FILE_2", bucket: "MISSING_FROM_FILE_2", note: null, records: [:]]], omitted: 1],
+                byCheck["outside-A"].outsideRules)
+        assertEquals([count: 0, rows: [], omitted: 0], byCheck["outside-B"].outsideRules, "a run that had none says 0")
+        assertTrue(byCheck["outside-C"].containsKey("outsideRules"), "the key is always there")
+        assertNull(byCheck["outside-C"].outsideRules, "no run that morning: unknown, not 0")
+        assertEquals(counted(0, 0, 0), s1.counts, "never a statement's finding")
+        assertEquals([outsideRules: 3, open: 0, newToday: 0], doc.summary.subMap(["outsideRules", "open", "newToday"]))
+        assertEquals([], s1.findings)
     }
 
     // ---- the finding ---------------------------------------------------------------------------------------------

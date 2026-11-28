@@ -169,6 +169,12 @@ class AuditReportGraph {
         st.checks = ((List<Map>) st.checks ?: []).collect { Map check ->
             Map c = new LinkedHashMap(check)
             c.compared = ((Map) check.compared ?: [:]).collect { k, v -> [system: k, count: v] }
+            // D11: each outside-the-rules row's records as a list, like a finding's.
+            if (check.outsideRules instanceof Map) {
+                Map o = new LinkedHashMap((Map) check.outsideRules)
+                o.rows = ((List<Map>) o.rows ?: []).collect { Map r -> new LinkedHashMap(r) + [records: records((Map) r.records)] }
+                c.outsideRules = o
+            }
             c
         }
         st.findings = ((List<Map>) st.findings ?: []).collect { Map finding ->

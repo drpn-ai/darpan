@@ -155,7 +155,10 @@ class AuditReportAssembler {
                  compared : status == NOT_RUN || run == null ? null : compared(readsByRun[run.checkRunId as String]),
                  systems  : systemsByCheck[checkId] ?: [],
                  // DAR-UI-063. The days this morning's run read: the period to date, or the days a person played.
-                 window   : run == null ? null : [from: isoDate(run.windowFromDate as Date), thru: isoDate(run.windowThruDate as Date)]]
+                 window   : run == null ? null : [from: isoDate(run.windowFromDate as Date), thru: isoDate(run.windowThruDate as Date)],
+                 // D11 (Aditi: "U1, but show the rest"; OC53). The Unexplained rows no rule of this check targets: no statement
+                 // owns them, so they are never counted, but they are listed, never lost.
+                 outsideRules: outsideRulesOf(run, zone)]
             }
             String worst = stChecks ? stChecks.collect { checkStatus[it] }.max { CHECK_STATUS_ORDER.indexOf(it) } : NOT_RUN
             String reason = null
@@ -208,7 +211,9 @@ class AuditReportAssembler {
         }
 
         Map oldest = ledger.findAll { it.state == OPEN && !waitingIds.contains(it.row.findingId as String) }.with { AuditOrderUnits.sortOldestFirst(it) }.find()
-        Map summary = sumCounts(byCategory.values() as List) + [
+        // D11: rows outside every rule, all checks together; never part of open, new or fixed. Null when no check's run has the data.
+        List<Long> outsideCounts = configuredCheckIds.sort().collect { runByCheck.get(it)?.outsideRulesCount as Long }.findAll { it != null }
+        Map summary = sumCounts(byCategory.values() as List) + [outsideRules: outsideCounts ? (outsideCounts.sum() as Long) : null,
                 oldestOpen: oldest == null ? null : [
                         id        : oldest.row.findingId,
                         statement : statementCodeById[oldest.row.statementId as String],
@@ -239,6 +244,28 @@ class AuditReportAssembler {
                 health    : health,
                 summary   : summary,
                 categories: categoryJson]
+    }
+
+    /**
+     * D11 (OC53). A check run's rows outside every rule as the report lists them: {count, rows, omitted}. count is the true
+     * total, rows the first 200 the ledger kept (each with its key as people read it and its records shaped like a
+     * finding's), omitted the rest, so the cap shows. Null when the check did not run that morning or its run predates D11.
+     */
+    static Map outsideRulesOf(Map run, ZoneId zone) {
+        if (run?.outsideRulesCount == null) return null
+        List stored = []
+        try {
+            Object parsed = run.outsideRulesJson ? new groovy.json.JsonSlurper().parseText(run.outsideRulesJson as String) : []
+            if (parsed instanceof List) stored = (List) parsed
+        } catch (groovy.json.JsonException ignored) { }   // rows unreadable: count and omitted still say how many there are
+        List<Map> rows = stored.findAll { it instanceof Map }.collect { Object o ->
+            Map r = (Map) o
+            [recordKey: AuditRecordFacts.displayKey(r.get("recordKey") as String), diffType: r.get("diffType"), bucket: r.get("bucket"),
+             note     : r.get("note"),
+             records  : AuditRecordFacts.recordsJson(((r.get("records") ?: []) as List).findAll { it instanceof Map } as List<Map>, false, zone)]
+        }
+        long count = run.outsideRulesCount as long
+        return [count: count, rows: rows, omitted: Math.max(count - rows.size(), 0L)]
     }
 
     private static Map health(Set<String> configuredCheckIds, Map<String, String> checkStatus, Map<String, String> checkReason,

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonToken
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import darpan.config.DarpanSettings
+import darpan.common.SecretRedactor
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
@@ -133,6 +134,8 @@ class DatasetRefreshSupport {
         // an error a service left on the message facade fails the read, and must not stop the row and unlock calls after it
         List<String> leftover = DatasetSupport.takeErrors(ec)
         if (leftover && !result.error) result = [error: leftover.join("; ")]
+        // OC215 (security): the error becomes DatasetRead.errorText, which the tenant reads; its secrets are masked.
+        if (result.error) result = result + [error: SecretRedactor.redact(result.error as String)]
         return result + [readKindEnumId: kind, fromStamp: fromStamp]
     }
 
@@ -392,7 +395,9 @@ class DatasetRefreshSupport {
             return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount, readFile: file.absolutePath,
                     recordsRead : counts.recordsRead ?: 0, changedCount: counts.changedCount ?: 0,
                     addedCount  : counts.addedCount ?: 0, removedCount: counts.removedCount ?: 0,
-                    missCount   : rolling ? null : (counts.missCount ?: 0)]
+                    missCount   : rolling ? null : (counts.missCount ?: 0),
+                    // OC220: a full read only; null on a merge, which ages nothing out
+                    agedOutCount: counts.agedOutCount]
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
             return [error: t.message ?: t.toString()]

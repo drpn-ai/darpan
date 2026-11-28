@@ -285,6 +285,7 @@ class DatasetRefreshTests {
         assertEquals(1, read.addedCount as int)
         assertEquals(1, read.changedCount as int)
         assertEquals(0, read.removedCount as int)
+        assertEquals(0L, read.agedOutCount as Long, "OC220: a full read writes its aged-out count, here none")
     }
 
     @Test

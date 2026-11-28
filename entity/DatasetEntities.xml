@@ -64,6 +64,9 @@
         <field name="addedCount" type="number-integer"/>
         <field name="removedCount" type="number-integer"/>
         <field name="missCount" type="number-integer"/>
+        <field name="agedOutCount" type="number-integer"><description>OC220. A full read: records the copy held that the new
+            horizon drops, re-read or not; recordCount after = recordCount before + addedCount - removedCount - agedOutCount.
+            Null for an incremental read.</description></field>
         <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetReadStatus: DRS_RUNNING while the read holds the lock, then DRS_DONE or DRS_FAILED.</description></field>
         <field name="errorText" type="text-long"/>
         <relationship type="one" related="darpan.dataset.Dataset" fk-name="DSREAD_DATASET">

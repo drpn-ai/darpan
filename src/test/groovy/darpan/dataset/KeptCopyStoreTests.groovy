@@ -36,6 +36,36 @@ class KeptCopyStoreTests {
     }
     List<String> versionDirs() { dir.listFiles().findAll { it.isDirectory() && it.name.startsWith("v") }*.name.sort() }
 
+    /**
+     * OC220 (S16a C1, Aditi 2026-11-28): a full read whose horizon moved forward ages records out of the copy, re-read or
+     * not, and counts them, so the copy's totals reconcile: new recordCount = old recordCount + added - removed - agedOut.
+     */
+    @Test void aFullReadCountsTheRecordsItAgesOutAndTheCopyTotalsReconcile() {
+        replace(dir, [rec("oldGone", "2026-09-02T00:00:00Z", [createdAt: "2026-09-02T00:00:00Z"]),
+                      rec("oldReread", "2026-09-03T00:00:00Z", [createdAt: "2026-09-03T00:00:00Z"]),
+                      rec("kept", "2026-10-05T00:00:00Z", [createdAt: "2026-10-05T00:00:00Z"]),
+                      rec("gone", "2026-10-06T00:00:00Z", [createdAt: "2026-10-06T00:00:00Z"])])
+        long oldCount = KeptCopyStore.manifest(dir).recordCount
+        assertEquals(4L, oldCount)
+        // the horizon moves to October: oldGone ages out unread, oldReread ages out though the read returned it (edge: a
+        // date-only window), gone is removed (in the horizon, not returned), fresh is added
+        Map out = replace(dir, [rec("oldReread", "2026-09-03T00:00:00Z", [createdAt: "2026-09-03T00:00:00Z"]),
+                                rec("kept", "2026-10-05T00:00:00Z", [createdAt: "2026-10-05T00:00:00Z"]),
+                                rec("fresh", "2026-11-02T00:00:00Z", [createdAt: "2026-11-02T00:00:00Z"])], "2026-10-01T00:00:00Z", "2026-11-09T00:00:00Z")
+        long newCount = KeptCopyStore.manifest(dir).recordCount
+        assertEquals(2L, out.agedOutCount)
+        assertEquals(1L, out.removedCount)
+        assertEquals(1L, out.addedCount)
+        assertEquals(2L, newCount)
+        assertEquals(newCount, oldCount + out.addedCount - out.removedCount - out.agedOutCount)
+        assertEquals(["fresh", "kept"], byId().keySet().sort())
+    }
+
+    @Test void aMergeAgesNothingOut() {
+        replace(dir, [rec("1", "2026-10-05T00:00:00Z")])
+        assertNull(merge(dir, [rec("1", "2026-10-07T00:00:00Z")]).agedOutCount)
+    }
+
     /** Plan 3b-1: a copy that kept only some fields records them; a merge of whole records onto it would mix the two. */
     @Test void aMergeOntoACopyThatKeptSomeFieldsCoversNothing() {
         KeptCopyStore.replace(dir, [rec("1", "2026-10-05T00:00:00Z")].iterator(), "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"),

@@ -196,7 +196,7 @@ class KeptCopyStore {
                 index.put(String.valueOf(e.get("id")), [e.get("stamp"), contentHash(rec, stampField), rec?.get(createdField)])
             }
         }
-        long recordsRead = 0, changedCount = 0, addedCount = 0, missCount = 0
+        long recordsRead = 0, changedCount = 0, addedCount = 0, missCount = 0, agedOutCount = 0
         Map coverage = horizonStart == null ? [:] :
                 [coveredFrom: horizonStart, idField: idField, stampField: stampField, windowField: createdField]
         Set<String> held = new TreeSet<String>()
@@ -217,6 +217,8 @@ class KeptCopyStore {
                     boolean sameHash = prior[1] == contentHash(rec, stampField)
                     if (!sameStamp || !sameHash) changedCount++
                     if (countMisses && sameStamp && !sameHash) missCount++
+                    // OC220: a record the copy held that the new horizon drops ages out, though the read returned it
+                    if (droppedByHorizon) agedOutCount++
                 } else if (!droppedByHorizon) {
                     addedCount++
                     if (countMisses && neverReadBefore != null && createdBefore(createdValue, neverReadBefore)) missCount++
@@ -232,8 +234,12 @@ class KeptCopyStore {
         long removedCount = index.values().count { List p ->
             horizon == null || !createdBefore(p[2], horizon)
         }
+        // OC220 (Aditi 2026-11-28): the copy's records the read did not return and the new horizon leaves behind age out too,
+        // so new recordCount = old recordCount + addedCount - removedCount - agedOutCount exactly. A record the read returns
+        // from before the horizon that the copy never held (a date-only window's edge) is dropped and in none of the counts.
+        agedOutCount += index.size() - removedCount
         return [version: out.version, recordsRead: recordsRead, changedCount: changedCount, addedCount: addedCount,
-                removedCount: removedCount, missCount: countMisses ? missCount : null]
+                removedCount: removedCount, missCount: countMisses ? missCount : null, agedOutCount: agedOutCount]
     }
 
     /** SHA-256 hex of the record as canonical JSON (keys sorted at every depth) without its stamp field. */

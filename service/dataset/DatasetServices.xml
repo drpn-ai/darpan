@@ -215,7 +215,7 @@
             <set field="missCount" from="result.missCount != null ? (result.missCount as Integer) : null"/>
             <script>read.putAll([statusId:'DRS_DONE', readAt:result.readAt, recordsRead:result.recordsRead,
                     changedCount:result.changedCount, addedCount:result.addedCount, removedCount:result.removedCount,
-                    missCount:missCount])</script>
+                    missCount:missCount, agedOutCount:result.agedOutCount])</script>
             <set field="warningText" from="null"/>
             <if condition="missCount != null &amp;&amp; missCount &gt; 0">
                 <set field="warningText" value="Read ${readSeqId} found ${missCount} records the earlier reads missed"/></if>

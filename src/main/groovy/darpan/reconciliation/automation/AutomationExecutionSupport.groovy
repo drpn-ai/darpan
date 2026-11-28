@@ -1883,7 +1883,7 @@ class AutomationExecutionSupport {
         // one branch because the divergence between these two dispatchers is already documented debt
         // and this is not the place to widen it.
         if (connector?.windowDateOnly == true) {
-            Object zone = readField(automation, "windowTimeZone")
+            Object zone = AutomationWindows.automationZone(null, automation).id   // S99-020: no zone = the tenant's
             serviceParams[dateFromParameterName] = ReconciliationApiWindowSupport
                     .calendarDateIn((java.sql.Timestamp) window.childWindowStartDate, zone)
             serviceParams[dateToParameterName] = ReconciliationApiWindowSupport

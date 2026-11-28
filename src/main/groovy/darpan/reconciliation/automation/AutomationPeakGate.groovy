@@ -126,7 +126,7 @@ class AutomationPeakGate {
      * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
      */
     static Instant readWindowEnd(def automation, Instant fire) {
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
+        ZoneId zone = AutomationWindows.automationZone(null, automation)
         Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
         return dayStart.isAfter(fire) ? fire : dayStart
     }

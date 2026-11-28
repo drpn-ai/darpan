@@ -67,7 +67,7 @@ class AutomationWindows {
         Map<String, Object> input = params ?: [:]
         Timestamp scheduledFireTime = toTimestamp(input.scheduledFireTime ?: input.scheduledDate ?: input.nowTimestamp) ?:
                 new Timestamp(System.currentTimeMillis())
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
+        ZoneId zone = automationZone(null, automation)
         ZonedDateTime scheduledLocal = scheduledFireTime.toInstant().atZone(zone)
         String windowType = normalize(readField(automation, "relativeWindowTypeEnumId")) ?: WINDOW_LAST_DAYS
         int windowCount = normalizeInt(readField(automation, "relativeWindowCount")) ?: 1
@@ -188,7 +188,7 @@ class AutomationWindows {
     static Timestamp resolveNextScheduledFireTime(def automation, Timestamp scheduledFireTime, Timestamp now) {
         String scheduleExpr = normalize(readField(automation, "scheduleExpr"))
         if (!scheduleExpr) return null
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
+        ZoneId zone = automationZone(null, automation)
         Timestamp base = scheduledFireTime ?: now ?: new Timestamp(System.currentTimeMillis())
 
         try {
@@ -202,9 +202,9 @@ class AutomationWindows {
         } catch (Throwable ignored) {
             Duration duration = parseScheduleDuration(scheduleExpr)
             if (duration == null || duration.isZero() || duration.isNegative()) return null
-            ZonedDateTime next = base.toInstant().atZone(zone).plus(duration)
+            ZonedDateTime next = plusSchedule(base.toInstant().atZone(zone), duration)
             ZonedDateTime nowLocal = (now ?: base).toInstant().atZone(zone)
-            while (!next.isAfter(nowLocal)) next = next.plus(duration)
+            while (!next.isAfter(nowLocal)) next = plusSchedule(next, duration)
             return Timestamp.from(next.toInstant())
         }
     }
@@ -222,7 +222,7 @@ class AutomationWindows {
         if (!scheduleExpr) return null
 
         Timestamp lastScheduledFireTime = toTimestamp(readField(automation, "lastScheduledFireTime"))
-        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
+        ZoneId zone = automationZone(null, automation)
         Timestamp cronFireTime = resolveLastCronFireTime(scheduleExpr, nowValue, zone)
         if (cronFireTime != null) {
             return lastScheduledFireTime == null || lastScheduledFireTime.before(cronFireTime) ? cronFireTime : null
@@ -265,11 +265,11 @@ class AutomationWindows {
         if (duration == null || duration.isZero() || duration.isNegative() || lastScheduledFireTime == null) return null
 
         ZonedDateTime nowLocal = now.toInstant().atZone(zone)
-        ZonedDateTime candidate = lastScheduledFireTime.toInstant().atZone(zone).plus(duration)
+        ZonedDateTime candidate = plusSchedule(lastScheduledFireTime.toInstant().atZone(zone), duration)
         Timestamp latestDue = null
         while (!candidate.isAfter(nowLocal)) {
             latestDue = Timestamp.from(candidate.toInstant())
-            candidate = candidate.plus(duration)
+            candidate = plusSchedule(candidate, duration)
         }
         return latestDue
     }
@@ -309,6 +309,32 @@ class AutomationWindows {
         throw new IllegalArgumentException("Invalid timestamp '${normalized}'")
     }
 
+    /**
+     * DAR-OPS-029 S99-020: the zone an automation's windows and fire times are cut in. Its own windowTimeZone when it holds a
+     * zone id; otherwise its TENANT's zone (the standing rule: an automation's zone is its tenant's), never a silent UTC.
+     * UTC only when there is no tenant or no running Moqui to read it from (a unit test, a plain JVM). With no ec given, the
+     * thread's execution context is used when a factory is running.
+     */
+    static ZoneId automationZone(def ec, def automation) {
+        String raw = normalize(readField(automation, "windowTimeZone"))
+        if (raw) {
+            try { return ZoneId.of(raw) } catch (Exception ignored) { }
+        }
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        def context = ec ?: threadExecutionContext()
+        return tenantId && context != null ? darpan.facade.common.TenantAccessSupport.tenantTimeZoneFor(context, tenantId) : ZoneId.of("UTC")
+    }
+
+    /** The thread's ec when a Moqui factory runs; null otherwise (Moqui.getExecutionContext throws with no factory). */
+    private static def threadExecutionContext() {
+        try {
+            def factory = org.moqui.Moqui.getExecutionContextFactory()
+            return factory != null ? factory.getExecutionContext() : null
+        } catch (Throwable ignored) {
+            return null
+        }
+    }
+
     protected static ZoneId resolveZoneId(Object rawZoneId) {
         String normalized = normalize(rawZoneId) ?: "UTC"
         try {
@@ -316,6 +342,16 @@ class AutomationWindows {
         } catch (Exception ignored) {
             return ZoneId.of("UTC")
         }
+    }
+
+    /**
+     * DAR-OPS-029 S99-017: one schedule step. A whole number of days (P1D, P7D) moves by calendar days in the automation's
+     * zone, so a daily run keeps its local wall time across a DST change, as cron does; a shorter step (PT1H, PT15M) is
+     * exact elapsed time.
+     */
+    protected static ZonedDateTime plusSchedule(ZonedDateTime from, Duration step) {
+        long day = Duration.ofDays(1).toMillis()
+        return step.toMillis() % day == 0 ? from.plusDays(step.toDays()) : from.plus(step)
     }
 
     protected static Duration parseScheduleDuration(String scheduleExpr) {

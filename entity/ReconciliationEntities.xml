@@ -493,7 +493,9 @@
         <field name="customWindowEndDate" type="date-time"/>
         <field name="maxWindowDays" type="number-integer" default="28"/>
         <field name="splitWindowDays" type="number-integer" default="28"/>
-        <field name="windowTimeZone" type="text-short" default="'UTC'"/>
+        <!-- DAR-OPS-029 S99-020: no default. A blank zone reads as the automation's TENANT zone (AutomationWindows.automationZone),
+             never a silent UTC: the standing rule that an automation's zone is its tenant's. -->
+        <field name="windowTimeZone" type="text-short"/>
         <field name="safeConfigJson" type="text-long">
             <description>Non-secret automation metadata safe to show in diagnostics.</description>
         </field>

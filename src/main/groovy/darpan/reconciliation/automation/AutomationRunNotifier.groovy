@@ -224,7 +224,7 @@ class AutomationRunNotifier {
         try {
             String name = normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId"))
             String line = quietDayLine(ec, name, toTimestamp(window?.childWindowStartDate), toTimestamp(window?.childWindowEndDate),
-                    resolveZoneId(readField(automation, "windowTimeZone")), file1Source, file2Source, file1Result, file2Result, evaluateMode)
+                    AutomationWindows.automationZone(ec, automation), file1Source, file2Source, file1Result, file2Result, evaluateMode)
             TenantNotificationSupport.notifyRunLine(ec, normalize(readField(automation, "companyUserGroupId")),
                     normalize(readField(automation, "chatSpaceId")), runResultId, line)
         } catch (Throwable notifyError) {
@@ -280,7 +280,7 @@ class AutomationRunNotifier {
                 trigger       : trigger,
                 scheduledDate : toTimestamp(execution.scheduledDate),
                 completedDate : toTimestamp(execution.completedDate),
-                zoneId        : normalize(readField(automation, "windowTimeZone")),
+                zoneId        : AutomationWindows.automationZone(ec, automation).id,
                 executionId   : normalize(execution.automationExecutionId),
         ] as Map<String, Object>
     }

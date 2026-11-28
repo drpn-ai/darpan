@@ -96,7 +96,8 @@ class AutomationEntityContractTests {
         assertEquals("'ruleset'", attr(field(automation, "savedRunType"), "default"))
         assertEquals("28", attr(field(automation, "maxWindowDays"), "default"))
         assertEquals("28", attr(field(automation, "splitWindowDays"), "default"))
-        assertEquals("'UTC'", attr(field(automation, "windowTimeZone"), "default"))
+        // S99-020: no 'UTC' default; a blank zone reads as the tenant's (AutomationWindows.automationZone).
+        assertNull(attr(field(automation, "windowTimeZone"), "default"))
         assertEquals("'Y'", attr(field(automation, "isActive"), "default"))
         assertRelationship(automation, "InputMode", "moqui.basic.Enumeration", "inputModeEnumId", "enumId")
         assertRelationship(automation, "RelativeWindow", "moqui.basic.Enumeration", "relativeWindowTypeEnumId", "enumId")

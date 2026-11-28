@@ -386,8 +386,7 @@ class AuditChangeBacktest {
             for (def execution : executions) {
                 Map files = ExtractReplaySupport.landedFilesOfSucceeded(ec, tenantId, execution.automationExecutionId as String)
                 if (!needed.every { files.containsKey(it) }) continue
-                ZoneId zone
-                try { zone = ZoneId.of(normalize(automation.windowTimeZone) ?: "UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
+                ZoneId zone = darpan.reconciliation.automation.AutomationWindows.automationZone(ec, automation)
                 // OC170: a replay concludes at the run's own time; with none it would conclude at now, and a WITHIN_HOURS
                 // cause would answer differently on every run.
                 Timestamp ranAt = (execution.completedDate ?: execution.startedDate) as Timestamp

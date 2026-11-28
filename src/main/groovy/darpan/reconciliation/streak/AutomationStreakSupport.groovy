@@ -446,12 +446,7 @@ class AutomationStreakSupport {
     }
 
     private static ZoneId zoneOf(def automation) {
-        String zone = automation?.windowTimeZone?.toString()?.trim()
-        try {
-            return zone ? ZoneId.of(zone) : ZoneId.of("UTC")
-        } catch (Throwable ignored) {
-            return ZoneId.of("UTC")
-        }
+        return darpan.reconciliation.automation.AutomationWindows.automationZone(null, automation)
     }
 
     private static int ladderDays(String badgeKey) {

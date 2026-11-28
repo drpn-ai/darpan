@@ -391,8 +391,7 @@ class AutomationScheduler {
         if (auditChecks) {
             // The audit's own days in the zone its windows are cut in (AuditAutomationSupport.zoneOf), end exclusive:
             // [Oct 1 00:00, Oct 28 00:00) is Oct 1 to 27.
-            ZoneId zone
-            try { zone = ZoneId.of(normalize(readField(automation, "windowTimeZone")) ?: "UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
+            ZoneId zone = AutomationWindows.automationZone(ec, automation)
             executeParams.auditWindowFromDate = java.sql.Date.valueOf(start.toInstant().atZone(zone).toLocalDate())
             executeParams.auditWindowThruDate = java.sql.Date.valueOf(new Timestamp(end.time - 1).toInstant().atZone(zone).toLocalDate())
             executeParams.auditFullRead = true

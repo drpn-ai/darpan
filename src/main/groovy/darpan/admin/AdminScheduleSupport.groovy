@@ -116,7 +116,7 @@ class AdminScheduleSupport {
                 tenantUserGroupId: tenantId,
                 tenantLabel      : tenantLabels[tenantId] ?: tenantId,
                 scheduleExpr     : automation.scheduleExpr,
-                windowTimeZone   : automation.windowTimeZone ?: "UTC",
+                windowTimeZone   : darpan.reconciliation.automation.AutomationWindows.automationZone(null, automation).id,
         ]
     }
 
@@ -142,7 +142,7 @@ class AdminScheduleSupport {
                 tenantUserGroupId: tenantId,
                 tenantLabel      : tenantLabels[tenantId] ?: tenantId,
                 scheduleExpr     : automation.scheduleExpr,
-                windowTimeZone   : automation.windowTimeZone ?: "UTC",
+                windowTimeZone   : darpan.reconciliation.automation.AutomationWindows.automationZone(null, automation).id,
         ]
     }
 

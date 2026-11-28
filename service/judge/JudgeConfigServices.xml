@@ -162,79 +162,24 @@
     </service>
 
     <service verb="check" noun="KeepRuleLines" allow-remote="false">
-        <description>DAR-BE-318 plan 3b-2b. Runs before store#Rule saves a rule (KeepRule.secas.xml). When the decision is one of
-            the active tenant's Keep decisions (CDS_KEEP_FILE_1 or CDS_KEEP_FILE_2), adds one error per line Keep cannot run:
-            the refusals of KeepLineTranslator, plus a line naming a side field that is not a field of the check's pair fact
-            type, so an unmapped field fails at save and not at run time. A decision that is not a Keep decision is not checked.
-            The decision stage is read by an explicit companyUserGroupId condition, so another tenant's Keep decision never
-            gates this tenant's rule.</description>
+        <description>Runs before store#Rule saves a rule (KeepRule.secas.xml). A rule on one of the active tenant's Keep
+            decisions (CheckDecision stage CDS_KEEP_FILE_1 or CDS_KEEP_FILE_2) is refused: no run reads a Keep decision (Aditi
+            2026-11-28, DAR-OPS-029), so one saved would be checked and then silently ignored. Any other decision passes. The
+            stage is read by an explicit companyUserGroupId condition, so another tenant's Keep decision never gates this
+            tenant's rule.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
-            <parameter name="conditions" type="List"/>
         </in-parameters>
         <actions>
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
-            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__' || !conditions"><return/></if>
-            <entity-find entity-name="darpan.judge.CheckDecision" list="keepList">
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'"><return/></if>
+            <entity-find-count entity-name="darpan.judge.CheckDecision" count-field="keepCount">
                 <econdition field-name="ruleSetId" from="ruleSetId"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
                 <econdition field-name="stageEnumId" operator="in" value="CDS_KEEP_FILE_1,CDS_KEEP_FILE_2"/>
-            </entity-find>
-            <iterate list="keepList" entry="keepDecision">
-                <set field="sideWord" from="keepDecision.stageEnumId == 'CDS_KEEP_FILE_1' ? 'file 1' : 'file 2'"/>
-                <entity-find entity-name="darpan.audit.AuditCheck" list="keepCheckList">
-                    <econdition field-name="checkId" from="keepDecision.checkId"/>
-                    <econdition field-name="companyUserGroupId" from="tenantId"/>
-                </entity-find>
-                <set field="keepCheck" from="keepCheckList ? keepCheckList[0] : null"/>
-                <!-- The side prefixes the check's pair fact type was generated with: its saved run's two systems, as
-                     generate#PairFactType and the replay read them. Nothing found is a refusal, never a guessed prefix. -->
-                <set field="systemBySide" from="[:]"/>
-                <if condition="keepCheck?.savedRunId">
-                    <entity-find entity-name="darpan.rule.RuleSetCompareScope" list="keepScopeList">
-                        <econdition field-name="ruleSetId" from="keepCheck.savedRunId"/>
-                        <econdition field-name="companyUserGroupId" from="tenantId"/>
-                    </entity-find>
-                    <if condition="keepScopeList.size() == 1">
-                        <entity-find entity-name="darpan.rule.RuleSetCompareSource" list="keepSourceList">
-                            <econdition field-name="compareScopeId" from="keepScopeList[0].compareScopeId"/>
-                            <econdition field-name="companyUserGroupId" from="tenantId"/>
-                        </entity-find>
-                        <set field="systemBySide" from="keepSourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
-                    </if>
-                </if>
-                <if condition="!systemBySide.containsKey('FILE_1') || !systemBySide.containsKey('FILE_2')">
-                    <message error="true">Keep cannot check these lines: the check has no saved run with two systems, so its ${sideWord} field names are unknown</message>
-                    <continue/>
-                </if>
-                <set field="sidePrefix" from="darpan.judge.PairFactSupport.sidePrefixes(systemBySide.FILE_1, systemBySide.FILE_2)[keepDecision.stageEnumId == 'CDS_KEEP_FILE_1' ? 0 : 1]"/>
-                <set field="pairFactTypeId" from="keepCheck.pairFactTypeId"/>
-                <set field="factFieldList" from="[]"/>
-                <if condition="pairFactTypeId">
-                    <entity-find entity-name="rules.FactField" list="factFieldList">
-                        <econdition field-name="factTypeId" from="pairFactTypeId"/>
-                        <econdition field-name="companyUserGroupId" from="tenantId"/>
-                    </entity-find>
-                </if>
-                <script><![CDATA[
-                    Map fieldKinds = [:]
-                    factFieldList.each { fieldKinds.put(it.fieldName, it.valueTypeEnumId) }
-                    List keepRefusals = []
-                    try {
-                        keepRefusals.addAll(darpan.reconciliation.source.KeepLineTranslator.refusals(conditions as List<Map>, sidePrefix, fieldKinds))
-                    } catch (IllegalArgumentException ignored) {
-                        // a malformed line tree: store#Rule's own line check reports it
-                    }
-                    conditions.each { Map line ->
-                        String field = line.fieldName as String
-                        if (line.conditionTypeId == 'RCT_COMPARE' && field && field.startsWith(sidePrefix + '_') &&
-                                field != sidePrefix + '_presence' && !fieldKinds.containsKey(field)) {
-                            keepRefusals.add("Keep line ${line.conditionSeqId}: ${field} is not a field of this check's pair fact type, so Keep cannot read it from a ${sideWord} record".toString())
-                        }
-                    }
-                    keepRefusals.unique().each { ec.message.addError(it as String) }
-                ]]></script>
-            </iterate>
+            </entity-find-count>
+            <if condition="keepCount &gt; 0">
+                <return error="true" message="Keep decisions are not supported yet"/></if>
         </actions>
     </service>
 </services>

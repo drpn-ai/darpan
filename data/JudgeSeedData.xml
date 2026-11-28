@@ -2,7 +2,9 @@
 <!-- DAR-BE-318 plan 2: the judge's own vocabulary, kept apart from the audit-run vocabulary in AuditSeedData.xml
      (whose contract, AuditCatalogContractTests, pins the codes the audit-run JSON emits). -->
 <entity-facade-xml type="darpan-seed">
-    <!-- What an outcome of a moqui-rules decision means to the judge, and a check's decision stages. -->
+    <!-- What an outcome of a moqui-rules decision means to the judge, and a check's decision stages. The Keep stages
+         (CDS_KEEP_FILE_1/2) are gone (DAR-OPS-029, Aditi 2026-11-28): check#KeepRuleLines refuses a rule on one that a database
+         loaded before still holds. -->
     <moqui.basic.EnumerationType enumTypeId="JudgeOutcomeKind" description="Judge outcome kind"/>
     <moqui.basic.Enumeration enumId="JOK_FINDING" enumTypeId="JudgeOutcomeKind" enumCode="finding" description="Finding" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="JOK_EXPECTED" enumTypeId="JudgeOutcomeKind" enumCode="expected" description="Expected" sequenceNum="2"/>
@@ -11,6 +13,4 @@
     <moqui.basic.EnumerationType enumTypeId="CheckDecisionStage" description="Check decision stage"/>
     <moqui.basic.Enumeration enumId="CDS_MUST_HOLD" enumTypeId="CheckDecisionStage" enumCode="mustHold" description="Must hold" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="CDS_EXPLAINS" enumTypeId="CheckDecisionStage" enumCode="explains" description="Explains" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="CDS_KEEP_FILE_1" enumTypeId="CheckDecisionStage" enumCode="keepFile1" description="Keep, file 1" sequenceNum="0"/>
-    <moqui.basic.Enumeration enumId="CDS_KEEP_FILE_2" enumTypeId="CheckDecisionStage" enumCode="keepFile2" description="Keep, file 2" sequenceNum="0"/>
 </entity-facade-xml>
